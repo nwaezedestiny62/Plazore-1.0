@@ -105,7 +105,7 @@ function CustomTabBar({ state, descriptors, navigation }: any) {
                 <Animated.View
                   style={[
                     styles.iconContainer,
-                    { transform: [{ scale: isFocused ? 1.28 : 1 }] },
+                    { transform: [{ scale: isFocused ? 1.0 : 1 }] },
                   ]}
                 >
                   {icon}
