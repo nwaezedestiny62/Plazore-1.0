@@ -77,4 +77,5 @@ export function useCart(){
     if(context === undefined) {
         throw new Error('useCart must be within a CartProvider')
     }
+    return context;
 }
