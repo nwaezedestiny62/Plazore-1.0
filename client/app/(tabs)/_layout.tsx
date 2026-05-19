@@ -9,7 +9,6 @@ import Animated, {
   withSpring,
 } from 'react-native-reanimated';
 import { COLORS } from '@/constants';
-
 const { width } = Dimensions.get('window');
 const PILL_WIDTH = width * 0.88;
 const TAB_WIDTH = PILL_WIDTH / 4;

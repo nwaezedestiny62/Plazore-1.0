@@ -37,12 +37,14 @@ export default function ProductDetails() {
 
   const fetchProduct = async () => {
     setProduct(dummyProducts.find((p) => p._id === id) as any);
+    const found: any = dummyProducts.find((product) => product._id === id);
+    setProduct(found ?? null);
     setLoading(false);
   };
 
   useEffect(() => {
     fetchProduct();
-  }, []);
+  }, [id]);
 
   if (loading) {
     return (
