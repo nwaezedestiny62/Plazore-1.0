@@ -9,11 +9,15 @@ import Animated, {
   withSpring,
 } from 'react-native-reanimated';
 import { COLORS } from '@/constants';
+import { useCart } from '@/context/CartContext';
 const { width } = Dimensions.get('window');
 const PILL_WIDTH = width * 0.88;
 const TAB_WIDTH = PILL_WIDTH / 4;
 
 export default function TabLayout() {
+
+       const {cartItems} = useCart();
+
   return (
     <Tabs
       screenOptions={{
@@ -31,14 +35,31 @@ export default function TabLayout() {
           ),
         }}
       />
-      <Tabs.Screen
-        name="cart"
-        options={{
-          tabBarIcon: ({ color, focused }) => (
-            <Feather name="shopping-cart" size={28} color={color} />
-          ),
-        }}
-      />
+<Tabs.Screen
+  name="cart"
+  options={{
+    tabBarIcon: ({ color, focused }) => (
+      <View className="relative items-center justify-center">
+        <Feather 
+          name="shopping-cart" 
+          size={28} 
+          color={focused ? "#00FF85" : color}   // Neon Green when focused
+        />
+        
+        {/* Badge */}
+        {cartItems.length > 0 && (
+          <View className="absolute -top-1 -right-1 bg-[#000] size-3 rounded-xl items-center justify-center">
+            <Ionicons 
+              name="ellipse" 
+              size={8} 
+              color="#00FF85"     // Matching neon green badge
+            />
+          </View>
+        )}
+      </View>
+    ),
+  }}
+/>
       <Tabs.Screen
         name="favorites"
         options={{
