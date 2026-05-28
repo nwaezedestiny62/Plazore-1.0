@@ -37,7 +37,7 @@ export default function Cart() {
           {/* Bottom Summary - Extra margin added */}
           <View 
             className="p-4 bg-white rounded-t-3xl shadow-sm"
-            style={{ marginBottom: 90 }}   // ← This pushes the whole box up
+            style={{ marginBottom: 98 }}   // ← This pushes the whole box up
           >
             {/* Subtotal */}
             <View className="flex-row justify-between mb-2">
@@ -77,7 +77,7 @@ export default function Cart() {
       ) : (
         <View className="flex-1 items-center justify-center px-6">
           <Text className="text-secondary text-lg text-center">
-            Your cart is currently empty{'\n'}
+            Your cart is currently empty.{'\n'}
             Items you select from Plazore mall will be displayed here
           </Text>
           <TouchableOpacity

@@ -1,78 +1,99 @@
-import { Tabs } from 'expo-router';
-import React from 'react';
-import { View, StyleSheet, Platform, TouchableOpacity, Dimensions } from 'react-native';
+import { Tabs, usePathname } from 'expo-router';
+import React, { useEffect } from 'react';
+import {
+  View,
+  StyleSheet,
+  Platform,
+  TouchableOpacity,
+  Dimensions,
+} from 'react-native';
+
 import { BlurView } from 'expo-blur';
 import { Ionicons, Feather } from '@expo/vector-icons';
+
 import Animated, {
-  useSharedValue,
   useAnimatedStyle,
+  useSharedValue,
   withSpring,
 } from 'react-native-reanimated';
+
 import { COLORS } from '@/constants';
 import { useCart } from '@/context/CartContext';
+
 const { width } = Dimensions.get('window');
-const PILL_WIDTH = width * 0.88;
-const TAB_WIDTH = PILL_WIDTH / 4;
+
+const TAB_COUNT = 4;
+const BAR_WIDTH = width * 0.88;
+const TAB_WIDTH = BAR_WIDTH / TAB_COUNT;
 
 export default function TabLayout() {
-
-       const {cartItems} = useCart();
+  const { cartItems } = useCart();
 
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
         tabBarShowLabel: false,
-        tabBarStyle: { display: 'none' },
       }}
-      tabBar={(props) => <CustomTabBar {...props} />}
+      tabBar={(props) => (
+        <CustomTabBar
+          {...props}
+          cartCount={cartItems.length}
+        />
+      )}
     >
       <Tabs.Screen
         name="index"
         options={{
-          tabBarIcon: ({ color, focused }) => (
-            <Ionicons name={focused ? 'home' : 'home-outline'} size={28} color={color} />
+          title: 'Home',
+          tabBarIcon: ({ focused, color, size }) => (
+            <Ionicons
+              name={focused ? 'home' : 'home-outline'}
+              size={size}
+              color={color}
+            />
           ),
         }}
       />
-<Tabs.Screen
-  name="cart"
-  options={{
-    tabBarIcon: ({ color, focused }) => (
-      <View className="relative items-center justify-center">
-        <Feather 
-          name="shopping-cart" 
-          size={28} 
-          color={focused ? "#00FF85" : color}   // Neon Green when focused
-        />
-        
-        {/* Badge */}
-        {cartItems.length > 0 && (
-          <View className="absolute -top-1 -right-1 bg-[#000] size-3 rounded-xl items-center justify-center">
-            <Ionicons 
-              name="ellipse" 
-              size={8} 
-              color="#00FF85"     // Matching neon green badge
+
+      <Tabs.Screen
+        name="cart"
+        options={{
+          title: 'Cart',
+          tabBarIcon: ({ focused, color, size }) => (
+            <Feather
+              name="shopping-cart"
+              size={size}
+              color={focused ? COLORS.primary : color}
             />
-          </View>
-        )}
-      </View>
-    ),
-  }}
-/>
+          ),
+        }}
+      />
+
       <Tabs.Screen
         name="favorites"
         options={{
-          tabBarIcon: ({ color, focused }) => (
-            <Ionicons name={focused ? 'heart' : 'heart-outline'} size={28} color={color} />
+          title: 'Wishlist',
+          tabBarIcon: ({ focused, color, size }) => (
+            <Ionicons
+              name={focused ? 'heart' : 'heart-outline'}
+              size={size}
+              color={color}
+            />
           ),
         }}
       />
+
       <Tabs.Screen
         name="profile"
         options={{
-          tabBarIcon: ({ color, focused }) => (
-            <Ionicons name={focused ? 'person' : 'person-outline'} size={28} color={color} />
+          title: 'Profile',
+          tabBarIcon: ({ focused, color, size }) => (
+            <Ionicons
+              name={focused ? 'person' : 'person-outline'}
+              size={size}
+              color={color}
+            />
           ),
         }}
       />
@@ -80,62 +101,120 @@ export default function TabLayout() {
   );
 }
 
-function CustomTabBar({ state, descriptors, navigation }: any) {
-  const translateX = useSharedValue(0);
+function CustomTabBar({
+  state,
+  descriptors,
+  navigation,
+  cartCount,
+}: any) {
+  const pathname = usePathname();
 
-  React.useEffect(() => {
-    const centerOffset = (TAB_WIDTH - (TAB_WIDTH - 28)) / 2; // Perfect centering
+  const hiddenRoutes = [
+    '/checkout',
+    '/orders',
+  ];
 
-    translateX.value = withSpring(state.index * TAB_WIDTH + centerOffset, {
-      damping: 25,
-      stiffness: 180,
-      mass: 0.8,
-    });
+  const shouldHide =
+    hiddenRoutes.includes(pathname);
+
+  const translateX = useSharedValue(
+    state.index * TAB_WIDTH
+  );
+
+  useEffect(() => {
+    translateX.value = withSpring(
+      state.index * TAB_WIDTH,
+      {
+        damping: 18,
+        stiffness: 180,
+      }
+    );
   }, [state.index]);
 
-  const animatedGlowStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: translateX.value }],
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [
+      {
+        translateX: translateX.value,
+      },
+    ],
   }));
+
+  if (shouldHide) return null;
 
   return (
     <View style={styles.container}>
-      <BlurView intensity={85} tint="light" style={styles.blurContainer}>
-        <View style={styles.pill}>
-          {/* Glowing Active Indicator */}
-          <Animated.View style={[styles.glowIndicator, animatedGlowStyle]} />
+      <BlurView
+        intensity={90}
+        tint="light"
+        style={styles.blur}
+      >
+        <View style={styles.bar}>
+          {/* Animated Active Background */}
+          <Animated.View
+            style={[
+              styles.activeTabBackground,
+              animatedStyle,
+            ]}
+          />
 
-          {state.routes.map((route: any, index: number) => {
-            const { options } = descriptors[route.key];
-            const isFocused = state.index === index;
+          {state.routes.map(
+            (route: any, index: number) => {
+              const { options } =
+                descriptors[route.key];
 
-            const icon = options.tabBarIcon({
-              color: isFocused ? COLORS.primary : '#8E8E93',
-              focused: isFocused,
-            });
+              const focused =
+                state.index === index;
 
-            const isCart = index === 1; // Middle tab (Cart)
+              const icon =
+                options.tabBarIcon?.({
+                  focused,
+                  color: focused
+                    ? COLORS.primary
+                    : '#8E8E93',
+                  size: 25,
+                });
 
-            return (
-              <TouchableOpacity
-                key={index}
-                onPress={() => navigation.navigate(route.name)}
-                style={[styles.tab, isCart && styles.middleTab]}
-                activeOpacity={0.7}
-              >
-                <Animated.View
-                  style={[
-                    styles.iconContainer,
-                    { transform: [{ scale: isFocused ? 1.0 : 1 }] },
-                  ]}
+              return (
+                <TouchableOpacity
+                  key={route.key}
+                  activeOpacity={0.8}
+                  style={styles.tab}
+                  onPress={() =>
+                    navigation.navigate(
+                      route.name
+                    )
+                  }
                 >
-                  {icon}
-                </Animated.View>
+                  <Animated.View
+                    style={{
+                      transform: [
+                        {
+                          scale: focused
+                            ? 1.12
+                            : 1,
+                        },
+                      ],
+                    }}
+                  >
+                    <View>
+                      {icon}
 
-                {/* Active dot for non-middle tabs */}
-                {isFocused && !isCart && <View style={styles.activeDot} />}
-              </TouchableOpacity>
-            );
-          })}
+                      {/* Cart Badge */}
+                      {route.name ===
+                        'cart' &&
+                        cartCount > 0 && (
+                          <View
+                            style={
+                              styles.badge
+                            }
+                          />
+                        )}
+                    </View>
+                  </Animated.View>
+                </TouchableOpacity>
+              );
+            }
+          )}
         </View>
       </BlurView>
     </View>
@@ -145,64 +224,67 @@ function CustomTabBar({ state, descriptors, navigation }: any) {
 const styles = StyleSheet.create({
   container: {
     position: 'absolute',
-    bottom: Platform.OS === 'ios' ? 28 : 16,
-    left: 0,
-    right: 0,
+    bottom:
+      Platform.OS === 'ios'
+        ? 30
+        : 18,
+    width: '100%',
     alignItems: 'center',
-    zIndex: 100,
   },
-  blurContainer: {
+
+  blur: {
     borderRadius: 999,
     overflow: 'hidden',
+
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.25,
-    shadowRadius: 20,
+    shadowOffset: {
+      width: 0,
+      height: 10,
+    },
+    shadowOpacity: 0.12,
+    shadowRadius: 18,
+
     elevation: 20,
   },
-  pill: {
-    width: PILL_WIDTH,
-    height: 68,
-    backgroundColor: 'rgba(255,255,255,0.75)',
+
+  bar: {
+    width: BAR_WIDTH,
+    height: 72,
     borderRadius: 999,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-around',
-    borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.6)',
+    backgroundColor:
+      'rgba(255,255,255,0.82)',
+    borderWidth: 1,
+    borderColor:
+      'rgba(255,255,255,0.45)',
   },
-  glowIndicator: {
-    position: 'absolute',
-    top: 6,
-    left: 0,
-    width: TAB_WIDTH - 28,
-    height: 56,
-    backgroundColor: COLORS.primary + '22',
-    borderRadius: 999,
-    shadowColor: COLORS.primary,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.7,
-    shadowRadius: 20,
-  },
+
   tab: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
+    width: TAB_WIDTH,
     height: '100%',
-  },
-  middleTab: {
-    transform: [{ scale: 1.18 }],
-  },
-  iconContainer: {
-    alignItems: 'center',
     justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 2,
   },
-  activeDot: {
+
+  activeTabBackground: {
     position: 'absolute',
-    bottom: 10,
-    width: 5,
-    height: 5,
+    width: TAB_WIDTH,
+    height: 58,
+    marginVertical: 7,
     borderRadius: 999,
-    backgroundColor: COLORS.primary,
+    backgroundColor:
+      COLORS.primary + '18',
+  },
+
+  badge: {
+    position: 'absolute',
+    top: -2,
+    right: -5,
+    width: 8,
+    height: 8,
+    borderRadius: 999,
+    backgroundColor: '#39FF14',
   },
 });
