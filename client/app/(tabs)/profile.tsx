@@ -1,6 +1,7 @@
 import { dummyUser } from '@/assets/assets'
 import Header from '@/components/Header'
 import { COLORS, PROFILE_MENU } from '@/constants'
+import { useClerk } from '@clerk/clerk-expo'
 import { Ionicons } from '@expo/vector-icons'
 import { LinearGradient } from 'expo-linear-gradient'
 import { useRouter } from 'expo-router'
@@ -16,10 +17,11 @@ import { ScrollView } from 'react-native-gesture-handler'
 import { SafeAreaView } from 'react-native-safe-area-context'
 
 export default function Profile() {
-  const { user } = { user: dummyUser }
+  const { user, signOut } = useClerk()
   const router = useRouter()
 
   const handleLogout = async () => {
+    await signOut();
     router.replace('/sign-in')
   }
 
