@@ -1,7 +1,6 @@
 import { dummyUser } from '@/assets/assets'
 import Header from '@/components/Header'
 import { COLORS, PROFILE_MENU } from '@/constants'
-import { useClerk } from '@clerk/clerk-expo'
 import { Ionicons } from '@expo/vector-icons'
 import { LinearGradient } from 'expo-linear-gradient'
 import { useRouter } from 'expo-router'
@@ -17,11 +16,10 @@ import { ScrollView } from 'react-native-gesture-handler'
 import { SafeAreaView } from 'react-native-safe-area-context'
 
 export default function Profile() {
-  const { user, signOut } = useClerk()
+  const { user } = { user: dummyUser }
   const router = useRouter()
 
   const handleLogout = async () => {
-    await signOut();
     router.replace('/sign-in')
   }
 
@@ -73,7 +71,7 @@ export default function Profile() {
                 className='bg-[#DCEBFF] mt-8 w-full py-4 rounded-2xl items-center'
               >
                 <Text className='text-[#07111F] font-bold text-[16px]'>
-                  Become a Verified Plazore Member
+                  Enter Lounge
                 </Text>
               </TouchableOpacity>
             </LinearGradient>
@@ -321,8 +319,6 @@ export default function Profile() {
                       <Text className='text-white font-bold text-[16px]'>
                         {item.title}
                       </Text>
-
-                     
                     </View>
 
                     <View className='w-10 h-10 rounded-full bg-[#101F31] items-center justify-center'>
@@ -350,7 +346,7 @@ export default function Profile() {
                   color='#C9D7E4'
                 />
 
-                <Text className='text-[#ef4444] font-bold text-[16px] ml-3'>
+                <Text className='text-[#DCEBFF] font-bold text-[16px] ml-3'>
                   Leave Lounge
                 </Text>
               </TouchableOpacity>
