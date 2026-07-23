@@ -2,13 +2,12 @@ import { useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import { ScrollView, Text, View, ActivityIndicator, RefreshControl } from "react-native";
 import { COLORS, getStatusColor } from "@/constants";
-import { dummyAdminStats } from "@/assets/assets";
 import { useAuth } from "@clerk/clerk-expo";
-import api from "@/constants/api";
+import api from "@/constants/api";   // ← Make sure this is the updated api with interceptor
 
 export default function AdminDashboard() {
-    const {getToken} = useAuth()
     const router = useRouter();
+    const { isSignedIn } = useAuth();   // Good to check this too
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [stats, setStats] = useState({
@@ -21,23 +20,34 @@ export default function AdminDashboard() {
 
     const fetchStats = async () => {
         try {
-            const token = await getToken()
-            const {data} = await api.get('/admin/stats/', {headers: {Authorization: `Bearer ${token}`}})
-            if(data.success) {
-                setStats(data.data)
+            setLoading(true);
+            const { data } = await api.get('/admin/stats');   // ← No trailing slash
+
+            if (data.success) {
+                setStats(data.data);
+            } else {
+                console.warn("API returned success: false");
             }
-        } catch (error) {
-            console.error("Failed to fetch admin stats:", error)
-        }
-        finally {
+        } catch (error: any) {
+            console.error("Failed to fetch admin stats:", error.response?.data || error.message);
+            
+            // Optional: Handle 401 specifically
+            if (error.response?.status === 401) {
+                console.log("Auth failed - user might not be signed in or token expired");
+            }
+        } finally {
             setLoading(false);
             setRefreshing(false);
         }
     };
 
     useEffect(() => {
-        fetchStats();
-    }, []);
+        if (isSignedIn) {
+            fetchStats();
+        } else {
+            setLoading(false);
+        }
+    }, [isSignedIn]);
 
     const onRefresh = () => {
         setRefreshing(true);
@@ -57,6 +67,7 @@ export default function AdminDashboard() {
             className="flex-1 bg-surface p-4"
             refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         >
+            {/* Rest of your JSX remains the same */}
             <View className="mb-8">
                 <Text className="text-primary font-bold text-2xl mb-4 tracking-tight">Overview</Text>
                 <View className="flex-row flex-wrap justify-between">
@@ -112,6 +123,7 @@ export default function AdminDashboard() {
     );
 }
 
+// StatCard component (unchanged)
 const StatCard = ({ label, value }: { label: string, value: string }) => (
     <View className="bg-white p-5 rounded-2xl border border-gray-100 w-[48%] mb-4 justify-center">
         <Text className="text-xl font-bold text-primary mb-1">{value}</Text>
