@@ -5,11 +5,15 @@ export const clerkWebhook = async (req, res) => {
         const evt = await verifyWebhook(req);
         if (evt.type === 'user.created' || evt.type === 'user.updated') {
             const user = await User.findOne({ clerkId: evt.data.id });
+            // Safely extract the primary email
+            const primaryEmail = evt.data.email_addresses?.find((e) => e.id === evt.data.primary_email_address_id);
+            const email = primaryEmail ? primaryEmail.email_address : evt.data.email_addresses?.[0]?.email_address || '';
             const userData = {
                 clerkId: evt.data.id,
-                email: evt.data?.email_addresses[0]?.email_address,
-                name: evt.data?.first_name + " " + evt.data?.last_name,
-                image: evt.data?.image_url,
+                email: email,
+                // Safely format the name
+                name: `${evt.data.first_name || ''} ${evt.data.last_name || ''}`.trim() || 'User',
+                image: evt.data.image_url,
             };
             if (user) {
                 await User.findOneAndUpdate({ clerkId: evt.data.id }, userData);
