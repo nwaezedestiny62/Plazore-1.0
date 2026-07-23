@@ -13,7 +13,7 @@ import AdminRouter from "./routes/adminRoutes.js";
 
 const app = express();
 
-// Connect to MongoDB (Added await here!)
+// Connect to MongoDB
 await connectDB();
 
 app.post('/api/clerk', express.raw({type: "application/json"}), clerkWebhook)
@@ -25,6 +25,16 @@ app.use(clerkMiddleware());
 
 const port = process.env.PORT || 3000;
 
+// ====================== PUBLIC TEST ROUTE ======================
+app.get('/api/test', (req: Request, res: Response) => {
+    console.log("✅ PUBLIC /api/test route hit from frontend!");
+    res.json({ 
+        success: true, 
+        message: "Backend is reachable. CORS & connection working." 
+    });
+});
+
+// ====================== MAIN ROUTES ======================
 app.get('/', (req: Request, res: Response) => {
     res.send('Server is Live!');
 });

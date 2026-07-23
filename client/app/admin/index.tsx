@@ -20,12 +20,10 @@ export default function AdminDashboard() {
 
 const fetchStats = async () => {
     try {
-        const { data } = await api.get('/admin/stats');   // No manual header needed
-        if (data.success) {
-            setStats(data.data);
-        }
+        const { data } = await api.get('/test');   // ← Test this first
+        console.log("✅ Public test success:", data);
     } catch (error: any) {
-        console.error("Failed to fetch admin stats:", error.response?.data || error);
+        console.error("❌ Public test failed:", error.message);
     } finally {
         setLoading(false);
         setRefreshing(false);
