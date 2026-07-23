@@ -1,3 +1,4 @@
+// client/constants/api.ts   (or utils/api.ts)
 import axios from "axios";
 import { Platform } from "react-native";
 import { useAuth } from '@clerk/clerk-expo';
@@ -10,7 +11,7 @@ const LOCAL_API_URL = Platform.select({
 
 const api = axios.create({ baseURL: LOCAL_API_URL });
 
-// ← This is the important part
+// This is the important part
 api.interceptors.request.use(async (config) => {
   try {
     const { getToken } = useAuth();

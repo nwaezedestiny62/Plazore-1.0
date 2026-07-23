@@ -18,28 +18,19 @@ export default function AdminDashboard() {
         recentOrders: []
     });
 
-    const fetchStats = async () => {
-        try {
-            setLoading(true);
-            const { data } = await api.get('/admin/stats');   // ← No trailing slash
-
-            if (data.success) {
-                setStats(data.data);
-            } else {
-                console.warn("API returned success: false");
-            }
-        } catch (error: any) {
-            console.error("Failed to fetch admin stats:", error.response?.data || error.message);
-            
-            // Optional: Handle 401 specifically
-            if (error.response?.status === 401) {
-                console.log("Auth failed - user might not be signed in or token expired");
-            }
-        } finally {
-            setLoading(false);
-            setRefreshing(false);
+const fetchStats = async () => {
+    try {
+        const { data } = await api.get('/admin/stats');   // No manual header needed
+        if (data.success) {
+            setStats(data.data);
         }
-    };
+    } catch (error: any) {
+        console.error("Failed to fetch admin stats:", error.response?.data || error);
+    } finally {
+        setLoading(false);
+        setRefreshing(false);
+    }
+};
 
     useEffect(() => {
         if (isSignedIn) {

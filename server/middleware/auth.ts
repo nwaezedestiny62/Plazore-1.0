@@ -5,11 +5,13 @@ import User from "../models/User.js";
 
 export const protect = async (req: Request, res: Response, next: NextFunction) => {
     try {
-        const { userId } = getAuth(req);
+        const { userId, isAuthenticated } = getAuth(req);
 
+        console.log("🔥 Protect middleware triggered");
         console.log("🔍 Clerk Debug - userId:", userId);
+        console.log("✅ Is Authenticated:", isAuthenticated);
 
-        if (!userId) {
+        if (!userId || !isAuthenticated) {
             return res.status(401).json({ 
                 success: false, 
                 message: "Not authorized. Please sign in." 
@@ -35,7 +37,6 @@ export const protect = async (req: Request, res: Response, next: NextFunction) =
         });
     }
 };
-
 export const authorize = (...roles: string[]) => {
     return (req: Request, res: Response, next: NextFunction) => {
         if (!req.user || !roles.includes(req.user.role)) {
