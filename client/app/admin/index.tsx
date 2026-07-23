@@ -3,11 +3,10 @@ import React, { useEffect, useState } from "react";
 import { ScrollView, Text, View, ActivityIndicator, RefreshControl } from "react-native";
 import { COLORS, getStatusColor } from "@/constants";
 import { useAuth } from "@clerk/clerk-expo";
-import { getAuthApi } from "@/constants/api";   // ← Import this
+import api from "@/constants/api";
 
 export default function AdminDashboard() {
-    const router = useRouter();
-    const { isSignedIn } = useAuth();
+    const { isSignedIn, getToken } = useAuth();
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [stats, setStats] = useState({
@@ -18,29 +17,25 @@ export default function AdminDashboard() {
         recentOrders: []
     });
 
-    const fetchStats = async () => {
-        try {
-            const authApi = getAuthApi();   // ← Get authenticated instance
+const fetchStats = async () => {
+    try {
+        const token = await getToken();
+        console.log("🔑 Token length:", token?.length);
+        console.log("🔑 Token preview:", token?.substring(0, 50) + "...");
 
-            console.log("🚀 Calling /api/test...");
-            const testRes = await authApi.get('/test');
-            console.log("✅ Test success:", testRes.data);
+        // Test call with token
+        const debugRes = await api.get('/admin/debug', {
+            headers: { Authorization: `Bearer ${token}` }
+        });
+        console.log("✅ Debug success:", debugRes.data);
 
-            console.log("🚀 Calling /admin/debug...");
-            const debugRes = await authApi.get('/admin/debug');
-            console.log("✅ Debug success:", debugRes.data);
-
-            // TODO: Later replace with real stats call
-            // const statsRes = await authApi.get('/admin/stats');
-            // if (statsRes.data.success) setStats(statsRes.data.data);
-
-        } catch (error: any) {
-            console.error("❌ Request failed:", error.response?.data || error.message);
-        } finally {
-            setLoading(false);
-            setRefreshing(false);
-        }
-    };
+    } catch (error: any) {
+        console.error("❌ Request failed:", error.response?.data || error.message);
+    } finally {
+        setLoading(false);
+        setRefreshing(false);
+    }
+};
 
     useEffect(() => {
         if (isSignedIn) {
@@ -62,6 +57,8 @@ export default function AdminDashboard() {
             </View>
         );
     }
+
+    // ... rest of your return JSX (unchanged)
 
     return (
         <ScrollView

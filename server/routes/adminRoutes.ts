@@ -7,19 +7,13 @@ const AdminRouter = express.Router();
 
 // ==================== DEBUG ROUTE (Temporary) ====================
 AdminRouter.get('/debug', protect, (req, res) => {
-    const { userId, isAuthenticated } = getAuth(req);
+    const auth = getAuth(req);
+    console.log("Full Auth Object from Clerk:", auth);
     
-    console.log("✅ DEBUG ROUTE HIT");
-    console.log("Clerk userId:", userId);
-    console.log("Is Authenticated:", isAuthenticated);
-    console.log("Full req.user:", req.user);
-
     res.json({
         success: true,
-        message: "Protect middleware is working",
-        clerkUserId: userId,
-        userInDB: req.user,
-        isAuthenticated
+        clerkAuth: auth,
+        userFromDB: req.user
     });
 });
 
