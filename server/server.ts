@@ -19,19 +19,23 @@ await connectDB();
 app.post('/api/clerk', express.raw({type: "application/json"}), clerkWebhook)
 
 // Middleware
-app.use(cors());
+app.use(cors({
+  origin: true,           // Allow all for now (good for development)
+  credentials: true
+}));
 app.use(express.json());
 app.use(clerkMiddleware());
 
 const port = process.env.PORT || 3000;
 
-// ====================== PUBLIC TEST ROUTE ======================
+// ====================== PUBLIC TEST ROUTES ======================
 app.get('/api/test', (req: Request, res: Response) => {
-    console.log("✅ PUBLIC /api/test route hit from frontend!");
-    res.json({ 
-        success: true, 
-        message: "Backend is reachable. CORS & connection working." 
-    });
+    console.log("✅ PUBLIC /api/test route hit!");
+    res.json({ success: true, message: "Backend is reachable!" });
+});
+
+app.get('/api', (req: Request, res: Response) => {
+    res.json({ success: true, message: "Root API endpoint working" });
 });
 
 // ====================== MAIN ROUTES ======================
@@ -49,4 +53,5 @@ await makeAdmin();
 
 app.listen(port, () => {
     console.log(`Server is running at http://localhost:${port}` );
+    console.log(`Test it at: http://localhost:${port}/api/test`);
 });

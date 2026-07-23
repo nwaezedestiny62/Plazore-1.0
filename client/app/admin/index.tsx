@@ -3,11 +3,11 @@ import React, { useEffect, useState } from "react";
 import { ScrollView, Text, View, ActivityIndicator, RefreshControl } from "react-native";
 import { COLORS, getStatusColor } from "@/constants";
 import { useAuth } from "@clerk/clerk-expo";
-import api from "@/constants/api";   // ← Make sure this is the updated api with interceptor
+import { getAuthApi } from "@/constants/api";   // ← Import this
 
 export default function AdminDashboard() {
     const router = useRouter();
-    const { isSignedIn } = useAuth();   // Good to check this too
+    const { isSignedIn } = useAuth();
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [stats, setStats] = useState({
@@ -18,17 +18,29 @@ export default function AdminDashboard() {
         recentOrders: []
     });
 
-const fetchStats = async () => {
-    try {
-        const { data } = await api.get('/test');   // ← Test this first
-        console.log("✅ Public test success:", data);
-    } catch (error: any) {
-        console.error("❌ Public test failed:", error.message);
-    } finally {
-        setLoading(false);
-        setRefreshing(false);
-    }
-};
+    const fetchStats = async () => {
+        try {
+            const authApi = getAuthApi();   // ← Get authenticated instance
+
+            console.log("🚀 Calling /api/test...");
+            const testRes = await authApi.get('/test');
+            console.log("✅ Test success:", testRes.data);
+
+            console.log("🚀 Calling /admin/debug...");
+            const debugRes = await authApi.get('/admin/debug');
+            console.log("✅ Debug success:", debugRes.data);
+
+            // TODO: Later replace with real stats call
+            // const statsRes = await authApi.get('/admin/stats');
+            // if (statsRes.data.success) setStats(statsRes.data.data);
+
+        } catch (error: any) {
+            console.error("❌ Request failed:", error.response?.data || error.message);
+        } finally {
+            setLoading(false);
+            setRefreshing(false);
+        }
+    };
 
     useEffect(() => {
         if (isSignedIn) {
@@ -56,7 +68,6 @@ const fetchStats = async () => {
             className="flex-1 bg-surface p-4"
             refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         >
-            {/* Rest of your JSX remains the same */}
             <View className="mb-8">
                 <Text className="text-primary font-bold text-2xl mb-4 tracking-tight">Overview</Text>
                 <View className="flex-row flex-wrap justify-between">
@@ -112,7 +123,6 @@ const fetchStats = async () => {
     );
 }
 
-// StatCard component (unchanged)
 const StatCard = ({ label, value }: { label: string, value: string }) => (
     <View className="bg-white p-5 rounded-2xl border border-gray-100 w-[48%] mb-4 justify-center">
         <Text className="text-xl font-bold text-primary mb-1">{value}</Text>
