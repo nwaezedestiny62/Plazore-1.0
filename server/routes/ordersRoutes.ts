@@ -1,22 +1,28 @@
-import express from 'express'
-import { createOrder, getAllOrders, getOrder, getOrders, updateOrderStatus } from '../controllers/ordersController.js'
-import { authorize, protect } from '../middleware/auth.js'
+import express from "express";
+import { protect, authorize } from "../middleware/auth.js";
+import {
+  createOrder,
+  getMyOrders,
+  getOrder,
+  getSellerOrders,
+  shipOrder,
+  deliverOrder,
+  getAllOrders,
+} from "../controllers/ordersController.js";
 
-const OrderRouter = express.Router()
+const OrderRouter = express.Router();
 
-// Get user orders
-OrderRouter.get('/', protect, getOrders)
+// Buyer
+OrderRouter.post("/", protect, createOrder);
+OrderRouter.get("/", protect, getMyOrders);
+OrderRouter.get("/:id", protect, getOrder);
 
-// Get single order
-OrderRouter.get('/:id', protect, getOrder)
+// Seller
+OrderRouter.get("/seller/my", protect, authorize("seller", "admin"), getSellerOrders);
+OrderRouter.put("/:id/ship", protect, authorize("seller", "admin"), shipOrder);
+OrderRouter.put("/:id/deliver", protect, authorize("seller", "admin"), deliverOrder);
 
-// Create order from cart
-OrderRouter.post('/', protect, createOrder)
-
-// Update order status (Admin)
-OrderRouter.put('/:id/status', protect, authorize("admin"), updateOrderStatus)
-
-// Get all orders
-OrderRouter.get('/:id/all', protect, authorize("admin"), getAllOrders)
+// Admin
+OrderRouter.get("/admin/all", protect, authorize("admin"), getAllOrders);
 
 export default OrderRouter;

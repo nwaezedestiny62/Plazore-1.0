@@ -6,12 +6,10 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   RefreshControl,
-  Image,
 } from 'react-native'
 import { useAuth } from '@clerk/clerk-expo'
 import { useRouter, useFocusEffect } from 'expo-router'
 import { Ionicons } from '@expo/vector-icons'
-import { SafeAreaView } from 'react-native-safe-area-context'
 import api from '@/constants/api'
 
 const statusColor: Record<string, string> = {
@@ -21,7 +19,7 @@ const statusColor: Record<string, string> = {
   Cancelled: '#FF8A9A',
 }
 
-export default function BuyerOrders() {
+export default function SellerOrders() {
   const { getToken } = useAuth()
   const router = useRouter()
   const [orders, setOrders] = useState<any[]>([])
@@ -31,7 +29,7 @@ export default function BuyerOrders() {
   const fetchOrders = async () => {
     try {
       const token = await getToken()
-      const res = await api.get('/orders', {
+      const res = await api.get('/orders/seller/my', {
         headers: { Authorization: `Bearer ${token}` },
       })
       if (res.data.success) setOrders(res.data.data)
@@ -58,9 +56,9 @@ export default function BuyerOrders() {
   }
 
   return (
-    <SafeAreaView className="flex-1 bg-[#07111F]" edges={['top']}>
+    <View className="flex-1 bg-[#07111F]">
       <View className="px-5 pt-4 pb-3">
-        <Text className="text-white text-2xl font-extrabold">My Orders</Text>
+        <Text className="text-white text-xl font-bold">Incoming Orders</Text>
       </View>
 
       <FlatList
@@ -78,7 +76,7 @@ export default function BuyerOrders() {
           />
         }
         ListEmptyComponent={
-          <View className="items-center mt-24">
+          <View className="items-center mt-20">
             <Ionicons name="receipt-outline" size={48} color="#4A657A" />
             <Text className="text-[#7F93A8] mt-4">No orders yet</Text>
           </View>
@@ -86,10 +84,10 @@ export default function BuyerOrders() {
         renderItem={({ item }) => (
           <TouchableOpacity
             activeOpacity={0.85}
-            onPress={() => router.push(`/orders/${item._id}` as any)}
+            onPress={() => router.push(`/seller/orders/${item._id}` as any)}
             className="bg-[#0B1625] border border-[#1E334A] rounded-[24px] p-5 mb-4"
           >
-            <View className="flex-row justify-between items-center mb-3">
+            <View className="flex-row justify-between items-center mb-2">
               <Text className="text-white font-bold">{item.orderNumber}</Text>
               <View
                 className="px-3 py-1 rounded-full"
@@ -104,21 +102,13 @@ export default function BuyerOrders() {
               </View>
             </View>
 
-            <Text className="text-[#8EA4B8] text-sm mb-2">
-              {item.seller?.storeName || item.seller?.name || 'Seller'}
+            <Text className="text-[#8EA4B8] text-sm">
+              {item.buyer?.name || 'Buyer'} • {item.items?.length} items
             </Text>
-
-            <Text className="text-[#AFC3D6] text-sm">
-              {item.items?.length} item{item.items?.length !== 1 ? 's' : ''} • $
-              {item.totalAmount?.toFixed(2)}
-            </Text>
-
-            <Text className="text-[#6B8299] text-xs mt-2">
-              {new Date(item.createdAt).toLocaleDateString()}
-            </Text>
+            <Text className="text-[#AFC3D6] mt-1">${item.totalAmount?.toFixed(2)}</Text>
           </TouchableOpacity>
         )}
       />
-    </SafeAreaView>
+    </View>
   )
 }

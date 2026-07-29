@@ -6,6 +6,7 @@ import { useWishlist } from '@/context/WishlistContext';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
+import api from '@/constants/api'
 import {
   ActivityIndicator,
   Animated,
@@ -35,12 +36,23 @@ export default function ProductDetails() {
   // 🔥 Animated scroll value (key upgrade)
   const scrollX = useRef(new Animated.Value(0)).current;
 
-  const fetchProduct = async () => {
-    setProduct(dummyProducts.find((p) => p._id === id) as any);
-    const found: any = dummyProducts.find((product) => product._id === id);
-    setProduct(found ?? null);
-    setLoading(false);
-  };
+const fetchProduct = async () => {
+  try {
+    setLoading(true)
+    const res = await api.get(`/products/${id}`)
+    
+    if (res.data.success) {
+      setProduct(res.data.data)
+    } else {
+      setProduct(null)
+    }
+  } catch (error) {
+    console.log('Product fetch error:', error)
+    setProduct(null)
+  } finally {
+    setLoading(false)
+  }
+}
 
   useEffect(() => {
     fetchProduct();

@@ -8,26 +8,35 @@ import { useRouter } from 'expo-router'
 import React, { useEffect, useState } from 'react'
 import { ActivityIndicator, Dimensions, Image, ScrollView, Text, TouchableOpacity, View } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
+import api from '@/constants/api'
 
 const {width} = Dimensions.get('window')
 
 export default function Home() {
-
-  const router = useRouter();
-  const [activeBannerIndex, setActiveBannerIndex] = useState(0) 
+  const router = useRouter()
+  const [activeBannerIndex, setActiveBannerIndex] = useState(0)
   const [products, setProducts] = useState<Product[]>([])
   const [loading, setLoading] = useState(true)
 
-  const categories = [{id: 'all', name: 'All', icon: 'grid'}, ...CATEGORIES]
+  const categories = [{ id: 'all', name: 'All', icon: 'grid' }, ...CATEGORIES]
 
-  const fetchProducts = async ()=> {
-    setProducts(dummyProducts)
-    setLoading(false)
+  const fetchProducts = async () => {
+    try {
+      setLoading(true)
+      const res = await api.get('/products?limit=8')
+      if (res.data.success) {
+        setProducts(res.data.data)
+      }
+    } catch (error) {
+      console.log('Home products error:', error)
+    } finally {
+      setLoading(false)
+    }
   }
 
-  useEffect(()=>{
+  useEffect(() => {
     fetchProducts()
-  },)
+  }, [])
 
     return (
       <SafeAreaView className='flex-1' edges={['top']}>

@@ -1,148 +1,279 @@
-import { Ionicons } from "@expo/vector-icons";
-import { useLocalSearchParams } from "expo-router";
-import React, { useEffect, useState } from "react";
-import { Image, ScrollView, Text, View, ActivityIndicator } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
-import Header from "@/components/Header";
-import { COLORS } from "@/constants";
-import type { Order, Product } from "@/constants/types";
-import { dummyOrders } from "@/assets/assets";
+import React, { useEffect, useState } from 'react'
+import {
+  View,
+  Text,
+  ScrollView,
+  ActivityIndicator,
+  Image,
+  TouchableOpacity,
+} from 'react-native'
+import { useAuth } from '@clerk/clerk-expo'
+import { useLocalSearchParams, useRouter } from 'expo-router'
+import { Ionicons } from '@expo/vector-icons'
+import { SafeAreaView } from 'react-native-safe-area-context'
+import api from '@/constants/api'
 
-export default function OrderDetails() {
-    const { id } = useLocalSearchParams();
-    const [order, setOrder] = useState<Order | null>(null);
-    const [loading, setLoading] = useState(true);
+const steps = ['Preparing', 'Shipped', 'Delivered']
 
-    const fetchOrderDetails = async () => {
-        setOrder(dummyOrders.find((order) => order._id === id) as any);
-        setLoading(false);
-    };
+export default function BuyerOrderDetails() {
+  const { id } = useLocalSearchParams<{ id: string }>()
+  const { getToken } = useAuth()
+  const router = useRouter()
 
-    useEffect(() => {
-        fetchOrderDetails();
-    }, [id]);
+  const [order, setOrder] = useState<any>(null)
+  const [loading, setLoading] = useState(true)
 
-    if (loading) {
-        return (
-            <SafeAreaView className="flex-1 bg-surface justify-center items-center">
-                <ActivityIndicator size="large" color={COLORS.primary} />
-            </SafeAreaView>
-        );
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const token = await getToken()
+        const res = await api.get(`/orders/${id}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+        if (res.data.success) {
+          setOrder(res.data.data)
+        }
+      } catch (error) {
+        console.log(error)
+      } finally {
+        setLoading(false)
+      }
     }
+    load()
+  }, [id])
 
-    if (!order) {
-        return (
-            <SafeAreaView className="flex-1 bg-surface justify-center items-center">
-                <Text>Order not found</Text>
-            </SafeAreaView>
-        );
-    }
-
-    const formatDate = (dateString: string) => {
-        const options: Intl.DateTimeFormatOptions = { year: 'numeric', month: 'short', day: 'numeric' };
-        return new Date(dateString).toLocaleDateString(undefined, options);
-    };
-
-    const ORDER_STEPS = [
-        { title: "Order Placed", date: formatDate(order.createdAt), completed: true },
-        { title: "Processing", date: "", completed: ['processing', 'shipped', 'delivered'].includes(order.orderStatus) },
-        { title: "Shipped", date: "", completed: ['shipped', 'delivered'].includes(order.orderStatus) },
-        { title: "Delivered", date: "", completed: order.orderStatus === 'delivered' },
-    ];
-
+  if (loading) {
     return (
-        <SafeAreaView className="flex-1 bg-surface" edges={['top']}>
-            <Header title={`Order #${order.orderNumber}`} showBack />
+      <View className="flex-1 justify-center items-center bg-[#07111F]">
+        <ActivityIndicator size="large" color="#DCEBFF" />
+      </View>
+    )
+  }
 
-            <ScrollView className="flex-1 px-4 pt-4">
-                {/* Order Status */}
-                <View className="bg-white p-4 rounded-xl mb-4 border border-gray-100">
-                    <Text className="text-lg font-bold text-primary mb-4">Order Status</Text>
+  if (!order) {
+    return (
+      <View className="flex-1 justify-center items-center bg-[#07111F]">
+        <Text className="text-[#7F93A8]">Order not found</Text>
+      </View>
+    )
+  }
 
-                    {ORDER_STEPS.map((step, index) => (
-                        <View key={index} className="flex-row mb-4 last:mb-0">
-                            <View className="items-center mr-4">
-                                <View className={`w-3 h-3 rounded-full ${step.completed ? 'bg-primary' : 'bg-gray-300'}`} />
-                                {index !== ORDER_STEPS.length - 1 && (
-                                    <View className={`w-0.5 h-full ${step.completed ? 'bg-primary' : 'bg-gray-300'} absolute top-3`} />
-                                )}
-                            </View>
-                            <View className="pb-4">
-                                <Text className={`font-bold ${step.completed ? 'text-primary' : 'text-gray-400'}`}>{step.title}</Text>
-                                {step.date ? <Text className="text-secondary text-xs">{step.date}</Text> : null}
-                            </View>
-                        </View>
-                    ))}
+  const currentStep = steps.indexOf(order.orderStatus)
+
+  const shipping = order.shipping || {}
+  const method = shipping.shippingMethod // "courier" | "self" | undefined
+
+  const isSelf = method === 'self'
+  const isCourier =
+    method === 'courier' || (!method && !!shipping.deliveryCompany)
+
+  return (
+    <SafeAreaView className="flex-1 bg-[#07111F]" edges={['top']}>
+      {/* Header */}
+      <View className="px-5 pt-3 pb-3 flex-row items-center border-b border-[#1E334A]">
+        <TouchableOpacity onPress={() => router.back()} className="mr-4 p-1">
+          <Ionicons name="arrow-back" size={24} color="#DCEBFF" />
+        </TouchableOpacity>
+        <View>
+          <Text className="text-white text-xl font-bold">
+            {order.orderNumber}
+          </Text>
+          <Text className="text-[#8EA4B8] text-xs mt-0.5">
+            {new Date(order.createdAt).toLocaleString()}
+          </Text>
+        </View>
+      </View>
+
+      <ScrollView
+        contentContainerStyle={{ padding: 20, paddingBottom: 40 }}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Progress */}
+        <View className="bg-[#0B1625] border border-[#1E334A] rounded-[24px] p-5 mb-6">
+          <Text className="text-white font-bold text-lg mb-5">
+            Order Progress
+          </Text>
+
+          {steps.map((step, index) => {
+            const isActive = index <= currentStep
+            const isCurrent = index === currentStep
+
+            return (
+              <View
+                key={step}
+                className="flex-row items-center mb-5 last:mb-0"
+              >
+                <View
+                  className={`w-9 h-9 rounded-full items-center justify-center ${
+                    isActive ? 'bg-[#DCEBFF]' : 'bg-[#1A2F45]'
+                  }`}
+                >
+                  {isActive ? (
+                    <Ionicons name="checkmark" size={18} color="#07111F" />
+                  ) : (
+                    <Text className="text-[#6B8299] text-xs font-medium">
+                      {index + 1}
+                    </Text>
+                  )}
                 </View>
 
-                {/* Items */}
-                <View className="bg-white p-4 rounded-xl mb-4 border border-gray-100">
-                    <Text className="text-lg font-bold text-primary mb-4">Products</Text>
-                    {order.items.map((item: any, index: number) => {
+                <Text
+                  className={`ml-3.5 text-[15px] font-medium ${
+                    isCurrent
+                      ? 'text-[#DCEBFF]'
+                      : isActive
+                      ? 'text-white'
+                      : 'text-[#6B8299]'
+                  }`}
+                >
+                  {step}
+                </Text>
+              </View>
+            )
+          })}
+        </View>
 
-                        const productData = item.product as Product;
-                        const image = productData?.images?.[0];
+        {/* Seller */}
+        <View className="bg-[#0B1625] border border-[#1E334A] rounded-[24px] p-5 mb-6">
+          <Text className="text-[#8EA4B8] text-sm mb-1">Sold by</Text>
+          <Text className="text-white font-bold text-lg">
+            {order.seller?.storeName || order.seller?.name || 'Seller'}
+          </Text>
+        </View>
 
-                        return (
-                            <View key={index} className={`flex-row ${index !== order.items.length - 1 && 'border-b border-gray-100 pb-4 mb-4'}`}>
-                                {image && <Image source={{ uri: image }} className="w-16 h-16 rounded-lg bg-gray-100" resizeMode="contain" />}
-                                <View className="flex-1 ml-3 justify-center">
-                                    <Text className="text-primary font-medium" numberOfLines={1}>{item.name}</Text>
-                                    <Text className="text-secondary text-xs">Size: {item.size}</Text>
-                                    <View className="flex-row justify-between items-center mt-2">
-                                        <Text className="text-primary font-bold">${item.price}</Text>
-                                        <Text className="text-secondary text-xs">Qty: {item.quantity}</Text>
-                                    </View>
-                                </View>
-                            </View>
-                        )
-                    })}
-                </View>
+        {/* Items */}
+        <Text className="text-white font-bold text-lg mb-3">Items</Text>
 
-                {/* Shipping Details */}
-                <View className="bg-white p-4 rounded-xl mb-4 border border-gray-100">
-                    <Text className="text-lg font-bold text-primary mb-2">Shipping Details</Text>
-                    <View className="flex-row items-center mb-2">
-                        <Ionicons name="location-outline" size={20} color={COLORS.secondary} />
-                        <Text className="text-secondary ml-2 flex-1">
-                            {order.shippingAddress?.street}, {order.shippingAddress?.city}, {order.shippingAddress?.zipCode}, {order.shippingAddress?.country}
-                        </Text>
-                    </View>
-                </View>
+        {order.items?.map((item: any, idx: number) => (
+          <View
+            key={idx}
+            className="bg-[#0B1625] border border-[#1E334A] rounded-[24px] p-4 mb-4"
+          >
+            <View className="flex-row">
+              {item.image ? (
+                <Image
+                  source={{ uri: item.image }}
+                  className="w-16 h-16 rounded-xl bg-[#13263B]"
+                />
+              ) : (
+                <View className="w-16 h-16 rounded-xl bg-[#13263B]" />
+              )}
 
-                {/* Payment Summary */}
-                <View className="bg-white p-4 rounded-xl mb-8 border border-gray-100">
-                    <Text className="text-lg font-bold text-primary mb-4">Payment Summary</Text>
-                    <View className="flex-row justify-between mb-2">
-                        <Text className="text-secondary">Payment Method</Text>
-                        <Text className="text-primary font-medium capitalize">{order.paymentMethod}</Text>
-                    </View>
-                    <View className="flex-row justify-between mb-2">
-                        <Text className="text-secondary">Payment Status</Text>
-                        <Text className={`font-medium capitalize ${order.paymentStatus === 'paid' ? 'text-green-600' : order.paymentStatus === 'failed' ? 'text-red-600' : 'text-orange-500'}`}>
-                            {order.paymentStatus}
-                        </Text>
-                    </View>
-                    <View className="h-px bg-gray-100 my-2" />
-                    <View className="flex-row justify-between mb-2">
-                        <Text className="text-secondary">Subtotal</Text>
-                        <Text className="text-primary font-medium">${order.subtotal.toFixed(2)}</Text>
-                    </View>
-                    <View className="flex-row justify-between mb-2">
-                        <Text className="text-secondary">Shipping</Text>
-                        <Text className="text-primary font-medium">${order.shippingCost.toFixed(2)}</Text>
-                    </View>
-                    <View className="flex-row justify-between mb-2">
-                        <Text className="text-secondary">Tax</Text>
-                        <Text className="text-primary font-medium">${order.tax.toFixed(2)}</Text>
-                    </View>
-                    <View className="h-px bg-gray-100 my-2" />
-                    <View className="flex-row justify-between">
-                        <Text className="text-primary font-bold text-lg">Total</Text>
-                        <Text className="text-primary font-bold text-lg">${order.totalAmount.toFixed(2)}</Text>
-                    </View>
-                </View>
-            </ScrollView>
-        </SafeAreaView>
-    );
+              <View className="ml-3.5 flex-1 justify-center">
+                <Text className="text-white font-semibold" numberOfLines={2}>
+                  {item.name}
+                </Text>
+                <Text className="text-[#8EA4B8] text-sm mt-1">
+                  Qty: {item.quantity} • ${Number(item.price).toFixed(2)}
+                </Text>
+              </View>
+            </View>
+
+            {/* Your Note */}
+            <View className="mt-4 bg-[#13263B] rounded-2xl px-4 py-3">
+              <Text className="text-[#8EA4B8] text-[11px] mb-1">Your Note</Text>
+              <Text className="text-[#DCEBFF] text-[14px] leading-5">
+                {item.note && item.note.trim()
+                  ? item.note
+                  : 'No note added.'}
+              </Text>
+            </View>
+          </View>
+        ))}
+
+        {/* ========== SHIPPING INFO ========== */}
+        {order.orderStatus !== 'Preparing' && (
+          <View className="bg-[#0B1625] border border-[#1E334A] rounded-[24px] p-5 mt-2 mb-6">
+            <Text className="text-white font-bold text-lg mb-4">
+              Shipping Details
+            </Text>
+
+            {/* Method */}
+            <View className="mb-4">
+              <Text className="text-[#8EA4B8] text-xs mb-1">Method</Text>
+              <Text className="text-[#DCEBFF] text-[15px] font-medium">
+                {isSelf ? 'Self Delivery' : 'Courier'}
+              </Text>
+            </View>
+
+            {/* Courier details */}
+            {isCourier && (
+              <>
+                {shipping.deliveryCompany ? (
+                  <View className="mb-3">
+                    <Text className="text-[#8EA4B8] text-xs mb-1">
+                      Courier Company
+                    </Text>
+                    <Text className="text-[#DCEBFF] text-[15px]">
+                      {shipping.deliveryCompany}
+                    </Text>
+                  </View>
+                ) : null}
+
+                {shipping.trackingNumber ? (
+                  <View className="mb-3">
+                    <Text className="text-[#8EA4B8] text-xs mb-1">
+                      Tracking Number
+                    </Text>
+                    <Text className="text-[#DCEBFF] text-[15px]">
+                      {shipping.trackingNumber}
+                    </Text>
+                  </View>
+                ) : null}
+              </>
+            )}
+
+            {/* Self Delivery note */}
+            {isSelf && shipping.selfDeliveryNote ? (
+              <View className="mb-3">
+                <Text className="text-[#8EA4B8] text-xs mb-1">Seller Note</Text>
+                <Text className="text-[#DCEBFF] text-[15px] leading-5">
+                  {shipping.selfDeliveryNote}
+                </Text>
+              </View>
+            ) : null}
+
+            {/* Estimated delivery */}
+            {shipping.estimatedDelivery ? (
+              <View className="mb-1">
+                <Text className="text-[#8EA4B8] text-xs mb-1">
+                  Estimated Delivery
+                </Text>
+                <Text className="text-[#DCEBFF] text-[15px]">
+                  {new Date(
+                    shipping.estimatedDelivery
+                  ).toLocaleDateString()}
+                </Text>
+              </View>
+            ) : null}
+          </View>
+        )}
+
+        {/* Address */}
+        <View className="bg-[#0B1625] border border-[#1E334A] rounded-[24px] p-5 mb-4">
+          <Text className="text-white font-bold text-lg mb-3">
+            Shipping Address
+          </Text>
+          <Text className="text-[#AFC3D6] leading-6 text-[15px]">
+            {order.shippingAddress?.street}
+            {'\n'}
+            {order.shippingAddress?.city}, {order.shippingAddress?.state}{' '}
+            {order.shippingAddress?.zipCode}
+            {'\n'}
+            {order.shippingAddress?.country}
+          </Text>
+        </View>
+
+        {/* Total */}
+        <View className="bg-[#0B1625] border border-[#1E334A] rounded-[24px] p-5">
+          <View className="flex-row justify-between items-center">
+            <Text className="text-[#8EA4B8]">Order Total</Text>
+            <Text className="text-white font-bold text-xl">
+              ${Number(order.totalAmount).toFixed(2)}
+            </Text>
+          </View>
+        </View>
+      </ScrollView>
+    </SafeAreaView>
+  )
 }
