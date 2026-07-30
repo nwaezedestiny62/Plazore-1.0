@@ -12,17 +12,30 @@ import {
 
 const OrderRouter = express.Router();
 
-// Buyer
+// Specific paths FIRST (before /:id)
 OrderRouter.post("/", protect, createOrder);
 OrderRouter.get("/", protect, getMyOrders);
-OrderRouter.get("/:id", protect, getOrder);
-
-// Seller
-OrderRouter.get("/seller/my", protect, authorize("seller", "admin"), getSellerOrders);
-OrderRouter.put("/:id/ship", protect, authorize("seller", "admin"), shipOrder);
-OrderRouter.put("/:id/deliver", protect, authorize("seller", "admin"), deliverOrder);
-
-// Admin
+OrderRouter.get(
+  "/seller/my",
+  protect,
+  authorize("seller", "admin"),
+  getSellerOrders
+);
 OrderRouter.get("/admin/all", protect, authorize("admin"), getAllOrders);
+
+// Param routes AFTER
+OrderRouter.get("/:id", protect, getOrder);
+OrderRouter.put(
+  "/:id/ship",
+  protect,
+  authorize("seller", "admin"),
+  shipOrder
+);
+OrderRouter.put(
+  "/:id/deliver",
+  protect,
+  authorize("seller", "admin"),
+  deliverOrder
+);
 
 export default OrderRouter;

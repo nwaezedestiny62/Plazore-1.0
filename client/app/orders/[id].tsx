@@ -16,25 +16,51 @@ import api from '@/constants/api'
 const steps = ['Preparing', 'Shipped', 'Delivered']
 
 export default function BuyerOrderDetails() {
-  const { id } = useLocalSearchParams<{ id: string }>()
+  const params = useLocalSearchParams<{ id: string | string[] }>()
+  const rawId = params.id
+  const id = Array.isArray(rawId) ? rawId[0] : rawId
+
   const { getToken } = useAuth()
   const router = useRouter()
 
   const [order, setOrder] = useState<any>(null)
   const [loading, setLoading] = useState(true)
+  const [errorMsg, setErrorMsg] = useState<string | null>(null)
 
   useEffect(() => {
     const load = async () => {
+      if (!id) {
+        setErrorMsg('Missing order id')
+        setLoading(false)
+        return
+      }
+
       try {
+        setLoading(true)
+        setErrorMsg(null)
         const token = await getToken()
+        console.log('Fetching order id →', id)
+
         const res = await api.get(`/orders/${id}`, {
           headers: { Authorization: `Bearer ${token}` },
         })
+
         if (res.data.success) {
           setOrder(res.data.data)
+        } else {
+          setErrorMsg(res.data.message || 'Order not found')
         }
-      } catch (error) {
-        console.log(error)
+      } catch (error: any) {
+        console.log(
+          'Order details error:',
+          error.response?.status,
+          error.response?.data || error.message
+        )
+        setErrorMsg(
+          error.response?.data?.message ||
+            error.message ||
+            'Could not load order'
+        )
       } finally {
         setLoading(false)
       }
@@ -52,8 +78,13 @@ export default function BuyerOrderDetails() {
 
   if (!order) {
     return (
-      <View className="flex-1 justify-center items-center bg-[#07111F]">
-        <Text className="text-[#7F93A8]">Order not found</Text>
+      <View className="flex-1 justify-center items-center bg-[#07111F] px-6">
+        <Text className="text-[#7F93A8] text-center text-base">
+          {errorMsg || 'Order not found'}
+        </Text>
+        <TouchableOpacity onPress={() => router.back()} className="mt-6">
+          <Text className="text-[#DCEBFF] font-semibold">Go back</Text>
+        </TouchableOpacity>
       </View>
     )
   }
@@ -189,12 +220,12 @@ export default function BuyerOrderDetails() {
             </Text>
 
             {/* Method */}
-            <View className="mb-4">
-              <Text className="text-[#8EA4B8] text-xs mb-1">Method</Text>
-              <Text className="text-[#DCEBFF] text-[15px] font-medium">
-                {isSelf ? 'Self Delivery' : 'Courier'}
-              </Text>
-            </View>
+<Text className="text-[#8EA4B8] text-sm mb-1">Method</Text>
+<Text className="text-[#DCEBFF] mb-3">
+  {order.shipping.shippingMethod === "self"
+    ? "Self Delivery"
+    : "Courier"}
+</Text>
 
             {/* Courier details */}
             {isCourier && (

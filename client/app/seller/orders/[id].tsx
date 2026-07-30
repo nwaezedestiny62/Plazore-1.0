@@ -187,35 +187,45 @@ if (method === 'courier') {
         </View>
 
         {/* Buyer Details */}
-        <View className="bg-[#0B1625] border border-[#1E334A] rounded-[24px] p-5 mb-6">
-          <Text className="text-white font-bold text-lg mb-4">Buyer Details</Text>
+{/* Buyer Information — name, phone, address only (no email) */}
+<View className="bg-[#0B1625] border border-[#1E334A] rounded-[24px] p-5 mb-6">
+  <Text className="text-white font-bold text-lg mb-4">
+    Buyer Information
+  </Text>
 
-          <View className="mb-3">
-            <Text className="text-[#8EA4B8] text-xs mb-1">Name</Text>
-            <Text className="text-[#DCEBFF] text-[15px]">
-              {order.buyer?.name || 'Buyer'}
-            </Text>
-          </View>
+  <View className="mb-3">
+    <Text className="text-[#8EA4B8] text-xs mb-1">Buyer Name</Text>
+    <Text className="text-[#DCEBFF] text-[15px] font-semibold">
+      {order.buyerContact?.name || order.buyer?.name || "Buyer"}
+    </Text>
+  </View>
 
-          <View className="mb-3">
-            <Text className="text-[#8EA4B8] text-xs mb-1">Email</Text>
-            <Text className="text-[#DCEBFF] text-[15px]">
-              {order.buyer?.email || '—'}
-            </Text>
-          </View>
+  <View className="mb-4">
+    <Text className="text-[#8EA4B8] text-xs mb-1">Phone Number</Text>
+    <Text className="text-[#DCEBFF] text-[15px]">
+      {order.buyerContact?.phone || order.buyer?.phone || "Not provided"}
+    </Text>
+  </View>
 
-          <View className="h-[1px] bg-[#1E334A] my-3" />
-
-          <Text className="text-[#8EA4B8] text-xs mb-2">Shipping Address</Text>
-          <Text className="text-[#DCEBFF] text-[15px] leading-6">
-            {order.shippingAddress?.street}
-            {'\n'}
-            {order.shippingAddress?.city}, {order.shippingAddress?.state}{' '}
-            {order.shippingAddress?.zipCode}
-            {'\n'}
-            {order.shippingAddress?.country}
-          </Text>
-        </View>
+  <View className="bg-[#13263B] border-2 border-[#DCEBFF]/40 rounded-2xl p-4">
+    <View className="flex-row items-center mb-2">
+      <Ionicons name="location" size={18} color="#DCEBFF" />
+      <Text className="text-white font-bold text-[15px] ml-2">
+        Delivery Address
+      </Text>
+    </View>
+    <Text className="text-white text-[16px] font-semibold leading-6">
+      {order.shippingAddress?.street}
+    </Text>
+    <Text className="text-[#DCEBFF] text-[15px] leading-6 mt-1">
+      {order.shippingAddress?.city}, {order.shippingAddress?.state}{" "}
+      {order.shippingAddress?.zipCode}
+    </Text>
+    <Text className="text-[#AFC3D6] text-[14px] mt-1">
+      {order.shippingAddress?.country}
+    </Text>
+  </View>
+</View>
 
         {/* Products */}
         <Text className="text-white font-bold text-lg mb-3">Products</Text>

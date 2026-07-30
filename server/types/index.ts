@@ -89,16 +89,22 @@ export interface IProduct extends Document {
 export interface IUser extends Document {
   name: string;
   email: string;
+  phone?: string;
   clerkId: string;
   image?: string;
-  role: "buyer" | "seller" | "admin"; // CHANGED
-  // Seller fields
+  role: "buyer" | "seller" | "admin";
   storeName?: string;
   storeDescription?: string;
+  businessGoal?: string;
   storeLogo?: string;
   isSellerVerified?: boolean;
   isSellerSuspended?: boolean;
   sellerAppliedAt?: Date;
+  payout?: {
+    bankName?: string;
+    accountName?: string;
+    accountNumber?: string;
+  };
   createdAt: Date;
   updatedAt: Date;
 }

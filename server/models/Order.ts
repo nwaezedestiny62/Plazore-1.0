@@ -43,7 +43,12 @@ const orderSchema = new mongoose.Schema(
     },
 
     items: [orderItemSchema],
-
+    
+buyerContact: {
+  name: { type: String, default: "" },
+  phone: { type: String, default: "" },
+  // email intentionally NOT stored for seller display
+},
     shippingAddress: {
       street: { type: String, required: true },
       city: { type: String, required: true },

@@ -17,12 +17,7 @@ import upload from "../middleware/upload.js";
 const SellerRouter = express.Router();
 
 // ====================== BECOME A SELLER ======================
-SellerRouter.post(
-  "/apply",
-  protect,
-  authorize("buyer", "user"),
-  applyAsSeller
-);
+SellerRouter.post("/apply", protect, authorize("buyer"), applyAsSeller);
 
 // ====================== DASHBOARD ======================
 SellerRouter.get(

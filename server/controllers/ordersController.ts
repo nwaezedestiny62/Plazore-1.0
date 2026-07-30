@@ -1,21 +1,21 @@
 import { Request, Response } from "express";
+import mongoose from "mongoose";
 import Order from "../models/Order.js";
 import Cart from "../models/Cart.js";
 import Product from "../models/Products.js";
 import { sendNotification } from "../utils/sendNotification.js";
+import User from "../models/User.js";
 
-// Helper: Generate order number like PLZ#23467
-const generateOrderNumber = () => {
-  const random = Math.floor(10000 + Math.random() * 90000);
-  return `PLZ#${random}`;
-};
+// Helper so TypeScript stops complaining about req.user
+const getUser = (req: Request) => (req as any).user;
 
 // ====================== CREATE ORDER ======================
 export const createOrder = async (req: Request, res: Response) => {
   try {
+    const user = getUser(req);
     const { shippingAddress, buyerNote, items: frontendItems } = req.body;
 
-    console.log("Received body:", JSON.stringify(req.body, null, 2)); // debug
+    console.log("Received body:", JSON.stringify(req.body, null, 2));
 
     if (!shippingAddress) {
       return res.status(400).json({
@@ -24,15 +24,18 @@ export const createOrder = async (req: Request, res: Response) => {
       });
     }
 
-    // ========== GET ITEMS ==========
     let rawItems: any[] = [];
 
-    if (frontendItems && Array.isArray(frontendItems) && frontendItems.length > 0) {
-      console.log("Using frontend items");
+    if (
+      frontendItems &&
+      Array.isArray(frontendItems) &&
+      frontendItems.length > 0
+    ) {
       rawItems = frontendItems;
     } else {
-      console.log("Trying database cart");
-      const cart = await Cart.findOne({ user: req.user._id }).populate("items.product");
+      const cart = await Cart.findOne({ user: user._id }).populate(
+        "items.product"
+      );
       if (!cart || cart.items.length === 0) {
         return res.status(400).json({
           success: false,
@@ -43,6 +46,7 @@ export const createOrder = async (req: Request, res: Response) => {
         productId: item.product._id,
         quantity: item.quantity,
         price: item.price,
+        note: item.note || "",
       }));
     }
 
@@ -53,7 +57,6 @@ export const createOrder = async (req: Request, res: Response) => {
       });
     }
 
-    // ========== GROUP BY SELLER ==========
     const itemsBySeller: Record<string, any[]> = {};
 
     for (const item of rawItems) {
@@ -80,19 +83,18 @@ export const createOrder = async (req: Request, res: Response) => {
         itemsBySeller[sellerId] = [];
       }
 
-itemsBySeller[sellerId].push({
-  product: product._id,
-  name: product.name,
-  quantity: item.quantity,
-  price: item.price || product.price,
-  image: product.images?.[0] || "",
-  note: (item.note || "").trim().slice(0, 120),   // ← THIS LINE MUST BE THERE
-});
+      itemsBySeller[sellerId].push({
+        product: product._id,
+        name: product.name,
+        quantity: item.quantity,
+        price: item.price || product.price,
+        image: product.images?.[0] || "",
+        note: (item.note || "").trim().slice(0, 120),
+      });
     }
 
     const createdOrders = [];
 
-    // ========== CREATE ONE ORDER PER SELLER ==========
     for (const sellerId of Object.keys(itemsBySeller)) {
       const sellerItems = itemsBySeller[sellerId];
 
@@ -101,29 +103,37 @@ itemsBySeller[sellerId].push({
         0
       );
 
-      const order = await Order.create({
-        buyer: req.user._id,
-        seller: sellerId,
-        orderNumber: `PLZ#${Math.floor(10000 + Math.random() * 90000)}`,
-        items: sellerItems,
-        shippingAddress,
-        buyerNote: buyerNote || "",
-        orderStatus: "Preparing",
-        subtotal,
-        shippingCost: 0,
-        totalAmount: subtotal,
-        paymentStatus: "pending",
-        paymentMethod: "pending",
-      });
+const order = await Order.create({
+  buyer: req.user._id,
+  seller: sellerId,
+  orderNumber: `PLZ#${Math.floor(10000 + Math.random() * 90000)}`,
+  items: sellerItems,
+  shippingAddress,
+  buyerNote: buyerNote || "",
+  buyerContact: {
+    name: req.user.name || "",
+    phone: (req.body.phone || req.user.phone || "").toString().trim(),
+  },
+  orderStatus: "Preparing",
+  subtotal,
+  shippingCost: 0,
+  totalAmount: subtotal,
+  paymentStatus: "pending",
+  paymentMethod: "pending",
+});
 
-      // Reduce stock
+// keep user phone up to date if sent
+const phone = (req.body.phone || "").toString().trim();
+if (phone) {
+  await User.findByIdAndUpdate(req.user._id, { phone });
+}
+
       for (const item of sellerItems) {
         await Product.findByIdAndUpdate(item.product, {
           $inc: { stock: -item.quantity },
         });
       }
 
-      // Notify seller
       await sendNotification({
         userId: sellerId,
         type: "new_order",
@@ -148,10 +158,11 @@ itemsBySeller[sellerId].push({
 };
 
 // ====================== BUYER: Get my orders ======================
-// GET /api/orders
 export const getMyOrders = async (req: Request, res: Response) => {
   try {
-    const orders = await Order.find({ buyer: req.user._id })
+    const user = getUser(req);
+
+    const orders = await Order.find({ buyer: user._id })
       .populate("seller", "name storeName storeLogo")
       .populate("items.product", "name images")
       .sort({ createdAt: -1 });
@@ -162,40 +173,68 @@ export const getMyOrders = async (req: Request, res: Response) => {
   }
 };
 
-// ====================== BUYER: Get single order ======================
-// GET /api/orders/:id
+// ====================== Get single order ======================
 export const getOrder = async (req: Request, res: Response) => {
   try {
-    const order = await Order.findById(req.params.id)
+    const user = getUser(req);
+    const { id } = req.params;
+
+if (!id || !mongoose.isValidObjectId(id)) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found",
+      });
+    }
+
+    const order = await Order.findById(id)
       .populate("seller", "name storeName storeLogo")
       .populate("buyer", "name email")
       .populate("items.product", "name images");
 
     if (!order) {
-      return res.status(404).json({ success: false, message: "Order not found" });
+      return res.status(404).json({
+        success: false,
+        message: "Order not found",
+      });
     }
 
-    // Only buyer, seller of this order, or admin can view
-    const isBuyer = order.buyer._id.toString() === req.user._id.toString();
-    const isSeller = order.seller._id.toString() === req.user._id.toString();
-    const isAdmin = req.user.role === "admin";
+    const currentUserId = user._id.toString();
+
+    const buyerId =
+      (order.buyer as any)?._id?.toString?.() ||
+      (order.buyer as any)?.toString?.() ||
+      "";
+
+    const sellerId =
+      (order.seller as any)?._id?.toString?.() ||
+      (order.seller as any)?.toString?.() ||
+      "";
+
+    const isBuyer = buyerId === currentUserId;
+    const isSeller = sellerId === currentUserId;
+    const isAdmin = user.role === "admin";
 
     if (!isBuyer && !isSeller && !isAdmin) {
-      return res.status(403).json({ success: false, message: "Not authorized" });
+      return res.status(403).json({
+        success: false,
+        message: "Not authorized",
+      });
     }
 
     res.json({ success: true, data: order });
   } catch (error: any) {
+    console.error("getOrder error:", error?.message || error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
 // ====================== SELLER: Get my orders ======================
-// GET /api/orders/seller/my
 export const getSellerOrders = async (req: Request, res: Response) => {
   try {
-    const orders = await Order.find({ seller: req.user._id })
-      .populate("buyer", "name email")
+    const user = getUser(req);
+
+    const orders = await Order.find({ seller: user._id })
+      .populate("buyer", "name phone")  // no email
       .populate("items.product", "name images")
       .sort({ createdAt: -1 });
 
@@ -206,9 +245,9 @@ export const getSellerOrders = async (req: Request, res: Response) => {
 };
 
 // ====================== SELLER: Ship Order ======================
-// PUT /api/orders/:id/ship
 export const shipOrder = async (req: Request, res: Response) => {
   try {
+    const user = getUser(req);
     const {
       deliveryCompany,
       trackingNumber,
@@ -217,19 +256,34 @@ export const shipOrder = async (req: Request, res: Response) => {
       selfDeliveryNote,
     } = req.body;
 
-    console.log("SHIP BODY →", req.body); // important debug
+    console.log("SHIP BODY →", req.body);
 
-    const order = await Order.findById(req.params.id);
+    const { id } = req.params;
+
+if (!id || !mongoose.isValidObjectId(id)) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found",
+      });
+    }
+
+    const order = await Order.findById(id);
 
     if (!order) {
-      return res.status(404).json({ success: false, message: "Order not found" });
+      return res.status(404).json({
+        success: false,
+        message: "Order not found",
+      });
     }
 
     if (
-      order.seller.toString() !== req.user._id.toString() &&
-      req.user.role !== "admin"
+      order.seller.toString() !== user._id.toString() &&
+      user.role !== "admin"
     ) {
-      return res.status(403).json({ success: false, message: "Not authorized" });
+      return res.status(403).json({
+        success: false,
+        message: "Not authorized",
+      });
     }
 
     if (order.orderStatus !== "Preparing") {
@@ -239,24 +293,22 @@ export const shipOrder = async (req: Request, res: Response) => {
       });
     }
 
-    // Force the correct method
     const method = shippingMethod === "self" ? "self" : "courier";
 
     order.orderStatus = "Shipped";
-    order.shipping = {
+    (order as any).shipping = {
       shippingMethod: method,
-      deliveryCompany: method === "courier" ? (deliveryCompany || "") : "",
-      trackingNumber: method === "courier" ? (trackingNumber || "") : "",
+      deliveryCompany: method === "courier" ? deliveryCompany || "" : "",
+      trackingNumber: method === "courier" ? trackingNumber || "" : "",
       estimatedDelivery: estimatedDelivery
         ? new Date(estimatedDelivery)
         : undefined,
-      selfDeliveryNote: method === "self" ? (selfDeliveryNote || "") : "",
+      selfDeliveryNote: method === "self" ? selfDeliveryNote || "" : "",
       shippedAt: new Date(),
     };
 
     await order.save();
 
-    // Notify buyer
     await sendNotification({
       userId: order.buyer.toString(),
       type: "order_shipped",
@@ -274,17 +326,35 @@ export const shipOrder = async (req: Request, res: Response) => {
 };
 
 // ====================== SELLER: Mark as Delivered ======================
-// PUT /api/orders/:id/deliver
 export const deliverOrder = async (req: Request, res: Response) => {
   try {
-    const order = await Order.findById(req.params.id);
+    const user = getUser(req);
+    const { id } = req.params;
 
-    if (!order) {
-      return res.status(404).json({ success: false, message: "Order not found" });
+ if (!id || !mongoose.isValidObjectId(id)) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found",
+      });
     }
 
-    if (order.seller.toString() !== req.user._id.toString() && req.user.role !== "admin") {
-      return res.status(403).json({ success: false, message: "Not authorized" });
+    const order = await Order.findById(id);
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found",
+      });
+    }
+
+    if (
+      order.seller.toString() !== user._id.toString() &&
+      user.role !== "admin"
+    ) {
+      return res.status(403).json({
+        success: false,
+        message: "Not authorized",
+      });
     }
 
     if (order.orderStatus !== "Shipped") {
@@ -298,7 +368,6 @@ export const deliverOrder = async (req: Request, res: Response) => {
     order.deliveredAt = new Date();
     await order.save();
 
-    // Notify the buyer
     await sendNotification({
       userId: order.buyer.toString(),
       type: "order_delivered",
@@ -315,7 +384,6 @@ export const deliverOrder = async (req: Request, res: Response) => {
 };
 
 // ====================== ADMIN: Get all orders ======================
-// GET /api/orders/admin/all
 export const getAllOrders = async (req: Request, res: Response) => {
   try {
     const { page = 1, limit = 20, status } = req.query;

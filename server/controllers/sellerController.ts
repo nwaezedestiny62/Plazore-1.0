@@ -7,41 +7,84 @@ import { clerkClient } from "@clerk/express";
 // Apply to become a seller
 export const applyAsSeller = async (req: Request, res: Response) => {
   try {
-    const { storeName, storeDescription } = req.body;
+    const user = (req as any).user;
+    const {
+      storeName,
+      storeDescription,
+      businessGoal,
+      phone,
+      bankName,
+      accountName,
+      accountNumber,
+    } = req.body;
 
-    if (!storeName) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Store name is required" });
+    if (!storeName?.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Store name is required",
+      });
+    }
+    if (!storeDescription?.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Business description is required",
+      });
+    }
+    if (!businessGoal?.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Business goal is required",
+      });
+    }
+    if (!phone?.trim() || String(phone).trim().length < 7) {
+      return res.status(400).json({
+        success: false,
+        message: "Valid phone number is required",
+      });
+    }
+    if (!bankName?.trim() || !accountName?.trim() || !accountNumber?.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "All payout / bank details are required",
+      });
     }
 
-if (req.user.role === "seller" || req.user.role === "admin") {
-  return res
-    .status(400)
-    .json({ success: false, message: "You are already a seller or admin" });
-}
+    if (user.role === "seller" || user.role === "admin") {
+      return res.status(400).json({
+        success: false,
+        message: "You are already a seller or admin",
+      });
+    }
 
-    const user = await User.findByIdAndUpdate(
-      req.user._id,
+    const updated = await User.findByIdAndUpdate(
+      user._id,
       {
         role: "seller",
-        storeName,
-        storeDescription: storeDescription || "",
+        storeName: storeName.trim(),
+        storeDescription: storeDescription.trim(),
+        businessGoal: businessGoal.trim(),
+        phone: String(phone).trim(),
         sellerAppliedAt: new Date(),
-        isSellerVerified: false, // admin can verify later
+        isSellerVerified: true, // immediate access — no 17h review for now
+        payout: {
+          bankName: bankName.trim(),
+          accountName: accountName.trim(),
+          accountNumber: String(accountNumber).trim(),
+        },
       },
       { new: true }
     );
 
-    // Sync to Clerk publicMetadata
-    await clerkClient.users.updateUserMetadata(user!.clerkId, {
-      publicMetadata: { role: "seller" },
-    });
+    if (updated?.clerkId) {
+      await clerkClient.users.updateUserMetadata(updated.clerkId, {
+        publicMetadata: { role: "seller" },
+      });
+    }
 
     res.json({
       success: true,
-      message: "You are now a seller! Waiting for verification.",
-      data: user,
+      message: "You are now a seller. Welcome to the Seller Lounge.",
+      data: updated,
     });
   } catch (error: any) {
     res.status(500).json({ success: false, message: error.message });
