@@ -1,4 +1,5 @@
 import { useCart } from '@/context/CartContext'
+import { useMarketplace } from '@/context/MarketplaceContext'
 import { useWishlist } from '@/context/WishlistContext'
 import { Ionicons } from '@expo/vector-icons'
 import { LinearGradient } from 'expo-linear-gradient'
@@ -29,11 +30,12 @@ export default function ProductDetails() {
   const [product, setProduct] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [wishlistCount, setWishlistCount] = useState(0)
-  const [liked, setLiked] = useState(false) // local source of truth for UI
+  const [liked, setLiked] = useState(false)
   const [busy, setBusy] = useState(false)
 
   const { toggleWishlist, isInWishlist } = useWishlist()
   const { addToCart, itemCount } = useCart()
+  const { formatProduct } = useMarketplace()
 
   const scrollX = useRef(new Animated.Value(0)).current
   const fadeIn = useRef(new Animated.Value(0)).current
@@ -75,7 +77,6 @@ export default function ProductDetails() {
     load()
   }, [id])
 
-  // Keep local liked state in sync with context
   useEffect(() => {
     if (product) {
       setLiked(isInWishlist(product._id))
@@ -97,19 +98,14 @@ export default function ProductDetails() {
     ]).start()
   }
 
-  // Used by both Heart button and Double-tap
   const performAddOrToggle = async (forceAddOnly = false) => {
     if (!product || busy) return
-
-    // If forceAddOnly (double-tap) and already liked → do nothing
     if (forceAddOnly && liked) return
 
     setBusy(true)
     pulseHeart()
 
     const wasLiked = liked
-
-    // Optimistic UI update
     setLiked(!wasLiked)
     setWishlistCount((prev) =>
       wasLiked ? Math.max(0, prev - 1) : prev + 1
@@ -118,7 +114,6 @@ export default function ProductDetails() {
     try {
       await toggleWishlist(product)
     } catch {
-      // Revert on error
       setLiked(wasLiked)
       setWishlistCount((prev) =>
         wasLiked ? prev + 1 : Math.max(0, prev - 1)
@@ -128,14 +123,11 @@ export default function ProductDetails() {
     }
   }
 
-  // Double-tap on image
   const handleImagePress = (evt: any) => {
     const now = Date.now()
     if (now - lastTap.current < 280) {
-      // Only try to add (never remove)
       performAddOrToggle(true)
 
-      // Always show floating hearts
       const { locationX } = evt.nativeEvent
       const hearts = Array.from({ length: 7 }).map((_, i) => ({
         id: Date.now() + i,
@@ -194,6 +186,8 @@ export default function ProductDetails() {
       ? product.category
       : product.category?.name
 
+  const productRegion = product.region
+
   return (
     <View className="flex-1 bg-[#070B12]">
       <StatusBar barStyle="light-content" />
@@ -248,7 +242,6 @@ export default function ProductDetails() {
               }}
             />
 
-            {/* Floating hearts */}
             {floatingHearts.map((h) => {
               const translateY = h.anim.interpolate({
                 inputRange: [0, 1],
@@ -325,7 +318,7 @@ export default function ProductDetails() {
                 {product.name}
               </Text>
               <Text className="text-[#E8F4FF] font-extrabold text-[34px]">
-                ${Number(product.price).toFixed(2)}
+                {formatProduct(Number(product.price), productRegion)}
               </Text>
             </View>
 
@@ -391,7 +384,7 @@ export default function ProductDetails() {
               <View className="flex-row justify-between items-center pt-3.5 border-t border-[#172636]">
                 <Text className="text-[#7A93A8] text-[14px]">Delivery Fee</Text>
                 <Text className="text-[#D4ECFF] font-bold text-[17px]">
-                  ${deliveryFee.toFixed(2)}
+                  {formatProduct(deliveryFee, productRegion)}
                 </Text>
               </View>
             </View>
@@ -473,7 +466,11 @@ export default function ProductDetails() {
         </View>
 
         {/* Header */}
-        <SafeAreaView edges={['top']} className="absolute top-0 left-0 right-0 z-10" pointerEvents="box-none">
+        <SafeAreaView
+          edges={['top']}
+          className="absolute top-0 left-0 right-0 z-10"
+          pointerEvents="box-none"
+        >
           <View className="px-4 pt-1.5 flex-row justify-between items-start">
             <TouchableOpacity
               onPress={() => router.back()}

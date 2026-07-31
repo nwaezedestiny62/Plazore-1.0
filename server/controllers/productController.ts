@@ -1,30 +1,55 @@
 import { Request, Response } from "express";
 import Product from "../models/Products.js";
+import User from "../models/User.js";
 import cloudinary from "../config/cloudinary.js";
 
 const getUser = (req: Request) => (req as any).user;
 
-// Public - Get all active products
+// ======================================================
+// PUBLIC - Get products (Regional prioritization)
+// ======================================================
 export const getProducts = async (req: Request, res: Response) => {
   try {
     const page = Number(req.query.page) || 1;
-    const limit = Number(req.query.limit) || 10;
+    const limit = Number(req.query.limit) || 12;
+    const buyerRegion = (req.query.region as string) || "NG";
 
-    const query: any = { isActive: true };
+    const baseQuery: any = { isActive: true };
 
-    if (req.query.seller) {
-      query.seller = req.query.seller;
-    }
-    if (req.query.category) {
-      query.category = req.query.category;
-    }
+    // Optional filters
+    if (req.query.seller) baseQuery.seller = req.query.seller;
+    if (req.query.category) baseQuery.category = req.query.category;
 
-    const total = await Product.countDocuments(query);
-    const products = await Product.find(query)
-      .populate("seller", "name storeName storeLogo")
+    // ---------- 1. Local products first ----------
+    const localQuery = { ...baseQuery, region: buyerRegion };
+
+    const localProducts = await Product.find(localQuery)
+      .populate("seller", "name storeName storeLogo marketplaceRegion")
+      .sort({ isFeatured: -1, createdAt: -1 })
       .skip((page - 1) * limit)
-      .limit(limit)
-      .sort({ createdAt: -1 });
+      .limit(limit);
+
+    let products = [...localProducts];
+    const usedLocal = localProducts.length;
+
+    // ---------- 2. Fill remaining slots with other regions ----------
+    if (usedLocal < limit) {
+      const remaining = limit - usedLocal;
+
+      const otherProducts = await Product.find({
+        ...baseQuery,
+        region: { $ne: buyerRegion },
+      })
+        .populate("seller", "name storeName storeLogo marketplaceRegion")
+        .sort({ isFeatured: -1, createdAt: -1 })
+        .limit(remaining);
+
+      products = [...products, ...otherProducts];
+    }
+
+    // Total count (for pagination)
+    const total = await Product.countDocuments(baseQuery);
+    const localCount = await Product.countDocuments(localQuery);
 
     res.json({
       success: true,
@@ -35,18 +60,26 @@ export const getProducts = async (req: Request, res: Response) => {
         pages: Math.ceil(total / limit),
         limit,
       },
+      meta: {
+        prioritizedRegion: buyerRegion,
+        localCount,
+        showingLocal: usedLocal,
+      },
     });
   } catch (error: any) {
+    console.error("getProducts error:", error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// Public - Get single product
+// ======================================================
+// PUBLIC - Get single product
+// ======================================================
 export const getProduct = async (req: Request, res: Response) => {
   try {
     const product = await Product.findById(req.params.id).populate(
       "seller",
-      "name storeName storeLogo storeDescription isSellerVerified"
+      "name storeName storeLogo storeDescription isSellerVerified marketplaceRegion"
     );
 
     if (!product || !product.isActive) {
@@ -61,12 +94,15 @@ export const getProduct = async (req: Request, res: Response) => {
   }
 };
 
-// Create product (Seller / Admin)
+// ======================================================
+// CREATE PRODUCT (auto-inherits seller region)
+// ======================================================
 export const createProduct = async (req: Request, res: Response) => {
   try {
     const user = getUser(req);
     let images: string[] = [];
 
+    // Upload images
     if (req.files && Array.isArray(req.files) && req.files.length > 0) {
       const uploadPromises = (req.files as any[]).map(
         (file) =>
@@ -129,6 +165,10 @@ export const createProduct = async (req: Request, res: Response) => {
       });
     }
 
+    // Get latest seller data to inherit region
+    const seller = await User.findById(user._id).select("marketplaceRegion");
+    const region = seller?.marketplaceRegion || "NG";
+
     const product = await Product.create({
       name: String(name).trim(),
       description: String(description).trim(),
@@ -139,6 +179,7 @@ export const createProduct = async (req: Request, res: Response) => {
       brand: String(brand || "").trim(),
       images,
       seller: user._id,
+      region, // ← Automatically inherited from seller
       isFeatured: false,
       isActive: true,
       shipping: {
@@ -151,12 +192,14 @@ export const createProduct = async (req: Request, res: Response) => {
 
     res.status(201).json({ success: true, data: product });
   } catch (error: any) {
-    console.error("createProduct:", error);
+    console.error("createProduct error:", error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// Update product
+// ======================================================
+// UPDATE PRODUCT
+// ======================================================
 export const updateProduct = async (req: Request, res: Response) => {
   try {
     const user = getUser(req);
@@ -218,6 +261,7 @@ export const updateProduct = async (req: Request, res: Response) => {
     if (req.body.brand !== undefined)
       updates.brand = String(req.body.brand).trim();
 
+    // Shipping update
     if (
       req.body.shippingMethod !== undefined ||
       req.body.courierCompany !== undefined ||
@@ -251,6 +295,9 @@ export const updateProduct = async (req: Request, res: Response) => {
       updates.images = images;
     }
 
+    // Note: We deliberately do NOT allow changing the region here.
+    // Region is permanently tied to the seller's marketplace.
+
     const updated = await Product.findByIdAndUpdate(req.params.id, updates, {
       new: true,
       runValidators: true,
@@ -262,7 +309,9 @@ export const updateProduct = async (req: Request, res: Response) => {
   }
 };
 
-// Delete product
+// ======================================================
+// DELETE PRODUCT
+// ======================================================
 export const deleteProduct = async (req: Request, res: Response) => {
   try {
     const user = getUser(req);
@@ -284,6 +333,7 @@ export const deleteProduct = async (req: Request, res: Response) => {
       });
     }
 
+    // Delete images from Cloudinary
     if (product.images?.length > 0) {
       const deletePromises = product.images.map(async (imageUrl: string) => {
         try {

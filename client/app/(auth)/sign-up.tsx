@@ -103,26 +103,27 @@ export default function SignUpScreen() {
         code: code.trim(),
       });
 
-      if (attempt.status === "complete") {
-        await setActive({ session: attempt.createdSessionId });
+if (attempt.status === "complete") {
+  await setActive({ session: attempt.createdSessionId });
 
-        // Save phone to MongoDB user
-        try {
-          const token = await getToken();
-          const cleanedPhone = phone.trim().replace(/\s+/g, "");
-          if (token && cleanedPhone) {
-            await api.patch(
-              "/users/me",
-              { phone: cleanedPhone },
-              { headers: { Authorization: `Bearer ${token}` } }
-            );
-          }
-        } catch (e) {
-          console.log("Phone sync error:", e);
-        }
+  // Save phone to MongoDB user
+  try {
+    const token = await getToken();
+    const cleanedPhone = phone.trim().replace(/\s+/g, "");
+    if (token && cleanedPhone) {
+      await api.patch(
+        "/users/me",
+        { phone: cleanedPhone },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+    }
+  } catch (e) {
+    console.log("Phone sync error:", e);
+  }
 
-        router.replace("/");
-      } else {
+  // Go to region selection instead of home
+  router.replace("/select-region");
+} else {
         Toast.show({
           type: "error",
           text1: "Verification incomplete",

@@ -143,6 +143,10 @@ export default function SellerLayout() {
         name="products/[id]"
         options={{ href: null, headerShown: true, title: 'Product Details' }}
       />
+      <Tabs.Screen
+        name="settings"
+        options={{ href: null, headerShown: true, title: 'Settings' }}
+      />
     </Tabs>
   )
 }

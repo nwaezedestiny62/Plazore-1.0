@@ -1,22 +1,23 @@
+import api from "@/constants/api";
+import { REGION_LIST } from "@/constants/regions";
+import { useAuth, useUser } from "@clerk/clerk-expo";
+import { Ionicons } from "@expo/vector-icons";
+import { LinearGradient } from "expo-linear-gradient";
+import { useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
-  View,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  ScrollView,
   ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
   Platform,
+  ScrollView,
   StatusBar,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
-import { useAuth, useUser } from "@clerk/clerk-expo";
-import { useRouter } from "expo-router";
-import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { LinearGradient } from "expo-linear-gradient";
-import api from "@/constants/api";
 
 export default function SellerRegister() {
   const { getToken } = useAuth();
@@ -30,6 +31,8 @@ export default function SellerRegister() {
   const [bankName, setBankName] = useState("");
   const [accountName, setAccountName] = useState("");
   const [accountNumber, setAccountNumber] = useState("");
+  const [marketplaceRegion, setMarketplaceRegion] = useState("NG");
+  const [showRegions, setShowRegions] = useState(false);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -41,6 +44,9 @@ export default function SellerRegister() {
         });
         if (res.data.success && res.data.data?.phone) {
           setPhone(res.data.data.phone);
+        }
+        if (res.data.success && res.data.data?.marketplaceRegion) {
+          setMarketplaceRegion(res.data.data.marketplaceRegion);
         }
       } catch (e) {
         console.log(e);
@@ -70,6 +76,10 @@ export default function SellerRegister() {
       Alert.alert("Required", "Please fill in all payout / bank details");
       return;
     }
+    if (!marketplaceRegion) {
+      Alert.alert("Required", "Please select your marketplace region");
+      return;
+    }
 
     try {
       setLoading(true);
@@ -85,6 +95,7 @@ export default function SellerRegister() {
           bankName: bankName.trim(),
           accountName: accountName.trim(),
           accountNumber: accountNumber.trim(),
+          marketplaceRegion,
         },
         {
           headers: { Authorization: `Bearer ${token}` },
@@ -115,6 +126,8 @@ export default function SellerRegister() {
       setLoading(false);
     }
   };
+
+  const selectedRegion = REGION_LIST.find((r) => r.code === marketplaceRegion);
 
   return (
     <SafeAreaView className="flex-1 bg-[#07111F]" edges={["top"]}>
@@ -203,6 +216,53 @@ export default function SellerRegister() {
             keyboardType="phone-pad"
             className="bg-[#0B1625] border border-[#1E334A] rounded-2xl px-4 py-4 text-white mb-5 text-[16px]"
           />
+
+          {/* Marketplace Region */}
+          <Text className="text-[#AFC3D6] text-sm mb-2 font-medium">
+            Marketplace Region *
+          </Text>
+          <TouchableOpacity
+            onPress={() => setShowRegions(!showRegions)}
+            className="bg-[#0B1625] border border-[#1E334A] rounded-2xl px-4 py-4 mb-3 flex-row items-center"
+          >
+            <Text className="text-2xl mr-3">{selectedRegion?.flag}</Text>
+            <View className="flex-1">
+              <Text className="text-white text-[16px]">
+                {selectedRegion?.name}
+              </Text>
+              <Text className="text-[#7A93A8] text-[13px]">
+                Currency will be {selectedRegion?.currency.symbol}
+              </Text>
+            </View>
+            <Ionicons
+              name={showRegions ? "chevron-up" : "chevron-down"}
+              size={18}
+              color="#7A93A8"
+            />
+          </TouchableOpacity>
+
+          {showRegions && (
+            <View className="bg-[#0B1625] border border-[#1E334A] rounded-2xl overflow-hidden mb-5">
+              {REGION_LIST.map((r) => (
+                <TouchableOpacity
+                  key={r.code}
+                  onPress={() => {
+                    setMarketplaceRegion(r.code);
+                    setShowRegions(false);
+                  }}
+                  className={`px-4 py-3.5 flex-row items-center ${
+                    marketplaceRegion === r.code ? "bg-[#13263B]" : ""
+                  }`}
+                >
+                  <Text className="text-xl mr-3">{r.flag}</Text>
+                  <Text className="text-white flex-1">{r.name}</Text>
+                  {marketplaceRegion === r.code && (
+                    <Ionicons name="checkmark" size={18} color="#7EC8FF" />
+                  )}
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
 
           <Text className="text-white font-bold text-base mb-3 mt-2">
             Payout / Bank Details *

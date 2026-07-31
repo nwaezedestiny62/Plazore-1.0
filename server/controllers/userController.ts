@@ -4,7 +4,7 @@ import User from "../models/User.js";
 export const updateMe = async (req: Request, res: Response) => {
   try {
     const user = (req as any).user;
-    const { phone, name } = req.body;
+    const { phone, name, marketplaceRegion } = req.body;
 
     const updates: any = {};
 
@@ -21,6 +21,18 @@ export const updateMe = async (req: Request, res: Response) => {
 
     if (name !== undefined && String(name).trim()) {
       updates.name = String(name).trim();
+    }
+
+    // Marketplace Region
+    if (marketplaceRegion !== undefined) {
+      const code = String(marketplaceRegion).trim().toUpperCase();
+      if (code.length < 2) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid marketplace region",
+        });
+      }
+      updates.marketplaceRegion = code;
     }
 
     const updated = await User.findByIdAndUpdate(user._id, updates, {

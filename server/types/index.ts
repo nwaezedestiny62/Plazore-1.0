@@ -66,29 +66,27 @@ export interface IOrder extends Document {
   updatedAt: Date;
 }
 
-export interface Product {
-  _id: string;
+export interface IProduct extends Document {
   name: string;
   description: string;
   price: number;
-  comparePrice?: number;
   images: string[];
-  sizes?: string[];
-  category:
-    | {
-        _id: string;
-        name: string;
-      }
-    | string;
+  category: string;
+  subCategory?: string;
+  brand?: string;
   stock: number;
-  ratings: {
-    average: number;
-    count: number;
-  };
   isFeatured: boolean;
   isActive: boolean;
-  createdAt: string;
-  wishlistCount?: number; // ← add this line
+  seller: Types.ObjectId;
+  region: string;                    // ← NEW
+  shipping?: {
+    method: "self" | "courier";
+    courierCompany?: string;
+    deliveryFee?: number;
+  };
+  wishlistCount?: number;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 export interface IUser extends Document {
@@ -98,6 +96,9 @@ export interface IUser extends Document {
   clerkId: string;
   image?: string;
   role: "buyer" | "seller" | "admin";
+
+  // Marketplace
+  marketplaceRegion: string;         // ← NEW (e.g. "NG", "US", "GB")
 
   storeName?: string;
   storeDescription?: string;

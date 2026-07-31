@@ -17,6 +17,8 @@ import { Ionicons } from '@expo/vector-icons'
 import { LinearGradient } from 'expo-linear-gradient'
 import * as ImagePicker from 'expo-image-picker'
 import api from '@/constants/api'
+import { useMarketplace } from "@/context/MarketplaceContext";
+import { getRegion } from "@/constants/regions";
 import {
   CATEGORY_LIST,
   PRODUCT_CATEGORIES,
@@ -88,6 +90,10 @@ export default function AddProduct() {
   const [deliveryFee, setDeliveryFee] = useState('')
   const [loading, setLoading] = useState(false)
 
+  // inside the component:
+const { region, currencySymbol } = useMarketplace()
+const regionInfo = getRegion(region)
+
   const subCategories = useMemo(
     () => (category ? PRODUCT_CATEGORIES[category] || ['Other'] : []),
     [category]
@@ -148,10 +154,18 @@ export default function AddProduct() {
       Alert.alert('Courier', 'Enter the courier company name')
       return
     }
-    if (deliveryFee === '' || Number.isNaN(Number(deliveryFee)) || Number(deliveryFee) < 0) {
-      Alert.alert('Delivery fee', 'Enter a valid delivery fee (0 is allowed)')
-      return
-    }
+ // Sanitize: allow "1,500.50" or "1500" or "0"
+const cleanedFee = String(deliveryFee).replace(/,/g, '').trim()
+const feeNum = Number(cleanedFee)
+
+if (
+  cleanedFee === '' ||
+  Number.isNaN(feeNum) ||
+  feeNum < 0
+) {
+  Alert.alert('Delivery fee', 'Enter a valid delivery fee (0 is allowed)')
+  return
+}
 
     try {
       setLoading(true)
@@ -167,7 +181,7 @@ export default function AddProduct() {
       formData.append('brand', brand.trim())
       formData.append('shippingMethod', shippingMethod)
       formData.append('courierCompany', courierCompany.trim())
-      formData.append('deliveryFee', deliveryFee)
+      formData.append('deliveryFee', String(feeNum))
 
       images.forEach((uri, index) => {
         const filename = uri.split('/').pop() || `image-${index}.jpg`
@@ -283,15 +297,20 @@ export default function AddProduct() {
             className="bg-[#0A121C] border border-[#1A2D42] rounded-2xl px-4 py-3.5 text-white mb-4"
           />
 
-          <Label>Price ($) *</Label>
-          <TextInput
-            value={price}
-            onChangeText={setPrice}
-            placeholder="0.00"
-            keyboardType="decimal-pad"
-            placeholderTextColor="#3D5268"
-            className="bg-[#0A121C] border border-[#1A2D42] rounded-2xl px-4 py-3.5 text-white mb-4"
-          />
+         <Text className="text-[#AFC3D6] text-sm mb-2">
+  Price ({currencySymbol}) *
+</Text>
+<TextInput
+  value={price}
+  onChangeText={setPrice}
+  placeholder="0.00"
+  keyboardType="decimal-pad"
+  placeholderTextColor="#3D5268"
+  className="bg-[#0A121C] border border-[#1A2D42] rounded-2xl px-4 py-3.5 text-white mb-1"
+/>
+<Text className="text-[#5A7088] text-[11px] mb-4">
+  Enter amount in {regionInfo.name} ({regionInfo.currency.code})
+</Text>
 
           <Label>Description *</Label>
           <TextInput
@@ -441,15 +460,18 @@ export default function AddProduct() {
 
           {!!shippingMethod && (
             <>
-              <Label>Delivery fee ($) *</Label>
-              <TextInput
-                value={deliveryFee}
-                onChangeText={setDeliveryFee}
-                placeholder="0.00"
-                keyboardType="decimal-pad"
-                placeholderTextColor="#3D5268"
-                className="bg-[#0A121C] border border-[#1A2D42] rounded-2xl px-4 py-3.5 text-white"
-              />
+<TextInput
+  value={deliveryFee}
+  onChangeText={(t) => {
+    // keep only digits and one decimal point
+    const next = t.replace(/[^0-9.]/g, '')
+    setDeliveryFee(next)
+  }}
+  placeholder="0.00"
+  keyboardType="decimal-pad"
+  placeholderTextColor="#3D5268"
+  className="bg-[#0A121C] border border-[#1A2D42] rounded-2xl px-4 py-3.5 text-white"
+/>
             </>
           )}
         </Section>

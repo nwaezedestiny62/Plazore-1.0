@@ -5,17 +5,20 @@ import { WishlistProvider } from "@/context/WishlistContext";
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { ClerkProvider } from '@clerk/clerk-expo'
 import { tokenCache } from '@clerk/clerk-expo/token-cache'
+import { MarketplaceProvider } from "@/context/MarketplaceContext";
 
 export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <ClerkProvider tokenCache={tokenCache}>
-        <CartProvider>
-        <WishlistProvider>
-          <Stack screenOptions={{ headerShown: false }} />
-        </WishlistProvider>
-      </CartProvider>
-      </ClerkProvider>
+  <MarketplaceProvider>
+    <CartProvider>
+      <WishlistProvider>
+        <Stack screenOptions={{ headerShown: false }} />
+      </WishlistProvider>
+    </CartProvider>
+  </MarketplaceProvider>
+</ClerkProvider>
       
     </GestureHandlerRootView>
   );

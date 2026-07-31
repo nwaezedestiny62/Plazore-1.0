@@ -23,6 +23,8 @@ import {
   PLAN_IMAGE_LIMITS,
   PLAN_FEES,
 } from '@/constants/productCatalog'
+import { useMarketplace } from '@/context/MarketplaceContext'
+import { getRegion } from '@/constants/regions'
 
 const CURRENT_PLAN: keyof typeof PLAN_IMAGE_LIMITS = 'free'
 
@@ -95,6 +97,9 @@ export default function EditProduct() {
   )
   const [courierCompany, setCourierCompany] = useState('')
   const [deliveryFee, setDeliveryFee] = useState('')
+
+  const { region, currencySymbol } = useMarketplace()
+const regionInfo = getRegion(region)
 
   const subCategories = useMemo(
     () => (category ? PRODUCT_CATEGORIES[category] || ['Other'] : []),
@@ -367,15 +372,20 @@ export default function EditProduct() {
             className="bg-[#0A121C] border border-[#1A2D42] rounded-2xl px-4 py-3.5 text-white mb-4"
           />
 
-          <Label>Price ($) *</Label>
-          <TextInput
-            value={price}
-            onChangeText={setPrice}
-            placeholder="0.00"
-            keyboardType="decimal-pad"
-            placeholderTextColor="#3D5268"
-            className="bg-[#0A121C] border border-[#1A2D42] rounded-2xl px-4 py-3.5 text-white mb-4"
-          />
+          <Text className="text-[#AFC3D6] text-sm mb-2">
+  Price ({currencySymbol}) *
+</Text>
+<TextInput
+  value={price}
+  onChangeText={setPrice}
+  placeholder="0.00"
+  keyboardType="decimal-pad"
+  placeholderTextColor="#3D5268"
+  className="bg-[#0A121C] border border-[#1A2D42] rounded-2xl px-4 py-3.5 text-white mb-1"
+/>
+<Text className="text-[#5A7088] text-[11px] mb-4">
+  Enter amount in {regionInfo.name} ({regionInfo.currency.code})
+</Text>
 
           <Label>Description *</Label>
           <TextInput

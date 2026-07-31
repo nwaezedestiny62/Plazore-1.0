@@ -14,31 +14,38 @@ const userSchema = new mongoose.Schema<IUser>(
       default: "buyer",
     },
 
-    // Store appearance
+    // Marketplace Region
+    marketplaceRegion: {
+      type: String,
+      default: "NG",
+      index: true,
+    },
+
+    // Seller profile
     storeName: { type: String, trim: true },
     storeDescription: { type: String, default: "" },
     businessGoal: { type: String, default: "" },
-    storeLogo: { type: String, default: "" },
-    storeBanner: { type: String, default: "" },
-
+    storeLogo: { type: String },
+    storeBanner: { type: String },
     isSellerVerified: { type: Boolean, default: false },
     isSellerSuspended: { type: Boolean, default: false },
     sellerAppliedAt: { type: Date },
 
+    // Payout
     payout: {
       bankName: { type: String, default: "" },
       accountName: { type: String, default: "" },
       accountNumber: { type: String, default: "" },
     },
 
-    // Defaults used when creating products (product can override)
+    // Shipping defaults
     shippingDefaults: {
       address: {
-        street: { type: String, default: "" },
-        city: { type: String, default: "" },
-        state: { type: String, default: "" },
-        zipCode: { type: String, default: "" },
-        country: { type: String, default: "" },
+        street: { type: String },
+        city: { type: String },
+        state: { type: String },
+        zipCode: { type: String },
+        country: { type: String },
       },
       deliveryMethod: {
         type: String,
