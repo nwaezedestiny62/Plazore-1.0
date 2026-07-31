@@ -3,6 +3,7 @@ import User from "../models/User.js";
 import Product from "../models/Products.js";
 import Order from "../models/Order.js";
 import { clerkClient } from "@clerk/express";
+import cloudinary from "../config/cloudinary.js";
 
 // Apply to become a seller
 export const applyAsSeller = async (req: Request, res: Response) => {
@@ -130,6 +131,197 @@ export const getSellerDashboard = async (req: Request, res: Response) => {
         recentOrders,
         storeName: req.user.storeName,
         isVerified: req.user.isSellerVerified,
+      },
+    });
+  } catch (error: any) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// ====================== MY STORE ======================
+
+const getUser = (req: Request) => (req as any).user;
+
+const uploadOne = (file: any, folder: string): Promise<string> =>
+  new Promise((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream(
+      { folder },
+      (err, result) => {
+        if (err) reject(err);
+        else resolve(result!.secure_url);
+      }
+    );
+    stream.end(file.buffer);
+  });
+
+// GET /api/seller/store
+export const getMyStore = async (req: Request, res: Response) => {
+  try {
+    const user = getUser(req);
+    const full = await User.findById(user._id).select(
+      "name email phone storeName storeDescription businessGoal storeLogo storeBanner payout shippingDefaults isSellerVerified sellerAppliedAt role"
+    );
+
+    if (!full) {
+      return res
+        .status(404)
+        .json({ success: false, message: "User not found" });
+    }
+
+    res.json({ success: true, data: full });
+  } catch (error: any) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// PUT /api/seller/store
+export const updateMyStore = async (req: Request, res: Response) => {
+  try {
+    const user = getUser(req);
+    const body = req.body || {};
+    const updates: any = {};
+
+    if (body.storeName !== undefined)
+      updates.storeName = String(body.storeName).trim();
+    if (body.storeDescription !== undefined)
+      updates.storeDescription = String(body.storeDescription).trim();
+    if (body.businessGoal !== undefined)
+      updates.businessGoal = String(body.businessGoal).trim();
+    if (body.phone !== undefined) updates.phone = String(body.phone).trim();
+
+    let payout = body.payout;
+    if (typeof payout === "string") {
+      try {
+        payout = JSON.parse(payout);
+      } catch {
+        payout = null;
+      }
+    }
+    if (payout && typeof payout === "object") {
+      updates.payout = {
+        bankName: String(payout.bankName || "").trim(),
+        accountName: String(payout.accountName || "").trim(),
+        accountNumber: String(payout.accountNumber || "").trim(),
+      };
+    }
+
+    let shippingDefaults = body.shippingDefaults;
+    if (typeof shippingDefaults === "string") {
+      try {
+        shippingDefaults = JSON.parse(shippingDefaults);
+      } catch {
+        shippingDefaults = null;
+      }
+    }
+    if (shippingDefaults && typeof shippingDefaults === "object") {
+      const addr = shippingDefaults.address || {};
+      updates.shippingDefaults = {
+        address: {
+          street: String(addr.street || "").trim(),
+          city: String(addr.city || "").trim(),
+          state: String(addr.state || "").trim(),
+          zipCode: String(addr.zipCode || "").trim(),
+          country: String(addr.country || "").trim(),
+        },
+        deliveryMethod:
+          shippingDefaults.deliveryMethod === "self" ||
+          shippingDefaults.deliveryMethod === "courier"
+            ? shippingDefaults.deliveryMethod
+            : "",
+        courierCompany: String(shippingDefaults.courierCompany || "").trim(),
+      };
+    }
+
+    const files = req.files as
+      | { [fieldname: string]: Express.Multer.File[] }
+      | undefined;
+
+    if (files?.storeLogo?.[0]) {
+      updates.storeLogo = await uploadOne(files.storeLogo[0], "plazore/store");
+    }
+    if (files?.storeBanner?.[0]) {
+      updates.storeBanner = await uploadOne(
+        files.storeBanner[0],
+        "plazore/store"
+      );
+    }
+
+    if (body.clearLogo === "true") updates.storeLogo = "";
+    if (body.clearBanner === "true") updates.storeBanner = "";
+
+    const updated = await User.findByIdAndUpdate(user._id, updates, {
+      new: true,
+      runValidators: true,
+    }).select(
+      "name email phone storeName storeDescription businessGoal storeLogo storeBanner payout shippingDefaults isSellerVerified sellerAppliedAt role"
+    );
+
+    res.json({ success: true, data: updated });
+  } catch (error: any) {
+    console.error("updateMyStore:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// ====================== PUBLIC STOREFRONT ======================
+// GET /api/seller/store/:id  (no auth — public mall experience)
+export const getPublicStorefront = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    if (!id) {
+      return res.status(400).json({
+        success: false,
+        message: "Store id is required",
+      });
+    }
+
+    const seller = await User.findById(id).select(
+      "storeName storeDescription businessGoal storeLogo storeBanner role isSellerVerified name"
+    );
+
+    if (!seller) {
+      return res.status(404).json({
+        success: false,
+        message: "Store not found",
+      });
+    }
+
+    if (seller.role !== "seller" && seller.role !== "admin") {
+      return res.status(404).json({
+        success: false,
+        message: "This user does not have a public store",
+      });
+    }
+
+    const products = await Product.find({
+      seller: seller._id,
+      isActive: true,
+    })
+      .select("name price images category subCategory brand shipping isFeatured createdAt")
+      .sort({ createdAt: -1 })
+      .limit(60);
+
+    // Public payload only — never phone, email, payout, etc.
+    res.json({
+      success: true,
+      data: {
+        store: {
+          id: seller._id,
+          storeName: seller.storeName || seller.name || "Store",
+          storeDescription: seller.storeDescription || "",
+          businessGoal: seller.businessGoal || "",
+          storeLogo: seller.storeLogo || "",
+          storeBanner: seller.storeBanner || "",
+          isVerified: !!seller.isSellerVerified,
+        },
+        products,
+        // Reserved for later (Buyer Confidence, AI, discovery)
+        modules: {
+          buyerConfidence: null,
+          plazoreAI: null,
+          recommendations: null,
+        },
       },
     });
   } catch (error: any) {

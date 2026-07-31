@@ -107,29 +107,25 @@ function CustomTabBar({
   navigation,
   cartCount,
 }: any) {
-  const pathname = usePathname();
+  const pathname = usePathname()
+  const currentRouteName = state.routes[state.index]?.name
 
-  const hiddenRoutes = [
-    '/checkout',
-    '/orders',
-  ];
-
+  // Hide bottom bar on Cart, Checkout, and Orders
   const shouldHide =
-    hiddenRoutes.includes(pathname);
+    currentRouteName === 'cart' ||
+    currentRouteName === 'checkout' ||
+    pathname === '/cart' ||
+    pathname === '/checkout' ||
+    (typeof pathname === 'string' && pathname.startsWith('/orders'))
 
-  const translateX = useSharedValue(
-    state.index * TAB_WIDTH
-  );
+  const translateX = useSharedValue(state.index * TAB_WIDTH)
 
   useEffect(() => {
-    translateX.value = withSpring(
-      state.index * TAB_WIDTH,
-      {
-        damping: 18,
-        stiffness: 180,
-      }
-    );
-  }, [state.index]);
+    translateX.value = withSpring(state.index * TAB_WIDTH, {
+      damping: 18,
+      stiffness: 180,
+    })
+  }, [state.index])
 
   const animatedStyle = useAnimatedStyle(() => ({
     transform: [
@@ -137,7 +133,7 @@ function CustomTabBar({
         translateX: translateX.value,
       },
     ],
-  }));
+  }))
 
   if (shouldHide) return null;
 

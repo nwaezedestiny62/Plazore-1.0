@@ -4,18 +4,15 @@ import Order from "../models/Order.js";
 import Cart from "../models/Cart.js";
 import Product from "../models/Products.js";
 import { sendNotification } from "../utils/sendNotification.js";
-import User from "../models/User.js";
 
-// Helper so TypeScript stops complaining about req.user
 const getUser = (req: Request) => (req as any).user;
 
 // ====================== CREATE ORDER ======================
 export const createOrder = async (req: Request, res: Response) => {
   try {
     const user = getUser(req);
-    const { shippingAddress, buyerNote, items: frontendItems } = req.body;
-
-    console.log("Received body:", JSON.stringify(req.body, null, 2));
+    const { shippingAddress, buyerNote, items: frontendItems, phone } =
+      req.body;
 
     if (!shippingAddress) {
       return res.status(400).json({
@@ -43,7 +40,7 @@ export const createOrder = async (req: Request, res: Response) => {
         });
       }
       rawItems = cart.items.map((item: any) => ({
-        productId: item.product._id,
+        productId: item.product?._id || item.product,
         quantity: item.quantity,
         price: item.price,
         note: item.note || "",
@@ -58,6 +55,10 @@ export const createOrder = async (req: Request, res: Response) => {
     }
 
     const itemsBySeller: Record<string, any[]> = {};
+    const shippingBySeller: Record<
+      string,
+      { method: "self" | "courier"; courierCompany: string; deliveryFee: number }
+    > = {};
 
     for (const item of rawItems) {
       const productId = item.productId || item.product;
@@ -78,59 +79,81 @@ export const createOrder = async (req: Request, res: Response) => {
       }
 
       const sellerId = product.seller.toString();
-
-      if (!itemsBySeller[sellerId]) {
-        itemsBySeller[sellerId] = [];
-      }
+      if (!itemsBySeller[sellerId]) itemsBySeller[sellerId] = [];
 
       itemsBySeller[sellerId].push({
         product: product._id,
         name: product.name,
         quantity: item.quantity,
-        price: item.price || product.price,
+        price: item.price ?? product.price,
         image: product.images?.[0] || "",
-        note: (item.note || "").trim().slice(0, 120),
+        note: String(item.note || "")
+          .trim()
+          .slice(0, 120),
       });
+
+      const method =
+        (product as any).shipping?.method === "self" ? "self" : "courier";
+      const fee = Number((product as any).shipping?.deliveryFee) || 0;
+      const company = String(
+        (product as any).shipping?.courierCompany || ""
+      ).trim();
+
+      if (!shippingBySeller[sellerId]) {
+        shippingBySeller[sellerId] = {
+          method,
+          courierCompany: company,
+          deliveryFee: fee,
+        };
+      } else if (fee > shippingBySeller[sellerId].deliveryFee) {
+        shippingBySeller[sellerId] = {
+          method,
+          courierCompany: company,
+          deliveryFee: fee,
+        };
+      }
     }
 
     const createdOrders = [];
+    const contactPhone = String(phone || user.phone || "").trim();
 
     for (const sellerId of Object.keys(itemsBySeller)) {
       const sellerItems = itemsBySeller[sellerId];
+      const snap = shippingBySeller[sellerId];
 
       const subtotal = sellerItems.reduce(
-        (sum, item) => sum + item.price * item.quantity,
+        (sum, row) => sum + row.price * row.quantity,
         0
       );
+      const shippingCost = snap?.deliveryFee || 0;
 
-const order = await Order.create({
-  buyer: req.user._id,
-  seller: sellerId,
-  orderNumber: `PLZ#${Math.floor(10000 + Math.random() * 90000)}`,
-  items: sellerItems,
-  shippingAddress,
-  buyerNote: buyerNote || "",
-  buyerContact: {
-    name: req.user.name || "",
-    phone: (req.body.phone || req.user.phone || "").toString().trim(),
-  },
-  orderStatus: "Preparing",
-  subtotal,
-  shippingCost: 0,
-  totalAmount: subtotal,
-  paymentStatus: "pending",
-  paymentMethod: "pending",
-});
+      const order = await Order.create({
+        buyer: user._id,
+        seller: sellerId,
+        orderNumber: `PLZ#${Math.floor(10000 + Math.random() * 90000)}`,
+        items: sellerItems,
+        shippingAddress,
+        buyerNote: buyerNote || "",
+        buyerContact: {
+          name: user.name || "",
+          phone: contactPhone,
+        },
+        productShipping: {
+          method: snap?.method || "courier",
+          courierCompany: snap?.courierCompany || "",
+          deliveryFee: shippingCost,
+        },
+        orderStatus: "Preparing",
+        subtotal,
+        shippingCost,
+        totalAmount: subtotal + shippingCost,
+        paymentStatus: "pending",
+        paymentMethod: "pending",
+      });
 
-// keep user phone up to date if sent
-const phone = (req.body.phone || "").toString().trim();
-if (phone) {
-  await User.findByIdAndUpdate(req.user._id, { phone });
-}
-
-      for (const item of sellerItems) {
-        await Product.findByIdAndUpdate(item.product, {
-          $inc: { stock: -item.quantity },
+      for (const row of sellerItems) {
+        await Product.findByIdAndUpdate(row.product, {
+          $inc: { stock: -row.quantity },
         });
       }
 
@@ -179,51 +202,42 @@ export const getOrder = async (req: Request, res: Response) => {
     const user = getUser(req);
     const { id } = req.params;
 
-if (!id || !mongoose.isValidObjectId(id)) {
-      return res.status(404).json({
-        success: false,
-        message: "Order not found",
-      });
+    if (!id || !mongoose.isValidObjectId(String(id))) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Order not found" });
     }
 
     const order = await Order.findById(id)
       .populate("seller", "name storeName storeLogo")
-      .populate("buyer", "name email")
-      .populate("items.product", "name images");
+      .populate("buyer", "name phone")
+      .populate("items.product", "name images shipping");
 
     if (!order) {
-      return res.status(404).json({
-        success: false,
-        message: "Order not found",
-      });
+      return res
+        .status(404)
+        .json({ success: false, message: "Order not found" });
     }
-
-    const currentUserId = user._id.toString();
 
     const buyerId =
       (order.buyer as any)?._id?.toString?.() ||
-      (order.buyer as any)?.toString?.() ||
-      "";
-
+      (order.buyer as any)?.toString?.();
     const sellerId =
       (order.seller as any)?._id?.toString?.() ||
-      (order.seller as any)?.toString?.() ||
-      "";
+      (order.seller as any)?.toString?.();
 
-    const isBuyer = buyerId === currentUserId;
-    const isSeller = sellerId === currentUserId;
+    const isBuyer = buyerId === user._id.toString();
+    const isSeller = sellerId === user._id.toString();
     const isAdmin = user.role === "admin";
 
     if (!isBuyer && !isSeller && !isAdmin) {
-      return res.status(403).json({
-        success: false,
-        message: "Not authorized",
-      });
+      return res
+        .status(403)
+        .json({ success: false, message: "Not authorized" });
     }
 
     res.json({ success: true, data: order });
   } catch (error: any) {
-    console.error("getOrder error:", error?.message || error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
@@ -234,7 +248,7 @@ export const getSellerOrders = async (req: Request, res: Response) => {
     const user = getUser(req);
 
     const orders = await Order.find({ seller: user._id })
-      .populate("buyer", "name phone")  // no email
+      .populate("buyer", "name phone")
       .populate("items.product", "name images")
       .sort({ createdAt: -1 });
 
@@ -244,46 +258,39 @@ export const getSellerOrders = async (req: Request, res: Response) => {
   }
 };
 
-// ====================== SELLER: Ship Order ======================
+// ====================== SELLER: Ship order ======================
 export const shipOrder = async (req: Request, res: Response) => {
   try {
     const user = getUser(req);
+    const { id } = req.params;
     const {
       deliveryCompany,
       trackingNumber,
       estimatedDelivery,
-      shippingMethod,
       selfDeliveryNote,
     } = req.body;
 
-    console.log("SHIP BODY →", req.body);
-
-    const { id } = req.params;
-
-if (!id || !mongoose.isValidObjectId(id)) {
-      return res.status(404).json({
-        success: false,
-        message: "Order not found",
-      });
+    if (!id || !mongoose.isValidObjectId(String(id))) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Order not found" });
     }
 
     const order = await Order.findById(id);
 
     if (!order) {
-      return res.status(404).json({
-        success: false,
-        message: "Order not found",
-      });
+      return res
+        .status(404)
+        .json({ success: false, message: "Order not found" });
     }
 
     if (
       order.seller.toString() !== user._id.toString() &&
       user.role !== "admin"
     ) {
-      return res.status(403).json({
-        success: false,
-        message: "Not authorized",
-      });
+      return res
+        .status(403)
+        .json({ success: false, message: "Not authorized" });
     }
 
     if (order.orderStatus !== "Preparing") {
@@ -293,20 +300,30 @@ if (!id || !mongoose.isValidObjectId(id)) {
       });
     }
 
-    const method = shippingMethod === "self" ? "self" : "courier";
+    // Method locked from product at order time
+const method =
+  (order as any).productShipping?.method === "self" ? "self" : "courier";
+const frozenCompany =
+  (order as any).productShipping?.courierCompany || "";
 
-    order.orderStatus = "Shipped";
-    (order as any).shipping = {
-      shippingMethod: method,
-      deliveryCompany: method === "courier" ? deliveryCompany || "" : "",
-      trackingNumber: method === "courier" ? trackingNumber || "" : "",
-      estimatedDelivery: estimatedDelivery
-        ? new Date(estimatedDelivery)
-        : undefined,
-      selfDeliveryNote: method === "self" ? selfDeliveryNote || "" : "",
-      shippedAt: new Date(),
-    };
-
+order.orderStatus = "Shipped";
+(order as any).shipping = {
+  shippingMethod: method,
+  deliveryCompany:
+    method === "courier"
+      ? String(deliveryCompany || frozenCompany || "").trim()
+      : "",
+  trackingNumber:
+    method === "courier" ? String(trackingNumber || "").trim() : "",
+  estimatedDelivery: estimatedDelivery
+    ? new Date(estimatedDelivery)
+    : undefined,
+  // Saved for both methods so the buyer always sees the seller note
+  selfDeliveryNote: String(selfDeliveryNote || "")
+    .trim()
+    .slice(0, 120),
+  shippedAt: new Date(),
+};
     await order.save();
 
     await sendNotification({
@@ -331,30 +348,27 @@ export const deliverOrder = async (req: Request, res: Response) => {
     const user = getUser(req);
     const { id } = req.params;
 
- if (!id || !mongoose.isValidObjectId(id)) {
-      return res.status(404).json({
-        success: false,
-        message: "Order not found",
-      });
+    if (!id || !mongoose.isValidObjectId(String(id))) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Order not found" });
     }
 
     const order = await Order.findById(id);
 
     if (!order) {
-      return res.status(404).json({
-        success: false,
-        message: "Order not found",
-      });
+      return res
+        .status(404)
+        .json({ success: false, message: "Order not found" });
     }
 
     if (
       order.seller.toString() !== user._id.toString() &&
       user.role !== "admin"
     ) {
-      return res.status(403).json({
-        success: false,
-        message: "Not authorized",
-      });
+      return res
+        .status(403)
+        .json({ success: false, message: "Not authorized" });
     }
 
     if (order.orderStatus !== "Shipped") {
@@ -394,7 +408,7 @@ export const getAllOrders = async (req: Request, res: Response) => {
     const total = await Order.countDocuments(query);
 
     const orders = await Order.find(query)
-      .populate("buyer", "name email")
+      .populate("buyer", "name email phone")
       .populate("seller", "name storeName")
       .populate("items.product", "name")
       .sort({ createdAt: -1 })

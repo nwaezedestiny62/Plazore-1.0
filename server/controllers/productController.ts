@@ -2,6 +2,8 @@ import { Request, Response } from "express";
 import Product from "../models/Products.js";
 import cloudinary from "../config/cloudinary.js";
 
+const getUser = (req: Request) => (req as any).user;
+
 // Public - Get all active products
 export const getProducts = async (req: Request, res: Response) => {
   try {
@@ -10,9 +12,11 @@ export const getProducts = async (req: Request, res: Response) => {
 
     const query: any = { isActive: true };
 
-    // Optional filter by seller
     if (req.query.seller) {
       query.seller = req.query.seller;
+    }
+    if (req.query.category) {
+      query.category = req.query.category;
     }
 
     const total = await Product.countDocuments(query);
@@ -42,7 +46,7 @@ export const getProduct = async (req: Request, res: Response) => {
   try {
     const product = await Product.findById(req.params.id).populate(
       "seller",
-      "name storeName storeLogo isSellerVerified"
+      "name storeName storeLogo storeDescription isSellerVerified"
     );
 
     if (!product || !product.isActive) {
@@ -57,9 +61,10 @@ export const getProduct = async (req: Request, res: Response) => {
   }
 };
 
-// Create product (Admin or Seller)
+// Create product (Seller / Admin)
 export const createProduct = async (req: Request, res: Response) => {
   try {
+    const user = getUser(req);
     let images: string[] = [];
 
     if (req.files && Array.isArray(req.files) && req.files.length > 0) {
@@ -86,16 +91,67 @@ export const createProduct = async (req: Request, res: Response) => {
       });
     }
 
-    const productData = {
-      ...req.body,
-      images,
-      seller: req.user._id, // always the current user
-    };
+    const {
+      name,
+      description,
+      price,
+      stock,
+      category,
+      subCategory,
+      brand,
+      shippingMethod,
+      courierCompany,
+      deliveryFee,
+    } = req.body;
 
-    const product = await Product.create(productData);
+    if (!name?.trim() || !description?.trim() || price === undefined) {
+      return res.status(400).json({
+        success: false,
+        message: "Name, description and price are required",
+      });
+    }
+
+    if (!category?.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Category is required",
+      });
+    }
+
+    const method = shippingMethod === "self" ? "self" : "courier";
+    const fee = Number(deliveryFee);
+    const safeFee = Number.isFinite(fee) && fee >= 0 ? fee : 0;
+
+    if (method === "courier" && !(courierCompany || "").trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Courier company is required for courier delivery",
+      });
+    }
+
+    const product = await Product.create({
+      name: String(name).trim(),
+      description: String(description).trim(),
+      price: Number(price),
+      stock: Number(stock) || 0,
+      category: String(category).trim(),
+      subCategory: String(subCategory || "").trim(),
+      brand: String(brand || "").trim(),
+      images,
+      seller: user._id,
+      isFeatured: false,
+      isActive: true,
+      shipping: {
+        method,
+        courierCompany:
+          method === "courier" ? String(courierCompany || "").trim() : "",
+        deliveryFee: safeFee,
+      },
+    });
 
     res.status(201).json({ success: true, data: product });
   } catch (error: any) {
+    console.error("createProduct:", error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
@@ -103,6 +159,7 @@ export const createProduct = async (req: Request, res: Response) => {
 // Update product
 export const updateProduct = async (req: Request, res: Response) => {
   try {
+    const user = getUser(req);
     const product = await Product.findById(req.params.id);
 
     if (!product) {
@@ -111,10 +168,9 @@ export const updateProduct = async (req: Request, res: Response) => {
         .json({ success: false, message: "Product not found" });
     }
 
-    // Only owner or admin can update
     if (
-      product.seller.toString() !== req.user._id.toString() &&
-      req.user.role !== "admin"
+      product.seller.toString() !== user._id.toString() &&
+      user.role !== "admin"
     ) {
       return res.status(403).json({
         success: false,
@@ -148,8 +204,48 @@ export const updateProduct = async (req: Request, res: Response) => {
       images = [...images, ...newImages];
     }
 
-    const updates = { ...req.body };
-    delete updates.existingImages;
+    const updates: any = {};
+
+    if (req.body.name !== undefined) updates.name = String(req.body.name).trim();
+    if (req.body.description !== undefined)
+      updates.description = String(req.body.description).trim();
+    if (req.body.price !== undefined) updates.price = Number(req.body.price);
+    if (req.body.stock !== undefined) updates.stock = Number(req.body.stock);
+    if (req.body.category !== undefined)
+      updates.category = String(req.body.category).trim();
+    if (req.body.subCategory !== undefined)
+      updates.subCategory = String(req.body.subCategory).trim();
+    if (req.body.brand !== undefined)
+      updates.brand = String(req.body.brand).trim();
+
+    if (
+      req.body.shippingMethod !== undefined ||
+      req.body.courierCompany !== undefined ||
+      req.body.deliveryFee !== undefined
+    ) {
+      const method =
+        req.body.shippingMethod === "self"
+          ? "self"
+          : req.body.shippingMethod === "courier"
+          ? "courier"
+          : product.shipping?.method || "courier";
+
+      const fee =
+        req.body.deliveryFee !== undefined
+          ? Number(req.body.deliveryFee)
+          : product.shipping?.deliveryFee || 0;
+
+      updates.shipping = {
+        method,
+        courierCompany:
+          method === "courier"
+            ? String(
+                req.body.courierCompany ?? product.shipping?.courierCompany ?? ""
+              ).trim()
+            : "",
+        deliveryFee: Number.isFinite(fee) && fee >= 0 ? fee : 0,
+      };
+    }
 
     if (images.length > 0) {
       updates.images = images;
@@ -169,6 +265,7 @@ export const updateProduct = async (req: Request, res: Response) => {
 // Delete product
 export const deleteProduct = async (req: Request, res: Response) => {
   try {
+    const user = getUser(req);
     const product = await Product.findById(req.params.id);
 
     if (!product) {
@@ -178,8 +275,8 @@ export const deleteProduct = async (req: Request, res: Response) => {
     }
 
     if (
-      product.seller.toString() !== req.user._id.toString() &&
-      req.user.role !== "admin"
+      product.seller.toString() !== user._id.toString() &&
+      user.role !== "admin"
     ) {
       return res.status(403).json({
         success: false,
@@ -187,7 +284,6 @@ export const deleteProduct = async (req: Request, res: Response) => {
       });
     }
 
-    // Delete images from Cloudinary
     if (product.images?.length > 0) {
       const deletePromises = product.images.map(async (imageUrl: string) => {
         try {

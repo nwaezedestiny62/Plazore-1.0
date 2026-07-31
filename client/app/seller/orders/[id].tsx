@@ -14,8 +14,6 @@ import { useLocalSearchParams, useRouter } from 'expo-router'
 import { Ionicons } from '@expo/vector-icons'
 import api from '@/constants/api'
 
-type ShippingMethod = 'courier' | 'self' | null
-
 export default function SellerOrderDetails() {
   const { id } = useLocalSearchParams<{ id: string }>()
   const { getToken } = useAuth()
@@ -25,12 +23,9 @@ export default function SellerOrderDetails() {
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
 
-  // Shipping form
-  const [method, setMethod] = useState<ShippingMethod>(null)
-  const [deliveryCompany, setDeliveryCompany] = useState('')
   const [trackingNumber, setTrackingNumber] = useState('')
   const [estimatedDelivery, setEstimatedDelivery] = useState('')
-  const [selfNote, setSelfNote] = useState('')
+  const [sellerNote, setSellerNote] = useState('')
 
   const loadOrder = async () => {
     try {
@@ -39,9 +34,7 @@ export default function SellerOrderDetails() {
       const res = await api.get(`/orders/${id}`, {
         headers: { Authorization: `Bearer ${token}` },
       })
-      if (res.data.success) {
-        setOrder(res.data.data)
-      }
+      if (res.data.success) setOrder(res.data.data)
     } catch (error) {
       console.log(error)
       Alert.alert('Error', 'Could not load order')
@@ -54,18 +47,13 @@ export default function SellerOrderDetails() {
     loadOrder()
   }, [id])
 
+  const impliedMethod =
+    order?.productShipping?.method === 'self' ? 'self' : 'courier'
+  const courierName = order?.productShipping?.courierCompany || ''
+
   const handleShip = async () => {
-    if (!method) {
-      Alert.alert('Required', 'Please choose a shipping method')
-      return
-    }
-
-    if (method === 'courier') {
-      // company & tracking are optional, but estimated date is nice to have
-    }
-
-    if (method === 'self' && !estimatedDelivery.trim()) {
-      Alert.alert('Required', 'Please enter an estimated delivery date for Self Delivery')
+    if (!estimatedDelivery.trim()) {
+      Alert.alert('Required', 'Please enter an estimated delivery date')
       return
     }
 
@@ -73,17 +61,15 @@ export default function SellerOrderDetails() {
       setSubmitting(true)
       const token = await getToken()
 
-const body: any = {
-  shippingMethod: method,               // "courier" or "self"
-  estimatedDelivery: estimatedDelivery || undefined,
-}
+      const body: any = {
+        estimatedDelivery: estimatedDelivery.trim(),
+        selfDeliveryNote: sellerNote.trim().slice(0, 120),
+      }
 
-if (method === 'courier') {
-  body.deliveryCompany = deliveryCompany.trim()
-  body.trackingNumber = trackingNumber.trim()
-} else {
-  body.selfDeliveryNote = selfNote.trim().slice(0, 120)
-}
+      if (impliedMethod === 'courier') {
+        body.trackingNumber = trackingNumber.trim()
+        body.deliveryCompany = courierName
+      }
 
       const res = await api.put(`/orders/${id}/ship`, body, {
         headers: { Authorization: `Bearer ${token}` },
@@ -141,15 +127,15 @@ if (method === 'courier') {
 
   if (loading) {
     return (
-      <View className="flex-1 justify-center items-center bg-[#07111F]">
-        <ActivityIndicator size="large" color="#DCEBFF" />
+      <View className="flex-1 justify-center items-center bg-[#060D18]">
+        <ActivityIndicator size="large" color="#9EC5FF" />
       </View>
     )
   }
 
   if (!order) {
     return (
-      <View className="flex-1 justify-center items-center bg-[#07111F]">
+      <View className="flex-1 justify-center items-center bg-[#060D18]">
         <Text className="text-[#7F93A8]">Order not found</Text>
       </View>
     )
@@ -160,15 +146,14 @@ if (method === 'courier') {
   const isDelivered = order.orderStatus === 'Delivered'
 
   return (
-    <View className="flex-1 bg-[#07111F]">
-      {/* Header */}
-      <View className="px-5 pt-4 pb-3 flex-row items-center border-b border-[#1E334A]">
+    <View className="flex-1 bg-[#060D18]">
+      <View className="px-5 pt-4 pb-3 flex-row items-center border-b border-[#1A2D42]">
         <TouchableOpacity onPress={() => router.back()} className="mr-4 p-1">
-          <Ionicons name="arrow-back" size={24} color="#DCEBFF" />
+          <Ionicons name="arrow-back" size={24} color="#9EC5FF" />
         </TouchableOpacity>
         <View>
           <Text className="text-white text-xl font-bold">{order.orderNumber}</Text>
-          <Text className="text-[#8EA4B8] text-xs mt-0.5">
+          <Text className="text-[#6B8299] text-xs mt-0.5">
             {new Date(order.createdAt).toLocaleString()}
           </Text>
         </View>
@@ -178,62 +163,47 @@ if (method === 'courier') {
         contentContainerStyle={{ padding: 20, paddingBottom: 50 }}
         showsVerticalScrollIndicator={false}
       >
-        {/* Status */}
-        <View className="bg-[#0B1625] border border-[#1E334A] rounded-[24px] p-5 mb-6">
-          <Text className="text-[#8EA4B8] text-sm mb-1">Current Status</Text>
+        <View className="bg-[#0B1625] border border-[#1A2D42] rounded-[24px] p-5 mb-5">
+          <Text className="text-[#6B8299] text-sm mb-1">Current Status</Text>
           <Text className="text-white text-2xl font-extrabold">
             {order.orderStatus}
           </Text>
         </View>
 
-        {/* Buyer Details */}
-{/* Buyer Information — name, phone, address only (no email) */}
-<View className="bg-[#0B1625] border border-[#1E334A] rounded-[24px] p-5 mb-6">
-  <Text className="text-white font-bold text-lg mb-4">
-    Buyer Information
-  </Text>
+        {/* Buyer — no email */}
+        <View className="bg-[#0B1625] border border-[#1A2D42] rounded-[24px] p-5 mb-5">
+          <Text className="text-white font-bold text-lg mb-4">
+            Buyer Information
+          </Text>
+          <Text className="text-[#6B8299] text-xs mb-1">Name</Text>
+          <Text className="text-[#DCEBFF] text-[15px] font-semibold mb-3">
+            {order.buyerContact?.name || order.buyer?.name || 'Buyer'}
+          </Text>
+          <Text className="text-[#6B8299] text-xs mb-1">Phone</Text>
+          <Text className="text-[#DCEBFF] text-[15px] mb-4">
+            {order.buyerContact?.phone || order.buyer?.phone || 'Not provided'}
+          </Text>
+          <View className="bg-[#13263B] border border-[#DCEBFF]/30 rounded-2xl p-4">
+            <View className="flex-row items-center mb-2">
+              <Ionicons name="location" size={16} color="#9EC5FF" />
+              <Text className="text-white font-bold ml-2">Delivery Address</Text>
+            </View>
+            <Text className="text-white text-[15px] leading-6">
+              {order.shippingAddress?.street}
+              {'\n'}
+              {order.shippingAddress?.city}, {order.shippingAddress?.state}{' '}
+              {order.shippingAddress?.zipCode}
+              {'\n'}
+              {order.shippingAddress?.country}
+            </Text>
+          </View>
+        </View>
 
-  <View className="mb-3">
-    <Text className="text-[#8EA4B8] text-xs mb-1">Buyer Name</Text>
-    <Text className="text-[#DCEBFF] text-[15px] font-semibold">
-      {order.buyerContact?.name || order.buyer?.name || "Buyer"}
-    </Text>
-  </View>
-
-  <View className="mb-4">
-    <Text className="text-[#8EA4B8] text-xs mb-1">Phone Number</Text>
-    <Text className="text-[#DCEBFF] text-[15px]">
-      {order.buyerContact?.phone || order.buyer?.phone || "Not provided"}
-    </Text>
-  </View>
-
-  <View className="bg-[#13263B] border-2 border-[#DCEBFF]/40 rounded-2xl p-4">
-    <View className="flex-row items-center mb-2">
-      <Ionicons name="location" size={18} color="#DCEBFF" />
-      <Text className="text-white font-bold text-[15px] ml-2">
-        Delivery Address
-      </Text>
-    </View>
-    <Text className="text-white text-[16px] font-semibold leading-6">
-      {order.shippingAddress?.street}
-    </Text>
-    <Text className="text-[#DCEBFF] text-[15px] leading-6 mt-1">
-      {order.shippingAddress?.city}, {order.shippingAddress?.state}{" "}
-      {order.shippingAddress?.zipCode}
-    </Text>
-    <Text className="text-[#AFC3D6] text-[14px] mt-1">
-      {order.shippingAddress?.country}
-    </Text>
-  </View>
-</View>
-
-        {/* Products */}
         <Text className="text-white font-bold text-lg mb-3">Products</Text>
-
         {order.items?.map((item: any, index: number) => (
           <View
             key={index}
-            className="bg-[#0B1625] border border-[#1E334A] rounded-[24px] p-4 mb-4"
+            className="bg-[#0B1625] border border-[#1A2D42] rounded-[24px] p-4 mb-4"
           >
             <View className="flex-row">
               {item.image ? (
@@ -244,208 +214,147 @@ if (method === 'courier') {
               ) : (
                 <View className="w-16 h-16 rounded-xl bg-[#13263B]" />
               )}
-
               <View className="ml-3 flex-1 justify-center">
                 <Text className="text-white font-semibold" numberOfLines={2}>
                   {item.name}
                 </Text>
-                <Text className="text-[#8EA4B8] text-sm mt-1">
-                  Qty: {item.quantity}  •  ${Number(item.price).toFixed(2)}
+                <Text className="text-[#6B8299] text-sm mt-1">
+                  Qty: {item.quantity} · ${Number(item.price).toFixed(2)}
                 </Text>
               </View>
             </View>
-
-            {/* Buyer Note */}
-            <View className="mt-4 bg-[#13263B] rounded-2xl px-4 py-3">
-              <Text className="text-[#8EA4B8] text-[11px] mb-1">Buyer Note</Text>
-              <Text className="text-[#DCEBFF] text-[14px] leading-5">
-                {item.note && item.note.trim()
-                  ? item.note
-                  : 'No buyer note.'}
+            <View className="mt-3 bg-[#13263B] rounded-2xl px-4 py-3">
+              <Text className="text-[#6B8299] text-[11px] mb-1">Buyer Note</Text>
+              <Text className="text-[#DCEBFF] text-[14px]">
+                {item.note?.trim() ? item.note : 'No buyer note.'}
               </Text>
             </View>
           </View>
         ))}
 
-        {/* ========== SHIP SECTION (only when Preparing) ========== */}
+        {/* Ship — method locked from product */}
         {isPreparing && (
-          <View className="bg-[#0B1625] border border-[#1E334A] rounded-[24px] p-5 mt-2 mb-6">
+          <View className="bg-[#0B1625] border border-[#1A2D42] rounded-[24px] p-5 mt-2 mb-5">
             <Text className="text-white font-bold text-lg mb-1">
               Ship this Order
             </Text>
-            <Text className="text-[#8EA4B8] text-sm mb-5">
-              Choose how you will deliver this order
+            <Text className="text-[#6B8299] text-sm mb-4">
+              Delivery method was set when the product was published.
             </Text>
 
-            {/* Method selection */}
-            <View className="flex-row gap-3 mb-5">
-              <TouchableOpacity
-                onPress={() => setMethod('courier')}
-                className={`flex-1 py-3.5 rounded-2xl border items-center ${
-                  method === 'courier'
-                    ? 'bg-[#DCEBFF] border-[#DCEBFF]'
-                    : 'bg-[#13263B] border-[#21374D]'
-                }`}
-              >
-                <Text
-                  className={`font-semibold ${
-                    method === 'courier' ? 'text-[#07111F]' : 'text-[#AFC3D6]'
-                  }`}
-                >
-                  Courier
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                onPress={() => setMethod('self')}
-                className={`flex-1 py-3.5 rounded-2xl border items-center ${
-                  method === 'self'
-                    ? 'bg-[#DCEBFF] border-[#DCEBFF]'
-                    : 'bg-[#13263B] border-[#21374D]'
-                }`}
-              >
-                <Text
-                  className={`font-semibold ${
-                    method === 'self' ? 'text-[#07111F]' : 'text-[#AFC3D6]'
-                  }`}
-                >
-                  Self Delivery
-                </Text>
-              </TouchableOpacity>
+            <View className="bg-[#122033] border border-[#1E334A] rounded-2xl px-4 py-3 mb-5 flex-row items-center">
+              <Ionicons
+                name={impliedMethod === 'self' ? 'walk-outline' : 'car-outline'}
+                size={18}
+                color="#9EC5FF"
+              />
+              <Text className="text-[#B8D4FF] font-semibold ml-2">
+                {impliedMethod === 'self'
+                  ? 'Self Delivery'
+                  : `Courier${courierName ? ` · ${courierName}` : ''}`}
+              </Text>
             </View>
 
-            {/* Courier fields */}
-            {method === 'courier' && (
-              <View>
-                <Text className="text-[#AFC3D6] text-sm mb-2">
-                  Delivery Company (optional)
-                </Text>
-                <TextInput
-                  value={deliveryCompany}
-                  onChangeText={setDeliveryCompany}
-                  placeholder="e.g. DHL, GIG, FedEx"
-                  placeholderTextColor="#5A7088"
-                  className="bg-[#13263B] border border-[#21374D] rounded-2xl px-4 py-3.5 text-white mb-4"
-                />
+            <Text className="text-[#7F93A8] text-[11px] mb-1.5 font-semibold uppercase">
+              Estimated delivery date *
+            </Text>
+            <TextInput
+              value={estimatedDelivery}
+              onChangeText={setEstimatedDelivery}
+              placeholder="YYYY-MM-DD"
+              placeholderTextColor="#3D5268"
+              className="bg-[#0A121C] border border-[#1A2D42] rounded-2xl px-4 py-3.5 text-white mb-4"
+            />
 
-                <Text className="text-[#AFC3D6] text-sm mb-2">
-                  Tracking Number (optional)
+            {impliedMethod === 'courier' && (
+              <>
+                <Text className="text-[#7F93A8] text-[11px] mb-1.5 font-semibold uppercase">
+                  Tracking number
                 </Text>
                 <TextInput
                   value={trackingNumber}
                   onChangeText={setTrackingNumber}
-                  placeholder="Tracking number"
-                  placeholderTextColor="#5A7088"
-                  className="bg-[#13263B] border border-[#21374D] rounded-2xl px-4 py-3.5 text-white mb-4"
+                  placeholder="Optional tracking number"
+                  placeholderTextColor="#3D5268"
+                  className="bg-[#0A121C] border border-[#1A2D42] rounded-2xl px-4 py-3.5 text-white mb-4"
                 />
-
-                <Text className="text-[#AFC3D6] text-sm mb-2">
-                  Estimated Delivery Date
-                </Text>
-                <TextInput
-                  value={estimatedDelivery}
-                  onChangeText={setEstimatedDelivery}
-                  placeholder="YYYY-MM-DD"
-                  placeholderTextColor="#5A7088"
-                  className="bg-[#13263B] border border-[#21374D] rounded-2xl px-4 py-3.5 text-white mb-2"
-                />
-              </View>
+              </>
             )}
 
-            {/* Self Delivery fields */}
-            {method === 'self' && (
-              <View>
-                <Text className="text-[#AFC3D6] text-sm mb-2">
-                  Estimated Delivery Date *
-                </Text>
-                <TextInput
-                  value={estimatedDelivery}
-                  onChangeText={setEstimatedDelivery}
-                  placeholder="YYYY-MM-DD"
-                  placeholderTextColor="#5A7088"
-                  className="bg-[#13263B] border border-[#21374D] rounded-2xl px-4 py-3.5 text-white mb-4"
-                />
+            <Text className="text-[#7F93A8] text-[11px] mb-1.5 font-semibold uppercase">
+              Note to buyer
+            </Text>
+            <TextInput
+              value={sellerNote}
+              onChangeText={(t) => setSellerNote(t.slice(0, 120))}
+              placeholder="Optional note"
+              placeholderTextColor="#3D5268"
+              multiline
+              className="bg-[#0A121C] border border-[#1A2D42] rounded-2xl px-4 py-3.5 text-white mb-2 min-h-[80]"
+              style={{ textAlignVertical: 'top' }}
+            />
+            <Text className="text-[#5A7088] text-xs text-right mb-4">
+              {sellerNote.length}/120
+            </Text>
 
-                <Text className="text-[#AFC3D6] text-sm mb-2">
-                  Note to Buyer (optional)
+            <TouchableOpacity
+              onPress={handleShip}
+              disabled={submitting}
+              className="bg-[#DCEBFF] rounded-2xl py-4 items-center"
+            >
+              {submitting ? (
+                <ActivityIndicator color="#060D18" />
+              ) : (
+                <Text className="text-[#060D18] font-extrabold text-[15px]">
+                  Mark as Shipped
                 </Text>
-                <TextInput
-                  value={selfNote}
-                  onChangeText={(t) => setSelfNote(t.slice(0, 120))}
-                  placeholder="e.g. I will call you 30 minutes before arrival"
-                  placeholderTextColor="#5A7088"
-                  multiline
-                  className="bg-[#13263B] border border-[#21374D] rounded-2xl px-4 py-3.5 text-white mb-2 min-h-[80]"
-                  style={{ textAlignVertical: 'top' }}
-                />
-                <Text className="text-[#6B8299] text-xs text-right mb-2">
-                  {selfNote.length}/120
-                </Text>
-              </View>
-            )}
-
-            {/* Ship button */}
-            {method && (
-              <TouchableOpacity
-                onPress={handleShip}
-                disabled={submitting}
-                activeOpacity={0.9}
-                className="bg-[#DCEBFF] rounded-2xl py-4 items-center mt-4"
-              >
-                {submitting ? (
-                  <ActivityIndicator color="#07111F" />
-                ) : (
-                  <Text className="text-[#07111F] font-extrabold text-[16px]">
-                    Mark as Shipped
-                  </Text>
-                )}
-              </TouchableOpacity>
-            )}
+              )}
+            </TouchableOpacity>
           </View>
         )}
 
-        {/* Already shipped info */}
         {(isShipped || isDelivered) && order.shipping && (
-          <View className="bg-[#0B1625] border border-[#1E334A] rounded-[24px] p-5 mb-6">
-            <Text className="text-white font-bold text-lg mb-3">Shipping Info</Text>
-
-            <Text className="text-[#8EA4B8] text-sm mb-1">Method</Text>
-            <Text className="text-[#DCEBFF] mb-3 capitalize">
-              {order.shipping.shippingMethod || 'Courier'}
+          <View className="bg-[#0B1625] border border-[#1A2D42] rounded-[24px] p-5 mb-5">
+            <Text className="text-white font-bold text-lg mb-3">
+              Shipping Info
             </Text>
-
+            <Text className="text-[#6B8299] text-sm mb-1">Method</Text>
+            <Text className="text-[#DCEBFF] mb-3">
+              {order.shipping.shippingMethod === 'self'
+                ? 'Self Delivery'
+                : 'Courier'}
+            </Text>
             {order.shipping.deliveryCompany ? (
               <>
-                <Text className="text-[#8EA4B8] text-sm mb-1">Courier</Text>
+                <Text className="text-[#6B8299] text-sm mb-1">Courier</Text>
                 <Text className="text-[#DCEBFF] mb-3">
                   {order.shipping.deliveryCompany}
                 </Text>
               </>
             ) : null}
-
             {order.shipping.trackingNumber ? (
               <>
-                <Text className="text-[#8EA4B8] text-sm mb-1">Tracking</Text>
+                <Text className="text-[#6B8299] text-sm mb-1">Tracking</Text>
                 <Text className="text-[#DCEBFF] mb-3">
                   {order.shipping.trackingNumber}
                 </Text>
               </>
             ) : null}
-
             {order.shipping.estimatedDelivery ? (
               <>
-                <Text className="text-[#8EA4B8] text-sm mb-1">
-                  Estimated Delivery
+                <Text className="text-[#6B8299] text-sm mb-1">
+                  Estimated delivery
                 </Text>
                 <Text className="text-[#DCEBFF] mb-3">
-                  {new Date(order.shipping.estimatedDelivery).toLocaleDateString()}
+                  {new Date(
+                    order.shipping.estimatedDelivery
+                  ).toLocaleDateString()}
                 </Text>
               </>
             ) : null}
-
             {order.shipping.selfDeliveryNote ? (
               <>
-                <Text className="text-[#8EA4B8] text-sm mb-1">Your Note</Text>
+                <Text className="text-[#6B8299] text-sm mb-1">Note</Text>
                 <Text className="text-[#DCEBFF]">
                   {order.shipping.selfDeliveryNote}
                 </Text>
@@ -454,28 +363,37 @@ if (method === 'courier') {
           </View>
         )}
 
-        {/* Mark as Delivered */}
         {isShipped && (
           <TouchableOpacity
             onPress={handleDeliver}
             disabled={submitting}
-            activeOpacity={0.9}
-            className="bg-[#8FE3B0] rounded-2xl py-4 items-center mb-6"
+            className="bg-[#8FE3B0] rounded-2xl py-4 items-center mb-5"
           >
             {submitting ? (
-              <ActivityIndicator color="#07111F" />
+              <ActivityIndicator color="#060D18" />
             ) : (
-              <Text className="text-[#07111F] font-extrabold text-[16px]">
+              <Text className="text-[#060D18] font-extrabold text-[15px]">
                 Mark as Delivered
               </Text>
             )}
           </TouchableOpacity>
         )}
 
-        {/* Order total */}
-        <View className="bg-[#0B1625] border border-[#1E334A] rounded-[24px] p-5">
-          <View className="flex-row justify-between">
-            <Text className="text-[#8EA4B8]">Total</Text>
+        <View className="bg-[#0B1625] border border-[#1A2D42] rounded-[24px] p-5">
+          <View className="flex-row justify-between mb-2">
+            <Text className="text-[#6B8299]">Subtotal</Text>
+            <Text className="text-white">
+              ${Number(order.subtotal).toFixed(2)}
+            </Text>
+          </View>
+          <View className="flex-row justify-between mb-2">
+            <Text className="text-[#6B8299]">Delivery</Text>
+            <Text className="text-white">
+              ${Number(order.shippingCost || 0).toFixed(2)}
+            </Text>
+          </View>
+          <View className="flex-row justify-between mt-2">
+            <Text className="text-[#6B8299]">Total</Text>
             <Text className="text-white font-bold text-xl">
               ${Number(order.totalAmount).toFixed(2)}
             </Text>

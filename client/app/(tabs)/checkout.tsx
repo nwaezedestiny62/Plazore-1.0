@@ -1,14 +1,14 @@
 import Header from '@/components/Header'
 import { COLORS } from '@/constants'
-import { Address } from '@/constants/types'
 import { useCart } from '@/context/CartContext'
 import { Ionicons } from '@expo/vector-icons'
 import { useAuth } from '@clerk/clerk-expo'
-import { useRouter } from 'expo-router'
-import React, { useEffect, useState } from 'react'
+import { useFocusEffect, useRouter } from 'expo-router'
+import React, { useCallback, useMemo, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
+  Image,
   Text,
   TouchableOpacity,
   View,
@@ -25,47 +25,81 @@ export default function Checkout() {
   const [loading, setLoading] = useState(false)
   const [pageLoading, setPageLoading] = useState(true)
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'stripe'>('cash')
+  const [addresses, setAddresses] = useState<any[]>([])
+  const [selectedAddress, setSelectedAddress] = useState<any>(null)
 
-  const shipping = 2.0
-  const tax = 0
-  const total = cartTotal + shipping + tax
+  // Exact delivery fee the seller set on product.shipping.deliveryFee
+  const deliveryFee = useMemo(() => {
+    if (!cartItems?.length) return 0
 
-const [addresses, setAddresses] = useState<any[]>([])
-const [selectedAddress, setSelectedAddress] = useState<any>(null)
+    const bySeller: Record<string, number> = {}
+    let noSellerMax = 0
 
-useEffect(() => {
-  const loadAddresses = async () => {
+    for (const item of cartItems) {
+      const fee = Number(item.product?.shipping?.deliveryFee) || 0
+      const seller = item.product?.seller as any
+      const sellerId =
+        typeof seller === 'string'
+          ? seller
+          : seller && seller._id
+            ? String(seller._id)
+            : ''
+
+      if (sellerId) {
+        bySeller[sellerId] = Math.max(bySeller[sellerId] || 0, fee)
+      } else {
+        noSellerMax = Math.max(noSellerMax, fee)
+      }
+    }
+
+    return (
+      Object.values(bySeller).reduce((sum, fee) => sum + fee, 0) + noSellerMax
+    )
+  }, [cartItems])
+
+  const productPrice = Number(cartTotal) || 0
+  const totalAmount = productPrice + deliveryFee
+  const itemCount = cartItems.reduce((n, i) => n + (i.quantity || 0), 0)
+
+  const loadAddresses = useCallback(async () => {
     try {
       const token = await getToken()
       const res = await api.get('/addresses', {
         headers: { Authorization: `Bearer ${token}` },
       })
       if (res.data.success) {
-        const list = res.data.data
+        const list = res.data.data || []
         setAddresses(list)
-        const def = list.find((a: any) => a.isDefault) || list[0]
-        setSelectedAddress(def || null)
+        setSelectedAddress((prev: any) => {
+          if (prev) {
+            const still = list.find((a: any) => a._id === prev._id)
+            if (still) return still
+          }
+          return list.find((a: any) => a.isDefault) || list[0] || null
+        })
       }
     } catch (error) {
-      console.log(error)
+      console.log('Checkout addresses error:', error)
     } finally {
       setPageLoading(false)
     }
-  }
-  loadAddresses()
-}, [])
+  }, [getToken])
+
+  useFocusEffect(
+    useCallback(() => {
+      loadAddresses()
+    }, [loadAddresses])
+  )
 
   const handlePlaceOrder = async () => {
     if (!selectedAddress) {
-      Alert.alert('Error', 'Please add a shipping address')
+      Alert.alert('Address needed', 'Please add or select a delivery address')
       return
     }
-
-    if (cartItems.length === 0) {
-      Alert.alert('Error', 'Your cart is empty')
+    if (!cartItems?.length) {
+      Alert.alert('Empty bag', 'Your bag is empty')
       return
     }
-
     if (paymentMethod === 'stripe') {
       Alert.alert('Coming soon', 'Card payment is not available yet')
       return
@@ -75,41 +109,39 @@ useEffect(() => {
       setLoading(true)
       const token = await getToken()
 
-const items = cartItems
-  .map((item) => ({
-    productId: (item.productId || item.product?._id)?.toString(),
-    quantity: Number(item.quantity) || 1,
-    price: Number(item.price) || 0,
-    note: (item.note || '').trim().slice(0, 120),
-  }))
-  .filter((item) => item.productId)
+      const items = cartItems
+        .map((item) => ({
+          productId: (item.productId || item.product?._id)?.toString(),
+          quantity: Number(item.quantity) || 1,
+          price: Number(item.price ?? item.product?.price) || 0,
+          note: (item.note || '').trim().slice(0, 120),
+        }))
+        .filter((item) => item.productId)
 
       if (items.length === 0) {
-        Alert.alert('Error', 'No valid products in cart')
+        Alert.alert('Error', 'No valid products in bag')
         return
       }
 
-      const payload = {
-        shippingAddress: {
-          street: selectedAddress.street,
-          city: selectedAddress.city,
-          state: selectedAddress.state,
-          zipCode: selectedAddress.zipCode,
-          country: selectedAddress.country,
+      const res = await api.post(
+        '/orders',
+        {
+          shippingAddress: {
+            street: selectedAddress.street,
+            city: selectedAddress.city,
+            state: selectedAddress.state,
+            zipCode: selectedAddress.zipCode,
+            country: selectedAddress.country,
+          },
+          buyerNote: '',
+          items,
         },
-        buyerNote: '',
-        items,
-      }
-
-      console.log('Sending order payload:', JSON.stringify(payload, null, 2))
-
-      const res = await api.post('/orders', payload, {
-        headers: { Authorization: `Bearer ${token}` },
-      })
+        { headers: { Authorization: `Bearer ${token}` } }
+      )
 
       if (res.data.success) {
         await clearCart()
-        Alert.alert('Success', 'Order placed successfully!', [
+        Alert.alert('Order placed', 'Your order is confirmed.', [
           {
             text: 'View Orders',
             onPress: () => router.replace('/orders' as any),
@@ -119,7 +151,7 @@ const items = cartItems
     } catch (error: any) {
       console.log('Place order error:', error.response?.data || error.message)
       Alert.alert(
-        'Order Failed',
+        'Order failed',
         error.response?.data?.message || 'Something went wrong'
       )
     } finally {
@@ -129,152 +161,271 @@ const items = cartItems
 
   if (pageLoading) {
     return (
-      <SafeAreaView className="flex-1 bg-surface justify-center items-center">
+      <SafeAreaView className="flex-1 bg-[#F4F5F7] justify-center items-center">
         <ActivityIndicator size="large" color={COLORS.primary} />
       </SafeAreaView>
     )
   }
 
   return (
-    <SafeAreaView className="flex-1 bg-surface" edges={['top']}>
+    <SafeAreaView className="flex-1 bg-[#F4F5F7]" edges={['top']}>
       <Header title="Checkout" showBack />
 
-      <ScrollView className="flex-1 px-4 pt-2">
-{/* Shipping Address */}
-<Text className="text-xl font-bold text-primary mb-3">Shipping Address</Text>
+      <ScrollView
+        className="flex-1"
+        contentContainerStyle={{ padding: 16, paddingBottom: 28 }}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Your bag — mall counter style */}
+        <View className="bg-white rounded-2xl border border-gray-200 overflow-hidden mb-4">
+          <View className="px-4 py-3 border-b border-gray-100 flex-row items-center justify-between">
+            <Text className="text-primary font-bold text-base">Your Bag</Text>
+            <Text className="text-secondary text-sm">
+              {itemCount} item{itemCount !== 1 ? 's' : ''}
+            </Text>
+          </View>
 
-{addresses.length > 0 ? (
-  <View className="mb-6">
-    {addresses.map((addr) => {
-      const isSelected = selectedAddress?._id === addr._id
+          {cartItems.length === 0 ? (
+            <View className="px-4 py-8 items-center">
+              <Text className="text-secondary">Your bag is empty</Text>
+            </View>
+          ) : (
+            cartItems.map((item, index) => {
+              const lineTotal = (item.price || 0) * (item.quantity || 1)
+              const lineFee = Number(item.product?.shipping?.deliveryFee) || 0
+              return (
+                <View
+                  key={item.id}
+                  className={`px-4 py-3.5 flex-row ${
+                    index < cartItems.length - 1 ? 'border-b border-gray-50' : ''
+                  }`}
+                >
+                  {item.product?.images?.[0] ? (
+                    <Image
+                      source={{ uri: item.product.images[0] }}
+                      className="w-14 h-14 rounded-xl bg-gray-100"
+                    />
+                  ) : (
+                    <View className="w-14 h-14 rounded-xl bg-gray-100" />
+                  )}
+                  <View className="flex-1 ml-3 justify-center">
+                    <Text
+                      className="text-primary font-semibold text-[14px]"
+                      numberOfLines={1}
+                    >
+                      {item.product?.name || 'Product'}
+                    </Text>
+                    <Text className="text-secondary text-[12px] mt-0.5">
+                      Qty {item.quantity} · ${Number(item.price).toFixed(2)} each
+                    </Text>
+                    {lineFee > 0 && (
+                      <Text className="text-secondary text-[11px] mt-0.5">
+                        Delivery Fee ${lineFee.toFixed(2)}
+                      </Text>
+                    )}
+                  </View>
+                  <Text className="text-primary font-bold text-[14px] self-center">
+                    ${lineTotal.toFixed(2)}
+                  </Text>
+                </View>
+              )
+            })
+          )}
+        </View>
 
-      return (
-        <TouchableOpacity
-          key={addr._id}
-          activeOpacity={0.85}
-          onPress={() => setSelectedAddress(addr)}
-          className={`bg-white p-5 rounded-3xl mb-3 border-2 ${
-            isSelected ? 'border-primary' : 'border-transparent'
-          }`}
-        >
-          <View className="flex-row items-start justify-between">
-            <View className="flex-1 pr-3">
-              {/* Type + Default badge */}
-              <View className="flex-row items-center mb-1.5">
-                <Text className="text-base font-bold text-primary">
-                  {addr.type}
+        {/* Deliver to */}
+        <View className="bg-white rounded-2xl border border-gray-200 overflow-hidden mb-4">
+          <View className="px-4 py-3 border-b border-gray-100 flex-row items-center justify-between">
+            <Text className="text-primary font-bold text-base">Deliver To</Text>
+            <TouchableOpacity onPress={() => router.push('/addresses' as any)}>
+              <Text className="text-accent font-semibold text-sm">Change</Text>
+            </TouchableOpacity>
+          </View>
+
+          {addresses.length > 0 ? (
+            <View className="p-3">
+              {addresses.map((addr) => {
+                const isSelected = selectedAddress?._id === addr._id
+                return (
+                  <TouchableOpacity
+                    key={addr._id}
+                    activeOpacity={0.85}
+                    onPress={() => setSelectedAddress(addr)}
+                    className={`rounded-xl p-3.5 mb-2 border ${
+                      isSelected
+                        ? 'border-primary bg-primary/5'
+                        : 'border-gray-100 bg-white'
+                    }`}
+                  >
+                    <View className="flex-row items-start">
+                      <View
+                        className={`w-5 h-5 rounded-full border-2 mt-0.5 items-center justify-center ${
+                          isSelected ? 'border-primary' : 'border-gray-300'
+                        }`}
+                      >
+                        {isSelected ? (
+                          <View className="w-2.5 h-2.5 rounded-full bg-primary" />
+                        ) : null}
+                      </View>
+                      <View className="flex-1 ml-3">
+                        <View className="flex-row items-center">
+                          <Text className="text-primary font-bold text-[14px]">
+                            {addr.type}
+                          </Text>
+                          {addr.isDefault ? (
+                            <View className="ml-2 bg-gray-100 px-2 py-0.5 rounded">
+                              <Text className="text-secondary text-[10px] font-medium">
+                                Default
+                              </Text>
+                            </View>
+                          ) : null}
+                        </View>
+                        <Text className="text-secondary text-[13px] leading-5 mt-1">
+                          {addr.street}, {addr.city}, {addr.state} {addr.zipCode}
+                          {'\n'}
+                          {addr.country}
+                        </Text>
+                      </View>
+                    </View>
+                  </TouchableOpacity>
+                )
+              })}
+              <TouchableOpacity
+                onPress={() => router.push('/addresses' as any)}
+                className="flex-row items-center justify-center py-2"
+              >
+                <Ionicons name="add" size={18} color={COLORS.accent} />
+                <Text className="text-accent font-medium ml-1 text-sm">
+                  Add new address
                 </Text>
-              </View>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <TouchableOpacity
+              onPress={() => router.push('/addresses' as any)}
+              className="px-4 py-8 items-center"
+            >
+              <Ionicons name="location-outline" size={28} color="#9CA3AF" />
+              <Text className="text-primary font-semibold mt-2">
+                Add delivery address
+              </Text>
+            </TouchableOpacity>
+          )}
+        </View>
 
-              <Text className="text-secondary leading-5">
-                {addr.street}
-                {'\n'}
-                {addr.city}, {addr.state} {addr.zipCode}
-                {'\n'}
-                {addr.country}
+        {/* Pay with */}
+        <View className="bg-white rounded-2xl border border-gray-200 overflow-hidden mb-4">
+          <View className="px-4 py-3 border-b border-gray-100">
+            <Text className="text-primary font-bold text-base">Pay With</Text>
+          </View>
+
+          <TouchableOpacity
+            onPress={() => setPaymentMethod('cash')}
+            className={`px-4 py-4 flex-row items-center border-b border-gray-50 ${
+              paymentMethod === 'cash' ? 'bg-primary/5' : ''
+            }`}
+          >
+            <View className="w-10 h-10 rounded-full bg-green-50 items-center justify-center">
+              <Ionicons name="cash-outline" size={22} color="#059669" />
+            </View>
+            <View className="flex-1 ml-3">
+              <Text className="text-primary font-semibold text-[14px]">
+                Cash on Delivery
+              </Text>
+              <Text className="text-secondary text-[12px]">
+                Pay when you receive
+              </Text>
+            </View>
+            {paymentMethod === 'cash' ? (
+              <Ionicons name="checkmark-circle" size={22} color={COLORS.primary} />
+            ) : (
+              <View className="w-5 h-5 rounded-full border-2 border-gray-300" />
+            )}
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            onPress={() => setPaymentMethod('stripe')}
+            className={`px-4 py-4 flex-row items-center ${
+              paymentMethod === 'stripe' ? 'bg-primary/5' : ''
+            }`}
+          >
+            <View className="w-10 h-10 rounded-full bg-blue-50 items-center justify-center">
+              <Ionicons name="card-outline" size={22} color="#2563EB" />
+            </View>
+            <View className="flex-1 ml-3">
+              <Text className="text-primary font-semibold text-[14px]">
+                Card
+              </Text>
+              <Text className="text-secondary text-[12px]">Coming soon</Text>
+            </View>
+            {paymentMethod === 'stripe' ? (
+              <Ionicons name="checkmark-circle" size={22} color={COLORS.primary} />
+            ) : (
+              <View className="w-5 h-5 rounded-full border-2 border-gray-300" />
+            )}
+          </TouchableOpacity>
+        </View>
+
+        {/* Receipt */}
+        <View className="bg-white rounded-2xl border border-gray-200 overflow-hidden mb-2">
+          <View className="px-4 py-3 border-b border-dashed border-gray-200">
+            <Text className="text-primary font-bold text-base">Receipt</Text>
+          </View>
+
+          <View className="px-4 py-4">
+            <View className="flex-row justify-between mb-3">
+              <Text className="text-secondary text-[15px]">Product Price</Text>
+              <Text className="text-primary font-semibold text-[15px]">
+                ${productPrice.toFixed(2)}
               </Text>
             </View>
 
-            {/* Selected indicator */}
-            {isSelected ? (
-              <Ionicons name="checkmark-circle" size={24} color={COLORS.primary} />
-            ) : (
-              <View className="w-6 h-6 rounded-full border-2 border-gray-300 mt-0.5" />
-            )}
-          </View>
-        </TouchableOpacity>
-      )
-    })}
+            <View className="flex-row justify-between mb-3">
+              <Text className="text-secondary text-[15px]">Delivery Fee</Text>
+              <Text className="text-primary font-semibold text-[15px]">
+                ${deliveryFee.toFixed(2)}
+              </Text>
+            </View>
 
-    {/* Add new address */}
-    <TouchableOpacity
-      onPress={() => router.push('/addresses' as any)}
-      className="flex-row items-center justify-center py-3"
-    >
-      <Ionicons name="add-circle-outline" size={20} color={COLORS.accent} />
-      <Text className="text-accent font-medium ml-2">Add new address</Text>
-    </TouchableOpacity>
-  </View>
-) : (
-  <TouchableOpacity
-    className="bg-white p-8 rounded-3xl mb-8 items-center justify-center border-2 border-dashed border-gray-200"
-    onPress={() => router.push('/addresses' as any)}
-  >
-    <Ionicons name="location-outline" size={32} color={COLORS.secondary} />
-    <Text className="text-primary font-bold mt-3">Add Shipping Address</Text>
-  </TouchableOpacity>
-)}
+            <View className="border-t border-dashed border-gray-200 my-2" />
 
-        <Text className="text-xl font-bold text-primary mb-4">Payment Method</Text>
+            <View className="flex-row justify-between items-center mt-1">
+              <Text className="text-primary font-bold text-lg">Total Amount</Text>
+              <Text className="text-primary font-extrabold text-2xl">
+                ${totalAmount.toFixed(2)}
+              </Text>
+            </View>
 
-        <TouchableOpacity
-          onPress={() => setPaymentMethod('cash')}
-          className={`bg-white p-5 rounded-3xl mb-4 flex-row items-center border-2 ${
-            paymentMethod === 'cash' ? 'border-primary' : 'border-transparent'
-          }`}
-        >
-          <View className="w-12 h-12 bg-green-50 rounded-2xl items-center justify-center">
-            <Ionicons name="cash-outline" size={28} color="#10b981" />
+            <Text className="text-secondary text-[11px] mt-3 leading-4">
+              You pay Product Price + Delivery Fee only. No extra platform charges
+              at checkout.
+            </Text>
           </View>
-          <View className="ml-4 flex-1">
-            <Text className="text-base font-bold text-primary">Cash on Delivery</Text>
-            <Text className="text-secondary text-sm">Pay when you receive the order</Text>
-          </View>
-          {paymentMethod === 'cash' && (
-            <Ionicons name="checkmark-circle" size={26} color={COLORS.primary} />
-          )}
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          onPress={() => setPaymentMethod('stripe')}
-          className={`bg-white p-5 rounded-3xl mb-8 flex-row items-center border-2 ${
-            paymentMethod === 'stripe' ? 'border-primary' : 'border-transparent'
-          }`}
-        >
-          <View className="w-12 h-12 bg-blue-50 rounded-2xl items-center justify-center">
-            <Ionicons name="card-outline" size={28} color="#3b82f6" />
-          </View>
-          <View className="ml-4 flex-1">
-            <Text className="text-base font-bold text-primary">Pay with Card</Text>
-            <Text className="text-secondary text-sm">Coming soon</Text>
-          </View>
-        </TouchableOpacity>
+        </View>
       </ScrollView>
 
-      <View className="bg-white p-5 border-t border-gray-100">
-        <Text className="text-lg font-bold text-primary mb-4">Order Summary</Text>
-
-        <View className="mb-6">
-          <View className="flex-row justify-between mb-2">
-            <Text className="text-secondary">Subtotal</Text>
-            <Text className="font-medium">${cartTotal.toFixed(2)}</Text>
-          </View>
-          <View className="flex-row justify-between mb-2">
-            <Text className="text-secondary">Shipping</Text>
-            <Text className="font-medium">${shipping.toFixed(2)}</Text>
-          </View>
-          <View className="flex-row justify-between">
-            <Text className="text-secondary">Tax</Text>
-            <Text className="font-medium">${tax.toFixed(2)}</Text>
-          </View>
+      {/* Bottom pay bar */}
+      <View className="bg-white border-t border-gray-200 px-4 pt-3 pb-5">
+        <View className="flex-row items-center justify-between mb-3">
+          <Text className="text-secondary text-sm">Amount due</Text>
+          <Text className="text-primary font-extrabold text-xl">
+            ${totalAmount.toFixed(2)}
+          </Text>
         </View>
-
-        <View className="flex-row justify-between items-center mb-6">
-          <Text className="text-xl font-bold text-primary">Total</Text>
-          <Text className="text-2xl font-bold text-primary">${total.toFixed(2)}</Text>
-        </View>
-
         <TouchableOpacity
-          className={`py-4 rounded-2xl items-center ${
+          className={`py-4 rounded-xl items-center ${
             loading ? 'bg-gray-400' : 'bg-primary'
           }`}
           onPress={handlePlaceOrder}
           disabled={loading}
+          activeOpacity={0.9}
         >
           {loading ? (
-            <ActivityIndicator color="white" />
+            <ActivityIndicator color="#fff" />
           ) : (
-            <Text className="text-white font-bold text-lg">Place Order</Text>
+            <Text className="text-white font-bold text-[16px]">
+              Place Order · ${totalAmount.toFixed(2)}
+            </Text>
           )}
         </TouchableOpacity>
       </View>

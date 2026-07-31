@@ -70,18 +70,19 @@ export interface IProduct extends Document {
   name: string;
   description: string;
   price: number;
-  comparePrice?: number;
   images: string[];
-  sizes?: string[];
-  category: "Men" | "Women" | "Kids" | "Shoes" | "Bags" | "Other";
+  category: string;
+  subCategory?: string;
+  brand?: string;
   stock: number;
-  ratings?: {
-    average: number;
-    count: number;
-  };
   isFeatured: boolean;
   isActive: boolean;
-  seller: Types.ObjectId; // NEW - required
+  seller: Types.ObjectId;
+  shipping?: {
+    method: "self" | "courier";
+    courierCompany?: string;
+    deliveryFee?: number;
+  };
   createdAt: Date;
   updatedAt: Date;
 }
@@ -93,18 +94,35 @@ export interface IUser extends Document {
   clerkId: string;
   image?: string;
   role: "buyer" | "seller" | "admin";
+
   storeName?: string;
   storeDescription?: string;
   businessGoal?: string;
   storeLogo?: string;
+  storeBanner?: string;
+
   isSellerVerified?: boolean;
   isSellerSuspended?: boolean;
   sellerAppliedAt?: Date;
+
   payout?: {
     bankName?: string;
     accountName?: string;
     accountNumber?: string;
   };
+
+  shippingDefaults?: {
+    address?: {
+      street?: string;
+      city?: string;
+      state?: string;
+      zipCode?: string;
+      country?: string;
+    };
+    deliveryMethod?: "courier" | "self" | "";
+    courierCompany?: string;
+  };
+
   createdAt: Date;
   updatedAt: Date;
 }

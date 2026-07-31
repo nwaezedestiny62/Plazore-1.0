@@ -6,67 +6,57 @@ import {
   ActivityIndicator,
   Image,
   TouchableOpacity,
+  Alert,
 } from 'react-native'
 import { useAuth } from '@clerk/clerk-expo'
 import { useLocalSearchParams, useRouter } from 'expo-router'
 import { Ionicons } from '@expo/vector-icons'
 import { SafeAreaView } from 'react-native-safe-area-context'
+import * as Clipboard from 'expo-clipboard'
 import api from '@/constants/api'
 
 const steps = ['Preparing', 'Shipped', 'Delivered']
 
 export default function BuyerOrderDetails() {
-  const params = useLocalSearchParams<{ id: string | string[] }>()
-  const rawId = params.id
+  const rawId = useLocalSearchParams<{ id: string | string[] }>().id
   const id = Array.isArray(rawId) ? rawId[0] : rawId
-
   const { getToken } = useAuth()
   const router = useRouter()
 
   const [order, setOrder] = useState<any>(null)
   const [loading, setLoading] = useState(true)
-  const [errorMsg, setErrorMsg] = useState<string | null>(null)
 
   useEffect(() => {
     const load = async () => {
       if (!id) {
-        setErrorMsg('Missing order id')
         setLoading(false)
         return
       }
-
       try {
-        setLoading(true)
-        setErrorMsg(null)
         const token = await getToken()
-        console.log('Fetching order id →', id)
-
         const res = await api.get(`/orders/${id}`, {
           headers: { Authorization: `Bearer ${token}` },
         })
-
         if (res.data.success) {
           setOrder(res.data.data)
-        } else {
-          setErrorMsg(res.data.message || 'Order not found')
         }
-      } catch (error: any) {
-        console.log(
-          'Order details error:',
-          error.response?.status,
-          error.response?.data || error.message
-        )
-        setErrorMsg(
-          error.response?.data?.message ||
-            error.message ||
-            'Could not load order'
-        )
+      } catch (error) {
+        console.log('Buyer order load error:', error)
       } finally {
         setLoading(false)
       }
     }
     load()
   }, [id])
+
+  const copyTracking = async (value: string) => {
+    try {
+      await Clipboard.setStringAsync(value)
+      Alert.alert('Copied', 'Tracking number copied to clipboard')
+    } catch {
+      Alert.alert('Error', 'Could not copy tracking number')
+    }
+  }
 
   if (loading) {
     return (
@@ -78,34 +68,39 @@ export default function BuyerOrderDetails() {
 
   if (!order) {
     return (
-      <View className="flex-1 justify-center items-center bg-[#07111F] px-6">
-        <Text className="text-[#7F93A8] text-center text-base">
-          {errorMsg || 'Order not found'}
-        </Text>
-        <TouchableOpacity onPress={() => router.back()} className="mt-6">
-          <Text className="text-[#DCEBFF] font-semibold">Go back</Text>
+      <View className="flex-1 justify-center items-center bg-[#07111F]">
+        <Text className="text-[#7F93A8]">Order not found</Text>
+        <TouchableOpacity onPress={() => router.back()} className="mt-4">
+          <Text className="text-[#DCEBFF]">Go back</Text>
         </TouchableOpacity>
       </View>
     )
   }
 
-  const currentStep = steps.indexOf(order.orderStatus)
-
+  const currentStep = Math.max(0, steps.indexOf(order.orderStatus))
   const shipping = order.shipping || {}
-  const method = shipping.shippingMethod // "courier" | "self" | undefined
+  const method =
+    shipping.shippingMethod ||
+    order.productShipping?.method ||
+    (shipping.deliveryCompany ? 'courier' : undefined)
 
   const isSelf = method === 'self'
-  const isCourier =
-    method === 'courier' || (!method && !!shipping.deliveryCompany)
+  const isCourier = method === 'courier' || (!isSelf && !!shipping.deliveryCompany)
+
+  const sellerNote = (shipping.selfDeliveryNote || '').trim()
+  const tracking = (shipping.trackingNumber || '').trim()
+  const hasShippingBlock =
+    order.orderStatus === 'Shipped' ||
+    order.orderStatus === 'Delivered' ||
+    !!shipping.shippedAt
 
   return (
     <SafeAreaView className="flex-1 bg-[#07111F]" edges={['top']}>
-      {/* Header */}
       <View className="px-5 pt-3 pb-3 flex-row items-center border-b border-[#1E334A]">
         <TouchableOpacity onPress={() => router.back()} className="mr-4 p-1">
           <Ionicons name="arrow-back" size={24} color="#DCEBFF" />
         </TouchableOpacity>
-        <View>
+        <View className="flex-1">
           <Text className="text-white text-xl font-bold">
             {order.orderNumber}
           </Text>
@@ -120,20 +115,15 @@ export default function BuyerOrderDetails() {
         showsVerticalScrollIndicator={false}
       >
         {/* Progress */}
-        <View className="bg-[#0B1625] border border-[#1E334A] rounded-[24px] p-5 mb-6">
+        <View className="bg-[#0B1625] border border-[#1E334A] rounded-[24px] p-5 mb-5">
           <Text className="text-white font-bold text-lg mb-5">
             Order Progress
           </Text>
-
           {steps.map((step, index) => {
             const isActive = index <= currentStep
             const isCurrent = index === currentStep
-
             return (
-              <View
-                key={step}
-                className="flex-row items-center mb-5 last:mb-0"
-              >
+              <View key={step} className="flex-row items-center mb-4 last:mb-0">
                 <View
                   className={`w-9 h-9 rounded-full items-center justify-center ${
                     isActive ? 'bg-[#DCEBFF]' : 'bg-[#1A2F45]'
@@ -147,7 +137,6 @@ export default function BuyerOrderDetails() {
                     </Text>
                   )}
                 </View>
-
                 <Text
                   className={`ml-3.5 text-[15px] font-medium ${
                     isCurrent
@@ -165,7 +154,7 @@ export default function BuyerOrderDetails() {
         </View>
 
         {/* Seller */}
-        <View className="bg-[#0B1625] border border-[#1E334A] rounded-[24px] p-5 mb-6">
+        <View className="bg-[#0B1625] border border-[#1E334A] rounded-[24px] p-5 mb-5">
           <Text className="text-[#8EA4B8] text-sm mb-1">Sold by</Text>
           <Text className="text-white font-bold text-lg">
             {order.seller?.storeName || order.seller?.name || 'Seller'}
@@ -174,7 +163,6 @@ export default function BuyerOrderDetails() {
 
         {/* Items */}
         <Text className="text-white font-bold text-lg mb-3">Items</Text>
-
         {order.items?.map((item: any, idx: number) => (
           <View
             key={idx}
@@ -189,94 +177,128 @@ export default function BuyerOrderDetails() {
               ) : (
                 <View className="w-16 h-16 rounded-xl bg-[#13263B]" />
               )}
-
               <View className="ml-3.5 flex-1 justify-center">
                 <Text className="text-white font-semibold" numberOfLines={2}>
                   {item.name}
                 </Text>
                 <Text className="text-[#8EA4B8] text-sm mt-1">
-                  Qty: {item.quantity} • ${Number(item.price).toFixed(2)}
+                  Qty: {item.quantity} · ${Number(item.price).toFixed(2)}
                 </Text>
               </View>
             </View>
-
-            {/* Your Note */}
             <View className="mt-4 bg-[#13263B] rounded-2xl px-4 py-3">
               <Text className="text-[#8EA4B8] text-[11px] mb-1">Your Note</Text>
               <Text className="text-[#DCEBFF] text-[14px] leading-5">
-                {item.note && item.note.trim()
-                  ? item.note
-                  : 'No note added.'}
+                {item.note?.trim() ? item.note : 'No note added.'}
               </Text>
             </View>
           </View>
         ))}
 
-        {/* ========== SHIPPING INFO ========== */}
-        {order.orderStatus !== 'Preparing' && (
-          <View className="bg-[#0B1625] border border-[#1E334A] rounded-[24px] p-5 mt-2 mb-6">
+        {/* Shipping details — after ship */}
+        {hasShippingBlock && (
+          <View className="bg-[#0B1625] border border-[#1E334A] rounded-[24px] p-5 mt-1 mb-5">
             <Text className="text-white font-bold text-lg mb-4">
               Shipping Details
             </Text>
 
-            {/* Method */}
-<Text className="text-[#8EA4B8] text-sm mb-1">Method</Text>
-<Text className="text-[#DCEBFF] mb-3">
-  {order.shipping.shippingMethod === "self"
-    ? "Self Delivery"
-    : "Courier"}
-</Text>
+            <View className="mb-4">
+              <Text className="text-[#8EA4B8] text-xs mb-1">Method</Text>
+              <Text className="text-[#DCEBFF] text-[15px] font-medium">
+                {isSelf ? 'Self Delivery' : 'Courier'}
+              </Text>
+            </View>
 
-            {/* Courier details */}
-            {isCourier && (
-              <>
-                {shipping.deliveryCompany ? (
-                  <View className="mb-3">
-                    <Text className="text-[#8EA4B8] text-xs mb-1">
-                      Courier Company
-                    </Text>
-                    <Text className="text-[#DCEBFF] text-[15px]">
-                      {shipping.deliveryCompany}
+            {(isCourier || shipping.deliveryCompany) &&
+              !!shipping.deliveryCompany && (
+                <View className="mb-4">
+                  <Text className="text-[#8EA4B8] text-xs mb-1">
+                    Courier Company
+                  </Text>
+                  <Text className="text-[#DCEBFF] text-[15px]">
+                    {shipping.deliveryCompany}
+                  </Text>
+                </View>
+              )}
+
+            {/* Tracking — copyable */}
+            {!!tracking && (
+              <View className="mb-4">
+                <Text className="text-[#8EA4B8] text-xs mb-1.5">
+                  Tracking Number
+                </Text>
+                <TouchableOpacity
+                  onPress={() => copyTracking(tracking)}
+                  activeOpacity={0.8}
+                  className="flex-row items-center bg-[#13263B] border border-[#1E334A] rounded-2xl px-4 py-3.5"
+                >
+                  <Text
+                    className="text-[#DCEBFF] text-[15px] font-semibold flex-1"
+                    selectable
+                  >
+                    {tracking}
+                  </Text>
+                  <View className="flex-row items-center ml-3 pl-3 border-l border-[#1E334A]">
+                    <Ionicons name="copy-outline" size={18} color="#9EC5FF" />
+                    <Text className="text-[#9EC5FF] text-[12px] font-semibold ml-1.5">
+                      Copy
                     </Text>
                   </View>
-                ) : null}
-
-                {shipping.trackingNumber ? (
-                  <View className="mb-3">
-                    <Text className="text-[#8EA4B8] text-xs mb-1">
-                      Tracking Number
-                    </Text>
-                    <Text className="text-[#DCEBFF] text-[15px]">
-                      {shipping.trackingNumber}
-                    </Text>
-                  </View>
-                ) : null}
-              </>
+                </TouchableOpacity>
+              </View>
             )}
 
-            {/* Self Delivery note */}
-            {isSelf && shipping.selfDeliveryNote ? (
-              <View className="mb-3">
-                <Text className="text-[#8EA4B8] text-xs mb-1">Seller Note</Text>
-                <Text className="text-[#DCEBFF] text-[15px] leading-5">
-                  {shipping.selfDeliveryNote}
+            {/* Seller note — show whenever present (self or courier) */}
+            {!!sellerNote && (
+              <View className="mb-4 bg-[#13263B] rounded-2xl px-4 py-3.5 border border-[#1E334A]">
+                <View className="flex-row items-center mb-1.5">
+                  <Ionicons
+                    name="chatbubble-ellipses-outline"
+                    size={14}
+                    color="#8EA4B8"
+                  />
+                  <Text className="text-[#8EA4B8] text-xs ml-1.5">
+                    Note from seller
+                  </Text>
+                </View>
+                <Text className="text-[#DCEBFF] text-[15px] leading-6">
+                  {sellerNote}
                 </Text>
               </View>
-            ) : null}
+            )}
 
-            {/* Estimated delivery */}
             {shipping.estimatedDelivery ? (
-              <View className="mb-1">
+              <View>
                 <Text className="text-[#8EA4B8] text-xs mb-1">
                   Estimated Delivery
                 </Text>
                 <Text className="text-[#DCEBFF] text-[15px]">
-                  {new Date(
-                    shipping.estimatedDelivery
-                  ).toLocaleDateString()}
+                  {new Date(shipping.estimatedDelivery).toLocaleDateString()}
                 </Text>
               </View>
             ) : null}
+
+            {!sellerNote &&
+              !tracking &&
+              !shipping.deliveryCompany &&
+              !shipping.estimatedDelivery && (
+                <Text className="text-[#6B8299] text-[13px]">
+                  Shipping details will appear here once the seller ships your
+                  order.
+                </Text>
+              )}
+          </View>
+        )}
+
+        {order.orderStatus === 'Preparing' && (
+          <View className="bg-[#0B1625] border border-[#1E334A] rounded-[24px] p-5 mb-5">
+            <Text className="text-white font-bold text-base mb-1">
+              Preparing your order
+            </Text>
+            <Text className="text-[#8EA4B8] text-[13px] leading-5">
+              The seller is packing your items. Tracking and seller notes appear
+              after they mark it as shipped.
+            </Text>
           </View>
         )}
 
@@ -295,9 +317,21 @@ export default function BuyerOrderDetails() {
           </Text>
         </View>
 
-        {/* Total */}
+        {/* Totals */}
         <View className="bg-[#0B1625] border border-[#1E334A] rounded-[24px] p-5">
-          <View className="flex-row justify-between items-center">
+          <View className="flex-row justify-between mb-2">
+            <Text className="text-[#8EA4B8]">Subtotal</Text>
+            <Text className="text-white">
+              ${Number(order.subtotal || 0).toFixed(2)}
+            </Text>
+          </View>
+          <View className="flex-row justify-between mb-3">
+            <Text className="text-[#8EA4B8]">Delivery</Text>
+            <Text className="text-white">
+              ${Number(order.shippingCost || 0).toFixed(2)}
+            </Text>
+          </View>
+          <View className="flex-row justify-between items-center pt-2 border-t border-[#1E334A]">
             <Text className="text-[#8EA4B8]">Order Total</Text>
             <Text className="text-white font-bold text-xl">
               ${Number(order.totalAmount).toFixed(2)}

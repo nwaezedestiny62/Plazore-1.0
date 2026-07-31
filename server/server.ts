@@ -13,6 +13,7 @@ import AdminRouter from "./routes/adminRoutes.js";
 import SellerRouter from "./routes/sellerRoutes.js";
 import NotificationRouter from "./routes/notificationRoutes.js";
 import UserRouter from "./routes/userRoutes.js";
+import WishlistRouter from "./routes/wishlistRoutes.js";
 
 const app = express();
 
@@ -54,6 +55,7 @@ app.use("/api/admin", AdminRouter)
 app.use("/api/seller", SellerRouter);
 app.use("/api/notifications", NotificationRouter);
 app.use("/api/users", UserRouter);
+app.use("/api/wishlist", WishlistRouter);
 
 await makeAdmin();
 

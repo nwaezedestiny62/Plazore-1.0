@@ -14,20 +14,38 @@ const userSchema = new mongoose.Schema<IUser>(
       default: "buyer",
     },
 
-    // Seller profile
+    // Store appearance
     storeName: { type: String, trim: true },
     storeDescription: { type: String, default: "" },
     businessGoal: { type: String, default: "" },
-    storeLogo: { type: String },
+    storeLogo: { type: String, default: "" },
+    storeBanner: { type: String, default: "" },
+
     isSellerVerified: { type: Boolean, default: false },
     isSellerSuspended: { type: Boolean, default: false },
     sellerAppliedAt: { type: Date },
 
-    // Payout (for later)
     payout: {
       bankName: { type: String, default: "" },
       accountName: { type: String, default: "" },
       accountNumber: { type: String, default: "" },
+    },
+
+    // Defaults used when creating products (product can override)
+    shippingDefaults: {
+      address: {
+        street: { type: String, default: "" },
+        city: { type: String, default: "" },
+        state: { type: String, default: "" },
+        zipCode: { type: String, default: "" },
+        country: { type: String, default: "" },
+      },
+      deliveryMethod: {
+        type: String,
+        enum: ["courier", "self", ""],
+        default: "",
+      },
+      courierCompany: { type: String, default: "" },
     },
   },
   { timestamps: true }

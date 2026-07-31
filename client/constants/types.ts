@@ -15,27 +15,36 @@ export interface User {
 }
 
 export interface Product {
-    _id: string;
-    name: string;
-    description: string;
-    price: number;
-    comparePrice?: number;
-    images: string[];
-    sizes?: string[];
-    category:
-        | {
-              _id: string;
-              name: string;
-          }
-        | string;
-    stock: number;
-    ratings: {
-        average: number;
-        count: number;
-    };
-    isFeatured: boolean;
-    isActive: boolean;
-    createdAt: string;
+  _id: string
+  name: string
+  description: string
+  price: number
+  comparePrice?: number
+  images: string[]
+  sizes?: string[]
+  category:
+    | {
+        _id: string
+        name: string
+      }
+    | string
+  subCategory?: string
+  brand?: string
+  stock: number
+  ratings?: {
+    average: number
+    count: number
+  }
+  isFeatured: boolean
+  isActive: boolean
+  seller?: string | { _id: string; name?: string; storeName?: string }
+  // Seller-set delivery — this is what checkout must use
+  shipping?: {
+    method: 'self' | 'courier'
+    courierCompany?: string
+    deliveryFee: number
+  }
+  createdAt: string
 }
 
 export type ProductCardProps = {

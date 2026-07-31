@@ -6,6 +6,9 @@ import {
   getMyProducts,
   getMyOrders,
   updateMyOrderStatus,
+  getMyStore,
+  updateMyStore,
+  getPublicStorefront, 
 } from "../controllers/sellerController.js";
 import {
   createProduct,
@@ -27,6 +30,23 @@ SellerRouter.get(
   getSellerDashboard
 );
 
+// ====================== MY STORE ======================
+SellerRouter.get("/store", protect, authorize("seller", "admin"), getMyStore);
+
+SellerRouter.put(
+  "/store",
+  protect,
+  authorize("seller", "admin"),
+  upload.fields([
+    { name: "storeLogo", maxCount: 1 },
+    { name: "storeBanner", maxCount: 1 },
+  ]),
+  updateMyStore
+);
+
+// ====================== PUBLIC STOREFRONT (mall) ======================
+SellerRouter.get("/store/:id", getPublicStorefront);
+
 // ====================== PRODUCTS ======================
 SellerRouter.get(
   "/products",
@@ -35,7 +55,6 @@ SellerRouter.get(
   getMyProducts
 );
 
-// ★ THIS WAS MISSING ★
 SellerRouter.post(
   "/products",
   protect,
@@ -60,12 +79,7 @@ SellerRouter.delete(
 );
 
 // ====================== ORDERS ======================
-SellerRouter.get(
-  "/orders",
-  protect,
-  authorize("seller", "admin"),
-  getMyOrders
-);
+SellerRouter.get("/orders", protect, authorize("seller", "admin"), getMyOrders);
 
 SellerRouter.put(
   "/orders/:id/status",
