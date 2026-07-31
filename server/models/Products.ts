@@ -12,6 +12,8 @@ const productSchema = new Schema(
     stock: { type: Number, required: true, default: 0, min: 0 },
     isFeatured: { type: Boolean, default: false },
     isActive: { type: Boolean, default: true },
+    // inside the schema
+wishlistCount: { type: Number, default: 0, min: 0 },
     seller: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",

@@ -53,19 +53,22 @@ export const toggleWishlist = async (req: Request, res: Response) => {
     let wishlist = await Wishlist.findOne({ user: user._id });
 
     if (!wishlist) {
+      // First time → create and add
       wishlist = await Wishlist.create({
         user: user._id,
         products: [productId],
       });
-      const populated = await Wishlist.findById(wishlist._id).populate(
-        "products"
-      );
+
+      await Product.findByIdAndUpdate(productId, {
+        $inc: { wishlistCount: 1 },
+      });
+
+      const populated = await Wishlist.findById(wishlist._id).populate("products");
       return res.json({
         success: true,
         added: true,
-        data: (populated!.products || []).filter(
-          (p: any) => p && p.isActive !== false
-        ),
+        data: (populated!.products || []).filter((p: any) => p && p.isActive !== false),
+        wishlistCount: (await Product.findById(productId).select("wishlistCount"))?.wishlistCount ?? 1,
       });
     }
 
@@ -73,26 +76,45 @@ export const toggleWishlist = async (req: Request, res: Response) => {
     const exists = wishlist.products.some((p) => p.toString() === idStr);
 
     if (exists) {
-      wishlist.products = wishlist.products.filter(
-        (p) => p.toString() !== idStr
+      // REMOVE
+      await Wishlist.updateOne(
+        { _id: wishlist._id },
+        { $pull: { products: productId } }
+      );
+
+      await Product.findByIdAndUpdate(productId, {
+        $inc: { wishlistCount: -1 },
+      });
+
+      // Safety: never go below 0
+      await Product.updateOne(
+        { _id: productId, wishlistCount: { $lt: 0 } },
+        { $set: { wishlistCount: 0 } }
       );
     } else {
-      wishlist.products.push(productId as any);
+      // ADD (guaranteed unique)
+      await Wishlist.updateOne(
+        { _id: wishlist._id },
+        { $addToSet: { products: productId } }
+      );
+
+      await Product.findByIdAndUpdate(productId, {
+        $inc: { wishlistCount: 1 },
+      });
     }
 
-    await wishlist.save();
-
-    const populated = await Wishlist.findById(wishlist._id).populate(
-      "products"
-    );
+    const populated = await Wishlist.findById(wishlist._id).populate("products");
     const products = (populated!.products || []).filter(
       (p: any) => p && p.isActive !== false
     );
+
+    const updatedProduct = await Product.findById(productId).select("wishlistCount");
 
     res.json({
       success: true,
       added: !exists,
       data: products,
+      wishlistCount: updatedProduct?.wishlistCount ?? 0,
     });
   } catch (error: any) {
     res.status(500).json({ success: false, message: error.message });
@@ -110,10 +132,26 @@ export const removeFromWishlist = async (req: Request, res: Response) => {
       return res.json({ success: true, data: [] });
     }
 
-    wishlist.products = wishlist.products.filter(
-      (p) => p.toString() !== productId
-    );
-    await wishlist.save();
+    const idStr = productId.toString();
+    const exists = wishlist.products.some((p) => p.toString() === idStr);
+
+    if (exists) {
+      wishlist.products = wishlist.products.filter(
+        (p) => p.toString() !== idStr
+      );
+      await wishlist.save();
+
+      // Decrement the count
+      await Product.findByIdAndUpdate(productId, {
+        $inc: { wishlistCount: -1 },
+      });
+
+      // Guard against negative counts
+      await Product.updateOne(
+        { _id: productId, wishlistCount: { $lt: 0 } },
+        { $set: { wishlistCount: 0 } }
+      );
+    }
 
     const populated = await Wishlist.findById(wishlist._id).populate(
       "products"
@@ -122,7 +160,15 @@ export const removeFromWishlist = async (req: Request, res: Response) => {
       (p: any) => p && p.isActive !== false
     );
 
-    res.json({ success: true, data: products });
+    const updatedProduct = await Product.findById(productId).select(
+      "wishlistCount"
+    );
+
+    res.json({
+      success: true,
+      data: products,
+      wishlistCount: updatedProduct?.wishlistCount ?? 0,
+    });
   } catch (error: any) {
     res.status(500).json({ success: false, message: error.message });
   }

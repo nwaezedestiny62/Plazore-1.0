@@ -66,25 +66,29 @@ export interface IOrder extends Document {
   updatedAt: Date;
 }
 
-export interface IProduct extends Document {
+export interface Product {
+  _id: string;
   name: string;
   description: string;
   price: number;
+  comparePrice?: number;
   images: string[];
-  category: string;
-  subCategory?: string;
-  brand?: string;
+  sizes?: string[];
+  category:
+    | {
+        _id: string;
+        name: string;
+      }
+    | string;
   stock: number;
+  ratings: {
+    average: number;
+    count: number;
+  };
   isFeatured: boolean;
   isActive: boolean;
-  seller: Types.ObjectId;
-  shipping?: {
-    method: "self" | "courier";
-    courierCompany?: string;
-    deliveryFee?: number;
-  };
-  createdAt: Date;
-  updatedAt: Date;
+  createdAt: string;
+  wishlistCount?: number; // ← add this line
 }
 
 export interface IUser extends Document {
