@@ -1,8 +1,9 @@
-import { useClerk, useUser } from '@clerk/clerk-expo'
+import api from '@/constants/api'
+import { useAuth, useClerk, useUser } from '@clerk/clerk-expo'
 import { Ionicons } from '@expo/vector-icons'
 import { LinearGradient } from 'expo-linear-gradient'
-import { useRouter } from 'expo-router'
-import React from 'react'
+import { useFocusEffect, useRouter } from 'expo-router'
+import React, { useCallback, useState } from 'react'
 import {
   Image,
   StatusBar,
@@ -47,20 +48,50 @@ const LOUNGE_MENU = [
 export default function Profile() {
   const { user, signOut } = useClerk()
   const { user: clerkUser } = useUser()
+  const { getToken, isSignedIn } = useAuth()
   const router = useRouter()
 
+  const [unreadCount, setUnreadCount] = useState(0)
+
   const role = (clerkUser?.publicMetadata?.role as string) || 'buyer'
+
+  const fetchUnread = useCallback(async () => {
+    if (!isSignedIn) {
+      setUnreadCount(0)
+      return
+    }
+    try {
+      const token = await getToken()
+      const res = await api.get('/notifications', {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (res.data.success && Array.isArray(res.data.data)) {
+        const n = res.data.data.filter((x: any) => !x.isRead).length
+        setUnreadCount(n)
+      }
+    } catch {
+      // keep previous count
+    }
+  }, [getToken, isSignedIn])
+
+  useFocusEffect(
+    useCallback(() => {
+      fetchUnread()
+    }, [fetchUnread])
+  )
 
   const handleLogout = async () => {
     await signOut()
     router.replace('/sign-in')
   }
 
+  const badgeLabel =
+    unreadCount > 99 ? '99+' : unreadCount > 0 ? String(unreadCount) : ''
+
   return (
     <SafeAreaView className="flex-1 bg-[#060B14]" edges={['top']}>
       <StatusBar barStyle="light-content" />
 
-      {/* Top bar — cool, minimal, open */}
       <View className="px-5 pt-2 pb-3 flex-row items-center justify-between">
         <View>
           <Text className="text-[#6B8299] text-[11px] font-semibold tracking-[3px] uppercase">
@@ -78,6 +109,15 @@ export default function Profile() {
             className="w-11 h-11 rounded-2xl bg-[#0C1520] border border-[#1A2A3A] items-center justify-center"
           >
             <Ionicons name="notifications-outline" size={22} color="#DCEBFF" />
+            {unreadCount > 0 && (
+              <View
+                className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-[#FF6B8A] items-center justify-center border border-[#060B14]"
+              >
+                <Text className="text-white text-[10px] font-bold">
+                  {badgeLabel}
+                </Text>
+              </View>
+            )}
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -96,7 +136,6 @@ export default function Profile() {
         contentContainerStyle={{ paddingBottom: 140 }}
       >
         {!user ? (
-          /* ─── Guest state ─── */
           <View className="flex-1 items-center justify-center px-6 pt-16">
             <LinearGradient
               colors={['#0F1C2E', '#0A1420']}
@@ -125,7 +164,6 @@ export default function Profile() {
           </View>
         ) : (
           <>
-            {/* ─── Profile Hero ─── */}
             <View className="px-5 mt-1">
               <LinearGradient
                 colors={['#0F1C2E', '#0A1420']}
@@ -168,7 +206,10 @@ export default function Profile() {
                       <Text className="text-white text-[22px] font-extrabold">
                         {user.firstName || 'Member'}
                       </Text>
-                      <Text className="text-[#7A93A8] text-[13px] mt-0.5" numberOfLines={1}>
+                      <Text
+                        className="text-[#7A93A8] text-[13px] mt-0.5"
+                        numberOfLines={1}
+                      >
                         {user.emailAddresses[0]?.emailAddress}
                       </Text>
                     </View>
@@ -177,7 +218,6 @@ export default function Profile() {
               </LinearGradient>
             </View>
 
-            {/* ─── Seller CTA ─── */}
             <View className="px-5 mt-5">
               {role === 'buyer' ? (
                 <TouchableOpacity
@@ -189,7 +229,8 @@ export default function Profile() {
                     className="rounded-[28px] border border-[#243B55] p-5"
                   >
                     <View className="flex-row items-center">
-                      <View className="w-13 h-13 rounded-2xl bg-[#1C334D] items-center justify-center"
+                      <View
+                        className="rounded-2xl bg-[#1C334D] items-center justify-center"
                         style={{ width: 52, height: 52 }}
                       >
                         <Ionicons
@@ -253,7 +294,6 @@ export default function Profile() {
               )}
             </View>
 
-            {/* ─── Quick Access ─── */}
             <View className="px-5 mt-8">
               <Text className="text-[#6B8299] text-[11px] font-semibold tracking-[2.5px] uppercase mb-3">
                 Quick Access
@@ -279,11 +319,7 @@ export default function Profile() {
                   className="flex-1 bg-[#0C1520] border border-[#1A2A3A] rounded-[24px] p-5"
                 >
                   <View className="w-11 h-11 rounded-2xl bg-[#13263B] items-center justify-center mb-3">
-                    <Ionicons
-                      name="heart-outline"
-                      size={22}
-                      color="#DCEBFF"
-                    />
+                    <Ionicons name="heart-outline" size={22} color="#DCEBFF" />
                   </View>
                   <Text className="text-white font-bold text-[15px]">
                     Wishlist
@@ -295,7 +331,6 @@ export default function Profile() {
               </View>
             </View>
 
-            {/* ─── Lounge Sections ─── */}
             <View className="px-5 mt-8">
               <Text className="text-[#6B8299] text-[11px] font-semibold tracking-[2.5px] uppercase mb-3">
                 Lounge
@@ -306,7 +341,7 @@ export default function Profile() {
                     key={item.id}
                     onPress={() => router.push(item.route as any)}
                     activeOpacity={0.8}
-                    className={`px-5 py-4.5 flex-row items-center ${
+                    className={`px-5 flex-row items-center ${
                       index !== LOUNGE_MENU.length - 1
                         ? 'border-b border-[#132030]'
                         : ''
@@ -328,6 +363,13 @@ export default function Profile() {
                         {item.subtitle}
                       </Text>
                     </View>
+                    {item.id === 'notifications' && unreadCount > 0 && (
+                      <View className="min-w-[20px] h-5 px-1.5 rounded-full bg-[#FF6B8A] items-center justify-center mr-2">
+                        <Text className="text-white text-[10px] font-bold">
+                          {badgeLabel}
+                        </Text>
+                      </View>
+                    )}
                     <Ionicons
                       name="chevron-forward"
                       size={18}
@@ -338,7 +380,6 @@ export default function Profile() {
               </View>
             </View>
 
-            {/* ─── Sign Out ─── */}
             <View className="px-5 mt-8">
               <TouchableOpacity
                 onPress={handleLogout}

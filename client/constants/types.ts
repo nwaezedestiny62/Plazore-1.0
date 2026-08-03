@@ -1,17 +1,27 @@
 export interface User {
-    _id: string;
-    name: string;
-    email: string;
-    role: "user" | "admin";
-    phone?: string;
-    address?: {
-        street: string;
-        city: string;
-        state: string;
-        zipCode: string;
-        country: string;
-    };
-    createdAt: string;
+  _id: string
+  name: string
+  email: string
+  role: 'user' | 'admin' | 'buyer' | 'seller'
+  phone?: string
+  address?: {
+    street: string
+    city: string
+    state: string
+    zipCode: string
+    country: string
+  }
+  createdAt: string
+}
+
+/** Where this product ships from (public: city + country only) */
+export interface FulfillmentLocation {
+  countryCode: string
+  country: string
+  stateCode?: string
+  state?: string
+  city: string
+  displayLabel: string
 }
 
 export interface Product {
@@ -37,95 +47,121 @@ export interface Product {
   }
   isFeatured: boolean
   isActive: boolean
-  seller?: string | { _id: string; name?: string; storeName?: string }
-  // Seller-set delivery — this is what checkout must use
+  region?: string
+  seller?:
+    | string
+    | {
+        _id: string
+        name?: string
+        storeName?: string
+        storeLogo?: string
+        storeDescription?: string
+        marketplaceRegion?: string
+      }
   shipping?: {
     method: 'self' | 'courier'
     courierCompany?: string
     deliveryFee: number
   }
+  fulfillmentLocation?: FulfillmentLocation
+  wishlistCount?: number
   createdAt: string
 }
 
 export type ProductCardProps = {
-    product: Product;
-};
+  product: Product
+}
 
 export interface CartItem {
-    product: Product;
-    quantity: number;
-    size: string;
+  product: Product
+  quantity: number
+  size: string
 }
 
 export type CartItemProps = {
-    item: { id: string; product: { name: string; price: number; images: string[] }; quantity: number; size: string };
-    onRemove?: () => void;
-    onUpdateQuantity?: (newQty: number) => void;
-};
+  item: {
+    id: string
+    product: { name: string; price: number; images: string[] }
+    quantity: number
+    size: string
+  }
+  onRemove?: () => void
+  onUpdateQuantity?: (newQty: number) => void
+}
 
 export type CategoryItemProps = {
-    item: { id: string | number; name: string; icon: string };
-    isSelected?: boolean;
-    onPress?: () => void;
-};
+  item: { id: string | number; name: string; icon: string }
+  isSelected?: boolean
+  onPress?: () => void
+}
 
 export type HeaderProps = {
-    title?: string;
-    showBack?: boolean;
-    showSearch?: boolean;
-    showCart?: boolean;
-    showMenu?: boolean;
-    showLogo?: boolean;
-};
+  title?: string
+  showBack?: boolean
+  showSearch?: boolean
+  showCart?: boolean
+  showMenu?: boolean
+  showLogo?: boolean
+}
 
 export interface Address {
-    _id: string;
-    type: "Home" | "Work" | "Other";
-    street: string;
-    city: string;
-    state: string;
-    zipCode: string;
-    country: string;
-    isDefault: boolean;
-    createdAt: string;
+  _id: string
+  type: 'Home' | 'Work' | 'Other'
+  street: string
+  city: string
+  state: string
+  zipCode: string
+  country: string
+  isDefault: boolean
+  createdAt: string
 }
 
 export interface OrderItem {
-    product: Product | string;
-    name: string;
-    quantity: number;
-    price: number;
-    image?: string;
-    size?: string;
+  product: Product | string
+  name: string
+  quantity: number
+  price: number
+  image?: string
+  size?: string
+  note?: string
 }
 
 export interface Order {
-    _id: string;
-    user: User | string;
-    orderNumber: string;
-    items: OrderItem[];
-    shippingAddress: {
-        street: string;
-        city: string;
-        state: string;
-        zipCode: string;
-        country: string;
-    };
-    paymentMethod: string;
-    paymentStatus: "pending" | "paid" | "failed" | "refunded";
-    orderStatus: "placed" | "processing" | "shipped" | "delivered" | "cancelled";
-    subtotal: number;
-    shippingCost: number;
-    tax: number;
-    totalAmount: number;
-    notes?: string;
-    deliveredAt?: string;
-    createdAt: string;
+  _id: string
+  user: User | string
+  orderNumber: string
+  items: OrderItem[]
+  shippingAddress: {
+    street: string
+    city: string
+    state: string
+    zipCode: string
+    country: string
+  }
+  paymentMethod: string
+  paymentStatus: 'pending' | 'paid' | 'failed' | 'refunded'
+  orderStatus:
+    | 'placed'
+    | 'processing'
+    | 'shipped'
+    | 'delivered'
+    | 'cancelled'
+    | 'Preparing'
+    | 'Shipped'
+    | 'Delivered'
+    | 'Cancelled'
+  subtotal: number
+  shippingCost: number
+  tax?: number
+  totalAmount: number
+  notes?: string
+  deliveredAt?: string
+  createdAt: string
 }
 
 export type WishlistContextType = {
-    wishlist: Product[];
-    toggleWishlist: (product: Product) => void;
-    isInWishlist: (productId: string) => boolean;
-    loading: boolean;
-};
+  wishlist: Product[]
+  toggleWishlist: (product: Product) => void
+  isInWishlist: (productId: string) => boolean
+  loading: boolean
+}

@@ -1,30 +1,76 @@
-import React, { useEffect, useState } from 'react'
-import {
-  View,
-  Text,
-  ScrollView,
-  ActivityIndicator,
-  Image,
-  TouchableOpacity,
-  Alert,
-} from 'react-native'
-import { useAuth } from '@clerk/clerk-expo'
-import { useLocalSearchParams, useRouter } from 'expo-router'
-import { Ionicons } from '@expo/vector-icons'
-import { SafeAreaView } from 'react-native-safe-area-context'
-import * as Clipboard from 'expo-clipboard'
 import api from '@/constants/api'
+import {
+  convertPrice,
+  DEFAULT_REGION,
+  formatMoney,
+  formatProductPrice,
+} from '@/constants/regions'
+import { useMarketplace } from '@/context/MarketplaceContext'
+import { useAuth } from '@clerk/clerk-expo'
+import { Ionicons } from '@expo/vector-icons'
+import * as Clipboard from 'expo-clipboard'
+import { useLocalSearchParams, useRouter } from 'expo-router'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import {
+  ActivityIndicator,
+  Alert,
+  Image,
+  ScrollView,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native'
+import { SafeAreaView } from 'react-native-safe-area-context'
 
 const steps = ['Preparing', 'Shipped', 'Delivered']
+
+function resolveOrderRegion(order: any, item?: any): string {
+  if (item?.product?.region) return String(item.product.region)
+  if (item?.region) return String(item.region)
+  if (order?.region) return String(order.region)
+  if (order?.seller?.marketplaceRegion) {
+    return String(order.seller.marketplaceRegion)
+  }
+  return DEFAULT_REGION
+}
 
 export default function BuyerOrderDetails() {
   const rawId = useLocalSearchParams<{ id: string | string[] }>().id
   const id = Array.isArray(rawId) ? rawId[0] : rawId
   const { getToken } = useAuth()
   const router = useRouter()
+  const {
+    format,
+    formatProduct,
+    region: viewerRegion,
+    refreshRegion,
+  } = useMarketplace()
 
   const [order, setOrder] = useState<any>(null)
   const [loading, setLoading] = useState(true)
+
+  const displayRegion = viewerRegion || DEFAULT_REGION
+
+  const fmt = useCallback(
+    (amount: number, fromRegion?: string | null) => {
+      try {
+        if (fromRegion && fromRegion !== displayRegion) {
+          return formatProduct
+            ? formatProduct(amount, fromRegion)
+            : formatProductPrice(amount, fromRegion, displayRegion)
+        }
+        return format ? format(amount) : formatMoney(amount, displayRegion)
+      } catch {
+        const converted = convertPrice(
+          amount,
+          fromRegion || displayRegion,
+          displayRegion
+        )
+        return formatMoney(converted, displayRegion)
+      }
+    },
+    [format, formatProduct, displayRegion]
+  )
 
   useEffect(() => {
     const load = async () => {
@@ -33,21 +79,25 @@ export default function BuyerOrderDetails() {
         return
       }
       try {
+        await refreshRegion()
         const token = await getToken()
         const res = await api.get(`/orders/${id}`, {
           headers: { Authorization: `Bearer ${token}` },
         })
-        if (res.data.success) {
-          setOrder(res.data.data)
-        }
-      } catch (error) {
-        console.log('Buyer order load error:', error)
+        if (res.data.success) setOrder(res.data.data)
+      } catch {
+        // ignore
       } finally {
         setLoading(false)
       }
     }
     load()
   }, [id])
+
+  const orderMoneyRegion = useMemo(() => {
+    if (!order) return DEFAULT_REGION
+    return resolveOrderRegion(order, order.items?.[0])
+  }, [order])
 
   const copyTracking = async (value: string) => {
     try {
@@ -77,6 +127,7 @@ export default function BuyerOrderDetails() {
     )
   }
 
+  const isCancelled = order.orderStatus === 'Cancelled'
   const currentStep = Math.max(0, steps.indexOf(order.orderStatus))
   const shipping = order.shipping || {}
   const method =
@@ -85,14 +136,16 @@ export default function BuyerOrderDetails() {
     (shipping.deliveryCompany ? 'courier' : undefined)
 
   const isSelf = method === 'self'
-  const isCourier = method === 'courier' || (!isSelf && !!shipping.deliveryCompany)
+  const isCourier =
+    method === 'courier' || (!isSelf && !!shipping.deliveryCompany)
 
   const sellerNote = (shipping.selfDeliveryNote || '').trim()
   const tracking = (shipping.trackingNumber || '').trim()
   const hasShippingBlock =
-    order.orderStatus === 'Shipped' ||
-    order.orderStatus === 'Delivered' ||
-    !!shipping.shippedAt
+    !isCancelled &&
+    (order.orderStatus === 'Shipped' ||
+      order.orderStatus === 'Delivered' ||
+      !!shipping.shippedAt)
 
   return (
     <SafeAreaView className="flex-1 bg-[#07111F]" edges={['top']}>
@@ -114,46 +167,79 @@ export default function BuyerOrderDetails() {
         contentContainerStyle={{ padding: 20, paddingBottom: 40 }}
         showsVerticalScrollIndicator={false}
       >
-        {/* Progress */}
-        <View className="bg-[#0B1625] border border-[#1E334A] rounded-[24px] p-5 mb-5">
-          <Text className="text-white font-bold text-lg mb-5">
-            Order Progress
-          </Text>
-          {steps.map((step, index) => {
-            const isActive = index <= currentStep
-            const isCurrent = index === currentStep
-            return (
-              <View key={step} className="flex-row items-center mb-4 last:mb-0">
-                <View
-                  className={`w-9 h-9 rounded-full items-center justify-center ${
-                    isActive ? 'bg-[#DCEBFF]' : 'bg-[#1A2F45]'
-                  }`}
-                >
-                  {isActive ? (
-                    <Ionicons name="checkmark" size={18} color="#07111F" />
-                  ) : (
-                    <Text className="text-[#6B8299] text-xs font-medium">
-                      {index + 1}
-                    </Text>
-                  )}
-                </View>
-                <Text
-                  className={`ml-3.5 text-[15px] font-medium ${
-                    isCurrent
-                      ? 'text-[#DCEBFF]'
-                      : isActive
-                      ? 'text-white'
-                      : 'text-[#6B8299]'
-                  }`}
-                >
-                  {step}
+        {/* Cancelled banner */}
+        {isCancelled ? (
+          <View className="bg-[#1A1214] border border-[#3D2228] rounded-[24px] p-5 mb-5">
+            <View className="flex-row items-center mb-2">
+              <Ionicons name="close-circle" size={22} color="#FF8A9A" />
+              <Text className="text-[#FF8A9A] font-bold text-lg ml-2">
+                {order.cancellation?.cancelledBy === 'seller'
+                  ? 'Cancelled by Seller'
+                  : 'Order Cancelled'}
+              </Text>
+            </View>
+            <Text className="text-[#AFC3D6] text-[14px] leading-6 mb-3">
+              Unfortunately, the seller was unable to fulfill your order.
+            </Text>
+            {(order.cancellation?.reasonLabel ||
+              order.cancellation?.note) && (
+              <>
+                <Text className="text-[#6B8299] text-xs mb-1">Reason</Text>
+                <Text className="text-[#DCEBFF] text-[15px] leading-6">
+                  “
+                  {order.cancellation.reasonLabel ||
+                    order.cancellation.note}
+                  ”
                 </Text>
-              </View>
-            )
-          })}
-        </View>
+              </>
+            )}
+            <Text className="text-[#6B8299] text-[12px] mt-4">
+              Your order has been cancelled successfully.
+            </Text>
+          </View>
+        ) : (
+          <View className="bg-[#0B1625] border border-[#1E334A] rounded-[24px] p-5 mb-5">
+            <Text className="text-white font-bold text-lg mb-5">
+              Order Progress
+            </Text>
+            {steps.map((step, index) => {
+              const isActive = index <= currentStep
+              const isCurrent = index === currentStep
+              return (
+                <View
+                  key={step}
+                  className="flex-row items-center mb-4 last:mb-0"
+                >
+                  <View
+                    className={`w-9 h-9 rounded-full items-center justify-center ${
+                      isActive ? 'bg-[#DCEBFF]' : 'bg-[#1A2F45]'
+                    }`}
+                  >
+                    {isActive ? (
+                      <Ionicons name="checkmark" size={18} color="#07111F" />
+                    ) : (
+                      <Text className="text-[#6B8299] text-xs font-medium">
+                        {index + 1}
+                      </Text>
+                    )}
+                  </View>
+                  <Text
+                    className={`ml-3.5 text-[15px] font-medium ${
+                      isCurrent
+                        ? 'text-[#DCEBFF]'
+                        : isActive
+                          ? 'text-white'
+                          : 'text-[#6B8299]'
+                    }`}
+                  >
+                    {step}
+                  </Text>
+                </View>
+              )
+            })}
+          </View>
+        )}
 
-        {/* Seller */}
         <View className="bg-[#0B1625] border border-[#1E334A] rounded-[24px] p-5 mb-5">
           <Text className="text-[#8EA4B8] text-sm mb-1">Sold by</Text>
           <Text className="text-white font-bold text-lg">
@@ -161,67 +247,64 @@ export default function BuyerOrderDetails() {
           </Text>
         </View>
 
-        {/* Items */}
         <Text className="text-white font-bold text-lg mb-3">Items</Text>
-        {order.items?.map((item: any, idx: number) => (
-          <View
-            key={idx}
-            className="bg-[#0B1625] border border-[#1E334A] rounded-[24px] p-4 mb-4"
-          >
-            <View className="flex-row">
-              {item.image ? (
-                <Image
-                  source={{ uri: item.image }}
-                  className="w-16 h-16 rounded-xl bg-[#13263B]"
-                />
-              ) : (
-                <View className="w-16 h-16 rounded-xl bg-[#13263B]" />
-              )}
-              <View className="ml-3.5 flex-1 justify-center">
-                <Text className="text-white font-semibold" numberOfLines={2}>
-                  {item.name}
-                </Text>
-                <Text className="text-[#8EA4B8] text-sm mt-1">
-                  Qty: {item.quantity} · ${Number(item.price).toFixed(2)}
+        {order.items?.map((item: any, idx: number) => {
+          const itemRegion = resolveOrderRegion(order, item)
+          const unit = Number(item.price) || 0
+          return (
+            <View
+              key={idx}
+              className="bg-[#0B1625] border border-[#1E334A] rounded-[24px] p-4 mb-4"
+            >
+              <View className="flex-row">
+                {item.image ? (
+                  <Image
+                    source={{ uri: item.image }}
+                    className="w-16 h-16 rounded-xl bg-[#13263B]"
+                  />
+                ) : (
+                  <View className="w-16 h-16 rounded-xl bg-[#13263B]" />
+                )}
+                <View className="ml-3.5 flex-1 justify-center">
+                  <Text className="text-white font-semibold" numberOfLines={2}>
+                    {item.name}
+                  </Text>
+                  <Text className="text-[#8EA4B8] text-sm mt-1">
+                    Qty: {item.quantity} · {fmt(unit, itemRegion)}
+                  </Text>
+                </View>
+              </View>
+              <View className="mt-4 bg-[#13263B] rounded-2xl px-4 py-3">
+                <Text className="text-[#8EA4B8] text-[11px] mb-1">Your Note</Text>
+                <Text className="text-[#DCEBFF] text-[14px] leading-5">
+                  {item.note?.trim() ? item.note : 'No note added.'}
                 </Text>
               </View>
             </View>
-            <View className="mt-4 bg-[#13263B] rounded-2xl px-4 py-3">
-              <Text className="text-[#8EA4B8] text-[11px] mb-1">Your Note</Text>
-              <Text className="text-[#DCEBFF] text-[14px] leading-5">
-                {item.note?.trim() ? item.note : 'No note added.'}
-              </Text>
-            </View>
-          </View>
-        ))}
+          )
+        })}
 
-        {/* Shipping details — after ship */}
         {hasShippingBlock && (
           <View className="bg-[#0B1625] border border-[#1E334A] rounded-[24px] p-5 mt-1 mb-5">
             <Text className="text-white font-bold text-lg mb-4">
               Shipping Details
             </Text>
-
             <View className="mb-4">
               <Text className="text-[#8EA4B8] text-xs mb-1">Method</Text>
               <Text className="text-[#DCEBFF] text-[15px] font-medium">
                 {isSelf ? 'Self Delivery' : 'Courier'}
               </Text>
             </View>
-
-            {(isCourier || shipping.deliveryCompany) &&
-              !!shipping.deliveryCompany && (
-                <View className="mb-4">
-                  <Text className="text-[#8EA4B8] text-xs mb-1">
-                    Courier Company
-                  </Text>
-                  <Text className="text-[#DCEBFF] text-[15px]">
-                    {shipping.deliveryCompany}
-                  </Text>
-                </View>
-              )}
-
-            {/* Tracking — copyable */}
+            {!!shipping.deliveryCompany && (
+              <View className="mb-4">
+                <Text className="text-[#8EA4B8] text-xs mb-1">
+                  Courier Company
+                </Text>
+                <Text className="text-[#DCEBFF] text-[15px]">
+                  {shipping.deliveryCompany}
+                </Text>
+              </View>
+            )}
             {!!tracking && (
               <View className="mb-4">
                 <Text className="text-[#8EA4B8] text-xs mb-1.5">
@@ -247,27 +330,17 @@ export default function BuyerOrderDetails() {
                 </TouchableOpacity>
               </View>
             )}
-
-            {/* Seller note — show whenever present (self or courier) */}
             {!!sellerNote && (
               <View className="mb-4 bg-[#13263B] rounded-2xl px-4 py-3.5 border border-[#1E334A]">
-                <View className="flex-row items-center mb-1.5">
-                  <Ionicons
-                    name="chatbubble-ellipses-outline"
-                    size={14}
-                    color="#8EA4B8"
-                  />
-                  <Text className="text-[#8EA4B8] text-xs ml-1.5">
-                    Note from seller
-                  </Text>
-                </View>
+                <Text className="text-[#8EA4B8] text-xs mb-1.5">
+                  Note from seller
+                </Text>
                 <Text className="text-[#DCEBFF] text-[15px] leading-6">
                   {sellerNote}
                 </Text>
               </View>
             )}
-
-            {shipping.estimatedDelivery ? (
+            {!!shipping.estimatedDelivery && (
               <View>
                 <Text className="text-[#8EA4B8] text-xs mb-1">
                   Estimated Delivery
@@ -276,21 +349,11 @@ export default function BuyerOrderDetails() {
                   {new Date(shipping.estimatedDelivery).toLocaleDateString()}
                 </Text>
               </View>
-            ) : null}
-
-            {!sellerNote &&
-              !tracking &&
-              !shipping.deliveryCompany &&
-              !shipping.estimatedDelivery && (
-                <Text className="text-[#6B8299] text-[13px]">
-                  Shipping details will appear here once the seller ships your
-                  order.
-                </Text>
-              )}
+            )}
           </View>
         )}
 
-        {order.orderStatus === 'Preparing' && (
+        {!isCancelled && order.orderStatus === 'Preparing' && (
           <View className="bg-[#0B1625] border border-[#1E334A] rounded-[24px] p-5 mb-5">
             <Text className="text-white font-bold text-base mb-1">
               Preparing your order
@@ -302,10 +365,9 @@ export default function BuyerOrderDetails() {
           </View>
         )}
 
-        {/* Address */}
         <View className="bg-[#0B1625] border border-[#1E334A] rounded-[24px] p-5 mb-4">
           <Text className="text-white font-bold text-lg mb-3">
-            Shipping Address
+            Your Shipping Address
           </Text>
           <Text className="text-[#AFC3D6] leading-6 text-[15px]">
             {order.shippingAddress?.street}
@@ -317,24 +379,23 @@ export default function BuyerOrderDetails() {
           </Text>
         </View>
 
-        {/* Totals */}
         <View className="bg-[#0B1625] border border-[#1E334A] rounded-[24px] p-5">
           <View className="flex-row justify-between mb-2">
             <Text className="text-[#8EA4B8]">Subtotal</Text>
             <Text className="text-white">
-              ${Number(order.subtotal || 0).toFixed(2)}
+              {fmt(Number(order.subtotal) || 0, orderMoneyRegion)}
             </Text>
           </View>
           <View className="flex-row justify-between mb-3">
             <Text className="text-[#8EA4B8]">Delivery</Text>
             <Text className="text-white">
-              ${Number(order.shippingCost || 0).toFixed(2)}
+              {fmt(Number(order.shippingCost) || 0, orderMoneyRegion)}
             </Text>
           </View>
           <View className="flex-row justify-between items-center pt-2 border-t border-[#1E334A]">
             <Text className="text-[#8EA4B8]">Order Total</Text>
             <Text className="text-white font-bold text-xl">
-              ${Number(order.totalAmount).toFixed(2)}
+              {fmt(Number(order.totalAmount) || 0, orderMoneyRegion)}
             </Text>
           </View>
         </View>

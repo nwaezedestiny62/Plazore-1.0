@@ -11,6 +11,7 @@ import {
   Animated,
   NativeSyntheticEvent,
   NativeScrollEvent,
+  Easing,
 } from 'react-native'
 import { useLocalSearchParams, useRouter } from 'expo-router'
 import { Ionicons } from '@expo/vector-icons'
@@ -21,11 +22,11 @@ import api from '@/constants/api'
 import { COLORS } from '@/constants'
 
 const { width, height } = Dimensions.get('window')
-const H_PAD = 18
-const GAP = 16
+const H_PAD = 20
+const GAP = 14
 const CARD_W = (width - H_PAD * 2 - GAP) / 2
-const ENTRANCE_H = Math.min(height * 0.34, 280)
-const FEATURED_H = width * 0.68
+const ENTRANCE_H = Math.min(height * 0.32, 268)
+const FEATURED_H = width * 0.72
 const FEATURED_INTERVAL_MS = 7000
 
 type StorePublic = {
@@ -36,6 +37,10 @@ type StorePublic = {
   storeLogo: string
   storeBanner: string
   isVerified?: boolean
+  location?: {
+    state?: string
+    country?: string
+  }
 }
 
 export default function PublicStorefront() {
@@ -52,6 +57,7 @@ export default function PublicStorefront() {
   const door = useRef(new Animated.Value(0)).current
   const cool = useRef(new Animated.Value(0)).current
   const content = useRef(new Animated.Value(0)).current
+  const identityLift = useRef(new Animated.Value(28)).current
   const featuredRef = useRef<ScrollView>(null)
   const featuredIndexRef = useRef(0)
   const userTouching = useRef(false)
@@ -83,28 +89,38 @@ export default function PublicStorefront() {
 
   useEffect(() => {
     if (loading || !store) return
+
     Animated.sequence([
       Animated.timing(door, {
         toValue: 1,
-        duration: 480,
+        duration: 560,
+        easing: Easing.out(Easing.cubic),
         useNativeDriver: true,
       }),
       Animated.parallel([
         Animated.timing(cool, {
           toValue: 1,
-          duration: 650,
+          duration: 900,
+          easing: Easing.out(Easing.quad),
           useNativeDriver: true,
         }),
         Animated.timing(content, {
           toValue: 1,
-          duration: 550,
+          duration: 680,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+        Animated.timing(identityLift, {
+          toValue: 0,
+          duration: 720,
+          easing: Easing.out(Easing.cubic),
           useNativeDriver: true,
         }),
       ]),
     ]).start()
   }, [loading, store])
 
-  // Auto-carousel: every 7s, next product, loop last → first
+  // Auto-carousel
   useEffect(() => {
     if (products.length <= 1) return
 
@@ -134,11 +150,15 @@ export default function PublicStorefront() {
     [products.length]
   )
 
+  const locationLabel = [store?.location?.state, store?.location?.country]
+    .filter(Boolean)
+    .join(', ')
+
   if (loading) {
     return (
-      <View className="flex-1 bg-[#E8F0F8] items-center justify-center">
+      <View className="flex-1 bg-[#EAF1F7] items-center justify-center">
         <ActivityIndicator size="large" color={COLORS.primary} />
-        <Text className="text-[#6B8299] mt-4 text-[13px]">
+        <Text className="text-[#6B8299] mt-5 text-[13px] tracking-wide">
           Opening the doors…
         </Text>
       </View>
@@ -148,12 +168,21 @@ export default function PublicStorefront() {
   if (!store) {
     return (
       <SafeAreaView className="flex-1 bg-[#F4F7FA] items-center justify-center px-8">
-        <Ionicons name="storefront-outline" size={44} color="#A1A1AA" />
-        <Text className="text-primary font-bold text-lg mt-4 text-center">
+        <View className="w-16 h-16 rounded-full bg-[#EEF2F7] items-center justify-center mb-1">
+          <Ionicons name="storefront-outline" size={30} color="#94A3B8" />
+        </View>
+        <Text className="text-[#0F172A] font-bold text-lg mt-4 text-center">
           Store not found
         </Text>
-        <TouchableOpacity onPress={() => router.back()} className="mt-5">
-          <Text className="text-secondary">Go back</Text>
+        <Text className="text-[#64748B] text-[13px] mt-2 text-center leading-5">
+          This aisle may have moved, or the doors are still closed.
+        </Text>
+        <TouchableOpacity
+          onPress={() => router.back()}
+          className="mt-7 px-6 py-3 rounded-full bg-[#0F172A]"
+          activeOpacity={0.88}
+        >
+          <Text className="text-white font-semibold text-[13px]">Go back</Text>
         </TouchableOpacity>
       </SafeAreaView>
     )
@@ -162,9 +191,10 @@ export default function PublicStorefront() {
   const slideW = width - H_PAD * 2
 
   return (
-    <View className="flex-1 bg-[#F0F4F8]">
+    <View className="flex-1 bg-[#EEF3F8]">
       <StatusBar barStyle="light-content" />
 
+      {/* Soft cool-air wash */}
       <Animated.View
         pointerEvents="none"
         style={{
@@ -172,16 +202,16 @@ export default function PublicStorefront() {
           top: 0,
           left: 0,
           right: 0,
-          height: height * 0.3,
+          height: height * 0.34,
           opacity: cool.interpolate({
             inputRange: [0, 1],
-            outputRange: [0.45, 0.1],
+            outputRange: [0.5, 0.12],
           }),
           zIndex: 1,
         }}
       >
         <LinearGradient
-          colors={['#B8D4F0', 'rgba(232,240,248,0)']}
+          colors={['#C5DBF0', 'rgba(238,243,248,0)']}
           style={{ flex: 1 }}
         />
       </Animated.View>
@@ -189,34 +219,32 @@ export default function PublicStorefront() {
       <ScrollView
         showsVerticalScrollIndicator={false}
         bounces
-        contentContainerStyle={{ paddingBottom: 56 }}
+        contentContainerStyle={{ paddingBottom: 64 }}
       >
-        {/* ========== ENTRANCE — less zoom ========== */}
+        {/* ========== ENTRANCE ========== */}
         <Animated.View style={{ opacity: door }}>
           <View
             style={{ height: ENTRANCE_H }}
-            className="relative bg-[#0C1218] overflow-hidden"
+            className="relative bg-[#0B1218] overflow-hidden"
           >
             {store.storeBanner ? (
               <Image
                 source={{ uri: store.storeBanner }}
-                style={{
-                  width: width,
-                  height: ENTRANCE_H,
-                }}
+                style={{ width, height: ENTRANCE_H }}
                 resizeMode="cover"
               />
             ) : (
               <LinearGradient
-                colors={['#1A2740', '#0C1218', '#152030']}
+                colors={['#162033', '#0B1218', '#14202E']}
                 style={{ width, height: ENTRANCE_H }}
               />
             )}
 
+            {/* Soft top glow */}
             <LinearGradient
               colors={[
-                'rgba(255,255,255,0.22)',
-                'rgba(255,255,255,0.04)',
+                'rgba(255,255,255,0.18)',
+                'rgba(255,255,255,0.03)',
                 'transparent',
               ]}
               style={{
@@ -224,18 +252,19 @@ export default function PublicStorefront() {
                 top: 0,
                 left: 0,
                 right: 0,
-                height: 70,
+                height: 80,
               }}
             />
 
+            {/* Bottom fade into floor */}
             <LinearGradient
-              colors={['transparent', 'rgba(240,244,248,0.65)', '#F0F4F8']}
+              colors={['transparent', 'rgba(238,243,248,0.55)', '#EEF3F8']}
               style={{
                 position: 'absolute',
                 left: 0,
                 right: 0,
                 bottom: 0,
-                height: 90,
+                height: 100,
               }}
             />
 
@@ -246,27 +275,29 @@ export default function PublicStorefront() {
               <View className="px-4 pt-1 flex-row justify-between items-center">
                 <TouchableOpacity
                   onPress={() => router.back()}
+                  activeOpacity={0.85}
                   className="w-11 h-11 rounded-full items-center justify-center overflow-hidden"
                 >
                   <BlurView
-                    intensity={40}
+                    intensity={42}
                     tint="dark"
                     style={{ position: 'absolute', inset: 0 }}
                   />
-                  <View className="w-11 h-11 rounded-full bg-black/30 items-center justify-center">
+                  <View className="w-11 h-11 rounded-full bg-black/28 items-center justify-center">
                     <Ionicons name="arrow-back" size={20} color="#fff" />
                   </View>
                 </TouchableOpacity>
-                <View className="px-3 py-1.5 rounded-full bg-black/30 border border-white/15">
-                  <Text className="text-white/90 text-[11px] font-semibold tracking-wide">
+
+                <View className="px-3.5 py-1.5 rounded-full bg-black/28 border border-white/12">
+                  <Text className="text-white/88 text-[11px] font-semibold tracking-[0.6px]">
                     Plazore Mall
                   </Text>
                 </View>
               </View>
             </SafeAreaView>
 
-            <View className="absolute bottom-10 left-0 right-0 items-center">
-              <Text className="text-white/70 text-[11px] font-semibold tracking-[3px] uppercase">
+            <View className="absolute bottom-11 left-0 right-0 items-center">
+              <Text className="text-white/65 text-[10px] font-semibold tracking-[3.2px] uppercase">
                 You are entering
               </Text>
             </View>
@@ -277,29 +308,30 @@ export default function PublicStorefront() {
         <Animated.View
           style={{
             opacity: content,
-            transform: [
-              {
-                translateY: content.interpolate({
-                  inputRange: [0, 1],
-                  outputRange: [24, 0],
-                }),
-              },
-            ],
+            transform: [{ translateY: identityLift }],
           }}
-          className="px-5 -mt-7"
+          className="px-5 -mt-8"
         >
           <View
-            className="bg-white rounded-[28px] border border-white p-5"
+            className="bg-white rounded-[30px] border border-white/80 p-6"
             style={{
               shadowColor: '#1A3A5C',
-              shadowOpacity: 0.08,
-              shadowRadius: 24,
-              shadowOffset: { width: 0, height: 10 },
-              elevation: 6,
+              shadowOpacity: 0.07,
+              shadowRadius: 28,
+              shadowOffset: { width: 0, height: 12 },
+              elevation: 7,
             }}
           >
             <View className="flex-row items-center">
-              <View className="w-[76px] h-[76px] rounded-[22px] bg-[#F0F4F8] overflow-hidden items-center justify-center border border-gray-100">
+              <View
+                className="w-[80px] h-[80px] rounded-[24px] bg-[#F0F4F8] overflow-hidden items-center justify-center border border-[#E8EEF4]"
+                style={{
+                  shadowColor: '#0F172A',
+                  shadowOpacity: 0.04,
+                  shadowRadius: 8,
+                  shadowOffset: { width: 0, height: 3 },
+                }}
+              >
                 {store.storeLogo ? (
                   <Image
                     source={{ uri: store.storeLogo }}
@@ -307,9 +339,10 @@ export default function PublicStorefront() {
                     resizeMode="cover"
                   />
                 ) : (
-                  <Ionicons name="storefront" size={32} color="#9CA3AF" />
+                  <Ionicons name="storefront" size={34} color="#94A3B8" />
                 )}
               </View>
+
               <View className="flex-1 ml-4">
                 <View className="flex-row items-center flex-wrap">
                   <Text className="text-[#0F172A] font-extrabold text-[22px] leading-7 mr-2">
@@ -328,21 +361,38 @@ export default function PublicStorefront() {
                     </View>
                   ) : null}
                 </View>
-                <Text className="text-[#64748B] text-[12px] mt-1">
+
+                <Text className="text-[#64748B] text-[12px] mt-1.5 tracking-wide">
                   Open · Walk the aisles
                 </Text>
+
+                {/* Location from My Store → Shipping details */}
+                {!!locationLabel && (
+                  <View className="flex-row items-center mt-2.5">
+                    <View className="w-5 h-5 rounded-full bg-[#F1F5F9] items-center justify-center">
+                      <Ionicons
+                        name="location-outline"
+                        size={12}
+                        color="#64748B"
+                      />
+                    </View>
+                    <Text className="text-[#64748B] text-[12px] ml-1.5 font-medium">
+                      {locationLabel}
+                    </Text>
+                  </View>
+                )}
               </View>
             </View>
 
             {!!store.storeDescription && (
-              <Text className="text-[#475569] text-[15px] leading-6 mt-4">
+              <Text className="text-[#475569] text-[15px] leading-6 mt-5">
                 {store.storeDescription}
               </Text>
             )}
 
             {!!store.businessGoal && (
-              <View className="mt-4 bg-[#F8FAFC] rounded-2xl px-4 py-3 border border-[#EEF2F7]">
-                <Text className="text-[#94A3B8] text-[10px] font-bold tracking-[1.5px] uppercase mb-1">
+              <View className="mt-5 bg-[#F8FAFC] rounded-2xl px-4 py-3.5 border border-[#EEF2F7]">
+                <Text className="text-[#94A3B8] text-[10px] font-bold tracking-[1.6px] uppercase mb-1.5">
                   Our goal
                 </Text>
                 <Text className="text-[#1E293B] text-[14px] leading-5">
@@ -351,7 +401,7 @@ export default function PublicStorefront() {
               </View>
             )}
 
-            <View className="flex-row mt-5 gap-3">
+            <View className="flex-row mt-6 gap-3">
               <TouchableOpacity
                 onPress={() => setFollowing((f) => !f)}
                 activeOpacity={0.88}
@@ -363,7 +413,8 @@ export default function PublicStorefront() {
                   {following ? 'Following' : 'Follow store'}
                 </Text>
               </TouchableOpacity>
-              <View className="px-4 py-3.5 rounded-2xl bg-[#F1F5F9] items-center justify-center">
+
+              <View className="px-4 py-3.5 rounded-2xl bg-[#F1F5F9] items-center justify-center min-w-[88px]">
                 <Text className="text-[#64748B] font-semibold text-[13px]">
                   {products.length} on floor
                 </Text>
@@ -372,14 +423,14 @@ export default function PublicStorefront() {
           </View>
         </Animated.View>
 
-        {/* ========== FEATURED CAROUSEL (7s loop) ========== */}
+        {/* ========== FEATURED CAROUSEL ========== */}
         {products.length > 0 && (
-          <Animated.View style={{ opacity: content }} className="mt-8">
-            <View className="px-5 mb-4">
-              <Text className="text-[#94A3B8] text-[11px] font-bold tracking-[2px] uppercase mb-1">
+          <Animated.View style={{ opacity: content }} className="mt-10">
+            <View className="px-5 mb-5">
+              <Text className="text-[#94A3B8] text-[11px] font-bold tracking-[2px] uppercase mb-1.5">
                 Front display
               </Text>
-              <Text className="text-[#0F172A] font-bold text-[20px]">
+              <Text className="text-[#0F172A] font-bold text-[21px] leading-7">
                 Featured on the floor
               </Text>
             </View>
@@ -407,21 +458,21 @@ export default function PublicStorefront() {
                   key={p._id}
                   activeOpacity={0.92}
                   onPress={() => router.push(`/product/${p._id}` as any)}
-                  style={{
-                    width: slideW,
-                    marginRight: 0,
-                  }}
+                  style={{ width: slideW }}
                 >
                   <View
-                    className="bg-white rounded-[28px] overflow-hidden border border-gray-100 mx-0"
+                    className="bg-white rounded-[28px] overflow-hidden border border-[#E8EEF4]"
                     style={{
                       shadowColor: '#0F172A',
-                      shadowOpacity: 0.06,
-                      shadowRadius: 20,
-                      shadowOffset: { width: 0, height: 8 },
+                      shadowOpacity: 0.05,
+                      shadowRadius: 22,
+                      shadowOffset: { width: 0, height: 10 },
                     }}
                   >
-                    <View style={{ height: FEATURED_H }} className="bg-[#E8EEF4]">
+                    <View
+                      style={{ height: FEATURED_H }}
+                      className="bg-[#E8EEF4]"
+                    >
                       {p.images?.[0] ? (
                         <Image
                           source={{ uri: p.images[0] }}
@@ -432,29 +483,35 @@ export default function PublicStorefront() {
                         <View className="flex-1 items-center justify-center">
                           <Ionicons
                             name="image-outline"
-                            size={40}
+                            size={42}
                             color="#CBD5E1"
                           />
                         </View>
                       )}
+
                       <LinearGradient
-                        colors={['transparent', 'rgba(15,23,42,0.78)']}
+                        colors={[
+                          'transparent',
+                          'rgba(15,23,42,0.55)',
+                          'rgba(15,23,42,0.82)',
+                        ]}
                         style={{
                           position: 'absolute',
                           left: 0,
                           right: 0,
                           bottom: 0,
-                          height: 110,
+                          height: 130,
                         }}
                       />
-                      <View className="absolute bottom-4 left-4 right-4">
+
+                      <View className="absolute bottom-5 left-5 right-5">
                         <Text
-                          className="text-white font-bold text-[18px]"
+                          className="text-white font-bold text-[18px] leading-6"
                           numberOfLines={2}
                         >
                           {p.name}
                         </Text>
-                        <Text className="text-white/90 font-extrabold text-[20px] mt-1">
+                        <Text className="text-white/95 font-extrabold text-[21px] mt-1.5">
                           ${Number(p.price).toFixed(2)}
                         </Text>
                       </View>
@@ -465,7 +522,7 @@ export default function PublicStorefront() {
             </ScrollView>
 
             {products.length > 1 && (
-              <View className="flex-row justify-center items-center mt-3.5 gap-1.5">
+              <View className="flex-row justify-center items-center mt-4 gap-1.5">
                 {products.map((_, i) => (
                   <View
                     key={i}
@@ -484,27 +541,29 @@ export default function PublicStorefront() {
         )}
 
         {/* ========== AISLES ========== */}
-        <Animated.View style={{ opacity: content }} className="px-5 mt-10">
+        <Animated.View style={{ opacity: content }} className="px-5 mt-12">
           <Text className="text-[#94A3B8] text-[11px] font-bold tracking-[2px] uppercase">
             Aisles
           </Text>
-          <Text className="text-[#0F172A] font-bold text-[20px] mt-1">
+          <Text className="text-[#0F172A] font-bold text-[21px] mt-1.5 leading-7">
             Walk the collection
           </Text>
 
-          <View className="flex-row items-center my-4">
+          <View className="flex-row items-center my-5">
             <View className="flex-1 h-[1px] bg-[#D8E0EA]" />
-            <Text className="text-[#94A3B8] text-[10px] mx-3 tracking-widest uppercase">
+            <Text className="text-[#94A3B8] text-[10px] mx-3.5 tracking-[1.8px] uppercase">
               Open floor
             </Text>
             <View className="flex-1 h-[1px] bg-[#D8E0EA]" />
           </View>
 
           {products.length === 0 ? (
-            <View className="py-20 items-center">
-              <Ionicons name="cube-outline" size={40} color="#CBD5E1" />
-              <Text className="text-[#64748B] mt-3 text-center px-6 leading-5">
-                This store is still setting up the shelves. Check back soon.
+            <View className="py-24 items-center">
+              <View className="w-16 h-16 rounded-full bg-[#E8EEF4] items-center justify-center mb-1">
+                <Ionicons name="cube-outline" size={28} color="#94A3B8" />
+              </View>
+              <Text className="text-[#64748B] mt-4 text-center px-8 leading-6 text-[14px]">
+                This store is still setting up the shelves.{'\n'}Check back soon.
               </Text>
             </View>
           ) : (
@@ -514,20 +573,20 @@ export default function PublicStorefront() {
                   key={p._id}
                   activeOpacity={0.9}
                   onPress={() => router.push(`/product/${p._id}` as any)}
-                  style={{ width: CARD_W, marginBottom: 20 }}
+                  style={{ width: CARD_W, marginBottom: 18 }}
                 >
                   <View
                     className="bg-white rounded-[22px] overflow-hidden border border-[#E8EEF4]"
                     style={{
                       shadowColor: '#0F172A',
-                      shadowOpacity: 0.04,
-                      shadowRadius: 12,
-                      shadowOffset: { width: 0, height: 4 },
+                      shadowOpacity: 0.035,
+                      shadowRadius: 14,
+                      shadowOffset: { width: 0, height: 5 },
                     }}
                   >
                     <View
                       className="bg-[#E8EEF4]"
-                      style={{ height: CARD_W * 1.2 }}
+                      style={{ height: CARD_W * 1.18 }}
                     >
                       {p.images?.[0] ? (
                         <Image
@@ -545,7 +604,7 @@ export default function PublicStorefront() {
                         </View>
                       )}
                     </View>
-                    <View className="px-3 pt-3 pb-3.5">
+                    <View className="px-3.5 pt-3 pb-3.5">
                       <Text
                         className="text-[#0F172A] font-semibold text-[13px] leading-5"
                         numberOfLines={2}
@@ -563,9 +622,10 @@ export default function PublicStorefront() {
           )}
         </Animated.View>
 
-        <View className="items-center mt-10 mb-2">
-          <View className="w-12 h-1 rounded-full bg-[#D8E0EA] mb-3" />
-          <Text className="text-[#94A3B8] text-[11px] tracking-[1px]">
+        {/* Quiet footer */}
+        <View className="items-center mt-14 mb-3">
+          <View className="w-10 h-[3px] rounded-full bg-[#D8E0EA] mb-4" />
+          <Text className="text-[#94A3B8] text-[11px] tracking-[1.2px]">
             Plazore · Premium Digital Mall
           </Text>
         </View>

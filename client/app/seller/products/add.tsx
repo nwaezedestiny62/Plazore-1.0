@@ -1,30 +1,36 @@
+import api from '@/constants/api'
+import {
+  buildFulfillmentLocation,
+  FULFILLMENT_COUNTRIES,
+  getCitiesForState,
+  getStatesForCountry,
+} from '@/constants/locations'
+import {
+  CATEGORY_LIST,
+  PLAN_FEES,
+  PLAN_IMAGE_LIMITS,
+  PRODUCT_CATEGORIES,
+} from '@/constants/productCatalog'
+import { getRegion } from '@/constants/regions'
+import { useMarketplace } from '@/context/MarketplaceContext'
+import { useAuth } from '@clerk/clerk-expo'
+import { Ionicons } from '@expo/vector-icons'
+import * as ImagePicker from 'expo-image-picker'
+import { LinearGradient } from 'expo-linear-gradient'
+import { useRouter } from 'expo-router'
 import React, { useMemo, useState } from 'react'
 import {
-  View,
+  ActivityIndicator,
+  Alert,
+  Image,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
   Text,
   TextInput,
   TouchableOpacity,
-  ScrollView,
-  Image,
-  ActivityIndicator,
-  Alert,
-  KeyboardAvoidingView,
-  Platform,
+  View,
 } from 'react-native'
-import { useAuth } from '@clerk/clerk-expo'
-import { useRouter } from 'expo-router'
-import { Ionicons } from '@expo/vector-icons'
-import { LinearGradient } from 'expo-linear-gradient'
-import * as ImagePicker from 'expo-image-picker'
-import api from '@/constants/api'
-import { useMarketplace } from "@/context/MarketplaceContext";
-import { getRegion } from "@/constants/regions";
-import {
-  CATEGORY_LIST,
-  PRODUCT_CATEGORIES,
-  PLAN_IMAGE_LIMITS,
-  PLAN_FEES,
-} from '@/constants/productCatalog'
 
 const CURRENT_PLAN: keyof typeof PLAN_IMAGE_LIMITS = 'free'
 
@@ -71,6 +77,8 @@ function Label({ children }: { children: string }) {
 export default function AddProduct() {
   const { getToken } = useAuth()
   const router = useRouter()
+  const { region, currencySymbol } = useMarketplace()
+  const regionInfo = getRegion(region)
 
   const maxImages = PLAN_IMAGE_LIMITS[CURRENT_PLAN]
   const feePct = PLAN_FEES[CURRENT_PLAN]
@@ -83,16 +91,23 @@ export default function AddProduct() {
   const [subCategory, setSubCategory] = useState('')
   const [brand, setBrand] = useState('')
   const [stock, setStock] = useState('')
-  const [shippingMethod, setShippingMethod] = useState<'self' | 'courier' | null>(
-    null
-  )
+  const [shippingMethod, setShippingMethod] = useState<
+    'self' | 'courier' | null
+  >(null)
   const [courierCompany, setCourierCompany] = useState('')
   const [deliveryFee, setDeliveryFee] = useState('')
   const [loading, setLoading] = useState(false)
 
-  // inside the component:
-const { region, currencySymbol } = useMarketplace()
-const regionInfo = getRegion(region)
+  // Fulfillment location (independent of shipping method)
+  const [fulfillCountryCode, setFulfillCountryCode] = useState('')
+  const [fulfillStateCode, setFulfillStateCode] = useState('')
+  const [fulfillCity, setFulfillCity] = useState('')
+
+  const fulfillCountry = FULFILLMENT_COUNTRIES.find(
+    (c) => c.code === fulfillCountryCode
+  )
+  const fulfillStates = getStatesForCountry(fulfillCountryCode)
+  const fulfillCities = getCitiesForState(fulfillCountryCode, fulfillStateCode)
 
   const subCategories = useMemo(
     () => (category ? PRODUCT_CATEGORIES[category] || ['Other'] : []),
@@ -146,6 +161,20 @@ const regionInfo = getRegion(region)
       Alert.alert('Images', 'Add at least one product image')
       return
     }
+
+    // Fulfillment location required
+    if (!fulfillCountryCode || !fulfillCity) {
+      Alert.alert(
+        'Fulfillment location',
+        'Select where this product will ship from (country and city)'
+      )
+      return
+    }
+    if (fulfillStates.length > 0 && !fulfillStateCode) {
+      Alert.alert('Fulfillment location', 'Select a state / province')
+      return
+    }
+
     if (!shippingMethod) {
       Alert.alert('Shipping', 'Choose Self Delivery or Courier Delivery')
       return
@@ -154,18 +183,20 @@ const regionInfo = getRegion(region)
       Alert.alert('Courier', 'Enter the courier company name')
       return
     }
- // Sanitize: allow "1,500.50" or "1500" or "0"
-const cleanedFee = String(deliveryFee).replace(/,/g, '').trim()
-const feeNum = Number(cleanedFee)
 
-if (
-  cleanedFee === '' ||
-  Number.isNaN(feeNum) ||
-  feeNum < 0
-) {
-  Alert.alert('Delivery fee', 'Enter a valid delivery fee (0 is allowed)')
-  return
-}
+    const cleanedFee = String(deliveryFee).replace(/,/g, '').trim()
+    const feeNum = Number(cleanedFee)
+    if (cleanedFee === '' || Number.isNaN(feeNum) || feeNum < 0) {
+      Alert.alert('Delivery fee', 'Enter a valid delivery fee (0 is allowed)')
+      return
+    }
+
+    const cleanedPrice = String(price).replace(/,/g, '').trim()
+    const priceNum = Number(cleanedPrice)
+    if (!Number.isFinite(priceNum) || priceNum < 0) {
+      Alert.alert('Price', 'Enter a valid product price')
+      return
+    }
 
     try {
       setLoading(true)
@@ -174,7 +205,7 @@ if (
 
       formData.append('name', name.trim())
       formData.append('description', description.trim())
-      formData.append('price', price)
+      formData.append('price', String(priceNum))
       formData.append('stock', stock)
       formData.append('category', category)
       formData.append('subCategory', subCategory)
@@ -182,6 +213,21 @@ if (
       formData.append('shippingMethod', shippingMethod)
       formData.append('courierCompany', courierCompany.trim())
       formData.append('deliveryFee', String(feeNum))
+
+      const loc = buildFulfillmentLocation({
+        countryCode: fulfillCountryCode,
+        country: fulfillCountry?.name || '',
+        stateCode: fulfillStateCode,
+        state:
+          fulfillStates.find((s) => s.code === fulfillStateCode)?.name || '',
+        city: fulfillCity,
+      })
+
+      formData.append('fulfillmentCountryCode', loc.countryCode)
+      formData.append('fulfillmentCountry', loc.country)
+      formData.append('fulfillmentStateCode', loc.stateCode || '')
+      formData.append('fulfillmentState', loc.state || '')
+      formData.append('fulfillmentCity', loc.city)
 
       images.forEach((uri, index) => {
         const filename = uri.split('/').pop() || `image-${index}.jpg`
@@ -207,7 +253,10 @@ if (
       }
     } catch (error: any) {
       console.log(error.response?.data || error.message)
-      Alert.alert('Error', error.response?.data?.message || 'Failed to publish')
+      Alert.alert(
+        'Error',
+        error.response?.data?.message || 'Failed to publish'
+      )
     } finally {
       setLoading(false)
     }
@@ -297,20 +346,20 @@ if (
             className="bg-[#0A121C] border border-[#1A2D42] rounded-2xl px-4 py-3.5 text-white mb-4"
           />
 
-         <Text className="text-[#AFC3D6] text-sm mb-2">
-  Price ({currencySymbol}) *
-</Text>
-<TextInput
-  value={price}
-  onChangeText={setPrice}
-  placeholder="0.00"
-  keyboardType="decimal-pad"
-  placeholderTextColor="#3D5268"
-  className="bg-[#0A121C] border border-[#1A2D42] rounded-2xl px-4 py-3.5 text-white mb-1"
-/>
-<Text className="text-[#5A7088] text-[11px] mb-4">
-  Enter amount in {regionInfo.name} ({regionInfo.currency.code})
-</Text>
+          <Text className="text-[#AFC3D6] text-sm mb-2">
+            Price ({currencySymbol}) *
+          </Text>
+          <TextInput
+            value={price}
+            onChangeText={setPrice}
+            placeholder="0.00"
+            keyboardType="decimal-pad"
+            placeholderTextColor="#3D5268"
+            className="bg-[#0A121C] border border-[#1A2D42] rounded-2xl px-4 py-3.5 text-white mb-1"
+          />
+          <Text className="text-[#5A7088] text-[11px] mb-4">
+            Enter amount in {regionInfo.name} ({regionInfo.currency.code})
+          </Text>
 
           <Label>Description *</Label>
           <TextInput
@@ -369,7 +418,9 @@ if (
                   >
                     <Text
                       className={`text-[12px] ${
-                        subCategory === sub ? 'text-[#B8D4FF]' : 'text-[#6B8299]'
+                        subCategory === sub
+                          ? 'text-[#B8D4FF]'
+                          : 'text-[#6B8299]'
                       }`}
                     >
                       {sub}
@@ -400,8 +451,12 @@ if (
           />
         </Section>
 
-        {/* 03 Shipping */}
-        <Section step="03" title="Shipping Details">
+        {/* 03 Fulfillment Location */}
+        <Section
+          step="03"
+          title="Fulfillment Location"
+          subtitle="Where this product ships from — not your personal address"
+        >
           <View className="bg-[#122033] border border-[#1E334A] rounded-2xl p-4 mb-5 flex-row">
             <Ionicons
               name="information-circle-outline"
@@ -409,9 +464,132 @@ if (
               color="#9EC5FF"
             />
             <Text className="text-[#AFC3D6] text-[12px] leading-5 flex-1 ml-2">
-              Review shipping carefully before publishing. Buyers see this method
-              and fee throughout checkout and order tracking. You will not choose
-              the method again when shipping an order.
+              Buyers only see city and country (e.g. Lagos, Nigeria). Exact
+              address stays private. Separate from how you deliver (self vs
+              courier).
+            </Text>
+          </View>
+
+          <Label>Country *</Label>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            className="mb-4"
+          >
+            {FULFILLMENT_COUNTRIES.map((c) => (
+              <TouchableOpacity
+                key={c.code}
+                onPress={() => {
+                  setFulfillCountryCode(c.code)
+                  setFulfillStateCode('')
+                  setFulfillCity('')
+                }}
+                className={`mr-2 px-3.5 py-2 rounded-full border ${
+                  fulfillCountryCode === c.code
+                    ? 'bg-[#1A2F4A] border-[#4A7AB5]'
+                    : 'bg-[#0A121C] border-[#1A2D42]'
+                }`}
+              >
+                <Text
+                  className={`text-[12px] font-medium ${
+                    fulfillCountryCode === c.code
+                      ? 'text-[#B8D4FF]'
+                      : 'text-[#6B8299]'
+                  }`}
+                >
+                  {c.name}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+
+          {fulfillStates.length > 0 && (
+            <>
+              <Label>State / Province *</Label>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                className="mb-4"
+              >
+                {fulfillStates.map((s) => (
+                  <TouchableOpacity
+                    key={s.code}
+                    onPress={() => {
+                      setFulfillStateCode(s.code)
+                      setFulfillCity('')
+                    }}
+                    className={`mr-2 px-3.5 py-2 rounded-full border ${
+                      fulfillStateCode === s.code
+                        ? 'bg-[#1A2F4A] border-[#4A7AB5]'
+                        : 'bg-[#0A121C] border-[#1A2D42]'
+                    }`}
+                  >
+                    <Text
+                      className={`text-[12px] ${
+                        fulfillStateCode === s.code
+                          ? 'text-[#B8D4FF]'
+                          : 'text-[#6B8299]'
+                      }`}
+                    >
+                      {s.name}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </>
+          )}
+
+          {!!fulfillCountryCode &&
+            (fulfillStates.length === 0 || !!fulfillStateCode) && (
+              <>
+                <Label>City *</Label>
+                <View className="flex-row flex-wrap gap-2 mb-3">
+                  {fulfillCities.map((city) => (
+                    <TouchableOpacity
+                      key={city}
+                      onPress={() => setFulfillCity(city)}
+                      className={`px-3.5 py-2 rounded-full border ${
+                        fulfillCity === city
+                          ? 'bg-[#1A2F4A] border-[#4A7AB5]'
+                          : 'bg-[#0A121C] border-[#1A2D42]'
+                      }`}
+                    >
+                      <Text
+                        className={`text-[12px] ${
+                          fulfillCity === city
+                            ? 'text-[#B8D4FF]'
+                            : 'text-[#6B8299]'
+                        }`}
+                      >
+                        {city}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </>
+            )}
+
+          {!!fulfillCity && fulfillCountry && (
+            <View className="mt-1 bg-[#122033] border border-[#1E334A] rounded-2xl px-4 py-3 flex-row items-center">
+              <Ionicons name="location-outline" size={16} color="#9EC5FF" />
+              <Text className="text-[#B8D4FF] font-semibold ml-2">
+                Ships from {fulfillCity}, {fulfillCountry.name}
+              </Text>
+            </View>
+          )}
+        </Section>
+
+        {/* 04 Shipping method */}
+        <Section step="04" title="Shipping Method">
+          <View className="bg-[#122033] border border-[#1E334A] rounded-2xl p-4 mb-5 flex-row">
+            <Ionicons
+              name="information-circle-outline"
+              size={20}
+              color="#9EC5FF"
+            />
+            <Text className="text-[#AFC3D6] text-[12px] leading-5 flex-1 ml-2">
+              How this product is delivered (self or courier). Independent of
+              fulfillment location above.
             </Text>
           </View>
 
@@ -476,8 +654,8 @@ if (
           )}
         </Section>
 
-        {/* 04 Publish */}
-        <Section step="04" title="Publish">
+        {/* 05 Publish */}
+        <Section step="05" title="Publish">
           <View className="flex-row justify-between mb-2">
             <Text className="text-[#6B8299] text-[13px]">Current plan</Text>
             <Text className="text-white font-semibold capitalize">
@@ -530,8 +708,7 @@ if (
           <Ionicons name="eye-outline" size={22} color="#4A657A" />
           <Text className="text-white font-bold mt-3">Live Product Preview</Text>
           <Text className="text-[#5A7088] text-center text-[12px] mt-2 leading-5">
-            Buyer-facing preview before publish will appear here later. AI and
-            Buyer Confidence stay out of this preview.
+            Buyer-facing preview before publish will appear here later.
           </Text>
         </View>
       </ScrollView>

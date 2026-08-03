@@ -1,9 +1,10 @@
 import Notification from "../models/Notification.js";
 
-type NotificationType =
+export type NotificationType =
   | "new_order"
   | "order_shipped"
   | "order_delivered"
+  | "order_cancelled"
   | "order_reminder"
   | "order_shipped_reminder"
   | "general";
@@ -26,13 +27,15 @@ export const sendNotification = async ({
   orderNumber,
 }: SendNotificationParams) => {
   try {
+    if (!userId) return;
+
     await Notification.create({
       user: userId,
       type,
       title,
       message,
-      order: orderId,
-      orderNumber,
+      order: orderId || undefined,
+      orderNumber: orderNumber || undefined,
     });
   } catch (error) {
     console.error("Failed to send notification:", error);

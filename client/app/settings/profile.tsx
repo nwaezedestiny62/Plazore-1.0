@@ -1,9 +1,10 @@
 import api from "@/constants/api";
 import { getRegion, REGION_LIST } from "@/constants/regions";
+import { useMarketplace } from "@/context/MarketplaceContext";
 import { useAuth, useUser } from "@clerk/clerk-expo";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Image,
@@ -17,74 +18,155 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import Toast from "react-native-toast-message";
 
 export default function EditProfileScreen() {
-  const { getToken } = useAuth();
+  const { getToken, isSignedIn, isLoaded } = useAuth();
   const { user: clerkUser } = useUser();
+  const { region: appRegion, setRegionLocal } = useMarketplace();
   const router = useRouter();
 
-  const [name, setName] = useState("");
+  const clerkName =
+    [clerkUser?.firstName, clerkUser?.lastName].filter(Boolean).join(" ") ||
+    clerkUser?.fullName ||
+    "";
+
+  const [name, setName] = useState(clerkName);
   const [phone, setPhone] = useState("");
-  const [region, setRegion] = useState("NG");
+  const [region, setRegion] = useState(appRegion || "NG");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [showRegions, setShowRegions] = useState(false);
 
+  const regionTouched = useRef(false);
+  const loadedOnce = useRef(false);
+
   useEffect(() => {
+    if (!isLoaded) return;
+    if (loadedOnce.current) return;
+    loadedOnce.current = true;
+
     const load = async () => {
       try {
+        if (!isSignedIn) {
+          setLoading(false);
+          return;
+        }
+
         const token = await getToken();
+        if (!token) {
+          setLoading(false);
+          return;
+        }
+
         const res = await api.get("/users/me", {
           headers: { Authorization: `Bearer ${token}` },
         });
-        if (res.data.success) {
+
+        if (res.data?.success) {
           const u = res.data.data;
-          setName(u.name || "");
+          setName(u.name || clerkName || "");
           setPhone(u.phone || "");
-          setRegion(u.marketplaceRegion || "NG");
+          if (!regionTouched.current) {
+            setRegion(u.marketplaceRegion || appRegion || "NG");
+          }
         }
-      } catch (e) {
-        console.log(e);
+      } catch {
+        if (!name && clerkName) setName(clerkName);
+        if (!regionTouched.current && appRegion) setRegion(appRegion);
       } finally {
         setLoading(false);
       }
     };
+
     load();
-  }, []);
+  }, [isLoaded, isSignedIn]);
+
+  const handleSelectRegion = (code: string) => {
+    regionTouched.current = true;
+    setRegion(code);
+    setShowRegions(false);
+  };
 
   const handleSave = async () => {
-    if (!name.trim()) {
-      Toast.show({ type: "error", text1: "Name is required" });
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      Toast.show({
+        type: "error",
+        text1: "Name is required",
+        text2: "Enter your name before saving",
+      });
       return;
     }
 
+    if (saving) return;
     setSaving(true);
+
     try {
       const token = await getToken();
-      await api.patch(
+      if (!token) {
+        Toast.show({
+          type: "error",
+          text1: "Not signed in",
+          text2: "Sign out and sign in again",
+        });
+        setSaving(false);
+        return;
+      }
+
+      const res = await api.patch(
         "/users/me",
         {
-          name: name.trim(),
+          name: trimmedName,
           phone: phone.trim(),
           marketplaceRegion: region,
         },
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
-      try {
-        await clerkUser?.update({
-          firstName: name.trim().split(" ")[0],
-          lastName: name.trim().split(" ").slice(1).join(" ") || undefined,
-        });
-      } catch {}
+      if (!res.data?.success) {
+        throw new Error(res.data?.message || "Save failed");
+      }
 
+      const savedRegion = res.data.data?.marketplaceRegion || region;
+
+      setRegionLocal(savedRegion);
+      setRegion(savedRegion);
+      regionTouched.current = false;
+
+      try {
+        const parts = trimmedName.split(" ");
+        await clerkUser?.update({
+          firstName: parts[0],
+          lastName: parts.slice(1).join(" ") || undefined,
+        });
+      } catch {
+        // optional
+      }
+
+      const chosen = getRegion(savedRegion);
       Toast.show({
         type: "success",
         text1: "Profile updated",
-        text2: "Your changes have been saved",
+        text2: `Marketplace: ${chosen.name} (${chosen.currency.symbol})`,
       });
 
       router.back();
-    } catch (e) {
-      Toast.show({ type: "error", text1: "Failed to save" });
+    } catch (e: any) {
+      const status = e?.response?.status;
+      if (status === 401) {
+        Toast.show({
+          type: "error",
+          text1: "Session expired",
+          text2: "Please sign out and sign in again",
+        });
+      } else {
+        Toast.show({
+          type: "error",
+          text1: "Failed to save",
+          text2:
+            e?.response?.data?.message ||
+            e?.message ||
+            "Check your connection and try again",
+        });
+      }
     } finally {
       setSaving(false);
     }
@@ -93,7 +175,7 @@ export default function EditProfileScreen() {
   if (loading) {
     return (
       <View className="flex-1 bg-[#070B12] items-center justify-center">
-        <ActivityIndicator color="#7EC8FF" />
+        <ActivityIndicator color="#7EC8FF" size="large" />
       </View>
     );
   }
@@ -102,34 +184,38 @@ export default function EditProfileScreen() {
 
   return (
     <SafeAreaView className="flex-1 bg-[#070B12]" edges={["top"]}>
-      <View className="px-5 pt-3 pb-4 flex-row items-center justify-between">
-        <View className="flex-row items-center">
-          <TouchableOpacity onPress={() => router.back()} className="mr-4 p-1">
-            <Ionicons name="arrow-back" size={24} color="#DCEBFF" />
-          </TouchableOpacity>
-          <Text className="text-white text-xl font-bold">Edit Profile</Text>
-        </View>
+      <View className="px-5 pt-3 pb-4 flex-row items-center">
+        <TouchableOpacity onPress={() => router.back()} className="mr-4 p-1">
+          <Ionicons name="arrow-back" size={24} color="#DCEBFF" />
+        </TouchableOpacity>
+        <Text className="text-white text-xl font-bold">Edit Profile</Text>
       </View>
 
       <ScrollView
         className="flex-1 px-5"
-        contentContainerStyle={{ paddingBottom: 40 }}
+        contentContainerStyle={{ paddingBottom: 48 }}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
-        {/* Avatar */}
         <View className="items-center mb-8">
-          <Image
-            source={{ uri: clerkUser?.imageUrl }}
-            style={{ width: 96, height: 96, borderRadius: 48 }}
-          />
-          <Text className="text-[#7A93A8] text-[13px] mt-3">
+          {clerkUser?.imageUrl ? (
+            <Image
+              source={{ uri: clerkUser.imageUrl }}
+              style={{ width: 96, height: 96, borderRadius: 48 }}
+            />
+          ) : (
+            <View className="w-24 h-24 rounded-full bg-[#0C1520] items-center justify-center">
+              <Ionicons name="person" size={40} color="#5A7088" />
+            </View>
+          )}
+          <Text className="text-[#7A93A8] text-[13px] mt-3 text-center">
             Profile photo is managed by your account provider
           </Text>
         </View>
 
-        {/* Full Name */}
-        <Text className="text-[#AFC3D6] text-sm mb-2 font-medium">Full Name</Text>
+        <Text className="text-[#AFC3D6] text-sm mb-2 font-medium">
+          Full Name
+        </Text>
         <TextInput
           value={name}
           onChangeText={setName}
@@ -138,7 +224,6 @@ export default function EditProfileScreen() {
           className="bg-[#0C1520] border border-[#1A2A3A] rounded-2xl px-4 py-4 text-white mb-5 text-[16px]"
         />
 
-        {/* Email (read-only) */}
         <Text className="text-[#AFC3D6] text-sm mb-2 font-medium">Email</Text>
         <View className="bg-[#0C1520] border border-[#1A2A3A] rounded-2xl px-4 py-4 mb-5">
           <Text className="text-[#7A93A8] text-[16px]">
@@ -146,8 +231,9 @@ export default function EditProfileScreen() {
           </Text>
         </View>
 
-        {/* Phone */}
-        <Text className="text-[#AFC3D6] text-sm mb-2 font-medium">Phone Number</Text>
+        <Text className="text-[#AFC3D6] text-sm mb-2 font-medium">
+          Phone Number
+        </Text>
         <TextInput
           value={phone}
           onChangeText={setPhone}
@@ -157,12 +243,16 @@ export default function EditProfileScreen() {
           className="bg-[#0C1520] border border-[#1A2A3A] rounded-2xl px-4 py-4 text-white mb-5 text-[16px]"
         />
 
-        {/* Marketplace Region */}
         <Text className="text-[#AFC3D6] text-sm mb-2 font-medium">
           Marketplace Region
         </Text>
+        <Text className="text-[#5A7088] text-[12px] mb-2 leading-4">
+          Prices and currency across the app follow this country.
+        </Text>
+
         <TouchableOpacity
-          onPress={() => setShowRegions(!showRegions)}
+          onPress={() => setShowRegions((v) => !v)}
+          activeOpacity={0.85}
           className="bg-[#0C1520] border border-[#1A2A3A] rounded-2xl px-4 py-4 mb-3 flex-row items-center"
         >
           <Text className="text-2xl mr-3">{currentRegion.flag}</Text>
@@ -170,8 +260,9 @@ export default function EditProfileScreen() {
             <Text className="text-white text-[16px] font-medium">
               {currentRegion.name}
             </Text>
-            <Text className="text-[#7A93A8] text-[13px]">
-              Currency: {currentRegion.currency.symbol}
+            <Text className="text-[#7A93A8] text-[13px] mt-0.5">
+              Currency: {currentRegion.currency.symbol} (
+              {currentRegion.currency.code})
             </Text>
           </View>
           <Ionicons
@@ -183,24 +274,40 @@ export default function EditProfileScreen() {
 
         {showRegions && (
           <View className="bg-[#0C1520] border border-[#1A2A3A] rounded-2xl overflow-hidden mb-5">
-            {REGION_LIST.map((r) => (
-              <TouchableOpacity
-                key={r.code}
-                onPress={() => {
-                  setRegion(r.code);
-                  setShowRegions(false);
-                }}
-                className={`px-4 py-3.5 flex-row items-center ${
-                  region === r.code ? "bg-[#13263B]" : ""
-                }`}
-              >
-                <Text className="text-xl mr-3">{r.flag}</Text>
-                <Text className="text-white flex-1">{r.name}</Text>
-                {region === r.code && (
-                  <Ionicons name="checkmark" size={18} color="#7EC8FF" />
-                )}
-              </TouchableOpacity>
-            ))}
+            {REGION_LIST.map((r, index) => {
+              const selected = region === r.code;
+              return (
+                <TouchableOpacity
+                  key={r.code}
+                  onPress={() => handleSelectRegion(r.code)}
+                  activeOpacity={0.8}
+                  className={`px-4 py-3.5 flex-row items-center ${
+                    selected ? "bg-[#13263B]" : ""
+                  } ${
+                    index < REGION_LIST.length - 1
+                      ? "border-b border-[#1A2A3A]"
+                      : ""
+                  }`}
+                >
+                  <Text className="text-xl mr-3">{r.flag}</Text>
+                  <View className="flex-1">
+                    <Text className="text-white text-[15px] font-medium">
+                      {r.name}
+                    </Text>
+                    <Text className="text-[#7A93A8] text-[12px] mt-0.5">
+                      {r.currency.symbol} · {r.currency.code}
+                    </Text>
+                  </View>
+                  {selected && (
+                    <Ionicons
+                      name="checkmark-circle"
+                      size={20}
+                      color="#7EC8FF"
+                    />
+                  )}
+                </TouchableOpacity>
+              );
+            })}
           </View>
         )}
 
@@ -208,7 +315,7 @@ export default function EditProfileScreen() {
           onPress={handleSave}
           disabled={saving}
           activeOpacity={0.85}
-          className="bg-[#7EC8FF] rounded-2xl py-4 items-center mt-4"
+          className="bg-[#7EC8FF] rounded-2xl py-4 items-center mt-4 mb-6"
         >
           {saving ? (
             <ActivityIndicator color="#071018" />

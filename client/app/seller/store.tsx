@@ -446,15 +446,31 @@ export default function MyStore() {
           />
         </SectionCard>
 
+        
+
         {/* ========== SHIPPING DEFAULTS ========== */}
+        
         <SectionCard
           icon="airplane-outline"
           title="Shipping Defaults"
           subtitle="Applied when creating products — each product can override"
         >
+          {/* Inside Shipping Defaults SectionCard, above the fields */}
+{!(form.city.trim() && form.country.trim()) && (
+  <View className="mb-4 bg-[#2A1F14] border border-[#5C3D1E] rounded-2xl px-4 py-3.5">
+    <Text className="text-[#F0C070] font-bold text-[13px]">
+      Required before sales
+    </Text>
+    <Text className="text-[#C4A882] text-[12px] leading-5 mt-1">
+      Complete City and Country in Shipping Details so buyers can checkout.
+      Products cannot be purchased until this is set.
+    </Text>
+  </View>
+)}
           <Text className="text-[#9EC5FF] text-[12px] font-semibold mb-3 tracking-wide">
             Default address
           </Text>
+          
           <Field
             label="Street"
             value={form.street}

@@ -5,23 +5,60 @@ import { Ionicons } from '@expo/vector-icons'
 import { useUser } from '@clerk/clerk-expo'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
+function HeaderBack() {
+  const router = useRouter()
+  return (
+    <TouchableOpacity
+      onPress={() => {
+        if (router.canGoBack()) router.back()
+        else router.replace('/seller' as any)
+      }}
+      style={{ marginLeft: 8, padding: 6 }}
+      hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+      activeOpacity={0.8}
+    >
+      <Ionicons name="arrow-back" size={24} color="#DCEBFF" />
+    </TouchableOpacity>
+  )
+}
+
+function HeaderBackToSettings() {
+  const router = useRouter()
+  return (
+    <TouchableOpacity
+      onPress={() => router.push('/seller/settings' as any)}
+      style={{ marginLeft: 8, padding: 6 }}
+      hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+      activeOpacity={0.8}
+    >
+      <Ionicons name="arrow-back" size={24} color="#DCEBFF" />
+    </TouchableOpacity>
+  )
+}
+
 export default function SellerLayout() {
   const { user, isLoaded } = useUser()
   const router = useRouter()
   const insets = useSafeAreaInsets()
 
   useEffect(() => {
-    if (isLoaded) {
-      const role = user?.publicMetadata?.role
-      if (!user || (role !== 'seller' && role !== 'admin')) {
-        router.replace('/(tabs)')
-      }
+    if (!isLoaded) return
+    const role = user?.publicMetadata?.role
+    if (!user || (role !== 'seller' && role !== 'admin')) {
+      router.replace('/(tabs)')
     }
   }, [isLoaded, user])
 
   if (!isLoaded) {
     return (
-      <View className="flex-1 justify-center items-center bg-[#060D18]">
+      <View
+        style={{
+          flex: 1,
+          justifyContent: 'center',
+          alignItems: 'center',
+          backgroundColor: '#060D18',
+        }}
+      >
         <ActivityIndicator size="large" color="#9EC5FF" />
       </View>
     )
@@ -68,18 +105,35 @@ export default function SellerLayout() {
         headerRight: () => (
           <TouchableOpacity
             onPress={() => router.replace('/(tabs)')}
-            className="mr-4 flex-row items-center bg-[#121C2B] border border-[#1E334A] px-3 py-1.5 rounded-full"
+            style={{
+              marginRight: 16,
+              flexDirection: 'row',
+              alignItems: 'center',
+              backgroundColor: '#121C2B',
+              borderWidth: 1,
+              borderColor: '#1E334A',
+              paddingHorizontal: 12,
+              paddingVertical: 6,
+              borderRadius: 999,
+            }}
             activeOpacity={0.8}
           >
             <Ionicons name="exit-outline" size={16} color="#9EC5FF" />
-            <Text className="ml-1.5 text-[#9EC5FF] font-semibold text-[12px]">
+            <Text
+              style={{
+                marginLeft: 6,
+                color: '#9EC5FF',
+                fontWeight: '600',
+                fontSize: 12,
+              }}
+            >
               Exit
             </Text>
           </TouchableOpacity>
         ),
       }}
     >
-      {/* ===== VISIBLE TABS ONLY ===== */}
+      {/* ===== VISIBLE TABS ===== */}
       <Tabs.Screen
         name="index"
         options={{
@@ -108,44 +162,106 @@ export default function SellerLayout() {
         }}
       />
       <Tabs.Screen
-        name="store"
-        options={{
-          title: 'My Store',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="storefront-outline" size={size - 1} color={color} />
-          ),
-        }}
-      />
-      <Tabs.Screen
         name="subscription"
         options={{
           title: 'Plan',
+          headerShown: false,
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="diamond-outline" size={size - 1} color={color} />
           ),
         }}
       />
+      <Tabs.Screen
+        name="ai"
+        options={{
+          title: 'AI',
+          headerShown: false,
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="sparkles-outline" size={size - 1} color={color} />
+          ),
+        }}
+      />
 
-      {/* ===== HIDE nested routes from tab bar ===== */}
+      {/* ===== HIDDEN (href: null) ===== */}
       <Tabs.Screen
-        name="products/add"
-        options={{ href: null, headerShown: true, title: 'Add Product' }}
-      />
-      <Tabs.Screen
-        name="products/edit/[id]"
-        options={{ href: null, headerShown: true, title: 'Edit Product' }}
-      />
-      <Tabs.Screen
-        name="orders/[id]"
-        options={{ href: null, headerShown: true, title: 'Order Details' }}
-      />
-      <Tabs.Screen
-        name="products/[id]"
-        options={{ href: null, headerShown: true, title: 'Product Details' }}
+        name="store"
+        options={{
+          href: null,
+          title: 'My Store',
+          headerLeft: () => <HeaderBackToSettings />,
+        }}
       />
       <Tabs.Screen
         name="settings"
-        options={{ href: null, headerShown: true, title: 'Settings' }}
+        options={{
+          href: null,
+          title: 'Seller Settings',
+          headerLeft: () => <HeaderBack />,
+        }}
+      />
+      <Tabs.Screen
+        name="settings/region"
+        options={{
+          href: null,
+          title: 'Marketplace Region',
+          headerLeft: () => <HeaderBackToSettings />,
+        }}
+      />
+      <Tabs.Screen
+        name="settings/notifications"
+        options={{
+          href: null,
+          title: 'Notifications',
+          headerLeft: () => <HeaderBackToSettings />,
+        }}
+      />
+      <Tabs.Screen
+        name="settings/about"
+        options={{
+          href: null,
+          title: 'About',
+          headerLeft: () => <HeaderBackToSettings />,
+        }}
+      />
+      <Tabs.Screen
+        name="products/add"
+        options={{
+          href: null,
+          title: 'Add Product',
+          headerLeft: () => <HeaderBack />,
+        }}
+      />
+      <Tabs.Screen
+        name="products/edit/[id]"
+        options={{
+          href: null,
+          title: 'Edit Product',
+          headerLeft: () => <HeaderBack />,
+        }}
+      />
+      <Tabs.Screen
+        name="products/[id]"
+        options={{
+          href: null,
+          title: 'Product Details',
+          headerLeft: () => <HeaderBack />,
+        }}
+      />
+      <Tabs.Screen
+        name="products/performance/[id]"
+        options={{
+          href: null,
+          title: 'Performance',
+          headerLeft: () => <HeaderBack />,
+        }}
+      />
+      <Tabs.Screen
+        name="orders/[id]"
+        options={{
+          href: null,
+          title: 'Order Details',
+          headerLeft: () => <HeaderBack />,
+        }}
       />
     </Tabs>
   )

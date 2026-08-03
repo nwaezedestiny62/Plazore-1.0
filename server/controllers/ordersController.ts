@@ -3,9 +3,30 @@ import mongoose from "mongoose";
 import Order from "../models/Order.js";
 import Cart from "../models/Cart.js";
 import Product from "../models/Products.js";
+import User from "../models/User.js";
 import { sendNotification } from "../utils/sendNotification.js";
+import { trackProductPerformance } from "../utils/performance.js";
 
 const getUser = (req: Request) => (req as any).user;
+
+const CANCEL_REASONS: Record<string, string> = {
+  out_of_stock: "Product is out of stock",
+  unable_to_deliver: "Unable to deliver to the destination",
+  shipping_limitations: "Shipping limitations",
+  incorrect_inventory: "Incorrect inventory",
+  temporary_closure: "Temporary business closure",
+  other: "Other",
+};
+
+function hasShipFromLocation(product: any, seller: any): boolean {
+  const fl = product?.fulfillmentLocation;
+  if (fl && (fl.city || fl.state) && fl.country) return true;
+
+  const addr = seller?.shippingDefaults?.address;
+  if (addr && (addr.city || addr.state) && addr.country) return true;
+
+  return false;
+}
 
 // ====================== CREATE ORDER ======================
 export const createOrder = async (req: Request, res: Response) => {
@@ -79,6 +100,19 @@ export const createOrder = async (req: Request, res: Response) => {
       }
 
       const sellerId = product.seller.toString();
+
+      const sellerUser = await User.findById(sellerId)
+        .select("storeName shippingDefaults")
+        .lean();
+
+      if (!hasShipFromLocation(product, sellerUser)) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "This seller has not completed their shipping information yet. Please try again later.",
+        });
+      }
+
       if (!itemsBySeller[sellerId]) itemsBySeller[sellerId] = [];
 
       itemsBySeller[sellerId].push({
@@ -151,10 +185,21 @@ export const createOrder = async (req: Request, res: Response) => {
         paymentMethod: "pending",
       });
 
+      // Stock decrease
       for (const row of sellerItems) {
         await Product.findByIdAndUpdate(row.product, {
           $inc: { stock: -row.quantity },
         });
+      }
+
+      // ★ PERFORMANCE: successful checkout = +15 × quantity per product
+      for (const row of sellerItems) {
+        trackProductPerformance({
+          productId: String(row.product),
+          action: "purchase",
+          actorUserId: user._id.toString(),
+          quantity: row.quantity || 1,
+        }).catch(() => {});
       }
 
       await sendNotification({
@@ -167,6 +212,18 @@ export const createOrder = async (req: Request, res: Response) => {
       });
 
       createdOrders.push(order);
+    }
+
+    // Clear cart after successful order (optional but usual)
+    try {
+      const cart = await Cart.findOne({ user: user._id });
+      if (cart) {
+        cart.items = [];
+        (cart as any).totalAmount = 0;
+        await cart.save();
+      }
+    } catch {
+      // non-fatal
     }
 
     res.status(201).json({
@@ -209,9 +266,12 @@ export const getOrder = async (req: Request, res: Response) => {
     }
 
     const order = await Order.findById(id)
-      .populate("seller", "name storeName storeLogo")
+      .populate("seller", "name storeName storeLogo shippingDefaults")
       .populate("buyer", "name phone")
-      .populate("items.product", "name images shipping");
+      .populate(
+        "items.product",
+        "name images shipping fulfillmentLocation"
+      );
 
     if (!order) {
       return res
@@ -300,30 +360,28 @@ export const shipOrder = async (req: Request, res: Response) => {
       });
     }
 
-    // Method locked from product at order time
-const method =
-  (order as any).productShipping?.method === "self" ? "self" : "courier";
-const frozenCompany =
-  (order as any).productShipping?.courierCompany || "";
+    const method =
+      (order as any).productShipping?.method === "self" ? "self" : "courier";
+    const frozenCompany =
+      (order as any).productShipping?.courierCompany || "";
 
-order.orderStatus = "Shipped";
-(order as any).shipping = {
-  shippingMethod: method,
-  deliveryCompany:
-    method === "courier"
-      ? String(deliveryCompany || frozenCompany || "").trim()
-      : "",
-  trackingNumber:
-    method === "courier" ? String(trackingNumber || "").trim() : "",
-  estimatedDelivery: estimatedDelivery
-    ? new Date(estimatedDelivery)
-    : undefined,
-  // Saved for both methods so the buyer always sees the seller note
-  selfDeliveryNote: String(selfDeliveryNote || "")
-    .trim()
-    .slice(0, 120),
-  shippedAt: new Date(),
-};
+    order.orderStatus = "Shipped";
+    (order as any).shipping = {
+      shippingMethod: method,
+      deliveryCompany:
+        method === "courier"
+          ? String(deliveryCompany || frozenCompany || "").trim()
+          : "",
+      trackingNumber:
+        method === "courier" ? String(trackingNumber || "").trim() : "",
+      estimatedDelivery: estimatedDelivery
+        ? new Date(estimatedDelivery)
+        : undefined,
+      selfDeliveryNote: String(selfDeliveryNote || "")
+        .trim()
+        .slice(0, 120),
+      shippedAt: new Date(),
+    };
     await order.save();
 
     await sendNotification({
@@ -425,6 +483,102 @@ export const getAllOrders = async (req: Request, res: Response) => {
       },
     });
   } catch (error: any) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// ====================== SELLER: Cancel order ======================
+export const cancelOrderBySeller = async (req: Request, res: Response) => {
+  try {
+    const user = getUser(req);
+    const { id } = req.params;
+    const { reasonCode, note } = req.body;
+
+    if (!id || !mongoose.isValidObjectId(String(id))) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Order not found" });
+    }
+
+    const code = String(reasonCode || "").trim();
+    if (!CANCEL_REASONS[code]) {
+      return res.status(400).json({
+        success: false,
+        message: "A valid cancellation reason is required",
+      });
+    }
+
+    const extraNote = String(note || "")
+      .trim()
+      .slice(0, 200);
+
+    if (code === "other" && !extraNote) {
+      return res.status(400).json({
+        success: false,
+        message: "Please add a short explanation for Other",
+      });
+    }
+
+    const order = await Order.findById(id);
+
+    if (!order) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Order not found" });
+    }
+
+    if (
+      order.seller.toString() !== user._id.toString() &&
+      user.role !== "admin"
+    ) {
+      return res
+        .status(403)
+        .json({ success: false, message: "Not authorized" });
+    }
+
+    if (String(order.orderStatus) !== "Preparing") {
+      return res.status(400).json({
+        success: false,
+        message: `Only Preparing orders can be cancelled. Current status: ${order.orderStatus}`,
+      });
+    }
+
+    const reasonLabel =
+      code === "other" && extraNote ? extraNote : CANCEL_REASONS[code];
+
+    order.orderStatus = "Cancelled" as any;
+    (order as any).cancellation = {
+      cancelledBy: "seller",
+      reasonCode: code,
+      reasonLabel,
+      note: extraNote,
+      cancelledAt: new Date(),
+      refundStatus: "not_applicable",
+    };
+
+    await order.save();
+
+    for (const row of order.items) {
+      await Product.findByIdAndUpdate(row.product, {
+        $inc: { stock: row.quantity },
+      });
+    }
+
+    const displayReason =
+      code === "other" && extraNote ? extraNote : CANCEL_REASONS[code];
+
+    await sendNotification({
+      userId: order.buyer.toString(),
+      type: "order_cancelled",
+      title: "Order Cancelled",
+      message: `Unfortunately, the seller was unable to fulfill your order.\nReason: "${displayReason}"\nYour order has been cancelled successfully.`,
+      orderId: order._id.toString(),
+      orderNumber: order.orderNumber,
+    });
+
+    res.json({ success: true, data: order });
+  } catch (error: any) {
+    console.error("Cancel order error:", error);
     res.status(500).json({ success: false, message: error.message });
   }
 };

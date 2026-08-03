@@ -2,7 +2,6 @@ import mongoose from "mongoose";
 
 const notificationSchema = new mongoose.Schema(
   {
-    // Who should receive this notification
     user: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
@@ -10,15 +9,15 @@ const notificationSchema = new mongoose.Schema(
       index: true,
     },
 
-    // Type of notification
     type: {
       type: String,
       enum: [
-        "new_order",           // Seller gets this when buyer places order
-        "order_shipped",       // Buyer gets this when seller ships
-        "order_delivered",     // Buyer gets this
-        "order_reminder",      // Seller reminder (Preparing too long)
-        "order_shipped_reminder", // Seller reminder (Shipped too long)
+        "new_order",
+        "order_shipped",
+        "order_delivered",
+        "order_cancelled",
+        "order_reminder",
+        "order_shipped_reminder",
         "general",
       ],
       required: true,
@@ -34,17 +33,15 @@ const notificationSchema = new mongoose.Schema(
       required: true,
     },
 
-    // Optional: link to a specific order
     order: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Order",
     },
 
     orderNumber: {
-      type: String, // e.g. PLZ#23467 (for easy display)
+      type: String,
     },
 
-    // Has the user read it?
     isRead: {
       type: Boolean,
       default: false,
@@ -53,7 +50,6 @@ const notificationSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// Index for fast queries
 notificationSchema.index({ user: 1, isRead: 1, createdAt: -1 });
 
 const Notification = mongoose.model("Notification", notificationSchema);

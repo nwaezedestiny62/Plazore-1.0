@@ -8,6 +8,7 @@ import {
   shipOrder,
   deliverOrder,
   getAllOrders,
+  cancelOrderBySeller, // ← import this from ordersController
 } from "../controllers/ordersController.js";
 
 const OrderRouter = express.Router();
@@ -25,17 +26,27 @@ OrderRouter.get("/admin/all", protect, authorize("admin"), getAllOrders);
 
 // Param routes AFTER
 OrderRouter.get("/:id", protect, getOrder);
+
 OrderRouter.put(
   "/:id/ship",
   protect,
   authorize("seller", "admin"),
   shipOrder
 );
+
 OrderRouter.put(
   "/:id/deliver",
   protect,
   authorize("seller", "admin"),
   deliverOrder
+);
+
+// NEW — seller cancel
+OrderRouter.put(
+  "/:id/cancel",
+  protect,
+  authorize("seller", "admin"),
+  cancelOrderBySeller
 );
 
 export default OrderRouter;

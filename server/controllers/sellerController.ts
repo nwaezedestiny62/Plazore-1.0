@@ -263,71 +263,75 @@ export const updateMyStore = async (req: Request, res: Response) => {
   }
 };
 
-// ====================== PUBLIC STOREFRONT ======================
-// GET /api/seller/store/:id  (no auth — public mall experience)
 export const getPublicStorefront = async (req: Request, res: Response) => {
   try {
-    const { id } = req.params;
+    const { id } = req.params
 
     if (!id) {
       return res.status(400).json({
         success: false,
-        message: "Store id is required",
-      });
+        message: 'Store id is required',
+      })
     }
 
     const seller = await User.findById(id).select(
-      "storeName storeDescription businessGoal storeLogo storeBanner role isSellerVerified name"
-    );
+      'storeName storeDescription businessGoal storeLogo storeBanner role isSellerVerified name shippingDefaults'
+    )
 
     if (!seller) {
       return res.status(404).json({
         success: false,
-        message: "Store not found",
-      });
+        message: 'Store not found',
+      })
     }
 
-    if (seller.role !== "seller" && seller.role !== "admin") {
+    if (seller.role !== 'seller' && seller.role !== 'admin') {
       return res.status(404).json({
         success: false,
-        message: "This user does not have a public store",
-      });
+        message: 'This user does not have a public store',
+      })
     }
 
     const products = await Product.find({
       seller: seller._id,
       isActive: true,
     })
-      .select("name price images category subCategory brand shipping isFeatured createdAt")
+      .select(
+        'name price images category subCategory brand shipping isFeatured createdAt'
+      )
       .sort({ createdAt: -1 })
-      .limit(60);
+      .limit(60)
 
-    // Public payload only — never phone, email, payout, etc.
+    const addr = seller.shippingDefaults?.address
+
     res.json({
       success: true,
       data: {
         store: {
           id: seller._id,
-          storeName: seller.storeName || seller.name || "Store",
-          storeDescription: seller.storeDescription || "",
-          businessGoal: seller.businessGoal || "",
-          storeLogo: seller.storeLogo || "",
-          storeBanner: seller.storeBanner || "",
+          storeName: seller.storeName || seller.name || 'Store',
+          storeDescription: seller.storeDescription || '',
+          businessGoal: seller.businessGoal || '',
+          storeLogo: seller.storeLogo || '',
+          storeBanner: seller.storeBanner || '',
           isVerified: !!seller.isSellerVerified,
+          location: {
+            state: addr?.state || '',
+            country: addr?.country || '',
+          },
         },
         products,
-        // Reserved for later (Buyer Confidence, AI, discovery)
         modules: {
           buyerConfidence: null,
           plazoreAI: null,
           recommendations: null,
         },
       },
-    });
+    })
   } catch (error: any) {
-    res.status(500).json({ success: false, message: error.message });
+    res.status(500).json({ success: false, message: error.message })
   }
-};
+}
 
 // Get seller's own products
 export const getMyProducts = async (req: Request, res: Response) => {

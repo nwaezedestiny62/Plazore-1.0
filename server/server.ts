@@ -14,6 +14,7 @@ import SellerRouter from "./routes/sellerRoutes.js";
 import NotificationRouter from "./routes/notificationRoutes.js";
 import UserRouter from "./routes/userRoutes.js";
 import WishlistRouter from "./routes/wishlistRoutes.js";
+import AnalyticsRouter from "./routes/analyticsRoutes.js";
 
 const app = express();
 
@@ -56,6 +57,7 @@ app.use("/api/seller", SellerRouter);
 app.use("/api/notifications", NotificationRouter);
 app.use("/api/users", UserRouter);
 app.use("/api/wishlist", WishlistRouter);
+app.use("/api/analytics", AnalyticsRouter);
 
 await makeAdmin();
 

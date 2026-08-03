@@ -29,11 +29,12 @@ export const getWishlist = async (req: Request, res: Response) => {
   }
 };
 
-// POST /api/wishlist/toggle  body: { productId }
+// POST /api/wishlist/toggle
+// body: { productId, action?: 'add' | 'remove' | 'toggle' }
 export const toggleWishlist = async (req: Request, res: Response) => {
   try {
     const user = getUser(req);
-    const { productId } = req.body;
+    const { productId, action } = req.body;
 
     if (!productId) {
       return res.status(400).json({
@@ -51,68 +52,93 @@ export const toggleWishlist = async (req: Request, res: Response) => {
     }
 
     let wishlist = await Wishlist.findOne({ user: user._id });
-
     if (!wishlist) {
-      // First time → create and add
-      wishlist = await Wishlist.create({
-        user: user._id,
-        products: [productId],
-      });
-
-      await Product.findByIdAndUpdate(productId, {
-        $inc: { wishlistCount: 1 },
-      });
-
-      const populated = await Wishlist.findById(wishlist._id).populate("products");
-      return res.json({
-        success: true,
-        added: true,
-        data: (populated!.products || []).filter((p: any) => p && p.isActive !== false),
-        wishlistCount: (await Product.findById(productId).select("wishlistCount"))?.wishlistCount ?? 1,
-      });
+      wishlist = await Wishlist.create({ user: user._id, products: [] });
     }
 
     const idStr = productId.toString();
     const exists = wishlist.products.some((p) => p.toString() === idStr);
 
-    if (exists) {
-      // REMOVE
-      await Wishlist.updateOne(
-        { _id: wishlist._id },
-        { $pull: { products: productId } }
-      );
+    // Resolve intended operation
+    let shouldAdd: boolean;
+    if (action === "add") shouldAdd = true;
+    else if (action === "remove") shouldAdd = false;
+    else shouldAdd = !exists; // default toggle
 
-      await Product.findByIdAndUpdate(productId, {
-        $inc: { wishlistCount: -1 },
+    // No-op cases — never touch wishlistCount twice for same user
+    if (shouldAdd && exists) {
+      const populated = await Wishlist.findById(wishlist._id).populate(
+        "products"
+      );
+      const products = (populated!.products || []).filter(
+        (p: any) => p && p.isActive !== false
+      );
+      return res.json({
+        success: true,
+        added: true,
+        changed: false,
+        data: products,
+        wishlistCount:
+          (await Product.findById(productId).select("wishlistCount"))
+            ?.wishlistCount ?? 0,
       });
+    }
 
-      // Safety: never go below 0
-      await Product.updateOne(
-        { _id: productId, wishlistCount: { $lt: 0 } },
-        { $set: { wishlistCount: 0 } }
+    if (!shouldAdd && !exists) {
+      const populated = await Wishlist.findById(wishlist._id).populate(
+        "products"
       );
-    } else {
-      // ADD (guaranteed unique)
+      const products = (populated!.products || []).filter(
+        (p: any) => p && p.isActive !== false
+      );
+      return res.json({
+        success: true,
+        added: false,
+        changed: false,
+        data: products,
+        wishlistCount:
+          (await Product.findById(productId).select("wishlistCount"))
+            ?.wishlistCount ?? 0,
+      });
+    }
+
+    if (shouldAdd) {
+      // Unique per user
       await Wishlist.updateOne(
         { _id: wishlist._id },
         { $addToSet: { products: productId } }
       );
-
       await Product.findByIdAndUpdate(productId, {
         $inc: { wishlistCount: 1 },
       });
+    } else {
+      await Wishlist.updateOne(
+        { _id: wishlist._id },
+        { $pull: { products: productId } }
+      );
+      await Product.findByIdAndUpdate(productId, {
+        $inc: { wishlistCount: -1 },
+      });
+      await Product.updateOne(
+        { _id: productId, wishlistCount: { $lt: 0 } },
+        { $set: { wishlistCount: 0 } }
+      );
     }
 
-    const populated = await Wishlist.findById(wishlist._id).populate("products");
+    const populated = await Wishlist.findById(wishlist._id).populate(
+      "products"
+    );
     const products = (populated!.products || []).filter(
       (p: any) => p && p.isActive !== false
     );
-
-    const updatedProduct = await Product.findById(productId).select("wishlistCount");
+    const updatedProduct = await Product.findById(productId).select(
+      "wishlistCount"
+    );
 
     res.json({
       success: true,
-      added: !exists,
+      added: shouldAdd,
+      changed: true,
       data: products,
       wishlistCount: updatedProduct?.wishlistCount ?? 0,
     });

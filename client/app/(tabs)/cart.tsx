@@ -1,9 +1,16 @@
 import Header from '@/components/Header'
 import { COLORS } from '@/constants'
+import {
+  convertPrice,
+  DEFAULT_REGION,
+  formatMoney,
+  formatProductPrice,
+} from '@/constants/regions'
 import { useCart } from '@/context/CartContext'
+import { useMarketplace } from '@/context/MarketplaceContext'
 import { Ionicons } from '@expo/vector-icons'
-import { useRouter } from 'expo-router'
-import React, { useEffect, useMemo, useRef } from 'react'
+import { useFocusEffect, useRouter } from 'expo-router'
+import React, { useCallback, useEffect, useMemo, useRef } from 'react'
 import {
   Animated,
   Image,
@@ -25,47 +32,110 @@ if (
   UIManager.setLayoutAnimationEnabledExperimental(true)
 }
 
+function resolveProductRegion(product: any): string {
+  if (!product) return DEFAULT_REGION
+  if (product.region) return String(product.region)
+  if (product.marketplaceRegion) return String(product.marketplaceRegion)
+  const seller = product.seller
+  if (seller && typeof seller === 'object' && seller.marketplaceRegion) {
+    return String(seller.marketplaceRegion)
+  }
+  return DEFAULT_REGION
+}
+
 export default function Cart() {
   const {
     cartItems,
-    cartTotal,
     removeFromCart,
     updateQuantity,
     updateItemNote,
   } = useCart()
+  const {
+    format,
+    formatProduct,
+    region: buyerRegion,
+    refreshRegion,
+  } = useMarketplace()
   const router = useRouter()
 
-  // Same formula as checkout — seller's exact product.shipping.deliveryFee
-  const deliveryFee = useMemo(() => {
-    if (!cartItems?.length) return 0
+  // Always re-sync region when opening bag
+  useFocusEffect(
+    useCallback(() => {
+      refreshRegion()
+    }, [refreshRegion])
+  )
 
+  const displayRegion = buyerRegion || DEFAULT_REGION
+
+  // Bulletproof formatters (never rely on stale closures alone)
+  const fmt = useCallback(
+    (amount: number) => {
+      try {
+        return format ? format(amount) : formatMoney(amount, displayRegion)
+      } catch {
+        return formatMoney(amount, displayRegion)
+      }
+    },
+    [format, displayRegion]
+  )
+
+  const fmtProduct = useCallback(
+    (amount: number, productRegion?: string | null) => {
+      try {
+        return formatProduct
+          ? formatProduct(amount, productRegion)
+          : formatProductPrice(amount, productRegion, displayRegion)
+      } catch {
+        return formatProductPrice(amount, productRegion, displayRegion)
+      }
+    },
+    [formatProduct, displayRegion]
+  )
+
+  const { productPrice, deliveryFee, totalAmount } = useMemo(() => {
+    if (!cartItems?.length) {
+      return { productPrice: 0, deliveryFee: 0, totalAmount: 0 }
+    }
+
+    let productsSum = 0
     const bySeller: Record<string, number> = {}
     let noSellerMax = 0
 
     for (const item of cartItems) {
-      const fee = Number(item.product?.shipping?.deliveryFee) || 0
+      const productRegion = resolveProductRegion(item.product)
+      const unit = Number(item.price ?? item.product?.price) || 0
+      const qty = Number(item.quantity) || 1
+
+      productsSum += convertPrice(unit * qty, productRegion, displayRegion)
+
+      const feeRaw = Number(item.product?.shipping?.deliveryFee) || 0
+      const feeConverted = convertPrice(feeRaw, productRegion, displayRegion)
+
       const seller = item.product?.seller as any
       const sellerId =
         typeof seller === 'string'
           ? seller
-          : seller && seller._id
+          : seller?._id
             ? String(seller._id)
             : ''
 
       if (sellerId) {
-        bySeller[sellerId] = Math.max(bySeller[sellerId] || 0, fee)
+        bySeller[sellerId] = Math.max(bySeller[sellerId] || 0, feeConverted)
       } else {
-        noSellerMax = Math.max(noSellerMax, fee)
+        noSellerMax = Math.max(noSellerMax, feeConverted)
       }
     }
 
-    return (
+    const feeSum =
       Object.values(bySeller).reduce((sum, fee) => sum + fee, 0) + noSellerMax
-    )
-  }, [cartItems])
 
-  const productPrice = Number(cartTotal) || 0
-  const totalAmount = productPrice + deliveryFee
+    return {
+      productPrice: productsSum,
+      deliveryFee: feeSum,
+      totalAmount: productsSum + feeSum,
+    }
+  }, [cartItems, displayRegion])
+
   const itemCount = cartItems.reduce((n, i) => n + (i.quantity || 0), 0)
 
   const bagAnim = useRef(new Animated.Value(0)).current
@@ -137,7 +207,6 @@ export default function Cart() {
                 ],
               }}
             >
-              {/* Bag header */}
               <View className="flex-row items-center justify-between mb-3 px-1">
                 <View className="flex-row items-center">
                   <Ionicons name="bag-handle" size={20} color={COLORS.primary} />
@@ -151,8 +220,10 @@ export default function Cart() {
               </View>
 
               {cartItems.map((item) => {
-                const lineTotal =
-                  (Number(item.price) || 0) * (Number(item.quantity) || 1)
+                const productRegion = resolveProductRegion(item.product)
+                const unit = Number(item.price ?? item.product?.price) || 0
+                const qty = Number(item.quantity) || 1
+                const lineTotal = unit * qty
                 const lineFee =
                   Number(item.product?.shipping?.deliveryFee) || 0
                 const note = item.note || ''
@@ -182,11 +253,11 @@ export default function Cart() {
                           {item.product?.name || 'Product'}
                         </Text>
                         <Text className="text-primary font-bold text-[15px] mt-1">
-                          ${Number(item.price).toFixed(2)}
+                          {fmtProduct(unit, productRegion)}
                         </Text>
                         {lineFee > 0 && (
                           <Text className="text-secondary text-[11px] mt-0.5">
-                            Delivery Fee ${lineFee.toFixed(2)}
+                            Delivery Fee {fmtProduct(lineFee, productRegion)}
                           </Text>
                         )}
 
@@ -210,7 +281,7 @@ export default function Cart() {
                           </View>
 
                           <Text className="text-primary font-bold text-[14px] ml-auto mr-3">
-                            ${lineTotal.toFixed(2)}
+                            {fmtProduct(lineTotal, productRegion)}
                           </Text>
 
                           <TouchableOpacity
@@ -227,7 +298,6 @@ export default function Cart() {
                       </View>
                     </View>
 
-                    {/* Note for seller */}
                     <View className="px-3.5 pb-3.5 pt-1 border-t border-gray-50">
                       <TextInput
                         value={note}
@@ -247,7 +317,6 @@ export default function Cart() {
                 )
               })}
 
-              {/* Mini receipt preview */}
               <View className="bg-white rounded-2xl border border-gray-200 mt-1 overflow-hidden">
                 <View className="px-4 py-3 border-b border-dashed border-gray-200">
                   <Text className="text-primary font-bold text-[14px]">
@@ -260,7 +329,7 @@ export default function Cart() {
                       Product Price
                     </Text>
                     <Text className="text-primary font-semibold text-[14px]">
-                      ${productPrice.toFixed(2)}
+                      {fmt(productPrice)}
                     </Text>
                   </View>
                   <View className="flex-row justify-between mb-2.5">
@@ -268,7 +337,7 @@ export default function Cart() {
                       Delivery Fee
                     </Text>
                     <Text className="text-primary font-semibold text-[14px]">
-                      ${deliveryFee.toFixed(2)}
+                      {fmt(deliveryFee)}
                     </Text>
                   </View>
                   <View className="border-t border-dashed border-gray-200 my-2" />
@@ -277,7 +346,7 @@ export default function Cart() {
                       Total Amount
                     </Text>
                     <Text className="text-primary font-extrabold text-lg">
-                      ${totalAmount.toFixed(2)}
+                      {fmt(totalAmount)}
                     </Text>
                   </View>
                 </View>
@@ -285,7 +354,6 @@ export default function Cart() {
             </Animated.View>
           </ScrollView>
 
-          {/* Bottom bar */}
           <View
             className="bg-white border-t border-gray-200 px-4 pt-3 pb-4"
             style={{ marginBottom: Platform.OS === 'ios' ? 0 : 4 }}
@@ -294,7 +362,7 @@ export default function Cart() {
               <View>
                 <Text className="text-secondary text-[12px]">Amount due</Text>
                 <Text className="text-primary font-extrabold text-xl">
-                  ${totalAmount.toFixed(2)}
+                  {fmt(totalAmount)}
                 </Text>
               </View>
               <TouchableOpacity
@@ -309,7 +377,7 @@ export default function Cart() {
               </TouchableOpacity>
             </View>
             <Text className="text-secondary text-[11px] text-center">
-              Product Price + Delivery Fee · same totals at checkout
+              Prices shown in your marketplace currency
             </Text>
           </View>
         </>

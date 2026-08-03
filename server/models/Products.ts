@@ -1,6 +1,18 @@
 import mongoose, { Schema } from "mongoose";
 import { IProduct } from "../types/index.js";
 
+const fulfillmentLocationSchema = new Schema(
+  {
+    countryCode: { type: String, required: true, trim: true, index: true },
+    country: { type: String, required: true, trim: true },
+    stateCode: { type: String, default: "", trim: true },
+    state: { type: String, default: "", trim: true },
+    city: { type: String, required: true, trim: true, index: true },
+    displayLabel: { type: String, required: true, trim: true },
+  },
+  { _id: false }
+);
+
 const productSchema = new Schema<IProduct>(
   {
     name: { type: String, required: true, trim: true },
@@ -14,7 +26,6 @@ const productSchema = new Schema<IProduct>(
     isFeatured: { type: Boolean, default: false },
     isActive: { type: Boolean, default: true },
 
-    // Marketplace Region (automatically inherited from seller)
     region: {
       type: String,
       required: true,
@@ -40,6 +51,12 @@ const productSchema = new Schema<IProduct>(
       deliveryFee: { type: Number, default: 0, min: 0 },
     },
 
+    // Independent of shipping method — where THIS product ships from
+    fulfillmentLocation: {
+      type: fulfillmentLocationSchema,
+      required: false, // optional for older products; required on create in controller
+    },
+
     wishlistCount: {
       type: Number,
       default: 0,
@@ -49,11 +66,15 @@ const productSchema = new Schema<IProduct>(
   { timestamps: true }
 );
 
-// Indexes for performance
 productSchema.index({ name: "text", description: "text" });
 productSchema.index({ category: 1, subCategory: 1 });
-productSchema.index({ region: 1, isActive: 1, createdAt: -1 }); // important for regional showroom
+productSchema.index({ region: 1, isActive: 1, createdAt: -1 });
 productSchema.index({ seller: 1, region: 1 });
+productSchema.index({ "fulfillmentLocation.countryCode": 1, isActive: 1 });
+productSchema.index({
+  "fulfillmentLocation.city": 1,
+  "fulfillmentLocation.countryCode": 1,
+});
 
 const Product = mongoose.model<IProduct>("Product", productSchema);
 export default Product;

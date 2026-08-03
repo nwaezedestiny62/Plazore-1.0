@@ -1,6 +1,8 @@
 import { Request, Response } from "express";
 import User from "../models/User.js";
 
+const ALLOWED_REGIONS = ["NG", "US", "GB", "CA", "EU", "GH", "KE", "ZA"];
+
 export const updateMe = async (req: Request, res: Response) => {
   try {
     const user = (req as any).user;
@@ -10,7 +12,7 @@ export const updateMe = async (req: Request, res: Response) => {
 
     if (phone !== undefined) {
       const cleaned = String(phone).trim();
-      if (cleaned.length < 7) {
+      if (cleaned.length > 0 && cleaned.length < 7) {
         return res.status(400).json({
           success: false,
           message: "Please enter a valid phone number",
@@ -23,10 +25,10 @@ export const updateMe = async (req: Request, res: Response) => {
       updates.name = String(name).trim();
     }
 
-    // Marketplace Region
+    // THIS is what was missing — region was never written to MongoDB
     if (marketplaceRegion !== undefined) {
       const code = String(marketplaceRegion).trim().toUpperCase();
-      if (code.length < 2) {
+      if (!ALLOWED_REGIONS.includes(code)) {
         return res.status(400).json({
           success: false,
           message: "Invalid marketplace region",

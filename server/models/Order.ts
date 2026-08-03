@@ -63,7 +63,6 @@ const orderSchema = new mongoose.Schema(
       default: "Preparing",
     },
 
-    // Frozen from products at order time — source of truth for ship step
     productShipping: {
       method: {
         type: String,
@@ -74,7 +73,6 @@ const orderSchema = new mongoose.Schema(
       deliveryFee: { type: Number, default: 0 },
     },
 
-    // Filled when seller ships
     shipping: {
       shippingMethod: {
         type: String,
@@ -86,6 +84,34 @@ const orderSchema = new mongoose.Schema(
       estimatedDelivery: { type: Date },
       selfDeliveryNote: { type: String, default: "" },
       shippedAt: { type: Date },
+    },
+
+    // ── Cancellation (seller or future buyer/admin) ──
+    cancellation: {
+      cancelledBy: {
+        type: String,
+        enum: ["seller", "buyer", "admin", "system"],
+      },
+      reasonCode: {
+        type: String,
+        enum: [
+          "out_of_stock",
+          "unable_to_deliver",
+          "shipping_limitations",
+          "incorrect_inventory",
+          "temporary_closure",
+          "other",
+        ],
+      },
+      reasonLabel: { type: String, default: "" },
+      note: { type: String, maxlength: 200, default: "" },
+      cancelledAt: { type: Date },
+      // Reserved for later: refunds / admin
+      refundStatus: {
+        type: String,
+        enum: ["not_applicable", "pending", "processed", "failed"],
+        default: "not_applicable",
+      },
     },
 
     subtotal: { type: Number, required: true },

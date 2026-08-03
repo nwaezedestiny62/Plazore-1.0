@@ -1,5 +1,7 @@
+import api from "@/constants/api";
+import { REGION_LIST } from "@/constants/regions";
+import { useMarketplace } from "@/context/MarketplaceContext";
 import { useAuth } from "@clerk/clerk-expo";
-import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import React, { useState } from "react";
 import {
@@ -11,21 +13,10 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Toast from "react-native-toast-message";
-import api from "@/constants/api";
-
-const REGIONS = [
-  { code: "NG", name: "Nigeria", currency: "₦", flag: "🇳🇬" },
-  { code: "US", name: "United States", currency: "$", flag: "🇺🇸" },
-  { code: "GB", name: "United Kingdom", currency: "£", flag: "🇬🇧" },
-  { code: "CA", name: "Canada", currency: "C$", flag: "🇨🇦" },
-  { code: "EU", name: "Europe", currency: "€", flag: "🇪🇺" },
-  { code: "GH", name: "Ghana", currency: "GH₵", flag: "🇬🇭" },
-  { code: "KE", name: "Kenya", currency: "KSh", flag: "🇰🇪" },
-  { code: "ZA", name: "South Africa", currency: "R", flag: "🇿🇦" },
-];
 
 export default function SelectRegionScreen() {
   const { getToken } = useAuth();
+  const { refreshRegion, setRegionLocal } = useMarketplace();
   const router = useRouter();
   const [selected, setSelected] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -48,6 +39,10 @@ export default function SelectRegionScreen() {
         { marketplaceRegion: selected },
         { headers: { Authorization: `Bearer ${token}` } }
       );
+
+      // Update app currency/region immediately
+      setRegionLocal(selected);
+      await refreshRegion();
 
       Toast.show({
         type: "success",
@@ -85,7 +80,7 @@ export default function SelectRegionScreen() {
         </View>
 
         <View className="gap-3 mb-10">
-          {REGIONS.map((region) => {
+          {REGION_LIST.map((region) => {
             const isSelected = selected === region.code;
             return (
               <TouchableOpacity
@@ -105,7 +100,7 @@ export default function SelectRegionScreen() {
                     {region.name}
                   </Text>
                   <Text className="text-[#7A93A8] text-[13px] mt-0.5">
-                    Currency: {region.currency}
+                    Currency: {region.currency.symbol}
                   </Text>
                 </View>
 

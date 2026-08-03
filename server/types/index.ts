@@ -34,6 +34,7 @@ export interface IOrderItem {
   quantity: number;
   price: number;
   image?: string;
+  note?: string;
 }
 
 export interface IOrder extends Document {
@@ -51,10 +52,17 @@ export interface IOrder extends Document {
   buyerNote?: string;
   orderStatus: "Preparing" | "Shipped" | "Delivered" | "Cancelled";
   shipping: {
+    shippingMethod?: "self" | "courier";
     deliveryCompany?: string;
     trackingNumber?: string;
     estimatedDelivery?: Date;
     shippedAt?: Date;
+    selfDeliveryNote?: string;
+  };
+  productShipping?: {
+    method?: "self" | "courier";
+    courierCompany?: string;
+    deliveryFee?: number;
   };
   subtotal: number;
   shippingCost: number;
@@ -64,6 +72,17 @@ export interface IOrder extends Document {
   deliveredAt?: Date;
   createdAt: Date;
   updatedAt: Date;
+}
+
+/** Where this product ships from (not seller home address) */
+export interface IFulfillmentLocation {
+  countryCode: string;
+  country: string;
+  stateCode?: string;
+  state?: string;
+  city: string;
+  /** Public-safe: "Lagos, Nigeria" — never street-level */
+  displayLabel: string;
 }
 
 export interface IProduct extends Document {
@@ -78,12 +97,14 @@ export interface IProduct extends Document {
   isFeatured: boolean;
   isActive: boolean;
   seller: Types.ObjectId;
-  region: string;                    // ← NEW
+  /** Marketplace currency/region inherited from seller (e.g. "NG") */
+  region: string;
   shipping?: {
     method: "self" | "courier";
     courierCompany?: string;
     deliveryFee?: number;
   };
+  fulfillmentLocation?: IFulfillmentLocation;
   wishlistCount?: number;
   createdAt: Date;
   updatedAt: Date;
@@ -97,8 +118,7 @@ export interface IUser extends Document {
   image?: string;
   role: "buyer" | "seller" | "admin";
 
-  // Marketplace
-  marketplaceRegion: string;         // ← NEW (e.g. "NG", "US", "GB")
+  marketplaceRegion: string;
 
   storeName?: string;
   storeDescription?: string;

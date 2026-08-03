@@ -14,6 +14,7 @@ import { LinearGradient } from 'expo-linear-gradient'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import api from '@/constants/api'
 import { PLAN_FEES } from '@/constants/productCatalog'
+import { PerformanceChart } from '@/components/PerformanceChart'
 
 const SELLER_TIPS = [
   'Products with high-quality images usually attract more buyers.',
@@ -142,6 +143,7 @@ export default function SellerDashboard() {
     plan: 'free',
   })
   const [activity, setActivity] = useState<ActivityItem[]>([])
+  const [analytics, setAnalytics] = useState<any>(null)
   const [tipIndex, setTipIndex] = useState(0)
 
   const firstName =
@@ -158,10 +160,11 @@ export default function SellerDashboard() {
       const token = await getToken()
       const headers = { Authorization: `Bearer ${token}` }
 
-      const [dashRes, ordersRes, productsRes] = await Promise.all([
+      const [dashRes, ordersRes, productsRes, analyticsRes] = await Promise.all([
         api.get('/seller/dashboard', { headers }).catch(() => null),
         api.get('/orders/seller/my', { headers }).catch(() => null),
         api.get('/seller/products', { headers }).catch(() => null),
+        api.get('/analytics/seller?range=30', { headers }).catch(() => null),
       ])
 
       const dash = dashRes?.data?.success ? dashRes.data.data : null
@@ -171,6 +174,10 @@ export default function SellerDashboard() {
       const products: any[] = productsRes?.data?.success
         ? productsRes.data.data || []
         : []
+
+      if (analyticsRes?.data?.success) {
+        setAnalytics(analyticsRes.data.data)
+      }
 
       const pending = orders.filter(
         (o) => o.orderStatus === 'Preparing' || o.orderStatus === 'Shipped'
@@ -232,7 +239,6 @@ export default function SellerDashboard() {
 
   return (
     <SafeAreaView className="flex-1 bg-[#060B14]" edges={['top']}>
-      {/* Top bar */}
       <View className="px-5 pt-2 pb-3 flex-row items-center justify-between">
         <View>
           <Text className="text-[#5A7088] text-[11px] font-semibold tracking-[3px] uppercase">
@@ -276,7 +282,6 @@ export default function SellerDashboard() {
           />
         }
       >
-        {/* Greeting */}
         <View className="mb-7">
           <Text className="text-white text-[26px] font-extrabold leading-8">
             {greeting}, {firstName}.
@@ -286,7 +291,6 @@ export default function SellerDashboard() {
           </Text>
         </View>
 
-        {/* Overview */}
         <Text className="text-[#5A7088] text-[11px] font-semibold tracking-[2.5px] uppercase mb-3">
           Overview
         </Text>
@@ -325,7 +329,66 @@ export default function SellerDashboard() {
           />
         </View>
 
-        {/* Revenue placeholder */}
+        {/* Performance — store-wide */}
+        <Text className="text-[#5A7088] text-[11px] font-semibold tracking-[2.5px] uppercase mb-3 mt-2">
+          Performance
+        </Text>
+        <View className="bg-[#0C1520] border border-[#1A2A3A] rounded-[24px] p-5 mb-6">
+          <View className="flex-row justify-between items-center mb-1">
+            <Text className="text-white font-bold text-[15px]">
+              Store engagement
+            </Text>
+            <Text className="text-[#9EC5FF] font-extrabold text-[16px]">
+              {analytics?.totals?.score ?? 0} pts
+            </Text>
+          </View>
+          <Text className="text-[#5A7088] text-[11px] mb-3">
+            Views · Cart · Purchases (last {analytics?.rangeDays || 30} days)
+          </Text>
+
+          <PerformanceChart data={analytics?.series || []} />
+
+          <Text className="text-white font-semibold text-[13px] mt-5 mb-3">
+            Top performing products
+          </Text>
+          {(analytics?.topProducts || []).length === 0 ? (
+            <Text className="text-[#5A7088] text-[12px] leading-5">
+              Rankings appear as buyers view, cart, and purchase your items.
+            </Text>
+          ) : (
+            (analytics?.topProducts || []).map((p: any, i: number) => (
+              <TouchableOpacity
+                key={String(p.productId)}
+                onPress={() =>
+                  router.push(
+                    `/seller/products/performance/${p.productId}` as any
+                  )
+                }
+                activeOpacity={0.85}
+                className="flex-row items-center py-2.5 border-b border-[#152030]"
+              >
+                <Text className="text-[#5A7088] w-6 text-[12px]">{i + 1}</Text>
+                <Text
+                  className="text-white flex-1 text-[13px]"
+                  numberOfLines={1}
+                >
+                  {p.name}
+                </Text>
+                {p.milestone200 ? (
+                  <View className="bg-[#1A2F28] px-2 py-0.5 rounded-full mr-2">
+                    <Text className="text-[#8FE3B0] text-[9px] font-bold">
+                      200+
+                    </Text>
+                  </View>
+                ) : null}
+                <Text className="text-[#9EC5FF] font-bold text-[13px]">
+                  {p.score}
+                </Text>
+              </TouchableOpacity>
+            ))
+          )}
+        </View>
+
         <View className="bg-[#0C1520] border border-dashed border-[#243B55] rounded-[24px] p-5 mb-8 mt-1">
           <View className="flex-row items-center mb-1">
             <Ionicons name="wallet-outline" size={18} color="#5A7088" />
@@ -341,7 +404,6 @@ export default function SellerDashboard() {
           </Text>
         </View>
 
-        {/* Quick actions */}
         <Text className="text-[#5A7088] text-[11px] font-semibold tracking-[2.5px] uppercase mb-3">
           Quick Actions
         </Text>
@@ -378,13 +440,14 @@ export default function SellerDashboard() {
           />
         </View>
 
-        {/* Recent activity */}
         <View className="flex-row items-center justify-between mb-3">
           <Text className="text-[#5A7088] text-[11px] font-semibold tracking-[2.5px] uppercase">
             Recent Activity
           </Text>
           {activity.length > 0 && (
-            <TouchableOpacity onPress={() => router.push('/seller/orders' as any)}>
+            <TouchableOpacity
+              onPress={() => router.push('/seller/orders' as any)}
+            >
               <Text className="text-[#9EC5FF] text-[13px] font-semibold">
                 View all
               </Text>
@@ -434,7 +497,6 @@ export default function SellerDashboard() {
           </View>
         )}
 
-        {/* Seller tips */}
         <Text className="text-[#5A7088] text-[11px] font-semibold tracking-[2.5px] uppercase mb-3">
           Seller Tips
         </Text>
@@ -468,7 +530,6 @@ export default function SellerDashboard() {
           </View>
         </View>
 
-        {/* Current plan */}
         <Text className="text-[#5A7088] text-[11px] font-semibold tracking-[2.5px] uppercase mb-3">
           Current Plan
         </Text>
