@@ -153,7 +153,12 @@ export default function SellerDashboard() {
     'Seller'
 
   const greeting = useMemo(() => getGreeting(new Date().getHours()), [])
-  const feePct = PLAN_FEES[overview.plan] ?? PLAN_FEES.free ?? 8
+
+  // Safe access to PLAN_FEES
+  const feePct =
+    (PLAN_FEES && typeof PLAN_FEES === 'object'
+      ? PLAN_FEES[overview.plan] ?? PLAN_FEES.free
+      : null) ?? 8
 
   const loadDashboard = useCallback(async () => {
     try {
@@ -168,22 +173,27 @@ export default function SellerDashboard() {
       ])
 
       const dash = dashRes?.data?.success ? dashRes.data.data : null
-      const orders: any[] = ordersRes?.data?.success
-        ? ordersRes.data.data || []
+
+      // Always force arrays
+      const orders: any[] = Array.isArray(ordersRes?.data?.data)
+        ? ordersRes.data.data
         : []
-      const products: any[] = productsRes?.data?.success
-        ? productsRes.data.data || []
+      const products: any[] = Array.isArray(productsRes?.data?.data)
+        ? productsRes.data.data
         : []
 
-      if (analyticsRes?.data?.success) {
+      if (analyticsRes?.data?.success && analyticsRes.data.data) {
         setAnalytics(analyticsRes.data.data)
+      } else {
+        setAnalytics(null)
       }
 
       const pending = orders.filter(
-        (o) => o.orderStatus === 'Preparing' || o.orderStatus === 'Shipped'
+        (o) => o?.orderStatus === 'Preparing' || o?.orderStatus === 'Shipped'
       ).length
+
       const completed = orders.filter(
-        (o) => o.orderStatus === 'Delivered'
+        (o) => o?.orderStatus === 'Delivered'
       ).length
 
       setOverview({
@@ -192,24 +202,26 @@ export default function SellerDashboard() {
         completedOrders: completed,
         storeName: dash?.storeName || '',
         isVerified: !!dash?.isVerified,
-        plan: 'free',
+        plan: dash?.plan || 'free',
       })
 
-      const recent: ActivityItem[] = orders.slice(0, 6).map((o) => ({
-        id: o._id,
-        type: o.orderStatus === 'Shipped' ? 'order_shipped' : 'order_received',
+      const recent: ActivityItem[] = orders.slice(0, 6).map((o: any) => ({
+        id: String(o?._id || Math.random()),
+        type: o?.orderStatus === 'Shipped' ? 'order_shipped' : 'order_received',
         title:
-          o.orderStatus === 'Shipped'
+          o?.orderStatus === 'Shipped'
             ? 'Order Shipped'
-            : o.orderStatus === 'Delivered'
+            : o?.orderStatus === 'Delivered'
               ? 'Order Delivered'
               : 'Order Received',
-        subtitle: o.orderNumber || 'Order',
-        at: o.createdAt,
+        subtitle: o?.orderNumber || 'Order',
+        at: o?.createdAt || '',
       }))
+
       setActivity(recent)
     } catch (e) {
       console.log('Seller dashboard error:', e)
+      // Keep previous state on error
     } finally {
       setLoading(false)
       setRefreshing(false)
@@ -218,7 +230,11 @@ export default function SellerDashboard() {
 
   useFocusEffect(
     useCallback(() => {
-      if (isSignedIn) loadDashboard()
+      if (isSignedIn) {
+        loadDashboard()
+      } else {
+        setLoading(false)
+      }
     }, [isSignedIn, loadDashboard])
   )
 
@@ -237,8 +253,16 @@ export default function SellerDashboard() {
     )
   }
 
+  // Safe arrays for rendering
+  const safeActivity = Array.isArray(activity) ? activity : []
+  const safeTopProducts = Array.isArray(analytics?.topProducts)
+    ? analytics.topProducts
+    : []
+  const safeSeries = Array.isArray(analytics?.series) ? analytics.series : []
+
   return (
     <SafeAreaView className="flex-1 bg-[#060B14]" edges={['top']}>
+      {/* Top bar */}
       <View className="px-5 pt-2 pb-3 flex-row items-center justify-between">
         <View>
           <Text className="text-[#5A7088] text-[11px] font-semibold tracking-[3px] uppercase">
@@ -282,6 +306,7 @@ export default function SellerDashboard() {
           />
         }
       >
+        {/* Greeting */}
         <View className="mb-7">
           <Text className="text-white text-[26px] font-extrabold leading-8">
             {greeting}, {firstName}.
@@ -291,13 +316,14 @@ export default function SellerDashboard() {
           </Text>
         </View>
 
+        {/* Overview */}
         <Text className="text-[#5A7088] text-[11px] font-semibold tracking-[2.5px] uppercase mb-3">
           Overview
         </Text>
         <View className="flex-row flex-wrap justify-between mb-2">
           <OverviewCard
             label="Products"
-            value={String(overview.totalProducts)}
+            value={String(overview.totalProducts ?? 0)}
             icon="cube-outline"
             hint={
               overview.totalProducts === 0
@@ -307,7 +333,7 @@ export default function SellerDashboard() {
           />
           <OverviewCard
             label="Pending"
-            value={String(overview.pendingOrders)}
+            value={String(overview.pendingOrders ?? 0)}
             icon="time-outline"
             hint={
               overview.pendingOrders === 0
@@ -317,19 +343,20 @@ export default function SellerDashboard() {
           />
           <OverviewCard
             label="Completed"
-            value={String(overview.completedOrders)}
+            value={String(overview.completedOrders ?? 0)}
             icon="checkmark-done-outline"
           />
           <OverviewCard
             label="Plan"
             value={
-              overview.plan.charAt(0).toUpperCase() + overview.plan.slice(1)
+              (overview.plan || 'free').charAt(0).toUpperCase() +
+              (overview.plan || 'free').slice(1)
             }
             icon="diamond-outline"
           />
         </View>
 
-        {/* Performance — store-wide */}
+        {/* Performance */}
         <Text className="text-[#5A7088] text-[11px] font-semibold tracking-[2.5px] uppercase mb-3 mt-2">
           Performance
         </Text>
@@ -346,24 +373,27 @@ export default function SellerDashboard() {
             Views · Cart · Purchases (last {analytics?.rangeDays || 30} days)
           </Text>
 
-          <PerformanceChart data={analytics?.series || []} />
+          <PerformanceChart data={safeSeries} />
 
           <Text className="text-white font-semibold text-[13px] mt-5 mb-3">
             Top performing products
           </Text>
-          {(analytics?.topProducts || []).length === 0 ? (
+
+          {safeTopProducts.length === 0 ? (
             <Text className="text-[#5A7088] text-[12px] leading-5">
               Rankings appear as buyers view, cart, and purchase your items.
             </Text>
           ) : (
-            (analytics?.topProducts || []).map((p: any, i: number) => (
+            safeTopProducts.map((p: any, i: number) => (
               <TouchableOpacity
-                key={String(p.productId)}
-                onPress={() =>
-                  router.push(
-                    `/seller/products/performance/${p.productId}` as any
-                  )
-                }
+                key={String(p?.productId || i)}
+                onPress={() => {
+                  if (p?.productId) {
+                    router.push(
+                      `/seller/products/performance/${p.productId}` as any
+                    )
+                  }
+                }}
                 activeOpacity={0.85}
                 className="flex-row items-center py-2.5 border-b border-[#152030]"
               >
@@ -372,9 +402,9 @@ export default function SellerDashboard() {
                   className="text-white flex-1 text-[13px]"
                   numberOfLines={1}
                 >
-                  {p.name}
+                  {p?.name || 'Product'}
                 </Text>
-                {p.milestone200 ? (
+                {p?.milestone200 ? (
                   <View className="bg-[#1A2F28] px-2 py-0.5 rounded-full mr-2">
                     <Text className="text-[#8FE3B0] text-[9px] font-bold">
                       200+
@@ -382,13 +412,14 @@ export default function SellerDashboard() {
                   </View>
                 ) : null}
                 <Text className="text-[#9EC5FF] font-bold text-[13px]">
-                  {p.score}
+                  {p?.score ?? 0}
                 </Text>
               </TouchableOpacity>
             ))
           )}
         </View>
 
+        {/* Revenue placeholder */}
         <View className="bg-[#0C1520] border border-dashed border-[#243B55] rounded-[24px] p-5 mb-8 mt-1">
           <View className="flex-row items-center mb-1">
             <Ionicons name="wallet-outline" size={18} color="#5A7088" />
@@ -404,6 +435,7 @@ export default function SellerDashboard() {
           </Text>
         </View>
 
+        {/* Quick Actions */}
         <Text className="text-[#5A7088] text-[11px] font-semibold tracking-[2.5px] uppercase mb-3">
           Quick Actions
         </Text>
@@ -440,11 +472,12 @@ export default function SellerDashboard() {
           />
         </View>
 
+        {/* Recent Activity */}
         <View className="flex-row items-center justify-between mb-3">
           <Text className="text-[#5A7088] text-[11px] font-semibold tracking-[2.5px] uppercase">
             Recent Activity
           </Text>
-          {activity.length > 0 && (
+          {safeActivity.length > 0 && (
             <TouchableOpacity
               onPress={() => router.push('/seller/orders' as any)}
             >
@@ -455,7 +488,7 @@ export default function SellerDashboard() {
           )}
         </View>
 
-        {activity.length === 0 ? (
+        {safeActivity.length === 0 ? (
           <View className="mb-8">
             <EmptyBlock
               icon="pulse-outline"
@@ -465,7 +498,7 @@ export default function SellerDashboard() {
           </View>
         ) : (
           <View className="mb-8">
-            {activity.map((item) => (
+            {safeActivity.map((item) => (
               <View
                 key={item.id}
                 className="bg-[#0C1520] border border-[#1A2A3A] rounded-[20px] px-4 py-3.5 mb-2.5 flex-row items-center"
@@ -497,6 +530,7 @@ export default function SellerDashboard() {
           </View>
         )}
 
+        {/* Seller Tips */}
         <Text className="text-[#5A7088] text-[11px] font-semibold tracking-[2.5px] uppercase mb-3">
           Seller Tips
         </Text>
@@ -514,7 +548,7 @@ export default function SellerDashboard() {
                 Platform tip
               </Text>
               <Text className="text-[#DCEBFF] text-[14px] leading-5">
-                {SELLER_TIPS[tipIndex]}
+                {SELLER_TIPS[tipIndex] || SELLER_TIPS[0]}
               </Text>
             </View>
           </View>
@@ -530,6 +564,7 @@ export default function SellerDashboard() {
           </View>
         </View>
 
+        {/* Current Plan */}
         <Text className="text-[#5A7088] text-[11px] font-semibold tracking-[2.5px] uppercase mb-3">
           Current Plan
         </Text>
@@ -542,7 +577,7 @@ export default function SellerDashboard() {
             <View>
               <Text className="text-[#6B8299] text-[12px]">Subscription</Text>
               <Text className="text-white text-[22px] font-extrabold mt-0.5 capitalize">
-                {overview.plan}
+                {overview.plan || 'free'}
               </Text>
             </View>
             <View className="w-12 h-12 rounded-2xl bg-[#1A2F4A] items-center justify-center">

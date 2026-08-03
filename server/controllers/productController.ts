@@ -1,8 +1,11 @@
 import { Request, Response } from "express";
 import Product from "../models/Products.js";
 import User from "../models/User.js";
+import ProductAI from "../models/ProductAI.js";
 import { trackProductPerformance } from "../utils/performance.js";
 import cloudinary from "../config/cloudinary.js";
+import { enqueueProductAI } from "../services/jobs/generateProductAI.js";
+import { generateProductFingerprint } from "../services/plazoreAI/index.js";
 
 const getUser = (req: Request) => (req as any).user;
 
@@ -287,6 +290,9 @@ export const createProduct = async (req: Request, res: Response) => {
       fulfillmentLocation,
     });
 
+    // ── Plazore AI: enqueue generation (non-blocking) ──
+    enqueueProductAI(String(product._id));
+
     res.status(201).json({ success: true, data: product });
   } catch (error: any) {
     console.error("createProduct error:", error);
@@ -462,6 +468,16 @@ export const updateProduct = async (req: Request, res: Response) => {
       runValidators: true,
     });
 
+    // ── Plazore AI: only regenerate if meaningful fields changed ──
+    if (updated) {
+      const newFingerprint = generateProductFingerprint(updated);
+      const existingAI = await ProductAI.findOne({ productId: updated._id });
+
+      if (!existingAI || existingAI.fingerprint !== newFingerprint) {
+        enqueueProductAI(String(updated._id));
+      }
+    }
+
     res.json({ success: true, data: updated });
   } catch (error: any) {
     console.error("updateProduct error:", error);
@@ -522,6 +538,9 @@ export const deleteProduct = async (req: Request, res: Response) => {
         })
       );
     }
+
+    // Also remove the associated Plazore AI document
+    await ProductAI.deleteOne({ productId: product._id });
 
     await Product.findByIdAndDelete(req.params.id);
 

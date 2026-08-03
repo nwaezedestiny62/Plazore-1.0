@@ -7,6 +7,7 @@ import { BlurView } from 'expo-blur'
 import { useLocalSearchParams, useRouter } from 'expo-router'
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import api from '@/constants/api'
+import { PlazoreAIData } from '@/constants/plazoreAI'
 import {
   ActivityIndicator,
   Animated,
@@ -36,6 +37,10 @@ export default function ProductDetails() {
   const [liked, setLiked] = useState(false)
   const [busy, setBusy] = useState(false)
 
+  // Plazore AI state
+  const [aiData, setAiData] = useState<PlazoreAIData | null>(null)
+  const [aiLoading, setAiLoading] = useState(false)
+
   const wishlistApi = useWishlist() as any
   const { isInWishlist, toggleWishlist, addToWishlist, mutateWishlist } =
     wishlistApi
@@ -53,6 +58,7 @@ export default function ProductDetails() {
     { id: number; x: number; anim: Animated.Value }[]
   >([])
 
+  // Load product
   useEffect(() => {
     const load = async () => {
       if (!id) {
@@ -94,7 +100,29 @@ export default function ProductDetails() {
     load()
   }, [id])
 
-  // Keep heart in sync when context wishlist changes
+  // Load Plazore AI (separate, non-blocking)
+  useEffect(() => {
+    if (!id) return
+
+    const loadAI = async () => {
+      try {
+        setAiLoading(true)
+        const res = await api.get(`/ai/product/${id}`)
+        if (res.data.success) {
+          setAiData(res.data.data)
+        }
+      } catch {
+        // Quiet fallback – AI may not be ready yet
+        setAiData(null)
+      } finally {
+        setAiLoading(false)
+      }
+    }
+
+    loadAI()
+  }, [id])
+
+  // Keep heart in sync
   useEffect(() => {
     if (!product?._id) return
     setLiked(!!isInWishlist?.(product._id))
@@ -115,10 +143,6 @@ export default function ProductDetails() {
     ]).start()
   }
 
-  /**
-   * Heart button → full toggle (add OR remove)
-   * Double-tap image → add only (never remove, never +2)
-   */
   const runWishlist = useCallback(
     async (mode: 'toggle' | 'add') => {
       if (!product || busy) return
@@ -141,7 +165,6 @@ export default function ProductDetails() {
             result = { ok: true, inWishlist: true, changed: true }
           }
         } else {
-          // Fallback: toggle only; for add mode skip if already liked
           if (mode === 'add' && wasLiked) {
             result = { ok: true, inWishlist: true, changed: false }
           } else {
@@ -153,7 +176,6 @@ export default function ProductDetails() {
 
         setLiked(result.inWishlist)
 
-        // Count moves only when membership actually changed
         if (result.changed) {
           setWishlistCount((c) =>
             result.inWishlist ? c + 1 : Math.max(0, c - 1)
@@ -169,14 +191,12 @@ export default function ProductDetails() {
   )
 
   const handleHeartPress = () => {
-    // Only heart can remove (toggle)
     runWishlist('toggle')
   }
 
   const handleImagePress = (evt: any) => {
     const now = Date.now()
     if (now - lastTap.current < 280) {
-      // Double-tap → ADD only
       runWishlist('add')
 
       const { locationX } = evt.nativeEvent
@@ -271,6 +291,7 @@ export default function ProductDetails() {
     <View className="flex-1 bg-[#EEF3F8]">
       <StatusBar barStyle="dark-content" />
 
+      {/* Soft top gradient */}
       <View
         pointerEvents="none"
         style={{
@@ -300,6 +321,7 @@ export default function ProductDetails() {
           showsVerticalScrollIndicator={false}
           bounces
         >
+          {/* ===================== PRODUCT IMAGES ===================== */}
           <View className="relative" style={{ height: GALLERY_H }}>
             {images.length > 0 ? (
               <Animated.ScrollView
@@ -344,6 +366,7 @@ export default function ProductDetails() {
               }}
             />
 
+            {/* Floating hearts */}
             {floatingHearts.map((h) => {
               const translateY = h.anim.interpolate({
                 inputRange: [0, 1],
@@ -374,6 +397,7 @@ export default function ProductDetails() {
               )
             })}
 
+            {/* Dots */}
             {images.length > 1 && (
               <View className="absolute bottom-6 left-0 right-0 flex-row justify-center">
                 {images.map((_, index) => {
@@ -410,7 +434,9 @@ export default function ProductDetails() {
             )}
           </View>
 
+          {/* ===================== CONTENT ===================== */}
           <View className="px-5 -mt-2">
+            {/* Name + Price + Category */}
             <View
               className="bg-white rounded-[28px] border border-white/80 p-6 mb-5"
               style={{
@@ -456,6 +482,54 @@ export default function ProductDetails() {
               </View>
             </View>
 
+                        {/* ===================== 🤖 PLAZORE AI ===================== */}
+            {(aiLoading || aiData) && (
+              <View
+                className="bg-white rounded-[26px] border border-[#E8EEF4] p-5 mb-5"
+                style={{
+                  shadowColor: '#0F172A',
+                  shadowOpacity: 0.03,
+                  shadowRadius: 12,
+                  shadowOffset: { width: 0, height: 4 },
+                }}
+              >
+                <Text className="text-[#0F172A] font-semibold text-[16px] mb-3">
+                  🤖 Plazore AI
+                </Text>
+
+                {aiLoading ? (
+                  <ActivityIndicator size="small" color="#94A3B8" />
+                ) : aiData?.status === 'pending' ? (
+                  <Text className="text-[#64748B] text-[14px] leading-6">
+                    Preparing product interpretation…
+                  </Text>
+                ) : aiData?.status === 'ready' ? (
+                  <>
+                    <Text className="text-[#475569] text-[15px] leading-7 mb-4">
+                      {aiData.summary}
+                    </Text>
+
+                    <TouchableOpacity
+                      onPress={() => router.push(`/product/${id}/ai` as any)}
+                      activeOpacity={0.7}
+                      className="flex-row items-center"
+                    >
+                      <Text className="text-[#2563EB] font-medium text-[14px] mr-1">
+                        See More
+                      </Text>
+                      <Ionicons
+                        name="chevron-forward"
+                        size={15}
+                        color="#2563EB"
+                      />
+                    </TouchableOpacity>
+                  </>
+                ) : null}
+              </View>
+            )}
+
+
+            {/* Product Description */}
             {!!product.description && (
               <View className="mb-6 px-1">
                 <Text className="text-[#94A3B8] text-[11px] font-bold tracking-[2px] uppercase mb-3">
@@ -467,6 +541,7 @@ export default function ProductDetails() {
               </View>
             )}
 
+            {/* ===================== SHIPPING INFORMATION ===================== */}
             <View
               className="bg-white rounded-[26px] border border-[#E8EEF4] p-5 mb-4"
               style={{
@@ -510,6 +585,7 @@ export default function ProductDetails() {
               </View>
             </View>
 
+            {/* Ships From */}
             {!!shipsFrom && (
               <View
                 className="bg-white rounded-[26px] border border-[#E8EEF4] p-5 mb-4 flex-row items-center"
@@ -538,6 +614,7 @@ export default function ProductDetails() {
               </View>
             )}
 
+            {/* Visit Store Card (kept for consistency) */}
             <TouchableOpacity
               activeOpacity={0.88}
               disabled={!sellerId}
@@ -586,6 +663,7 @@ export default function ProductDetails() {
           </View>
         </ScrollView>
 
+        {/* ===================== BOTTOM BAR ===================== */}
         <View
           className="absolute bottom-0 left-0 right-0 px-4 pt-3.5 pb-9 border-t border-[#E2E8F0] bg-white/95 flex-row gap-3 items-center"
           style={{
@@ -641,6 +719,7 @@ export default function ProductDetails() {
           </TouchableOpacity>
         </View>
 
+        {/* ===================== TOP BAR ===================== */}
         <SafeAreaView
           edges={['top']}
           className="absolute top-0 left-0 right-0 z-10"
