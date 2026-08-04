@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons'
 import { BlurView } from 'expo-blur'
 import { LinearGradient } from 'expo-linear-gradient'
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useRef, useState } from 'react'
 import {
   Animated,
   Image,
@@ -12,20 +12,16 @@ import {
 } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
-/** Soft gold accent — active music / notification dot */
 const ACCENT = '#C9A962'
 const ICON = '#FFFFFF'
 const GLASS = 'rgba(12,12,12,0.82)'
 
 type Props = {
-  /** 0 = over hero (transparent), 1 = scrolled (glass) */
   scrollProgress: Animated.Value | number
-  /** Unread notifications — shows elegant gold dot only */
   hasUnreadNotifications?: boolean
   onMenuPress?: () => void
   onMusicPress?: () => void
   onNotificationsPress?: () => void
-  /** Controlled music visual (optional). If omitted, toggles locally for UI only. */
   musicOn?: boolean
 }
 
@@ -44,12 +40,12 @@ function IconButton({
   const pressIn = () => {
     Animated.parallel([
       Animated.timing(scale, {
-        toValue: 0.96,
+        toValue: 0.94,
         duration: 120,
         useNativeDriver: true,
       }),
       Animated.timing(opacity, {
-        toValue: 0.72,
+        toValue: 0.7,
         duration: 120,
         useNativeDriver: true,
       }),
@@ -76,7 +72,7 @@ function IconButton({
       onPress={onPress}
       onPressIn={pressIn}
       onPressOut={pressOut}
-      hitSlop={12}
+      hitSlop={14}
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}
     >
@@ -89,11 +85,6 @@ function IconButton({
   )
 }
 
-/**
- * Plazore Title Bar — showroom control center
- * Floating over hero → sticky glass after scroll.
- * Architecture only: menu / music / notifications callbacks.
- */
 export default function PlazoreTitleBar({
   scrollProgress,
   hasUnreadNotifications = false,
@@ -107,12 +98,6 @@ export default function PlazoreTitleBar({
   const musicOn =
     typeof musicControlled === 'boolean' ? musicControlled : musicLocal
 
-  const progress =
-    typeof scrollProgress === 'number'
-      ? scrollProgress
-      : scrollProgress
-
-  // Native-driver friendly interpolations when Animated.Value
   const isAnimated = typeof scrollProgress !== 'number'
 
   const glassOpacity = isAnimated
@@ -121,7 +106,7 @@ export default function PlazoreTitleBar({
         outputRange: [0, 1],
         extrapolate: 'clamp',
       })
-    : progress
+    : scrollProgress
 
   const handleMusic = () => {
     if (typeof musicControlled !== 'boolean') {
@@ -130,21 +115,21 @@ export default function PlazoreTitleBar({
     onMusicPress?.()
   }
 
-  const topPad = Math.max(insets.top, 12)
+  const topPad = Math.max(insets.top - 6, 4)
 
   return (
     <View
       pointerEvents="box-none"
       style={[styles.wrap, { paddingTop: topPad }]}
     >
-      {/* Glass layer — fades in as user leaves the hero */}
+      {/* Glass */}
       {isAnimated ? (
         <Animated.View
           pointerEvents="none"
           style={[StyleSheet.absoluteFill, { opacity: glassOpacity as any }]}
         >
           {Platform.OS === 'ios' ? (
-            <BlurView intensity={48} tint="dark" style={StyleSheet.absoluteFill} />
+            <BlurView intensity={52} tint="dark" style={StyleSheet.absoluteFill} />
           ) : (
             <View style={[StyleSheet.absoluteFill, { backgroundColor: GLASS }]} />
           )}
@@ -158,13 +143,10 @@ export default function PlazoreTitleBar({
       ) : (
         <View
           pointerEvents="none"
-          style={[
-            StyleSheet.absoluteFill,
-            { opacity: glassOpacity as number },
-          ]}
+          style={[StyleSheet.absoluteFill, { opacity: glassOpacity as number }]}
         >
           {Platform.OS === 'ios' ? (
-            <BlurView intensity={48} tint="dark" style={StyleSheet.absoluteFill} />
+            <BlurView intensity={52} tint="dark" style={StyleSheet.absoluteFill} />
           ) : (
             <View style={[StyleSheet.absoluteFill, { backgroundColor: GLASS }]} />
           )}
@@ -180,41 +162,41 @@ export default function PlazoreTitleBar({
         </View>
       )}
 
-      {/* Soft top veil so white icons stay readable on bright hero frames */}
       <LinearGradient
         pointerEvents="none"
-        colors={['rgba(0,0,0,0.28)', 'rgba(0,0,0,0)']}
+        colors={['rgba(0,0,0,0.32)', 'rgba(0,0,0,0)']}
         style={styles.topVeil}
       />
 
+      {/* Big logo — absolute so it does NOT stretch bar height */}
+      <View style={styles.logoWrap} pointerEvents="none">
+        <Image
+          source={require('../assets/logo.png')}
+          style={styles.logo}
+          resizeMode="contain"
+        />
+      </View>
+
+      {/* Tight icon row — this sets the real navbar height */}
       <View style={styles.row}>
-        {/* LEFT — Navigation Hub toggle */}
         <View style={styles.side}>
           <IconButton
             onPress={onMenuPress}
             accessibilityLabel="Open navigation"
           >
-            <Ionicons name="menu-outline" size={26} color={ICON} />
+            <Ionicons name="menu" size={26} color={ICON} />
           </IconButton>
         </View>
 
-        {/* CENTER — Wordmark (never shifts) */}
-        <View style={styles.center} pointerEvents="none">
-          <Image
-            source={require('../assets/logo.png')}
-            style={styles.logo}
-            resizeMode="contain"
-          />
-        </View>
+        <View style={styles.center} />
 
-        {/* RIGHT — Music + Notifications */}
         <View style={[styles.side, styles.sideRight]}>
           <IconButton
             onPress={handleMusic}
             accessibilityLabel={musicOn ? 'Music on' : 'Music off'}
           >
             <Ionicons
-              name={musicOn ? 'musical-notes' : 'musical-notes-outline'}
+              name={musicOn ? 'headset' : 'headset-outline'}
               size={22}
               color={musicOn ? ACCENT : ICON}
             />
@@ -225,13 +207,36 @@ export default function PlazoreTitleBar({
             accessibilityLabel="Notifications"
           >
             <View>
-              <Ionicons name="notifications-outline" size={22} color={ICON} />
-              {hasUnreadNotifications ? (
-                <View style={styles.dot} />
-              ) : null}
+              <Ionicons
+                name={
+                  hasUnreadNotifications
+                    ? 'notifications'
+                    : 'notifications-outline'
+                }
+                size={22}
+                color={ICON}
+              />
+              {hasUnreadNotifications ? <View style={styles.dot} /> : null}
             </View>
           </IconButton>
         </View>
+      </View>
+
+      {/* Line flush with the bottom edge of the bar */}
+      <View style={styles.bottomRule} pointerEvents="none">
+        <LinearGradient
+          colors={[
+            'transparent',
+            'rgba(255,255,255,0.55)',
+            'rgba(255,255,255,0.9)',
+            'rgba(255,255,255,0.55)',
+            'transparent',
+          ]}
+          locations={[0, 0.18, 0.5, 0.82, 1]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 0 }}
+          style={styles.bottomLine}
+        />
       </View>
     </View>
   )
@@ -244,7 +249,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     zIndex: 40,
-    overflow: 'hidden',
+    overflow: 'visible',
   },
   topVeil: {
     position: 'absolute',
@@ -253,48 +258,76 @@ const styles = StyleSheet.create({
     right: 0,
     height: 88,
   },
-  row: {
-    flexDirection: 'row',
+  logoWrap: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 42,
+    bottom: 0,
     alignItems: 'center',
-    paddingHorizontal: 14,
-    paddingBottom: 12,
-    minHeight: 48,
+    justifyContent: 'center',
+    zIndex: 1,
   },
+  logo: {
+    height: 99,
+    width: 280,
+  },
+row: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  paddingHorizontal: 10,
+  paddingTop: 17,   // keep — this is your content position
+  paddingBottom: 0,
+  height: 70,      // was 44 — brings bar bottom down under the logo
+  zIndex: 2,
+},
   side: {
     width: 96,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 0,
   },
   sideRight: {
     justifyContent: 'flex-end',
-    gap: 4,
   },
   center: {
     flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  logo: {
-    height: 22,
-    width: 120,
-    tintColor: '#FFFFFF',
   },
   iconHit: {
-    width: 42,
-    height: 42,
+    width: 40,
+    height: 40,
     alignItems: 'center',
     justifyContent: 'center',
   },
   dot: {
     position: 'absolute',
-    top: 1,
-    right: 1,
+    top: 0,
+    right: 0,
     width: 7,
     height: 7,
     borderRadius: 4,
     backgroundColor: ACCENT,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(12,12,12,0.35)',
+    borderColor: 'rgba(12,12,12,0.4)',
+  },
+  bottomRule: {
+    marginHorizontal: 16,
+    marginTop: 0,
+    marginBottom: 0,
+  },
+  bottomLine: {
+    height: 1,
+    borderRadius: 1,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#FFFFFF',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.4,
+        shadowRadius: 3,
+      },
+      android: {
+        elevation: 2,
+      },
+    }),
   },
 })

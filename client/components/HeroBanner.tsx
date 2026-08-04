@@ -9,6 +9,7 @@ import { Video, ResizeMode } from 'expo-av'
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Animated,
+  Dimensions,
   Easing,
   Image,
   PanResponder,
@@ -33,7 +34,6 @@ type Props = {
   onScrollToShowroom?: () => void
 }
 
-/** Full-bleed, centered cover — never stretched */
 function MediaFill({
   slide,
   playing,
@@ -70,12 +70,7 @@ function MediaFill({
     return (
       <View style={[frame, styles.mediaClip]}>
         {slide.media.poster ? (
-          <Image
-            source={slide.media.poster}
-            style={frame}
-            resizeMode="cover"
-            // @ts-ignore — RN centers cover by default
-          />
+          <Image source={slide.media.poster} style={frame} resizeMode="cover" />
         ) : null}
         <Video
           ref={videoRef}
@@ -110,14 +105,16 @@ export default function HeroBanner({
   onScrollToShowroom,
 }: Props) {
   const insets = useSafeAreaInsets()
-  const { height: windowH, width: windowW } = useWindowDimensions()
+  const window = useWindowDimensions()
+  const screen = Dimensions.get('screen')
 
-  // Exact device viewport (minus optional header chrome)
-  const heroHeight = Math.max(320, windowH - topChrome)
-  const heroWidth = windowW
+  // FULL device screen — not shortened by nav insets
+  const heroWidth = screen.width || window.width
+  const heroHeight = (screen.height || window.height) - topChrome
 
-  const bottomSafe =
-    Math.max(insets.bottom, Platform.OS === 'android' ? 28 : 16) + 12
+  // Only for text/arrow so they stay readable above system UI
+  const bottomPad =
+    Math.max(insets.bottom, Platform.OS === 'android' ? 16 : 10) + 10
 
   const slides = useMemo(
     () => resolveHeroSlides(slidesProp ?? HERO_SLIDES),
@@ -277,7 +274,6 @@ export default function HeroBanner({
       }}
       {...pan.panHandlers}
     >
-      {/* Fullscreen centered layers */}
       {slides.map((slide, i) => (
         <Animated.View
           key={slide.id}
@@ -290,8 +286,6 @@ export default function HeroBanner({
             height: heroHeight,
             opacity: opacities[i],
             overflow: 'hidden',
-            alignItems: 'center',
-            justifyContent: 'center',
           }}
         >
           <MediaFill
@@ -306,11 +300,11 @@ export default function HeroBanner({
       <LinearGradient
         pointerEvents="none"
         colors={[
-          'rgba(0,0,0,0.16)',
-          'rgba(0,0,0,0.30)',
-          'rgba(0,0,0,0.50)',
+          'rgba(0,0,0,0.18)',
+          'rgba(0,0,0,0.28)',
+          'rgba(0,0,0,0.52)',
         ]}
-        locations={[0, 0.5, 1]}
+        locations={[0, 0.45, 1]}
         style={StyleSheet.absoluteFill}
       />
 
@@ -320,7 +314,7 @@ export default function HeroBanner({
           styles.centerBlock,
           {
             paddingTop: Math.max(insets.top, 8) + 12,
-            paddingBottom: bottomSafe + 52,
+            paddingBottom: bottomPad + 48,
             opacity: copyOpacity,
           },
         ]}
@@ -346,10 +340,7 @@ export default function HeroBanner({
 
       <View
         pointerEvents="box-none"
-        style={[
-          styles.arrowBar,
-          { height: bottomSafe + 36, paddingBottom: bottomSafe },
-        ]}
+        style={[styles.arrowBar, { paddingBottom: bottomPad }]}
       >
         <Pressable onPress={onScrollToShowroom} hitSlop={20}>
           <Animated.View style={{ transform: [{ translateY: arrowY }] }}>
@@ -418,7 +409,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 0,
     right: 0,
-    bottom: 30,
+    bottom: 0,
     alignItems: 'center',
     justifyContent: 'flex-end',
     zIndex: 10,

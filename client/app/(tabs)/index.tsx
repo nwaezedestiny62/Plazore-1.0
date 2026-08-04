@@ -2,6 +2,7 @@ import HeroBanner from '@/components/HeroBanner'
 import PlazoreTitleBar from '@/components/PlazoreTitleBar'
 import { Product } from '@/constants/types'
 import api from '@/constants/api'
+import PlazoreNavigationHub from '@/components/PlazoreNavigationHub'
 import React, { useEffect, useRef, useState } from 'react'
 import {
   ActivityIndicator,
@@ -14,6 +15,7 @@ import {
 } from 'react-native'
 
 export default function Home() {
+  const [hubOpen, setHubOpen] = useState(false)
   const [products, setProducts] = useState<Product[]>([])
   const [loading, setLoading] = useState(true)
   const [scrollProgress, setScrollProgress] = useState(0)
