@@ -262,7 +262,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 0,
     right: 0,
-    top: 42,
+    top: 40,
     bottom: 0,
     alignItems: 'center',
     justifyContent: 'center',
@@ -276,7 +276,7 @@ row: {
   flexDirection: 'row',
   alignItems: 'center',
   paddingHorizontal: 10,
-  paddingTop: 17,   // keep — this is your content position
+  paddingTop: 16,   // keep — this is your content position
   paddingBottom: 0,
   height: 70,      // was 44 — brings bar bottom down under the logo
   zIndex: 2,

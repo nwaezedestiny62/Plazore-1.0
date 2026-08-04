@@ -1,8 +1,8 @@
 import HeroBanner from '@/components/HeroBanner'
 import PlazoreTitleBar from '@/components/PlazoreTitleBar'
+import PlazoreNavigationHub from '@/components/PlazoreNavigationHub'
 import { Product } from '@/constants/types'
 import api from '@/constants/api'
-import PlazoreNavigationHub from '@/components/PlazoreNavigationHub'
 import React, { useEffect, useRef, useState } from 'react'
 import {
   ActivityIndicator,
@@ -44,7 +44,6 @@ export default function Home() {
 
   const onScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
     const y = e.nativeEvent.contentOffset.y
-    // 0 → 1 as user leaves the hero
     const p = Math.min(1, Math.max(0, y / (heroH * 0.9)))
     setScrollProgress(p)
   }
@@ -59,9 +58,9 @@ export default function Home() {
   return (
     <View style={{ flex: 1, backgroundColor: '#0E0E0E' }}>
       <PlazoreTitleBar
-        scrollProgress={scrollProgress}   // ← plain number 0–1
+        scrollProgress={scrollProgress}
         hasUnreadNotifications={false}
-        onMenuPress={() => {}}
+        onMenuPress={() => setHubOpen(true)}
         onMusicPress={() => {}}
         onNotificationsPress={() => {}}
       />
@@ -131,6 +130,11 @@ export default function Home() {
           )}
         </View>
       </ScrollView>
+
+      <PlazoreNavigationHub
+        visible={hubOpen}
+        onClose={() => setHubOpen(false)}
+      />
     </View>
   )
 }

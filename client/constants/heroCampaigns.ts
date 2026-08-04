@@ -1,15 +1,9 @@
 import { ImageSourcePropType } from 'react-native'
 
-export type HeroMedia =
-  | {
-      kind: 'image'
-      source: ImageSourcePropType
-    }
-  | {
-      kind: 'video'
-      source: number | { uri: string }
-      poster?: ImageSourcePropType
-    }
+export type HeroMedia = {
+  kind: 'image'
+  source: ImageSourcePropType
+}
 
 export type HeroSlide = {
   id: string
@@ -25,7 +19,7 @@ export type HeroSlide = {
 
 /**
  * Local files: client/assets/hero/
- * Paths are relative from client/constants/ (no @ alias)
+ * Paths are relative from client/constants/
  */
 export const HERO_SLIDES: HeroSlide[] = [
   {
@@ -46,9 +40,8 @@ export const HERO_SLIDES: HeroSlide[] = [
     campaignKey: 'campaign_summer',
     season: 'summer',
     media: {
-      kind: 'video',
-      source: require('../assets/hero/summer.mp4'),
-      poster: require('../assets/hero/summer-poster.jpg'),
+      kind: 'image',
+      source: require('../assets/hero/summer-poster.jpg'),
     },
     headline: 'Summer Collection',
     subheadline:
@@ -74,9 +67,8 @@ export const HERO_SLIDES: HeroSlide[] = [
     campaignKey: 'campaign_christmas',
     season: 'winter',
     media: {
-      kind: 'video',
+      kind: 'image',
       source: require('../assets/hero/christmas-poster.jpg'),
-      poster: require('../assets/hero/christmas-poster.jpg'),
     },
     headline: 'Christmas Campaign',
     subheadline:

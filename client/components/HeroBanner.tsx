@@ -5,7 +5,6 @@ import {
 } from '@/constants/heroCampaigns'
 import { Ionicons } from '@expo/vector-icons'
 import { LinearGradient } from 'expo-linear-gradient'
-import { Video, ResizeMode } from 'expo-av'
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Animated,
@@ -15,6 +14,7 @@ import {
   PanResponder,
   Platform,
   Pressable,
+  StatusBar,
   StyleSheet,
   Text,
   useWindowDimensions,
@@ -36,61 +36,29 @@ type Props = {
 
 function MediaFill({
   slide,
-  playing,
   width,
   height,
 }: {
   slide: HeroSlide
-  playing: boolean
   width: number
   height: number
 }) {
-  const videoRef = useRef<Video>(null)
-
-  useEffect(() => {
-    if (slide.media.kind !== 'video') return
-    const v = videoRef.current
-    if (!v) return
-    if (playing) {
-      v.playAsync().catch(() => {})
-    } else {
-      v.pauseAsync().catch(() => {})
-    }
-  }, [playing, slide.id])
-
-  const frame = {
-    position: 'absolute' as const,
-    top: 0,
-    left: 0,
-    width,
-    height,
-  }
-
-  if (slide.media.kind === 'video') {
-    return (
-      <View style={[frame, styles.mediaClip]}>
-        {slide.media.poster ? (
-          <Image source={slide.media.poster} style={frame} resizeMode="cover" />
-        ) : null}
-        <Video
-          ref={videoRef}
-          source={slide.media.source as any}
-          style={frame}
-          resizeMode={ResizeMode.COVER}
-          isLooping
-          isMuted
-          shouldPlay={playing}
-          useNativeControls={false}
-        />
-      </View>
-    )
-  }
-
   return (
-    <View style={[frame, styles.mediaClip]}>
+    <View
+      style={[
+        styles.mediaClip,
+        {
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          width,
+          height,
+        },
+      ]}
+    >
       <Image
         source={slide.media.source}
-        style={frame}
+        style={{ width, height }}
         resizeMode="cover"
         fadeDuration={0}
       />
@@ -106,15 +74,30 @@ export default function HeroBanner({
 }: Props) {
   const insets = useSafeAreaInsets()
   const window = useWindowDimensions()
+
+  // Always prefer full device screen so cold-start matches post-modal layout
   const screen = Dimensions.get('screen')
+  const heroWidth = Math.max(screen.width, window.width)
+  const heroHeight = Math.max(screen.height, window.height) - topChrome
 
-  // FULL device screen — not shortened by nav insets
-  const heroWidth = screen.width || window.width
-  const heroHeight = (screen.height || window.height) - topChrome
+  // Stable status-bar inset (works before/after modal)
+  const statusTop = Math.max(
+    insets.top,
+    Platform.OS === 'android' ? StatusBar.currentHeight ?? 24 : 12,
+    12
+  )
 
-  // Only for text/arrow so they stay readable above system UI
   const bottomPad =
-    Math.max(insets.bottom, Platform.OS === 'android' ? 16 : 10) + 10
+    Math.max(insets.bottom, Platform.OS === 'android' ? 20 : 12) + 8
+
+  // Lock edge-to-edge status bar on first paint (same state modal forces later)
+  useEffect(() => {
+    StatusBar.setBarStyle('light-content', true)
+    if (Platform.OS === 'android') {
+      StatusBar.setTranslucent(true)
+      StatusBar.setBackgroundColor('transparent', true)
+    }
+  }, [])
 
   const slides = useMemo(
     () => resolveHeroSlides(slidesProp ?? HERO_SLIDES),
@@ -155,7 +138,6 @@ export default function HeroBanner({
   const goTo = useCallback(
     (raw: number) => {
       if (busy.current || slides.length < 2) return
-
       const from = currentRef.current
       const target = ((raw % slides.length) + slides.length) % slides.length
       if (target === from) return
@@ -203,8 +185,8 @@ export default function HeroBanner({
         currentRef.current = target
         setCurrent(target)
         setCopyIndex(target)
-
         copyOpacity.setValue(0)
+
         Animated.timing(copyOpacity, {
           toValue: 1,
           duration: 650,
@@ -288,21 +270,16 @@ export default function HeroBanner({
             overflow: 'hidden',
           }}
         >
-          <MediaFill
-            slide={slide}
-            playing={i === current}
-            width={heroWidth}
-            height={heroHeight}
-          />
+          <MediaFill slide={slide} width={heroWidth} height={heroHeight} />
         </Animated.View>
       ))}
 
       <LinearGradient
         pointerEvents="none"
         colors={[
-          'rgba(0,0,0,0.18)',
+          'rgba(0,0,0,0.22)',
           'rgba(0,0,0,0.28)',
-          'rgba(0,0,0,0.52)',
+          'rgba(0,0,0,0.55)',
         ]}
         locations={[0, 0.45, 1]}
         style={StyleSheet.absoluteFill}
@@ -313,8 +290,8 @@ export default function HeroBanner({
         style={[
           styles.centerBlock,
           {
-            paddingTop: Math.max(insets.top, 8) + 12,
-            paddingBottom: bottomPad + 48,
+            paddingTop: statusTop + 48,
+            paddingBottom: bottomPad + 56,
             opacity: copyOpacity,
           },
         ]}
