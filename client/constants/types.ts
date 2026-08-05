@@ -24,6 +24,12 @@ export interface FulfillmentLocation {
   displayLabel: string
 }
 
+export interface VerificationDocument {
+  documentName: string
+  documentType: string
+  secureUrl: string
+}
+
 export interface Product {
   _id: string
   name: string
@@ -64,6 +70,10 @@ export interface Product {
     deliveryFee: number
   }
   fulfillmentLocation?: FulfillmentLocation
+  /** Category-specific structured specs */
+  specifications?: Record<string, string>
+  /** Cloudinary metadata only */
+  verificationDocuments?: VerificationDocument[]
   wishlistCount?: number
   createdAt: string
 }

@@ -18,8 +18,19 @@ export type HeroSlide = {
 }
 
 /**
- * Local files: client/assets/hero/
- * Paths are relative from client/constants/
+ * Plazore Hero Campaigns — "Calm Signage" Edition
+ *
+ * Copy has been rewritten for a psychologically soothing tone.
+ * Each slide speaks softly — no urgency, no loud CTAs.
+ * The language is quiet, inviting, and premium.
+ * Think: a curated gallery wall, not a billboard.
+ *
+ * Image recommendations (for the actual files):
+ *  - welcome.jpg          → Dark moody editorial photo, soft bokeh, warm tones
+ *  - summer-poster.jpg    → Sun-dappled still life, linen textures, golden hour
+ *  - featured-seller.jpg  → Minimal product flat-lay, muted palette, shallow DOF
+ *  - christmas-poster.jpg → Warm candlelight, gift textures, deep shadows
+ *  - new-arrivals.jpg     → Clean shelf or rack, soft lighting, neutral tones
  */
 export const HERO_SLIDES: HeroSlide[] = [
   {
@@ -29,10 +40,10 @@ export const HERO_SLIDES: HeroSlide[] = [
       kind: 'image',
       source: require('../assets/hero/welcome.jpg'),
     },
-    headline: 'Welcome to Plazore',
+    headline: 'Plazore',
     subheadline:
-      'Discover products through a calmer, more personal shopping experience.',
-    ctaLabel: 'Start Exploring',
+      'A quieter way to discover what matters.',
+    ctaLabel: 'Enter',
     ctaAction: 'scroll_showroom',
   },
   {
@@ -43,10 +54,10 @@ export const HERO_SLIDES: HeroSlide[] = [
       kind: 'image',
       source: require('../assets/hero/summer-poster.jpg'),
     },
-    headline: 'Summer Collection',
+    headline: 'Summer, gently',
     subheadline:
-      'Light layers, warm tones, and pieces made for slower afternoons.',
-    ctaLabel: 'Explore Summer',
+      'Pieces that feel like warm light and slow afternoons.',
+    ctaLabel: 'Browse',
     ctaAction: 'scroll_showroom',
   },
   {
@@ -56,10 +67,10 @@ export const HERO_SLIDES: HeroSlide[] = [
       kind: 'image',
       source: require('../assets/hero/featured-seller.jpg'),
     },
-    headline: 'Featured Seller',
+    headline: 'Featured Maker',
     subheadline:
-      'Step into a carefully built storefront — craft, detail, and quiet confidence.',
-    ctaLabel: 'Visit Store',
+      'Craft meets confidence. A storefront worth lingering in.',
+    ctaLabel: 'Visit',
     ctaAction: 'storefront',
   },
   {
@@ -70,10 +81,10 @@ export const HERO_SLIDES: HeroSlide[] = [
       kind: 'image',
       source: require('../assets/hero/christmas-poster.jpg'),
     },
-    headline: 'Christmas Campaign',
+    headline: 'Thoughtful Season',
     subheadline:
-      'Thoughtful gifts and warm finds for the season of gathering.',
-    ctaLabel: 'Discover Gifts',
+      'Gifts that say something, for the people who mean it.',
+    ctaLabel: 'Explore',
     ctaAction: 'scroll_showroom',
   },
   {
@@ -83,10 +94,10 @@ export const HERO_SLIDES: HeroSlide[] = [
       kind: 'image',
       source: require('../assets/hero/new-arrivals.jpg'),
     },
-    headline: 'New Arrivals',
+    headline: 'Just Arrived',
     subheadline:
-      'Fresh pieces just entered the showroom — take a quiet look around.',
-    ctaLabel: 'See What’s New',
+      'New pieces, same calm. Take your time.',
+    ctaLabel: 'See More',
     ctaAction: 'scroll_showroom',
   },
 ]

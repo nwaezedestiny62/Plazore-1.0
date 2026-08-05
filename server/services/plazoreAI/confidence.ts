@@ -15,11 +15,13 @@ interface ConfidenceInput {
     storeDescription?: string;
     isSellerVerified?: boolean;
   };
+  specifications?: Record<string, string>;
+  verificationDocuments?: { documentName?: string; documentType?: string }[];
 }
 
 /**
  * Pure backend calculation.
- * GPT never decides the confidence level.
+ * The model never decides the confidence level.
  */
 export function calculateBuyerConfidence(
   input: ConfidenceInput
@@ -27,37 +29,37 @@ export function calculateBuyerConfidence(
   let score = 0;
   const factors: string[] = [];
 
-  // 1. Description quality (max 25)
+  // 1. Description (max 22)
   const desc = (input.description || "").trim();
   if (desc.length >= 300) {
-    score += 25;
+    score += 22;
     factors.push("Detailed product description provided");
   } else if (desc.length >= 120) {
-    score += 18;
+    score += 16;
     factors.push("Good product description provided");
   } else if (desc.length >= 40) {
-    score += 10;
+    score += 9;
     factors.push("Basic product description provided");
   } else {
     factors.push("Limited product description");
   }
 
-  // 2. Images (max 25)
+  // 2. Images (max 22)
   const imageCount = Array.isArray(input.images) ? input.images.length : 0;
   if (imageCount >= 5) {
-    score += 25;
-    factors.push("Multiple high-quality product images");
+    score += 22;
+    factors.push("Multiple product images available");
   } else if (imageCount >= 3) {
-    score += 18;
+    score += 16;
     factors.push("Several product images available");
   } else if (imageCount >= 1) {
-    score += 10;
+    score += 9;
     factors.push("Product image available");
   } else {
     factors.push("No product images uploaded");
   }
 
-  // 3. Shipping information (max 20)
+  // 3. Shipping (max 16)
   const hasShippingMethod = !!input.shipping?.method;
   const hasCourier =
     input.shipping?.method === "courier"
@@ -65,10 +67,10 @@ export function calculateBuyerConfidence(
       : true;
 
   if (hasShippingMethod && hasCourier) {
-    score += 20;
+    score += 16;
     factors.push("Clear shipping information provided");
   } else if (hasShippingMethod) {
-    score += 12;
+    score += 10;
     factors.push("Shipping method indicated");
   } else {
     factors.push("Shipping details incomplete");
@@ -85,27 +87,48 @@ export function calculateBuyerConfidence(
     factors.push("Fulfillment location not fully specified");
   }
 
-  // 5. Seller profile completeness (max 20)
+  // 5. Specifications (max 8)
+  const specCount = input.specifications
+    ? Object.keys(input.specifications).filter(
+        (k) => String(input.specifications![k] || "").trim().length > 0
+      ).length
+    : 0;
+  if (specCount >= 3) {
+    score += 8;
+    factors.push("Detailed product specifications provided");
+  } else if (specCount >= 1) {
+    score += 4;
+    factors.push("Some product specifications provided");
+  }
+
+  // 6. Verification documents — presence only (max 7)
+  const docCount = Array.isArray(input.verificationDocuments)
+    ? input.verificationDocuments.length
+    : 0;
+  if (docCount >= 1) {
+    score += 7;
+    factors.push("Supporting verification documents uploaded");
+  }
+
+  // 7. Seller profile (max 15)
   let sellerScore = 0;
-  if (input.seller?.storeName) sellerScore += 6;
-  if (input.seller?.storeLogo) sellerScore += 5;
-  if (input.seller?.storeDescription) sellerScore += 5;
+  if (input.seller?.storeName) sellerScore += 5;
+  if (input.seller?.storeLogo) sellerScore += 3;
+  if (input.seller?.storeDescription) sellerScore += 3;
   if (input.seller?.isSellerVerified) sellerScore += 4;
 
   score += sellerScore;
 
-  if (sellerScore >= 16) {
+  if (sellerScore >= 12) {
     factors.push("Complete and verified seller profile");
-  } else if (sellerScore >= 10) {
+  } else if (sellerScore >= 7) {
     factors.push("Seller profile partially complete");
   } else {
     factors.push("Limited seller profile information");
   }
 
-  // Clamp score
   score = Math.min(100, Math.max(0, score));
 
-  // Map to level
   let level: ConfidenceLevel;
   if (score >= 75) {
     level = "High Confidence";

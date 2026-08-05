@@ -85,6 +85,12 @@ export interface IFulfillmentLocation {
   displayLabel: string;
 }
 
+export interface IVerificationDocument {
+  documentName: string;
+  documentType: string;
+  secureUrl: string;
+}
+
 export interface IProduct extends Document {
   name: string;
   description: string;
@@ -105,6 +111,10 @@ export interface IProduct extends Document {
     deliveryFee?: number;
   };
   fulfillmentLocation?: IFulfillmentLocation;
+  /** Category-specific structured data */
+  specifications?: Map<string, string> | Record<string, string>;
+  /** Cloudinary metadata only */
+  verificationDocuments?: IVerificationDocument[];
   wishlistCount?: number;
   createdAt: Date;
   updatedAt: Date;

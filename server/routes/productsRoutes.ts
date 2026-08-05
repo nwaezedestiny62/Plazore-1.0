@@ -15,12 +15,15 @@ const ProductRouter = express.Router();
 ProductRouter.get("/", getProducts);
 ProductRouter.get("/:id", getProduct);
 
-// Admin can still create/update/delete any product
+// Admin create/update/delete
 ProductRouter.post(
   "/",
   protect,
   authorize("admin"),
-  upload.array("images", 5),
+  upload.fields([
+    { name: "images", maxCount: 10 },
+    { name: "documents", maxCount: 5 },
+  ]),
   createProduct
 );
 
@@ -28,15 +31,13 @@ ProductRouter.put(
   "/:id",
   protect,
   authorize("admin"),
-  upload.array("images", 5),
+  upload.fields([
+    { name: "images", maxCount: 10 },
+    { name: "documents", maxCount: 5 },
+  ]),
   updateProduct
 );
 
-ProductRouter.delete(
-  "/:id",
-  protect,
-  authorize("admin"),
-  deleteProduct
-);
+ProductRouter.delete("/:id", protect, authorize("admin"), deleteProduct);
 
 export default ProductRouter;

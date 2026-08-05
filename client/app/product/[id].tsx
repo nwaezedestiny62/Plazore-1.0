@@ -4,8 +4,9 @@ import { useWishlist } from '@/context/WishlistContext'
 import { Ionicons } from '@expo/vector-icons'
 import { LinearGradient } from 'expo-linear-gradient'
 import { BlurView } from 'expo-blur'
+import * as WebBrowser from 'expo-web-browser'
 import { useLocalSearchParams, useRouter } from 'expo-router'
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import api from '@/constants/api'
 import { PlazoreAIData } from '@/constants/plazoreAI'
 import {
@@ -26,6 +27,26 @@ import { COLORS } from '@/constants'
 const { width, height } = Dimensions.get('window')
 const GALLERY_H = Math.min(width * 1.12, 460)
 
+function formatSpecKey(key: string) {
+  return key
+    .replace(/([A-Z])/g, ' $1')
+    .replace(/_/g, ' ')
+    .trim()
+    .replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
+function normalizeSpecs(raw: any): Record<string, string> {
+  if (!raw) return {}
+  if (typeof raw === 'object' && !Array.isArray(raw)) {
+    const out: Record<string, string> = {}
+    for (const [k, v] of Object.entries(raw)) {
+      if (v != null && String(v).trim()) out[String(k)] = String(v)
+    }
+    return out
+  }
+  return {}
+}
+
 export default function ProductDetails() {
   const { id: rawId } = useLocalSearchParams<{ id: string | string[] }>()
   const id = Array.isArray(rawId) ? rawId[0] : rawId
@@ -37,7 +58,6 @@ export default function ProductDetails() {
   const [liked, setLiked] = useState(false)
   const [busy, setBusy] = useState(false)
 
-  // Plazore AI state
   const [aiData, setAiData] = useState<PlazoreAIData | null>(null)
   const [aiLoading, setAiLoading] = useState(false)
 
@@ -100,7 +120,7 @@ export default function ProductDetails() {
     load()
   }, [id])
 
-  // Load Plazore AI (separate, non-blocking)
+  // Load Plazore AI (non-blocking)
   useEffect(() => {
     if (!id) return
 
@@ -112,7 +132,6 @@ export default function ProductDetails() {
           setAiData(res.data.data)
         }
       } catch {
-        // Quiet fallback – AI may not be ready yet
         setAiData(null)
       } finally {
         setAiLoading(false)
@@ -221,6 +240,25 @@ export default function ProductDetails() {
     lastTap.current = now
   }
 
+  const openDocument = async (url: string) => {
+    try {
+      await WebBrowser.openBrowserAsync(url)
+    } catch {
+      /* ignore */
+    }
+  }
+
+  // ✅ ALL HOOKS ABOVE — never after early returns
+  const specifications = useMemo(
+    () => normalizeSpecs(product?.specifications),
+    [product?.specifications]
+  )
+  const hasSpecs = Object.keys(specifications).length > 0
+  const verificationDocuments = Array.isArray(product?.verificationDocuments)
+    ? product.verificationDocuments
+    : []
+  const hasDocs = verificationDocuments.length > 0
+
   if (loading) {
     return (
       <View className="flex-1 justify-center items-center bg-[#EAF1F7]">
@@ -291,7 +329,6 @@ export default function ProductDetails() {
     <View className="flex-1 bg-[#EEF3F8]">
       <StatusBar barStyle="dark-content" />
 
-      {/* Soft top gradient */}
       <View
         pointerEvents="none"
         style={{
@@ -321,7 +358,7 @@ export default function ProductDetails() {
           showsVerticalScrollIndicator={false}
           bounces
         >
-          {/* ===================== PRODUCT IMAGES ===================== */}
+          {/* Gallery */}
           <View className="relative" style={{ height: GALLERY_H }}>
             {images.length > 0 ? (
               <Animated.ScrollView
@@ -366,7 +403,6 @@ export default function ProductDetails() {
               }}
             />
 
-            {/* Floating hearts */}
             {floatingHearts.map((h) => {
               const translateY = h.anim.interpolate({
                 inputRange: [0, 1],
@@ -397,7 +433,6 @@ export default function ProductDetails() {
               )
             })}
 
-            {/* Dots */}
             {images.length > 1 && (
               <View className="absolute bottom-6 left-0 right-0 flex-row justify-center">
                 {images.map((_, index) => {
@@ -434,9 +469,8 @@ export default function ProductDetails() {
             )}
           </View>
 
-          {/* ===================== CONTENT ===================== */}
           <View className="px-5 -mt-2">
-            {/* Name + Price + Category */}
+            {/* Name + price */}
             <View
               className="bg-white rounded-[28px] border border-white/80 p-6 mb-5"
               style={{
@@ -482,7 +516,7 @@ export default function ProductDetails() {
               </View>
             </View>
 
-                        {/* ===================== 🤖 PLAZORE AI ===================== */}
+            {/* Plazore AI */}
             {(aiLoading || aiData) && (
               <View
                 className="bg-white rounded-[26px] border border-[#E8EEF4] p-5 mb-5"
@@ -528,8 +562,7 @@ export default function ProductDetails() {
               </View>
             )}
 
-
-            {/* Product Description */}
+            {/* Description */}
             {!!product.description && (
               <View className="mb-6 px-1">
                 <Text className="text-[#94A3B8] text-[11px] font-bold tracking-[2px] uppercase mb-3">
@@ -541,7 +574,95 @@ export default function ProductDetails() {
               </View>
             )}
 
-            {/* ===================== SHIPPING INFORMATION ===================== */}
+            {/* Specifications */}
+            {hasSpecs && (
+              <View
+                className="bg-white rounded-[26px] border border-[#E8EEF4] p-5 mb-4"
+                style={{
+                  shadowColor: '#0F172A',
+                  shadowOpacity: 0.03,
+                  shadowRadius: 12,
+                  shadowOffset: { width: 0, height: 4 },
+                }}
+              >
+                <Text className="text-[#0F172A] font-semibold text-[16px] mb-4">
+                  Product Specifications
+                </Text>
+                {Object.entries(specifications).map(
+                  ([key, value], index, arr) => (
+                    <View
+                      key={key}
+                      className={`flex-row justify-between py-3 ${
+                        index < arr.length - 1
+                          ? 'border-b border-[#F1F5F9]'
+                          : ''
+                      }`}
+                    >
+                      <Text className="text-[#64748B] text-[13px] flex-shrink-0 mr-4">
+                        {formatSpecKey(key)}
+                      </Text>
+                      <Text className="text-[#0F172A] text-[13px] font-medium text-right flex-1">
+                        {value}
+                      </Text>
+                    </View>
+                  )
+                )}
+              </View>
+            )}
+
+            {/* Verification documents */}
+            {hasDocs && (
+              <View
+                className="bg-white rounded-[26px] border border-[#E8EEF4] p-5 mb-4"
+                style={{
+                  shadowColor: '#0F172A',
+                  shadowOpacity: 0.03,
+                  shadowRadius: 12,
+                  shadowOffset: { width: 0, height: 4 },
+                }}
+              >
+                <Text className="text-[#0F172A] font-semibold text-[16px] mb-4">
+                  Verification Documents
+                </Text>
+                {verificationDocuments.map((doc: any, i: number) => (
+                  <TouchableOpacity
+                    key={`${doc.secureUrl}-${i}`}
+                    onPress={() => openDocument(doc.secureUrl)}
+                    activeOpacity={0.85}
+                    className={`flex-row items-center py-3 ${
+                      i < verificationDocuments.length - 1
+                        ? 'border-b border-[#F1F5F9]'
+                        : ''
+                    }`}
+                  >
+                    <View className="w-11 h-11 rounded-2xl bg-[#F1F5F9] items-center justify-center mr-3.5">
+                      <Ionicons
+                        name="document-text-outline"
+                        size={20}
+                        color={COLORS.primary}
+                      />
+                    </View>
+                    <View className="flex-1 mr-2">
+                      <Text
+                        className="text-[#0F172A] text-[14px] font-medium"
+                        numberOfLines={1}
+                      >
+                        {doc.documentName || 'Document'}
+                      </Text>
+                      <Text className="text-[#94A3B8] text-[11px] mt-0.5 capitalize">
+                        {String(doc.documentType || 'document').replace(
+                          /_/g,
+                          ' '
+                        )}
+                      </Text>
+                    </View>
+                    <Ionicons name="open-outline" size={18} color="#94A3B8" />
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+
+            {/* Shipping */}
             <View
               className="bg-white rounded-[26px] border border-[#E8EEF4] p-5 mb-4"
               style={{
@@ -585,7 +706,7 @@ export default function ProductDetails() {
               </View>
             </View>
 
-            {/* Ships From */}
+            {/* Ships from */}
             {!!shipsFrom && (
               <View
                 className="bg-white rounded-[26px] border border-[#E8EEF4] p-5 mb-4 flex-row items-center"
@@ -614,7 +735,7 @@ export default function ProductDetails() {
               </View>
             )}
 
-            {/* Visit Store Card (kept for consistency) */}
+            {/* Seller */}
             <TouchableOpacity
               activeOpacity={0.88}
               disabled={!sellerId}
@@ -655,7 +776,7 @@ export default function ProductDetails() {
                   className="text-[#64748B] text-[12.5px] mt-1"
                   numberOfLines={1}
                 >
-                  {seller.storeDescription || 'Open this seller’s showroom'}
+                  {seller.storeDescription || "Open this seller's showroom"}
                 </Text>
               </View>
               <Ionicons name="chevron-forward" size={18} color="#94A3B8" />
@@ -663,7 +784,7 @@ export default function ProductDetails() {
           </View>
         </ScrollView>
 
-        {/* ===================== BOTTOM BAR ===================== */}
+        {/* Bottom bar */}
         <View
           className="absolute bottom-0 left-0 right-0 px-4 pt-3.5 pb-9 border-t border-[#E2E8F0] bg-white/95 flex-row gap-3 items-center"
           style={{
@@ -719,7 +840,7 @@ export default function ProductDetails() {
           </TouchableOpacity>
         </View>
 
-        {/* ===================== TOP BAR ===================== */}
+        {/* Top bar */}
         <SafeAreaView
           edges={['top']}
           className="absolute top-0 left-0 right-0 z-10"

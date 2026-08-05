@@ -8,7 +8,7 @@ import {
   updateMyOrderStatus,
   getMyStore,
   updateMyStore,
-  getPublicStorefront, 
+  getPublicStorefront,
 } from "../controllers/sellerController.js";
 import {
   createProduct,
@@ -44,7 +44,7 @@ SellerRouter.put(
   updateMyStore
 );
 
-// ====================== PUBLIC STOREFRONT (mall) ======================
+// ====================== PUBLIC STOREFRONT ======================
 SellerRouter.get("/store/:id", getPublicStorefront);
 
 // ====================== PRODUCTS ======================
@@ -59,7 +59,10 @@ SellerRouter.post(
   "/products",
   protect,
   authorize("seller", "admin"),
-  upload.array("images", 5),
+  upload.fields([
+    { name: "images", maxCount: 10 },
+    { name: "documents", maxCount: 5 },
+  ]),
   createProduct
 );
 
@@ -67,7 +70,10 @@ SellerRouter.put(
   "/products/:id",
   protect,
   authorize("seller", "admin"),
-  upload.array("images", 5),
+  upload.fields([
+    { name: "images", maxCount: 10 },
+    { name: "documents", maxCount: 5 },
+  ]),
   updateProduct
 );
 

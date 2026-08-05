@@ -1,6 +1,7 @@
 import HeroBanner from '@/components/HeroBanner'
 import PlazoreTitleBar from '@/components/PlazoreTitleBar'
 import PlazoreNavigationHub from '@/components/PlazoreNavigationHub'
+import { AdaptiveShowroom } from '@/components/showroom'
 import { Product } from '@/constants/types'
 import api from '@/constants/api'
 import React, { useEffect, useRef, useState } from 'react'
@@ -9,8 +10,6 @@ import {
   NativeScrollEvent,
   NativeSyntheticEvent,
   ScrollView,
-  Text,
-  useWindowDimensions,
   View,
 } from 'react-native'
 
@@ -20,16 +19,13 @@ export default function Home() {
   const [loading, setLoading] = useState(true)
   const [scrollProgress, setScrollProgress] = useState(0)
 
-  const { height: windowH } = useWindowDimensions()
-  const heroH = Math.max(windowH, 1)
-
   const showroomY = useRef(0)
   const scrollRef = useRef<ScrollView>(null)
 
   const fetchProducts = async () => {
     try {
       setLoading(true)
-      const res = await api.get('/products?limit=8')
+      const res = await api.get('/products?limit=24')
       if (res.data.success) setProducts(res.data.data)
     } catch (error) {
       console.log('Home products error:', error)
@@ -44,7 +40,7 @@ export default function Home() {
 
   const onScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
     const y = e.nativeEvent.contentOffset.y
-    const p = Math.min(1, Math.max(0, y / (heroH * 0.9)))
+    const p = Math.min(1, Math.max(0, y / 400))
     setScrollProgress(p)
   }
 
@@ -56,7 +52,7 @@ export default function Home() {
   }
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#0E0E0E' }}>
+    <View style={{ flex: 1, backgroundColor: '#0A0A0A' }}>
       <PlazoreTitleBar
         scrollProgress={scrollProgress}
         hasUnreadNotifications={false}
@@ -71,6 +67,7 @@ export default function Home() {
         bounces
         scrollEventThrottle={16}
         onScroll={onScroll}
+        contentContainerStyle={{ flexGrow: 1 }}
       >
         <HeroBanner
           topChrome={0}
@@ -81,52 +78,16 @@ export default function Home() {
           onLayout={(e) => {
             showroomY.current = e.nativeEvent.layout.y
           }}
-          style={{
-            minHeight: 320,
-            backgroundColor: '#FFFFFF',
-            paddingHorizontal: 20,
-            paddingTop: 40,
-            paddingBottom: 64,
-          }}
         >
-          <Text
-            style={{
-              color: '#94A3B8',
-              fontSize: 11,
-              fontWeight: '600',
-              letterSpacing: 2,
-              textTransform: 'uppercase',
-              marginBottom: 8,
-            }}
-          >
-            Showroom
-          </Text>
-          <Text
-            style={{
-              color: '#0F172A',
-              fontSize: 20,
-              fontWeight: '600',
-              marginBottom: 8,
-            }}
-          >
-            Adaptive Showroom
-          </Text>
-          <Text
-            style={{
-              color: '#64748B',
-              fontSize: 14,
-              lineHeight: 20,
-              marginBottom: 24,
-            }}
-          >
-            Curated discovery will live here next.
-          </Text>
           {loading ? (
-            <ActivityIndicator color="#94A3B8" />
+              <View style={{ minHeight: 400, alignItems: 'center', justifyContent: 'center', backgroundColor: '#0A0A0A' }}>
+              <ActivityIndicator color="#94A3B8" />
+            </View>
           ) : (
-            <Text style={{ color: '#94A3B8', fontSize: 13 }}>
-              {products.length} products ready for the showroom.
-            </Text>
+            <AdaptiveShowroom
+              products={products}
+              loading={loading}
+            />
           )}
         </View>
       </ScrollView>

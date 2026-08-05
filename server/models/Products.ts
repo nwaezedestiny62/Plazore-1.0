@@ -13,6 +13,15 @@ const fulfillmentLocationSchema = new Schema(
   { _id: false }
 );
 
+const verificationDocumentSchema = new Schema(
+  {
+    documentName: { type: String, required: true, trim: true },
+    documentType: { type: String, required: true, trim: true },
+    secureUrl: { type: String, required: true },
+  },
+  { _id: false }
+);
+
 const productSchema = new Schema<IProduct>(
   {
     name: { type: String, required: true, trim: true },
@@ -51,10 +60,22 @@ const productSchema = new Schema<IProduct>(
       deliveryFee: { type: Number, default: 0, min: 0 },
     },
 
-    // Independent of shipping method — where THIS product ships from
     fulfillmentLocation: {
       type: fulfillmentLocationSchema,
-      required: false, // optional for older products; required on create in controller
+      required: false,
+    },
+
+    // Category-specific structured specs (key → value)
+    specifications: {
+      type: Map,
+      of: String,
+      default: {},
+    },
+
+    // Cloudinary metadata only — never file buffers
+    verificationDocuments: {
+      type: [verificationDocumentSchema],
+      default: [],
     },
 
     wishlistCount: {

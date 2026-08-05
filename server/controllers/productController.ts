@@ -37,6 +37,142 @@ function parseFulfillmentLocation(body: any) {
   };
 }
 
+/** Client sends specifications as JSON string or object */
+function parseSpecifications(body: any): Record<string, string> {
+  let raw = body?.specifications;
+  if (!raw) return {};
+
+  if (typeof raw === "string") {
+    try {
+      raw = JSON.parse(raw);
+    } catch {
+      return {};
+    }
+  }
+
+  if (typeof raw !== "object" || Array.isArray(raw) || raw === null) {
+    return {};
+  }
+
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(raw)) {
+    const key = String(k).trim();
+    const val = String(v ?? "").trim();
+    if (key && val) out[key] = val;
+  }
+  return out;
+}
+
+/** Support both upload.array (legacy) and upload.fields */
+function getImageFiles(req: Request): Express.Multer.File[] {
+  const f = req.files as
+    | { [fieldname: string]: Express.Multer.File[] }
+    | Express.Multer.File[]
+    | undefined;
+
+  if (!f) return [];
+  if (Array.isArray(f)) return f;
+  return f.images || [];
+}
+
+function getDocumentFiles(req: Request): Express.Multer.File[] {
+  const f = req.files as
+    | { [fieldname: string]: Express.Multer.File[] }
+    | undefined;
+
+  if (!f || Array.isArray(f as any)) return [];
+  return f.documents || [];
+}
+
+function uploadToCloudinary(
+  buffer: Buffer,
+  folder: string,
+  resourceType: "image" | "auto" = "image"
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream(
+      { folder, resource_type: resourceType },
+      (error, result) => {
+        if (error) reject(error);
+        else if (!result?.secure_url) {
+          reject(new Error("Cloudinary returned no URL"));
+        } else {
+          resolve(result.secure_url);
+        }
+      }
+    );
+    stream.end(buffer);
+  });
+}
+
+/** Upload verification docs — store only name, type, secureUrl */
+async function uploadVerificationDocs(
+  files: Express.Multer.File[],
+  body: any
+): Promise<{ documentName: string; documentType: string; secureUrl: string }[]> {
+  if (!files || files.length === 0) return [];
+
+  const types = Array.isArray(body.documentTypes)
+    ? body.documentTypes
+    : body.documentTypes
+      ? [body.documentTypes]
+      : [];
+
+  const names = Array.isArray(body.documentNames)
+    ? body.documentNames
+    : body.documentNames
+      ? [body.documentNames]
+      : [];
+
+  const results = await Promise.all(
+    files.map(async (file, i) => {
+      const secureUrl = await uploadToCloudinary(
+        file.buffer,
+        "plazore/documents",
+        "auto"
+      );
+      return {
+        documentName: String(
+          names[i] || file.originalname || `Document ${i + 1}`
+        ).trim(),
+        documentType: String(types[i] || "other").trim(),
+        secureUrl,
+      };
+    })
+  );
+
+  return results;
+}
+
+function parseExistingDocuments(body: any, fallback: any[] = []): any[] {
+  if (body.existingDocuments === undefined) return fallback;
+
+  try {
+    const raw =
+      typeof body.existingDocuments === "string"
+        ? JSON.parse(body.existingDocuments)
+        : body.existingDocuments;
+
+    if (!Array.isArray(raw)) return fallback;
+
+    return raw
+      .filter(
+        (d) =>
+          d &&
+          typeof d.documentName === "string" &&
+          typeof d.documentType === "string" &&
+          typeof d.secureUrl === "string"
+      )
+      .map((d) => ({
+        documentName: String(d.documentName).trim(),
+        documentType: String(d.documentType).trim(),
+        secureUrl: String(d.secureUrl).trim(),
+      }));
+  } catch {
+    return fallback;
+  }
+}
+
 // ======================================================
 // PUBLIC - Get products (regional prioritization)
 // ======================================================
@@ -131,7 +267,13 @@ export const getProduct = async (req: Request, res: Response) => {
         .json({ success: false, message: "Product not found" });
     }
 
-    // Performance: product view (+1) — non-blocking
+    // Normalize Map → plain object for client
+    if (product.specifications instanceof Map) {
+      (product as any).specifications = Object.fromEntries(
+        product.specifications as Map<string, string>
+      );
+    }
+
     const actor = getUser(req);
     trackProductPerformance({
       productId: String(product._id),
@@ -162,30 +304,19 @@ export const createProduct = async (req: Request, res: Response) => {
       });
     }
 
+    // ── Images ──
     let images: string[] = [];
+    const imageFiles = getImageFiles(req);
 
-    if (req.files && Array.isArray(req.files) && req.files.length > 0) {
+    if (imageFiles.length > 0) {
       try {
-        const uploadPromises = (req.files as Express.Multer.File[]).map(
-          (file) =>
-            new Promise<string>((resolve, reject) => {
-              const uploadStream = cloudinary.uploader.upload_stream(
-                { folder: "plazore/products" },
-                (error, result) => {
-                  if (error) reject(error);
-                  else if (!result?.secure_url) {
-                    reject(new Error("Cloudinary returned no URL"));
-                  } else {
-                    resolve(result.secure_url);
-                  }
-                }
-              );
-              uploadStream.end(file.buffer);
-            })
+        images = await Promise.all(
+          imageFiles.map((file) =>
+            uploadToCloudinary(file.buffer, "plazore/products", "image")
+          )
         );
-        images = await Promise.all(uploadPromises);
       } catch (uploadErr: any) {
-        console.error("Cloudinary upload error:", uploadErr);
+        console.error("Cloudinary image upload error:", uploadErr);
         return res.status(502).json({
           success: false,
           message:
@@ -201,6 +332,26 @@ export const createProduct = async (req: Request, res: Response) => {
       return res.status(400).json({
         success: false,
         message: "Please upload at least one image",
+      });
+    }
+
+    // ── Verification documents (optional) ──
+    let verificationDocuments: {
+      documentName: string;
+      documentType: string;
+      secureUrl: string;
+    }[] = [];
+
+    try {
+      verificationDocuments = await uploadVerificationDocs(
+        getDocumentFiles(req),
+        req.body
+      );
+    } catch (docErr: any) {
+      console.error("Document upload error:", docErr);
+      return res.status(502).json({
+        success: false,
+        message: "Document upload failed. Please try again.",
       });
     }
 
@@ -263,6 +414,8 @@ export const createProduct = async (req: Request, res: Response) => {
       });
     }
 
+    const specifications = parseSpecifications(req.body);
+
     const seller = await User.findById(user._id)
       .select("marketplaceRegion")
       .lean();
@@ -288,9 +441,11 @@ export const createProduct = async (req: Request, res: Response) => {
         deliveryFee: safeFee,
       },
       fulfillmentLocation,
+      specifications,
+      verificationDocuments,
     });
 
-    // ── Plazore AI: enqueue generation (non-blocking) ──
+    // ── Plazore AI: enqueue generation (non-blocking) — not modified ──
     enqueueProductAI(String(product._id));
 
     res.status(201).json({ success: true, data: product });
@@ -333,6 +488,7 @@ export const updateProduct = async (req: Request, res: Response) => {
       });
     }
 
+    // ── Images: keep existing + optional new uploads ──
     let images: string[] = [];
 
     if (req.body.existingImages) {
@@ -341,29 +497,17 @@ export const updateProduct = async (req: Request, res: Response) => {
         : [req.body.existingImages];
     }
 
-    if (req.files && Array.isArray(req.files) && req.files.length > 0) {
+    const imageFiles = getImageFiles(req);
+    if (imageFiles.length > 0) {
       try {
-        const uploadPromises = (req.files as Express.Multer.File[]).map(
-          (file) =>
-            new Promise<string>((resolve, reject) => {
-              const uploadStream = cloudinary.uploader.upload_stream(
-                { folder: "plazore/products" },
-                (error, result) => {
-                  if (error) reject(error);
-                  else if (!result?.secure_url) {
-                    reject(new Error("Cloudinary returned no URL"));
-                  } else {
-                    resolve(result.secure_url);
-                  }
-                }
-              );
-              uploadStream.end(file.buffer);
-            })
+        const newImages = await Promise.all(
+          imageFiles.map((file) =>
+            uploadToCloudinary(file.buffer, "plazore/products", "image")
+          )
         );
-        const newImages = await Promise.all(uploadPromises);
         images = [...images, ...newImages];
       } catch (uploadErr: any) {
-        console.error("Cloudinary upload error:", uploadErr);
+        console.error("Cloudinary image upload error:", uploadErr);
         return res.status(502).json({
           success: false,
           message: "Image upload failed. Please try again.",
@@ -463,6 +607,31 @@ export const updateProduct = async (req: Request, res: Response) => {
       updates.images = images;
     }
 
+    // ── Specifications ──
+    if (req.body.specifications !== undefined) {
+      updates.specifications = parseSpecifications(req.body);
+    }
+
+    // ── Verification documents: keep selected existing + new uploads ──
+    const existingDocs = parseExistingDocuments(
+      req.body,
+      product.verificationDocuments || []
+    );
+
+    try {
+      const newDocs = await uploadVerificationDocs(
+        getDocumentFiles(req),
+        req.body
+      );
+      updates.verificationDocuments = [...existingDocs, ...newDocs];
+    } catch (docErr: any) {
+      console.error("Document upload error:", docErr);
+      return res.status(502).json({
+        success: false,
+        message: "Document upload failed. Please try again.",
+      });
+    }
+
     const updated = await Product.findByIdAndUpdate(req.params.id, updates, {
       returnDocument: "after",
       runValidators: true,
@@ -539,9 +708,30 @@ export const deleteProduct = async (req: Request, res: Response) => {
       );
     }
 
-    // Also remove the associated Plazore AI document
-    await ProductAI.deleteOne({ productId: product._id });
+    // Best-effort cleanup of verification docs on Cloudinary
+    if (product.verificationDocuments?.length) {
+      await Promise.all(
+        product.verificationDocuments.map(async (doc: any) => {
+          try {
+            const publicId = doc.secureUrl
+              ?.split("/upload/")[1]
+              ?.split("/")
+              .slice(1)
+              .join("/")
+              .replace(/\.[^/.]+$/, "");
+            if (publicId) {
+              await cloudinary.uploader.destroy(publicId, {
+                resource_type: "raw",
+              });
+            }
+          } catch {
+            /* ignore */
+          }
+        })
+      );
+    }
 
+    await ProductAI.deleteOne({ productId: product._id });
     await Product.findByIdAndDelete(req.params.id);
 
     res.json({ success: true, message: "Product deleted successfully" });

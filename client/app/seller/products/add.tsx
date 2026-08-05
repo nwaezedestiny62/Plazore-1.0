@@ -11,10 +11,16 @@ import {
   PLAN_IMAGE_LIMITS,
   PRODUCT_CATEGORIES,
 } from '@/constants/productCatalog'
+import {
+  categoryNeedsDocs,
+  getDocTypes,
+  getSpecFields,
+} from '@/constants/productSpecs'
 import { getRegion } from '@/constants/regions'
 import { useMarketplace } from '@/context/MarketplaceContext'
 import { useAuth } from '@clerk/clerk-expo'
 import { Ionicons } from '@expo/vector-icons'
+import * as DocumentPicker from 'expo-document-picker'
 import * as ImagePicker from 'expo-image-picker'
 import { LinearGradient } from 'expo-linear-gradient'
 import { useRouter } from 'expo-router'
@@ -33,6 +39,13 @@ import {
 } from 'react-native'
 
 const CURRENT_PLAN: keyof typeof PLAN_IMAGE_LIMITS = 'free'
+
+type LocalDoc = {
+  uri: string
+  name: string
+  type: string
+  mimeType?: string
+}
 
 function Section({
   step,
@@ -91,14 +104,18 @@ export default function AddProduct() {
   const [subCategory, setSubCategory] = useState('')
   const [brand, setBrand] = useState('')
   const [stock, setStock] = useState('')
-  const [shippingMethod, setShippingMethod] = useState<
-    'self' | 'courier' | null
-  >(null)
+  const [shippingMethod, setShippingMethod] = useState<'self' | 'courier' | null>(
+    null
+  )
   const [courierCompany, setCourierCompany] = useState('')
   const [deliveryFee, setDeliveryFee] = useState('')
   const [loading, setLoading] = useState(false)
 
-  // Fulfillment location (independent of shipping method)
+  // Specs + docs
+  const [specs, setSpecs] = useState<Record<string, string>>({})
+  const [documents, setDocuments] = useState<LocalDoc[]>([])
+
+  // Fulfillment location
   const [fulfillCountryCode, setFulfillCountryCode] = useState('')
   const [fulfillStateCode, setFulfillStateCode] = useState('')
   const [fulfillCity, setFulfillCity] = useState('')
@@ -113,6 +130,10 @@ export default function AddProduct() {
     () => (category ? PRODUCT_CATEGORIES[category] || ['Other'] : []),
     [category]
   )
+
+  const specFields = useMemo(() => getSpecFields(category), [category])
+  const needsDocs = categoryNeedsDocs(category)
+  const docTypes = useMemo(() => getDocTypes(category), [category])
 
   const pickImages = async () => {
     const remaining = maxImages - images.length
@@ -148,6 +169,33 @@ export default function AddProduct() {
     })
   }
 
+  const pickDocuments = async () => {
+    if (documents.length >= 5) {
+      Alert.alert('Limit', 'You can upload up to 5 documents')
+      return
+    }
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ['application/pdf', 'image/*'],
+        copyToCacheDirectory: true,
+        multiple: true,
+      })
+      if (result.canceled) return
+
+      const defaultType = docTypes[0]?.id || 'other'
+      const next: LocalDoc[] = result.assets.map((a) => ({
+        uri: a.uri,
+        name: a.name || 'Document',
+        type: defaultType,
+        mimeType: a.mimeType || undefined,
+      }))
+      setDocuments((prev) => [...prev, ...next].slice(0, 5))
+    } catch (e) {
+      console.log('Document picker error:', e)
+      Alert.alert('Error', 'Could not open document picker')
+    }
+  }
+
   const handleSubmit = async () => {
     if (!name.trim() || !description.trim() || !price || !stock) {
       Alert.alert('Missing fields', 'Please complete product information')
@@ -162,7 +210,6 @@ export default function AddProduct() {
       return
     }
 
-    // Fulfillment location required
     if (!fulfillCountryCode || !fulfillCity) {
       Alert.alert(
         'Fulfillment location',
@@ -214,6 +261,9 @@ export default function AddProduct() {
       formData.append('courierCompany', courierCompany.trim())
       formData.append('deliveryFee', String(feeNum))
 
+      // Specs → JSON string for controller
+      formData.append('specifications', JSON.stringify(specs))
+
       const loc = buildFulfillmentLocation({
         countryCode: fulfillCountryCode,
         country: fulfillCountry?.name || '',
@@ -236,6 +286,17 @@ export default function AddProduct() {
           uri,
           name: filename,
           type: match ? `image/${match[1]}` : 'image/jpeg',
+        } as any)
+      })
+
+      // Verification documents (Cloudinary only stores URL metadata)
+      documents.forEach((doc) => {
+        formData.append('documentTypes', doc.type)
+        formData.append('documentNames', doc.name)
+        formData.append('documents', {
+          uri: doc.uri,
+          name: doc.name,
+          type: doc.mimeType || 'application/pdf',
         } as any)
       })
 
@@ -384,6 +445,8 @@ export default function AddProduct() {
                 onPress={() => {
                   setCategory(cat)
                   setSubCategory('')
+                  setSpecs({})
+                  setDocuments([])
                 }}
                 className={`mr-2 px-3.5 py-2 rounded-full border ${
                   category === cat
@@ -451,9 +514,116 @@ export default function AddProduct() {
           />
         </Section>
 
-        {/* 03 Fulfillment Location */}
+        {/* 03 Product Specifications — dynamic by category */}
+        {!!category && specFields.length > 0 && (
+          <Section
+            step="03"
+            title="Product Specifications"
+            subtitle="Only fields relevant to this category"
+          >
+            {specFields.map((field) => (
+              <View key={field.key} className="mb-4">
+                <Label>
+                  {field.label}
+                  {field.optional ? ' (optional)' : ''}
+                </Label>
+                <TextInput
+                  value={specs[field.key] || ''}
+                  onChangeText={(t) =>
+                    setSpecs((prev) => ({ ...prev, [field.key]: t }))
+                  }
+                  placeholder={field.placeholder || field.label}
+                  placeholderTextColor="#3D5268"
+                  className="bg-[#0A121C] border border-[#1A2D42] rounded-2xl px-4 py-3.5 text-white"
+                />
+              </View>
+            ))}
+          </Section>
+        )}
+
+        {/* 04 Verification Documents — only for selected categories */}
+        {needsDocs && (
+          <Section
+            step="04"
+            title="Verification Documents"
+            subtitle="PDF or image · stored on Cloudinary, not in the database"
+          >
+            {documents.map((doc, index) => (
+              <View
+                key={`${doc.uri}-${index}`}
+                className="mb-3 bg-[#0A121C] border border-[#1A2D42] rounded-2xl p-3"
+              >
+                <View className="flex-row items-center justify-between mb-2">
+                  <Text
+                    className="text-white text-[13px] flex-1 mr-2"
+                    numberOfLines={1}
+                  >
+                    {doc.name}
+                  </Text>
+                  <TouchableOpacity
+                    onPress={() =>
+                      setDocuments((prev) =>
+                        prev.filter((_, i) => i !== index)
+                      )
+                    }
+                  >
+                    <Ionicons name="trash-outline" size={18} color="#FF8A9A" />
+                  </TouchableOpacity>
+                </View>
+
+                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                  {docTypes.map((t) => (
+                    <TouchableOpacity
+                      key={t.id}
+                      onPress={() =>
+                        setDocuments((prev) =>
+                          prev.map((d, i) =>
+                            i === index ? { ...d, type: t.id } : d
+                          )
+                        )
+                      }
+                      className={`mr-2 px-3 py-1.5 rounded-full border ${
+                        doc.type === t.id
+                          ? 'bg-[#1A2F4A] border-[#4A7AB5]'
+                          : 'border-[#1A2D42]'
+                      }`}
+                    >
+                      <Text
+                        className={`text-[11px] ${
+                          doc.type === t.id
+                            ? 'text-[#B8D4FF]'
+                            : 'text-[#6B8299]'
+                        }`}
+                      >
+                        {t.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+            ))}
+
+            {documents.length < 5 && (
+              <TouchableOpacity
+                onPress={pickDocuments}
+                className="border border-dashed border-[#2A4560] rounded-2xl py-4 items-center"
+              >
+                <Ionicons
+                  name="document-attach-outline"
+                  size={22}
+                  color="#6B8299"
+                />
+                <Text className="text-[#6B8299] text-[12px] mt-1">
+                  Add document
+                </Text>
+              </TouchableOpacity>
+            )}
+          </Section>
+        )}
+
+        {/* 05 Fulfillment Location */}
         <Section
-          step="03"
+          step={needsDocs ? '05' : '04'}
           title="Fulfillment Location"
           subtitle="Where this product ships from — not your personal address"
         >
@@ -579,8 +749,11 @@ export default function AddProduct() {
           )}
         </Section>
 
-        {/* 04 Shipping method */}
-        <Section step="04" title="Shipping Method">
+        {/* 06 Shipping method */}
+        <Section
+          step={needsDocs ? '06' : '05'}
+          title="Shipping Method"
+        >
           <View className="bg-[#122033] border border-[#1E334A] rounded-2xl p-4 mb-5 flex-row">
             <Ionicons
               name="information-circle-outline"
@@ -638,24 +811,24 @@ export default function AddProduct() {
 
           {!!shippingMethod && (
             <>
-<TextInput
-  value={deliveryFee}
-  onChangeText={(t) => {
-    // keep only digits and one decimal point
-    const next = t.replace(/[^0-9.]/g, '')
-    setDeliveryFee(next)
-  }}
-  placeholder="0.00"
-  keyboardType="decimal-pad"
-  placeholderTextColor="#3D5268"
-  className="bg-[#0A121C] border border-[#1A2D42] rounded-2xl px-4 py-3.5 text-white"
-/>
+              <Label>Delivery fee *</Label>
+              <TextInput
+                value={deliveryFee}
+                onChangeText={(t) => {
+                  const next = t.replace(/[^0-9.]/g, '')
+                  setDeliveryFee(next)
+                }}
+                placeholder="0.00"
+                keyboardType="decimal-pad"
+                placeholderTextColor="#3D5268"
+                className="bg-[#0A121C] border border-[#1A2D42] rounded-2xl px-4 py-3.5 text-white"
+              />
             </>
           )}
         </Section>
 
-        {/* 05 Publish */}
-        <Section step="05" title="Publish">
+        {/* 07 Publish */}
+        <Section step={needsDocs ? '07' : '06'} title="Publish">
           <View className="flex-row justify-between mb-2">
             <Text className="text-[#6B8299] text-[13px]">Current plan</Text>
             <Text className="text-white font-semibold capitalize">
