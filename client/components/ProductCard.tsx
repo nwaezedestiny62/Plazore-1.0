@@ -1,4 +1,5 @@
 import { ProductCardProps } from '@/constants/types'
+import { useCart } from '@/context/CartContext'
 import { useMarketplace } from '@/context/MarketplaceContext'
 import { Ionicons } from '@expo/vector-icons'
 import { Link } from 'expo-router'
@@ -19,75 +20,165 @@ function resolveShipLocation(product: any): string {
     if (parts.length) return parts.join(', ')
   }
 
-  return ''
+  if (product?.brand) return product.brand
+  if (product?.subCategory) return product.subCategory
+
+  return 'honey'
 }
 
-export default function ProductCard({ product }: ProductCardProps) {
+interface AuraProductCardProps extends ProductCardProps {
+  cardWidth?: number
+  aspectRatio?: number
+}
+
+export default function ProductCard({
+  product,
+  cardWidth,
+}: AuraProductCardProps) {
   const { formatProduct } = useMarketplace()
+  const { addToCart } = useCart()
 
   const location = useMemo(
     () => resolveShipLocation(product),
     [product]
   )
 
+  const formattedPrice = useMemo(() => {
+    return formatProduct(product.price, (product as any).region)
+  }, [product, formatProduct])
+
+  const handleQuickAdd = async (e: any) => {
+    e?.stopPropagation?.()
+    try {
+      await addToCart(product)
+    } catch (err) {
+      console.log('Cart add error:', err)
+    }
+  }
+
   return (
     <Link href={`/product/${product._id}` as any} asChild>
       <TouchableOpacity
-        activeOpacity={0.88}
-        className="w-[48%] mb-5 bg-white rounded-[20px] overflow-hidden border border-[#E8EEF4]"
+        activeOpacity={0.92}
+        style={{
+          width: cardWidth ? cardWidth : '48%',
+          marginBottom: 24,
+          backgroundColor: '#FFFFFF',
+          borderRadius: 0,
+        }}
       >
-        {/* Image */}
-        <View className="relative w-full h-40 bg-[#F1F5F9]">
+        {/* Image Container - Zero Border Radius */}
+        <View
+          style={{
+            position: 'relative',
+            width: '100%',
+            height: cardWidth ? cardWidth * 1.25 : 210,
+            backgroundColor: '#F8FAFC',
+            borderRadius: 0,
+            overflow: 'hidden',
+          }}
+        >
           {product.images?.[0] ? (
             <Image
               source={{ uri: product.images[0] }}
-              className="w-full h-full"
+              style={{ width: '100%', height: '100%' }}
               resizeMode="cover"
             />
           ) : (
-            <View className="flex-1 items-center justify-center">
-              <Ionicons name="image-outline" size={28} color="#CBD5E1" />
+            <View
+              style={{
+                flex: 1,
+                alignItems: 'center',
+                justifyContent: 'center',
+                backgroundColor: '#F1F5F9',
+              }}
+            >
+              <Ionicons name="image-outline" size={32} color="#CBD5E1" />
             </View>
           )}
 
+          {/* Floating Cart Button - Bottom Right Crisp White Square */}
+          <TouchableOpacity
+            activeOpacity={0.8}
+            onPress={handleQuickAdd}
+            style={{
+              position: 'absolute',
+              bottom: 10,
+              right: 10,
+              width: 36,
+              height: 36,
+              backgroundColor: '#FFFFFF',
+              borderRadius: 0,
+              alignItems: 'center',
+              justifyContent: 'center',
+              shadowColor: '#000',
+              shadowOffset: { width: 0, height: 2 },
+              shadowOpacity: 0.12,
+              shadowRadius: 4,
+              elevation: 3,
+            }}
+          >
+            <Ionicons name="cart-outline" size={18} color="#0F172A" />
+          </TouchableOpacity>
+
+          {/* Featured Tag */}
           {product.isFeatured && (
-            <View className="absolute top-2.5 left-2.5 bg-[#0F172A]/85 px-2.5 py-1 rounded-lg">
-              <Text className="text-white text-[10px] font-semibold tracking-wide">
+            <View
+              style={{
+                position: 'absolute',
+                top: 8,
+                left: 8,
+                backgroundColor: 'rgba(15, 23, 42, 0.85)',
+                paddingHorizontal: 8,
+                paddingVertical: 3,
+              }}
+            >
+              <Text
+                style={{
+                  color: '#FFFFFF',
+                  fontSize: 9,
+                  fontWeight: '700',
+                  letterSpacing: 1,
+                  textTransform: 'uppercase',
+                }}
+              >
                 Featured
               </Text>
             </View>
           )}
         </View>
 
-        {/* Body — breathing space */}
-        <View className="px-3.5 pt-3.5 pb-4">
+        {/* Info Box Below Image - Clean Aura Rae Typography */}
+        <View style={{ paddingTop: 12, paddingHorizontal: 4, alignItems: 'center' }}>
+          {/* Line 1: Title */}
           <Text
-            className="text-[#0F172A] font-semibold text-[13px] leading-5"
-            numberOfLines={2}
+            style={{
+              color: '#0F172A',
+              fontSize: 13,
+              fontWeight: '600',
+              textAlign: 'center',
+              lineHeight: 18,
+            }}
+            numberOfLines={1}
           >
             {product.name}
           </Text>
 
-          <Text className="text-[#0F172A] font-extrabold text-[15px] mt-2">
-            {formatProduct(product.price, (product as any).region)}
+          {/* Line 2: Location | Price */}
+          <Text
+            style={{
+              color: '#475569',
+              fontSize: 12,
+              fontWeight: '400',
+              textAlign: 'center',
+              marginTop: 4,
+            }}
+            numberOfLines={1}
+          >
+            <Text style={{ color: '#64748B' }}>{location.toLowerCase()}</Text>
+            <Text style={{ color: '#94A3B8' }}> | </Text>
+            <Text style={{ color: '#0F172A', fontWeight: '500' }}>{formattedPrice}</Text>
           </Text>
-
-          {!!location && (
-            <View className="flex-row items-start mt-2.5 pr-0.5">
-              <Ionicons
-                name="location-outline"
-                size={12}
-                color="#94A3B8"
-                style={{ marginTop: 2 }}
-              />
-              <Text
-                className="text-[#94A3B8] text-[11px] leading-4 ml-1 flex-1"
-                numberOfLines={2}
-              >
-                {location}
-              </Text>
-            </View>
-          )}
         </View>
       </TouchableOpacity>
     </Link>

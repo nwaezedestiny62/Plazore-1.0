@@ -1,6 +1,5 @@
 import Header from '@/components/Header'
 import ProductCard from '@/components/ProductCard'
-import { COLORS } from '@/constants'
 import api from '@/constants/api'
 import { Product } from '@/constants/types'
 import { useMarketplace } from '@/context/MarketplaceContext'
@@ -68,56 +67,52 @@ export default function Shop() {
   }, [region])
 
   return (
-    <SafeAreaView className="flex-1 bg-surface" edges={['top']}>
-      <Header title="Shop" showBack showCart />
+    <SafeAreaView style={{ flex: 1, backgroundColor: '#F8FAFC' }} edges={['top']}>
+      <Header title="Showroom" showBack showCart />
 
-      <View className="flex-row gap-2 mx-4 my-2 mb-3">
-        <View className="flex-1 flex-row items-center bg-white rounded-xl border border-gray-100">
-          <Ionicons
-            name="search"
-            className="ml-4"
-            size={20}
-            color={COLORS.secondary}
-          />
+      {/* Search Bar */}
+      <View style={{ flexDirection: 'row', gap: 8, marginHorizontal: 16, marginVertical: 12 }}>
+        <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E2E8F0', paddingHorizontal: 12, height: 44 }}>
+          <Ionicons name="search" size={18} color="#64748B" />
           <TextInput
-            className="flex-1 ml-2 text-primary px-4 py-3"
-            placeholder="Search"
+            style={{ flex: 1, marginLeft: 8, color: '#0F172A', fontSize: 13 }}
+            placeholder="Search showroom..."
             returnKeyType="search"
-            placeholderTextColor={COLORS.secondary}
+            placeholderTextColor="#94A3B8"
           />
         </View>
 
-        <TouchableOpacity className="bg-gray-800 w-12 h-12 items-center justify-center rounded-xl">
-          <Ionicons name="options-outline" size={24} color="white" />
+        <TouchableOpacity style={{ backgroundColor: '#0F172A', width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}>
+          <Ionicons name="options-outline" size={20} color="white" />
         </TouchableOpacity>
       </View>
 
       {loading ? (
-        <View className="flex-1 justify-center items-center">
-          <ActivityIndicator size="large" color={COLORS.primary} />
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+          <ActivityIndicator size="large" color="#0F172A" />
         </View>
       ) : (
         <FlatList
           data={products}
           keyExtractor={(item) => item._id}
           numColumns={2}
-          contentContainerStyle={{ padding: 16, paddingBottom: 100 }}
+          contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 100 }}
           columnWrapperStyle={{ justifyContent: 'space-between' }}
           renderItem={({ item }) => <ProductCard product={item} />}
           onEndReached={loadMore}
           onEndReachedThreshold={0.5}
           ListFooterComponent={
             loadingMore ? (
-              <View className="py-4">
-                <ActivityIndicator size="small" color={COLORS.primary} />
+              <View style={{ paddingVertical: 16 }}>
+                <ActivityIndicator size="small" color="#0F172A" />
               </View>
             ) : null
           }
           ListEmptyComponent={
             !loading ? (
-              <View className="flex-1 items-center justify-center py-20">
-                <Text className="text-secondary">
-                  It looks like product listing ends here for now
+              <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 60 }}>
+                <Text style={{ color: '#64748B', fontSize: 13 }}>
+                  No additional products in this region for now
                 </Text>
               </View>
             ) : null

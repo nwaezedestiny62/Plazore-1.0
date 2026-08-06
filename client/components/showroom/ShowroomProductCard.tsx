@@ -4,6 +4,7 @@ import { Image } from 'expo-image'
 import { Link } from 'expo-router'
 import React, { useMemo } from 'react'
 import { Dimensions, StyleSheet, Text, TouchableOpacity, View } from 'react-native'
+import { Ionicons } from '@expo/vector-icons'
 
 const SCREEN_W = Dimensions.get('window').width
 const SCREEN_H = Dimensions.get('window').height
@@ -42,36 +43,26 @@ export default function ShowroomProductCard({
 
   // Size calculations — cinematic, full-bleed
   let imageHeight: number
-  let textPadding: number
 
   switch (size) {
     case 'hero':
-      // Full-screen cinematic — entire viewport
-      imageHeight = SCREEN_H - 200
-      textPadding = 32
+      imageHeight = SCREEN_H * 0.75
       break
     case 'full':
-      // Almost full-screen — for vertical portrait tiles
-      imageHeight = SCREEN_H * 0.85
-      textPadding = 24
+      imageHeight = SCREEN_H * 0.7
       break
     case 'rail':
-      // Full-height rail item — like beyonce/ronaldo horizontal scroll
-      imageHeight = SCREEN_H * 0.78
-      textPadding = 20
+      imageHeight = SCREEN_H * 0.65
       break
     case 'grid':
-      // Smaller grid item
-      imageHeight = SCREEN_H * 0.42
-      textPadding = 16
+      imageHeight = SCREEN_H * 0.45
       break
     default:
-      imageHeight = SCREEN_H * 0.78
-      textPadding = 20
+      imageHeight = SCREEN_H * 0.65
   }
 
-  const textPrimary = dark ? '#FFFFFF' : '#0F172A'
-  const textSecondary = dark ? 'rgba(255,255,255,0.6)' : '#94A3B8'
+  const textPrimary = dark ? '#FFFFFF' : '#000000'
+  const textSecondary = dark ? 'rgba(255,255,255,0.7)' : '#666666'
 
   return (
     <Link href={`/product/${product._id}` as any} asChild>
@@ -79,7 +70,7 @@ export default function ShowroomProductCard({
         activeOpacity={0.9}
         style={[styles.card, style]}
       >
-        {/* Image — edge-to-edge, no rounded corners, no borders */}
+        {/* Image — edge-to-edge, no rounded corners */}
         <View style={[styles.imageWrap, { height: imageHeight }]}>
           {product.images?.[0] ? (
             <Image
@@ -87,27 +78,35 @@ export default function ShowroomProductCard({
               style={styles.image}
               contentFit="cover"
               cachePolicy="memory-disk"
-              placeholder={undefined}
             />
           ) : (
             <View style={[styles.image, styles.placeholder]} />
           )}
+          
+          {/* Quick Add / Cart Icon Button — as seen in aura-rae */}
+          <View style={styles.cartButton}>
+            <Ionicons name="cart-outline" size={20} color="#000" />
+          </View>
         </View>
 
-        {/* Minimal text overlay — positioned at bottom of image */}
-        <View style={[styles.textOverlay, { paddingHorizontal: textPadding, paddingBottom: textPadding }]}>
+        {/* Text Content Below Image */}
+        <View style={styles.infoContainer}>
           <Text
             style={[styles.productName, { color: textPrimary }]}
-            numberOfLines={2}
+            numberOfLines={1}
           >
             {product.name}
           </Text>
-          {!!location && (
-            <Text style={[styles.location, { color: textSecondary }]}>{location}</Text>
-          )}
-          <Text style={[styles.price, { color: textPrimary }]}>
-            {formatProduct(product.price, (product as any).region)}
-          </Text>
+          
+          <View style={styles.metaRow}>
+            <Text style={[styles.location, { color: textSecondary }]} numberOfLines={1}>
+              {location.toLowerCase() || 'global'}
+            </Text>
+            <Text style={[styles.metaDivider, { color: textSecondary }]}> | </Text>
+            <Text style={[styles.price, { color: textPrimary }]}>
+              {formatProduct(product.price, (product as any).region)}
+            </Text>
+          </View>
         </View>
       </TouchableOpacity>
     </Link>
@@ -116,50 +115,66 @@ export default function ShowroomProductCard({
 
 const styles = StyleSheet.create({
   card: {
-    overflow: 'hidden',
     backgroundColor: 'transparent',
-    position: 'relative',
+    marginBottom: 24,
   },
   imageWrap: {
     width: '100%',
     overflow: 'hidden',
+    position: 'relative',
   },
   image: {
     width: '100%',
     height: '100%',
   },
   placeholder: {
-    backgroundColor: '#F1F5F9',
+    backgroundColor: '#F3F4F6',
   },
-  textOverlay: {
+  cartButton: {
     position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    // Gradient-like: subtle dark overlay behind text
-    backgroundColor: 'rgba(0,0,0,0.35)',
-    paddingTop: 24,
+    bottom: 16,
+    right: 16,
+    backgroundColor: '#FFFFFF',
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+    // Minimal shadow for depth
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  infoContainer: {
+    paddingTop: 16,
+    paddingHorizontal: 4,
   },
   productName: {
-    fontSize: 18,
-    fontWeight: '600',
-    lineHeight: 24,
+    fontSize: 16,
+    fontWeight: '500',
     letterSpacing: 0.2,
-    fontFamily: 'Manrope_600SemiBold',
+    fontFamily: 'System', // Fallback to system if Manrope is not loaded
+    marginBottom: 4,
+  },
+  metaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   location: {
-    fontSize: 12,
+    fontSize: 14,
     fontWeight: '400',
-    lineHeight: 18,
-    marginTop: 4,
-    fontFamily: 'Manrope_400Regular',
-    letterSpacing: 0.5,
+    letterSpacing: 0.3,
+    fontFamily: 'System',
+    flexShrink: 1,
+  },
+  metaDivider: {
+    fontSize: 14,
+    fontWeight: '400',
   },
   price: {
-    fontSize: 18,
-    fontWeight: '700',
-    lineHeight: 24,
-    marginTop: 6,
-    fontFamily: 'Manrope_700Bold',
+    fontSize: 14,
+    fontWeight: '600',
+    fontFamily: 'System',
   },
 })

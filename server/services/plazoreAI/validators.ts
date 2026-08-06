@@ -2,7 +2,6 @@ import { AIGenerationResult } from "./types.js";
 
 /**
  * Counts the number of words in a piece of text.
- * Used only to gently check that the summary stays within a comfortable reading range.
  */
 function wordCount(text: string): number {
   return String(text || "")
@@ -13,15 +12,13 @@ function wordCount(text: string): number {
 
 /**
  * Validates the raw response from the model.
- * Ensures the AI returned exactly the shape we expect —
- * calm, complete, and free of invented structure.
- * If anything is missing or malformed, the response is rejected.
+ * Matches the short, friendly Plazore AI voice
+ * (summary is 1–3 sentences, not a long essay).
  */
 export function validateAIResponse(raw: string): AIGenerationResult {
   let parsed: any;
 
   try {
-    // Gently remove markdown fences if the model wrapped the JSON
     const cleaned = String(raw)
       .replace(/^```(?:json)?\s*/i, "")
       .replace(/\s*```$/i, "")
@@ -57,25 +54,47 @@ export function validateAIResponse(raw: string): AIGenerationResult {
   }
 
   const summary = parsed.summary.trim();
+  const overview = parsed.overview.trim();
+  const shippingSummary = parsed.shippingSummary.trim();
+  const confidenceExplanation = parsed.confidenceExplanation.trim();
+
+  const highlights = parsed.highlights
+    .map((h: unknown) => String(h).trim())
+    .filter(Boolean);
+  const bestFor = parsed.bestFor
+    .map((b: unknown) => String(b).trim())
+    .filter(Boolean);
+  const thingsToConsider = parsed.thingsToConsider
+    .map((t: unknown) => String(t).trim())
+    .filter(Boolean);
+
+  if (highlights.length === 0) {
+    throw new Error("highlights must be a non-empty array");
+  }
+  if (bestFor.length === 0) {
+    throw new Error("bestFor must be a non-empty array");
+  }
+
   const words = wordCount(summary);
 
-  // Soft band around the 60–100 word goal
-  // (models rarely land on exact counts, so we allow a comfortable range)
-  if (words < 25 || words > 180) {
+  // Short voice: ~8–120 words (was 25–180)
+  if (words < 8 || words > 120) {
     throw new Error(
-      `summary length out of expected range (${words} words; expected ~25–180)`
+      `summary length out of expected range (${words} words; expected ~8–120)`
     );
+  }
+
+  if (wordCount(overview) < 5) {
+    throw new Error("overview is too short");
   }
 
   return {
     summary,
-    overview: parsed.overview.trim(),
-    highlights: parsed.highlights.map((h: string) => String(h).trim()),
-    bestFor: parsed.bestFor.map((b: string) => String(b).trim()),
-    shippingSummary: parsed.shippingSummary.trim(),
-    thingsToConsider: parsed.thingsToConsider.map((t: string) =>
-      String(t).trim()
-    ),
-    confidenceExplanation: parsed.confidenceExplanation.trim(),
+    overview,
+    highlights,
+    bestFor,
+    shippingSummary,
+    thingsToConsider,
+    confidenceExplanation,
   };
 }
