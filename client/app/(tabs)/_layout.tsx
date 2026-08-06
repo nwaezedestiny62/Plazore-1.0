@@ -1,11 +1,6 @@
 import { Tabs } from 'expo-router'
 import React from 'react'
 
-/**
- * Buyer tab group — Phase 1
- * Screens (Home, Cart, Wishlist, Profile, Checkout) stay registered.
- * Visual bottom tab bar is removed; navigation will move to the drawer later.
- */
 export default function TabLayout() {
   return (
     <Tabs
@@ -16,6 +11,7 @@ export default function TabLayout() {
       }}
     >
       <Tabs.Screen name="index" options={{ title: 'Home' }} />
+      <Tabs.Screen name="search" options={{ title: 'Search' }} />
       <Tabs.Screen name="cart" options={{ title: 'Cart' }} />
       <Tabs.Screen name="favorites" options={{ title: 'Wishlist' }} />
       <Tabs.Screen name="profile" options={{ title: 'Profile' }} />

@@ -1,4 +1,5 @@
 import HeroBanner from '@/components/HeroBanner'
+import PlazoreFloatingNav from '@/components/PlazoreFloatingNav'
 import PlazoreNavigationHub from '@/components/PlazoreNavigationHub'
 import PlazoreTitleBar from '@/components/PlazoreTitleBar'
 import ProductCard from '@/components/ProductCard'
@@ -28,8 +29,10 @@ export default function Home() {
   const [loading, setLoading] = useState(true)
   const [scrollProgress, setScrollProgress] = useState(0)
   const [carouselProgress, setCarouselProgress] = useState(0)
+
   const { height: windowH } = useWindowDimensions()
   const heroH = Math.max(windowH, 1)
+
   const showroomY = useRef(0)
   const scrollRef = useRef<ScrollView>(null)
 
@@ -38,7 +41,7 @@ export default function Home() {
       setLoading(true)
       const res = await api.get('/products?limit=12')
       if (res.data.success) {
-        setProducts(res.data.data || [])
+        setProducts(res.data.data)
       } else {
         setProducts([])
       }
@@ -56,7 +59,8 @@ export default function Home() {
 
   const onMainScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
     const y = e.nativeEvent.contentOffset.y
-    const p = Math.min(1, Math.max(0, y / (heroH * 0.9)))
+    // 0 at top → 1 after ~35% of hero height
+    const p = Math.min(1, Math.max(0, y / (heroH * 0.35)))
     setScrollProgress(p)
   }
 
@@ -66,8 +70,9 @@ export default function Home() {
     const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent
     const maxScroll = contentSize.width - layoutMeasurement.width
     if (maxScroll > 0) {
-      const progress = Math.min(1, Math.max(0, contentOffset.x / maxScroll))
-      setCarouselProgress(progress)
+      setCarouselProgress(
+        Math.min(1, Math.max(0, contentOffset.x / maxScroll))
+      )
     }
   }
 
@@ -89,6 +94,7 @@ export default function Home() {
         onMusicPress={() => {}}
         onNotificationsPress={() => {}}
       />
+
       <ScrollView
         ref={scrollRef}
         showsVerticalScrollIndicator={false}
@@ -98,17 +104,15 @@ export default function Home() {
         onScroll={onMainScroll}
         style={{ flex: 1 }}
       >
-        {/* HERO BANNER */}
         <HeroBanner topChrome={0} onScrollToShowroom={scrollToShowroom} />
 
-        {/* SHOWROOM ROOT CONTAINER */}
         <View
           onLayout={(e) => {
             showroomY.current = e.nativeEvent.layout.y
           }}
           style={{ width: '100%' }}
         >
-          {/* SECTION 1: PURE WHITE BG - HORIZONTAL PRODUCT CAROUSEL */}
+          {/* SECTION 1 — white carousel */}
           <View
             style={{
               backgroundColor: '#FFFFFF',
@@ -152,16 +156,9 @@ export default function Home() {
                 <ActivityIndicator color="#0F172A" size="small" />
               </View>
             ) : products.length === 0 ? (
-              <View
-                style={{
-                  height: 120,
-                  justifyContent: 'center',
-                  alignItems: 'center',
-                  paddingHorizontal: 20,
-                }}
-              >
-                <Text style={{ color: '#64748B', fontSize: 14 }}>
-                  No products available
+              <View style={{ paddingHorizontal: 20, paddingVertical: 24 }}>
+                <Text style={{ color: '#94A3B8', fontSize: 13 }}>
+                  No products in the showroom yet.
                 </Text>
               </View>
             ) : (
@@ -220,7 +217,7 @@ export default function Home() {
             )}
           </View>
 
-          {/* SECTION 2: SOFT COOL CREAM BG - LANDSCAPE SCREEN FEATURE */}
+          {/* SECTION 2 — cream feature */}
           <View
             style={{
               backgroundColor: '#F7F5F0',
@@ -234,9 +231,7 @@ export default function Home() {
                 width: '100%',
                 height: 240,
                 backgroundColor: '#E5E0D8',
-                borderRadius: 0,
                 overflow: 'hidden',
-                position: 'relative',
               }}
             >
               <Image
@@ -248,28 +243,6 @@ export default function Home() {
                 style={{ width: '100%', height: '100%' }}
                 resizeMode="cover"
               />
-              <View
-                style={{
-                  position: 'absolute',
-                  top: '55%',
-                  left: '46%',
-                  width: 24,
-                  height: 24,
-                  borderRadius: 12,
-                  backgroundColor: 'rgba(15, 23, 42, 0.4)',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                <View
-                  style={{
-                    width: 10,
-                    height: 10,
-                    borderRadius: 5,
-                    backgroundColor: '#FFFFFF',
-                  }}
-                />
-              </View>
             </View>
             <View style={{ marginTop: 24, alignItems: 'center' }}>
               <Text
@@ -283,19 +256,10 @@ export default function Home() {
               >
                 A SUMMER STAPLE
               </Text>
-              <View
-                style={{
-                  width: 32,
-                  height: 2,
-                  backgroundColor: '#94A3B8',
-                  marginTop: 10,
-                  borderRadius: 1,
-                }}
-              />
             </View>
           </View>
 
-          {/* SECTION 3: COOL SLATE BG - CURATED SHOWROOM GRID */}
+          {/* SECTION 3 — grid */}
           <View
             style={{
               backgroundColor: '#F0F4F8',
@@ -322,50 +286,37 @@ export default function Home() {
                   color: '#0F172A',
                   fontSize: 20,
                   fontWeight: '700',
-                  letterSpacing: -0.3,
                 }}
               >
                 Showroom Staples
               </Text>
             </View>
 
-            {products.length > 0 ? (
-              <View
-                style={{
-                  flexDirection: 'row',
-                  flexWrap: 'wrap',
-                  justifyContent: 'space-between',
-                }}
-              >
-                {products.slice(0, 6).map((item) => (
-                  <View key={item._id} style={{ width: '48%' }}>
-                    <ProductCard product={item} />
-                  </View>
-                ))}
-              </View>
-            ) : (
-              <View
-                style={{
-                  height: 100,
-                  justifyContent: 'center',
-                  alignItems: 'center',
-                }}
-              >
-                <Text style={{ color: '#64748B', fontSize: 14 }}>
-                  No products available
-                </Text>
-              </View>
-            )}
+            <View
+              style={{
+                flexDirection: 'row',
+                flexWrap: 'wrap',
+                justifyContent: 'space-between',
+              }}
+            >
+              {products.slice(0, 6).map((item) => (
+                <View
+                  key={item._id}
+                  style={{ width: '48%', marginBottom: 16 }}
+                >
+                  <ProductCard product={item} />
+                </View>
+              ))}
+            </View>
 
             <Link href="/shop" asChild>
               <TouchableOpacity
                 activeOpacity={0.88}
                 style={{
-                  marginTop: 16,
+                  marginTop: 8,
                   width: '100%',
                   height: 48,
                   backgroundColor: '#0F172A',
-                  borderRadius: 0,
                   alignItems: 'center',
                   justifyContent: 'center',
                   flexDirection: 'row',
@@ -388,7 +339,7 @@ export default function Home() {
             </Link>
           </View>
 
-          {/* SECTION 4: SOFT MINT / SAGE BG - EDITORIAL SPOTLIGHT */}
+          {/* SECTION 4 — regions */}
           <View
             style={{
               backgroundColor: '#ECEFF1',
@@ -427,84 +378,21 @@ export default function Home() {
                 textAlign: 'center',
                 lineHeight: 20,
                 maxWidth: 300,
-                marginBottom: 24,
               }}
             >
-              Automatic currency & location matching across Nigeria, UK, US, and
-              Europe.
+              Automatic currency & location matching across Nigeria, UK, US,
+              and Europe.
             </Text>
-            <View
-              style={{
-                flexDirection: 'row',
-                gap: 12,
-                width: '100%',
-                justifyContent: 'center',
-              }}
-            >
-              <View
-                style={{
-                  backgroundColor: '#FFFFFF',
-                  paddingVertical: 12,
-                  paddingHorizontal: 16,
-                  flex: 1,
-                  alignItems: 'center',
-                  borderWidth: 1,
-                  borderColor: '#CBD5E1',
-                }}
-              >
-                <Text style={{ fontSize: 16, marginBottom: 2 }}>🇳🇬</Text>
-                <Text
-                  style={{ fontSize: 11, fontWeight: '700', color: '#0F172A' }}
-                >
-                  NGN (₦)
-                </Text>
-              </View>
-              <View
-                style={{
-                  backgroundColor: '#FFFFFF',
-                  paddingVertical: 12,
-                  paddingHorizontal: 16,
-                  flex: 1,
-                  alignItems: 'center',
-                  borderWidth: 1,
-                  borderColor: '#CBD5E1',
-                }}
-              >
-                <Text style={{ fontSize: 16, marginBottom: 2 }}>🇪🇺</Text>
-                <Text
-                  style={{ fontSize: 11, fontWeight: '700', color: '#0F172A' }}
-                >
-                  EUR (€)
-                </Text>
-              </View>
-              <View
-                style={{
-                  backgroundColor: '#FFFFFF',
-                  paddingVertical: 12,
-                  paddingHorizontal: 16,
-                  flex: 1,
-                  alignItems: 'center',
-                  borderWidth: 1,
-                  borderColor: '#CBD5E1',
-                }}
-              >
-                <Text style={{ fontSize: 16, marginBottom: 2 }}>🇺🇸</Text>
-                <Text
-                  style={{ fontSize: 11, fontWeight: '700', color: '#0F172A' }}
-                >
-                  USD ($)
-                </Text>
-              </View>
-            </View>
           </View>
 
-          {/* SECTION 5: OBSIDIAN DARK FOOTER */}
+          {/* SECTION 5 — footer */}
           <View
             style={{
               backgroundColor: '#0E0E0E',
               paddingVertical: 48,
               paddingHorizontal: 20,
               alignItems: 'center',
+              paddingBottom: 120,
             }}
           >
             <Text
@@ -532,6 +420,11 @@ export default function Home() {
           </View>
         </View>
       </ScrollView>
+
+      <PlazoreFloatingNav
+        visibleProgress={scrollProgress}
+        onMenuPress={() => setHubOpen(true)}
+      />
 
       <PlazoreNavigationHub
         visible={hubOpen}
