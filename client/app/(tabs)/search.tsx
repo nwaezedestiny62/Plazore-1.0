@@ -43,7 +43,6 @@ const PAD = 16
 const GAP = 12
 const CARD_W = (W - PAD * 2 - GAP) / 2
 const CAT_SIZE = 78
-const THUMB = 44
 
 const FLOORS = [
   {
@@ -132,16 +131,18 @@ export default function SearchScreen() {
   const [recent, setRecent] = useState<string[]>([])
   const [activeCategory, setActiveCategory] = useState<string | null>(null)
 
+  const [serverProducts, setServerProducts] = useState<any[]>([])
   const [aiPhrases, setAiPhrases] = useState<string[]>([])
   const [aiFloors, setAiFloors] = useState<string[]>([])
   const [pinOpen, setPinOpen] = useState(false)
+  const [searchLoading, setSearchLoading] = useState(false)
 
   useEffect(() => {
     let alive = true
     ;(async () => {
       try {
         const [res, stored] = await Promise.all([
-          api.get('/products?limit=40'),
+          api.get('/products?limit=60'),
           AsyncStorage.getItem(RECENT_KEY),
         ])
         if (!alive) return
@@ -172,39 +173,50 @@ export default function SearchScreen() {
     return () => clearTimeout(t)
   }, [query])
 
+  // Real server search-suggest
   useEffect(() => {
-    if (debounced.length < 2 || activeCategory) {
+    if (debounced.length < 1 || activeCategory) {
+      setServerProducts([])
       setAiPhrases([])
       setAiFloors([])
+      setSearchLoading(false)
       return
     }
+
     let cancelled = false
+    setSearchLoading(true)
+
     ;(async () => {
       try {
         const res = await api.get(
           `/ai/search-suggest?q=${encodeURIComponent(debounced)}`
         )
         if (cancelled || !res.data?.success) return
+
         const d = res.data.data
+        setServerProducts(Array.isArray(d?.products) ? d.products : [])
         setAiPhrases(Array.isArray(d?.suggestions) ? d.suggestions : [])
         setAiFloors(Array.isArray(d?.floors) ? d.floors : [])
       } catch {
         if (!cancelled) {
+          setServerProducts([])
           setAiPhrases([])
           setAiFloors([])
         }
+      } finally {
+        if (!cancelled) setSearchLoading(false)
       }
     })()
+
     return () => {
       cancelled = true
     }
   }, [debounced, activeCategory])
 
-  const getSeller = (p: Product): SellerInfo | null => {
+  const getSeller = (p: any): SellerInfo | null => {
     const s = p.seller
-    if (!s || typeof s === 'string') {
-      return typeof s === 'string' ? { _id: s } : null
-    }
+    if (!s) return null
+    if (typeof s === 'string') return { _id: s }
     if (!s._id) return null
     return {
       _id: String(s._id),
@@ -214,80 +226,75 @@ export default function SearchScreen() {
     }
   }
 
-  // ── Rich suggestion hits ──
-  const localHits = useMemo((): LocalHit[] => {
+  // Grouped hits for the clean design
+  const groupedHits = useMemo(() => {
     const q = query.trim().toLowerCase()
-    if (q.length < 1) return []
-
-    const hits: LocalHit[] = []
-    const seen = new Set<string>()
-
-    const push = (h: LocalHit) => {
-      const key =
-        h.type === 'product' || h.type === 'store'
-          ? `${h.type}:${h.id}`
-          : `${h.type}:${h.label.toLowerCase()}`
-      if (seen.has(key) || hits.length >= 10) return
-      seen.add(key)
-      hits.push(h)
+    if (q.length < 1) {
+      return { products: [] as LocalHit[], stores: [] as LocalHit[], categories: [] as LocalHit[], ai: [] as LocalHit[] }
     }
 
-    // Products first (rich rows)
-    allProducts.forEach((p) => {
-      if ((p.name || '').toLowerCase().includes(q)) {
-        const seller = getSeller(p)
-        push({
-          type: 'product',
-          label: p.name,
-          id: p._id,
-          image: p.images?.[0],
-          price: p.price,
-          region: p.region,
-          storeName: seller?.storeName || seller?.name,
-        })
+    // Products from server
+    const products: LocalHit[] = (serverProducts || []).slice(0, 6).map((p: any) => {
+      const seller = getSeller(p)
+      return {
+        type: 'product' as const,
+        label: p.name,
+        id: p._id,
+        image: p.images?.[0],
+        price: p.price,
+        region: p.region,
+        storeName: seller?.storeName || seller?.name,
       }
     })
 
-    // Storefronts (from product sellers)
-    const stores = new Map<string, SellerInfo>()
+    // Stores
+    const storesMap = new Map<string, SellerInfo>()
     allProducts.forEach((p) => {
       const s = getSeller(p)
       if (!s) return
       const name = (s.storeName || s.name || '').toLowerCase()
-      if (name && name.includes(q)) stores.set(s._id, s)
-    })
-    stores.forEach((s) => {
-      push({
-        type: 'store',
-        label: s.storeName || s.name || 'Store',
-        id: s._id,
-        logo: s.storeLogo,
-      })
+      if (name && name.includes(q)) storesMap.set(s._id, s)
     })
 
-    // Categories
-    CATEGORY_LIST.forEach((c) => {
-      if (c.toLowerCase().includes(q)) push({ type: 'category', label: c })
-    })
-    FLOORS.forEach((f) => {
-      if (f.id.toLowerCase().includes(q) || f.short.toLowerCase().includes(q)) {
-        push({ type: 'category', label: f.id })
+    const stores: LocalHit[] = []
+    storesMap.forEach((s) => {
+      if (stores.length < 3) {
+        stores.push({
+          type: 'store',
+          label: s.storeName || s.name || 'Store',
+          id: s._id,
+          logo: s.storeLogo,
+        })
       }
     })
-    aiFloors.forEach((f) => push({ type: 'category', label: f }))
 
-    // Brands
-    allProducts.forEach((p) => {
-      if (p.brand && p.brand.toLowerCase().includes(q)) {
-        push({ type: 'brand', label: p.brand })
+    // Categories + AI floors
+    const categories: LocalHit[] = []
+    CATEGORY_LIST.forEach((c) => {
+      if (c.toLowerCase().includes(q) && categories.length < 4) {
+        categories.push({ type: 'category', label: c })
+      }
+    })
+    aiFloors.forEach((f) => {
+      if (categories.length < 5 && !categories.some((c) => c.label === f)) {
+        categories.push({ type: 'category', label: f })
       }
     })
 
     // AI phrases
-    aiPhrases.forEach((s) => push({ type: 'ai', label: s }))
+    const aiHits: LocalHit[] = aiPhrases.slice(0, 5).map((phrase) => ({
+      type: 'ai' as const,
+      label: phrase,
+    }))
 
-    return hits
-  }, [query, allProducts, aiPhrases, aiFloors])
+    return { products, stores, categories, ai: aiHits }
+  }, [query, serverProducts, allProducts, aiPhrases, aiFloors])
+
+  const totalHits =
+    groupedHits.products.length +
+    groupedHits.stores.length +
+    groupedHits.categories.length +
+    groupedHits.ai.length
 
   const results = useMemo(() => {
     const q = debounced.toLowerCase()
@@ -366,6 +373,7 @@ export default function SearchScreen() {
     setQuery('')
     setDebounced('')
     setActiveCategory(null)
+    setServerProducts([])
     setAiPhrases([])
     setAiFloors([])
     setPinOpen(false)
@@ -384,7 +392,7 @@ export default function SearchScreen() {
   const showSuggestions =
     (focused || pinOpen) &&
     query.trim().length >= 1 &&
-    localHits.length > 0 &&
+    totalHits > 0 &&
     !activeCategory
 
   const onHitPress = (h: LocalHit) => {
@@ -407,127 +415,6 @@ export default function SearchScreen() {
       return
     }
     runSearch(h.label)
-  }
-
-  const renderSuggestRow = (h: LocalHit, i: number, last: boolean) => {
-    // ── Product: image + name + price ──
-    if (h.type === 'product') {
-      const priceText = formatProduct(h.price, h.region)
-      return (
-        <Pressable
-          key={`p-${h.id}`}
-          onPressIn={() => setPinOpen(true)}
-          onPress={() => onHitPress(h)}
-          style={({ pressed }) => [
-            styles.sugRow,
-            pressed && styles.sugPressed,
-            last && styles.sugLast,
-          ]}
-        >
-          <View style={styles.thumb}>
-            {h.image ? (
-              <Image
-                source={{ uri: h.image }}
-                style={styles.thumbImg}
-                contentFit="cover"
-              />
-            ) : (
-              <View style={styles.thumbFallback}>
-                <Ionicons name="bag-handle-outline" size={18} color={DIM} />
-              </View>
-            )}
-          </View>
-          <View style={styles.sugBody}>
-            <Text style={styles.sugTitle} numberOfLines={1}>
-              {h.label}
-            </Text>
-            <View style={styles.sugMeta}>
-              <Text style={styles.sugPrice}>{priceText}</Text>
-              {h.storeName ? (
-                <>
-                  <Text style={styles.sugDot}>·</Text>
-                  <Text style={styles.sugStore} numberOfLines={1}>
-                    {h.storeName}
-                  </Text>
-                </>
-              ) : null}
-            </View>
-          </View>
-          <Ionicons name="chevron-forward" size={14} color={DIM} />
-        </Pressable>
-      )
-    }
-
-    // ── Storefront ──
-    if (h.type === 'store') {
-      return (
-        <Pressable
-          key={`s-${h.id}`}
-          onPressIn={() => setPinOpen(true)}
-          onPress={() => onHitPress(h)}
-          style={({ pressed }) => [
-            styles.sugRow,
-            pressed && styles.sugPressed,
-            last && styles.sugLast,
-          ]}
-        >
-          <View style={[styles.thumb, styles.storeThumb]}>
-            {h.logo ? (
-              <Image
-                source={{ uri: h.logo }}
-                style={styles.thumbImg}
-                contentFit="cover"
-              />
-            ) : (
-              <View style={styles.thumbFallback}>
-                <Ionicons name="storefront-outline" size={18} color={BLUE} />
-              </View>
-            )}
-          </View>
-          <View style={styles.sugBody}>
-            <Text style={styles.sugTitle} numberOfLines={1}>
-              {h.label}
-            </Text>
-            <Text style={styles.sugKind}>Storefront</Text>
-          </View>
-          <Ionicons name="chevron-forward" size={14} color={DIM} />
-        </Pressable>
-      )
-    }
-
-    // ── Category / brand / ai ──
-    const icon =
-      h.type === 'category'
-        ? 'grid-outline'
-        : h.type === 'brand'
-          ? 'pricetag-outline'
-          : 'sparkles-outline'
-    const kind =
-      h.type === 'category' ? 'floor' : h.type === 'brand' ? 'brand' : 'try'
-
-    return (
-      <Pressable
-        key={`${h.type}-${h.label}-${i}`}
-        onPressIn={() => setPinOpen(true)}
-        onPress={() => onHitPress(h)}
-        style={({ pressed }) => [
-          styles.sugRow,
-          pressed && styles.sugPressed,
-          last && styles.sugLast,
-        ]}
-      >
-        <View style={[styles.thumb, styles.iconThumb]}>
-          <Ionicons name={icon as any} size={18} color={MUTED} />
-        </View>
-        <View style={styles.sugBody}>
-          <Text style={styles.sugTitle} numberOfLines={1}>
-            {h.label}
-          </Text>
-          <Text style={styles.sugKind}>{kind}</Text>
-        </View>
-        <Ionicons name="arrow-forward" size={14} color={DIM} />
-      </Pressable>
-    )
   }
 
   // ── IDLE ──
@@ -741,16 +628,147 @@ export default function SearchScreen() {
             )}
           </View>
 
-          {/* Rich floating suggestions */}
+          {/* ── Clean Suggestion Panel (same architecture as Hub) ── */}
           {showSuggestions && (
             <View style={styles.suggestBox}>
               <ScrollView
                 keyboardShouldPersistTaps="always"
                 nestedScrollEnabled
-                style={{ maxHeight: 340 }}
+                style={{ maxHeight: 380 }}
+                contentContainerStyle={{ paddingVertical: 8 }}
               >
-                {localHits.map((h, i) =>
-                  renderSuggestRow(h, i, i === localHits.length - 1)
+                {searchLoading && totalHits === 0 ? (
+                  <View style={{ padding: 20, alignItems: 'center' }}>
+                    <Text style={{ color: MUTED, fontSize: 13 }}>Searching…</Text>
+                  </View>
+                ) : (
+                  <>
+                    {/* SUGGESTIONS */}
+                    {(groupedHits.ai.length > 0 || groupedHits.categories.length > 0) && (
+                      <View style={{ marginBottom: 12 }}>
+                        <View style={styles.sugSectionHead}>
+                          <Text style={styles.sugSectionTitle}>SUGGESTIONS</Text>
+                          <Text style={styles.sugCount}>
+                            {groupedHits.ai.length + groupedHits.categories.length}
+                          </Text>
+                        </View>
+
+                        {[...groupedHits.ai, ...groupedHits.categories].map((h, i) => (
+                          <Pressable
+                            key={`sug-${h.type}-${h.label}-${i}`}
+                            onPressIn={() => setPinOpen(true)}
+                            onPress={() => onHitPress(h)}
+                            style={({ pressed }) => [
+                              styles.simpleRow,
+                              pressed && styles.rowPressed,
+                            ]}
+                          >
+                            <Text style={styles.simpleText}>{h.label}</Text>
+                          </Pressable>
+                        ))}
+                      </View>
+                    )}
+
+                    {/* PRODUCTS */}
+                    {groupedHits.products.length > 0 && (
+                      <View style={{ marginBottom: 12 }}>
+                        <View style={styles.sugSectionHead}>
+                          <Text style={styles.sugSectionTitle}>PRODUCTS</Text>
+                          <Text style={styles.sugCount}>
+                            {groupedHits.products.length}
+                          </Text>
+                        </View>
+
+                        {groupedHits.products.map((h) => {
+                          if (h.type !== 'product') return null
+                          const priceText = formatProduct(h.price, h.region)
+
+                          return (
+                            <Pressable
+                              key={h.id}
+                              onPressIn={() => setPinOpen(true)}
+                              onPress={() => onHitPress(h)}
+                              style={({ pressed }) => [
+                                styles.productRow,
+                                pressed && styles.rowPressed,
+                              ]}
+                            >
+                              {/* Image */}
+                              <View style={styles.productThumb}>
+                                {h.image ? (
+                                  <Image
+                                    source={{ uri: h.image }}
+                                    style={{ width: 56, height: 56 }}
+                                    contentFit="cover"
+                                  />
+                                ) : (
+                                  <View style={styles.thumbFallback}>
+                                    <Ionicons name="image-outline" size={20} color={DIM} />
+                                  </View>
+                                )}
+                              </View>
+
+                              {/* Name + Price */}
+                              <View style={{ flex: 1 }}>
+                                <Text style={styles.productName} numberOfLines={2}>
+                                  {h.label}
+                                </Text>
+                                <Text style={styles.productPrice}>{priceText}</Text>
+                              </View>
+                            </Pressable>
+                          )
+                        })}
+                      </View>
+                    )}
+
+                    {/* STORES */}
+                    {groupedHits.stores.length > 0 && (
+                      <View style={{ marginBottom: 8 }}>
+                        <View style={styles.sugSectionHead}>
+                          <Text style={styles.sugSectionTitle}>STORES</Text>
+                          <Text style={styles.sugCount}>
+                            {groupedHits.stores.length}
+                          </Text>
+                        </View>
+
+                        {groupedHits.stores.map((h) => {
+                          if (h.type !== 'store') return null
+                          return (
+                            <Pressable
+                              key={h.id}
+                              onPressIn={() => setPinOpen(true)}
+                              onPress={() => onHitPress(h)}
+                              style={({ pressed }) => [
+                                styles.productRow,
+                                pressed && styles.rowPressed,
+                              ]}
+                            >
+                              <View style={[styles.productThumb, { borderRadius: 28 }]}>
+                                {h.logo ? (
+                                  <Image
+                                    source={{ uri: h.logo }}
+                                    style={{ width: 56, height: 56 }}
+                                    contentFit="cover"
+                                  />
+                                ) : (
+                                  <View style={styles.thumbFallback}>
+                                    <Ionicons name="storefront-outline" size={20} color={BLUE} />
+                                  </View>
+                                )}
+                              </View>
+
+                              <View style={{ flex: 1 }}>
+                                <Text style={styles.productName} numberOfLines={1}>
+                                  {h.label}
+                                </Text>
+                                <Text style={styles.storeLabel}>Official Storefront</Text>
+                              </View>
+                            </Pressable>
+                          )
+                        })}
+                      </View>
+                    )}
+                  </>
                 )}
               </ScrollView>
             </View>
@@ -809,6 +827,7 @@ const styles = StyleSheet.create({
     height: 48,
     paddingHorizontal: 14,
     backgroundColor: SURFACE,
+    borderRadius: 12,
   },
   input: {
     flex: 1,
@@ -818,93 +837,91 @@ const styles = StyleSheet.create({
     paddingVertical: 0,
   },
 
-  /* ── suggestion panel ── */
+  /* ── Clean suggestion panel ── */
   suggestBox: {
     position: 'absolute',
-    top: 50,
+    top: 52,
     left: 0,
     right: 0,
     backgroundColor: SURFACE,
+    borderRadius: 12,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: LINE,
-    borderTopWidth: 0,
     zIndex: 100,
     elevation: 100,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.14,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.12,
     shadowRadius: 16,
-  },
-  sugRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: LINE,
-  },
-  sugPressed: { backgroundColor: '#F1F5F9' },
-  sugLast: { borderBottomWidth: 0 },
-  thumb: {
-    width: THUMB,
-    height: THUMB,
-    backgroundColor: '#F1F5F9',
     overflow: 'hidden',
   },
-  storeThumb: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(43,91,255,0.25)',
-  },
-  iconThumb: {
+  sugSectionHead: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    justifyContent: 'center',
+    paddingHorizontal: 14,
+    paddingTop: 10,
+    paddingBottom: 6,
   },
-  thumbImg: {
-    width: '100%',
-    height: '100%',
+  sugSectionTitle: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.8,
+    color: DIM,
+  },
+  sugCount: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: DIM,
+  },
+  simpleRow: {
+    paddingVertical: 11,
+    paddingHorizontal: 14,
+  },
+  simpleText: {
+    fontSize: 15,
+    fontWeight: '500',
+    color: TEXT,
+  },
+  productRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    gap: 12,
+  },
+  productThumb: {
+    width: 56,
+    height: 56,
+    borderRadius: 8,
+    backgroundColor: '#F1F5F9',
+    overflow: 'hidden',
   },
   thumbFallback: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  sugBody: {
-    flex: 1,
-    minWidth: 0,
-  },
-  sugTitle: {
+  productName: {
     fontSize: 14,
     fontWeight: '600',
     color: TEXT,
+    lineHeight: 19,
   },
-  sugMeta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 3,
-    gap: 4,
-  },
-  sugPrice: {
-    fontSize: 12,
+  productPrice: {
+    fontSize: 13,
     fontWeight: '600',
     color: GREEN,
-  },
-  sugDot: {
-    fontSize: 12,
-    color: DIM,
-  },
-  sugStore: {
-    flex: 1,
-    fontSize: 12,
-    color: MUTED,
-  },
-  sugKind: {
     marginTop: 3,
-    fontSize: 11,
+  },
+  storeLabel: {
+    fontSize: 12,
     fontWeight: '600',
-    letterSpacing: 0.4,
-    textTransform: 'uppercase',
-    color: DIM,
+    color: BLUE,
+    marginTop: 3,
+  },
+  rowPressed: {
+    backgroundColor: '#F8FAFC',
   },
 
   pillBar: {
@@ -922,8 +939,9 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(43,91,255,0.35)',
     backgroundColor: 'rgba(43,91,255,0.06)',
+    borderRadius: 8,
   },
-  pillDot: { width: 5, height: 5, backgroundColor: BLUE },
+  pillDot: { width: 5, height: 5, backgroundColor: BLUE, borderRadius: 3 },
   pillText: { fontSize: 12, fontWeight: '600', color: BLUE },
 
   body: { flex: 1, backgroundColor: BG },
@@ -947,6 +965,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     backgroundColor: '#E2E8F0',
     marginBottom: 8,
+    borderRadius: 12,
   },
   catImg: { width: '100%', height: '100%' },
   catLabel: {
@@ -967,6 +986,7 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: LINE,
     marginRight: 8,
+    borderRadius: 20,
   },
   chipText: {
     fontSize: 13,

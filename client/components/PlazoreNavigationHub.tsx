@@ -36,18 +36,15 @@ const TEXT_MUTED = 'rgba(245,247,250,0.35)'
 const GREEN = '#00E575'
 const BLUE = '#3B82F6'
 const PURPLE = '#A78BFA'
-const AMBER = '#F59E0B'
 const CYAN = '#22D3EE'
 const LINE = 'rgba(255,255,255,0.08)'
 
-/* ── Animation Speeds ── */
-const OPEN_MS = 1800
-const CLOSE_MS = 420
-const EASE_LUXURY = Easing.bezier(0.16, 1, 0.3, 1)
-const DEBOUNCE = 240
-const THUMB_SIZE = 46
+/* ── Animation Speeds (slow & calm) ── */
+const OPEN_MS = 900
+const CLOSE_MS = 480
+const EASE_LUXURY = Easing.bezier(0.22, 1, 0.36, 1)
+const DEBOUNCE = 280
 
-/* Custom floor color tiles */
 const TILE_COLORS: Record<string, { bg: string; accent: string; glow: string }> = {
   home:       { bg: '#0A1C14', accent: '#00E575', glow: 'rgba(0,229,117,0.25)' },
   cart:       { bg: '#0D172A', accent: '#3B82F6', glow: 'rgba(59,130,246,0.25)' },
@@ -149,14 +146,17 @@ const SECTIONS: NavSection[] = [
   },
 ]
 
+/* ── Calm Fade + Slide ── */
 function FadeSlideIn({
   index,
   children,
   delayBase = 0,
+  duration = 700,
 }: {
   index: number
   children: React.ReactNode
   delayBase?: number
+  duration?: number
 }) {
   const anim = useRef(new Animated.Value(0)).current
 
@@ -164,8 +164,8 @@ function FadeSlideIn({
     anim.setValue(0)
     Animated.timing(anim, {
       toValue: 1,
-      duration: 650,
-      delay: delayBase + index * 45,
+      duration,
+      delay: delayBase + index * 55,
       easing: EASE_LUXURY,
       useNativeDriver: true,
     }).start()
@@ -179,13 +179,7 @@ function FadeSlideIn({
           {
             translateY: anim.interpolate({
               inputRange: [0, 1],
-              outputRange: [24, 0],
-            }),
-          },
-          {
-            scale: anim.interpolate({
-              inputRange: [0, 1],
-              outputRange: [0.96, 1],
+              outputRange: [18, 0],
             }),
           },
         ],
@@ -219,43 +213,38 @@ function MallTile({
   }
 
   return (
-    <FadeSlideIn index={index} delayBase={250}>
+    <FadeSlideIn index={index} delayBase={180} duration={750}>
       <Pressable
         onPress={onPress}
         onPressIn={() =>
           Animated.timing(scale, {
-            toValue: 0.95,
-            duration: 100,
+            toValue: 0.96,
+            duration: 120,
             useNativeDriver: true,
           }).start()
         }
         onPressOut={() =>
           Animated.timing(scale, {
             toValue: 1,
-            duration: 200,
+            duration: 220,
             easing: EASE_LUXURY,
             useNativeDriver: true,
           }).start()
         }
-        accessibilityRole="button"
-        accessibilityState={{ selected: active }}
-        accessibilityLabel={item.label}
       >
         <Animated.View
-          style={[
-            {
-              width,
-              height,
-              backgroundColor: palette.bg,
-              borderRadius: 16,
-              borderWidth: 1,
-              borderColor: active ? palette.accent : LINE,
-              padding: 14,
-              justifyContent: 'space-between',
-              overflow: 'hidden',
-              transform: [{ scale }],
-            },
-          ]}
+          style={{
+            width,
+            height,
+            backgroundColor: palette.bg,
+            borderRadius: 16,
+            borderWidth: 1,
+            borderColor: active ? palette.accent : LINE,
+            padding: 14,
+            justifyContent: 'space-between',
+            overflow: 'hidden',
+            transform: [{ scale }],
+          }}
         >
           <View
             pointerEvents="none"
@@ -267,7 +256,7 @@ function MallTile({
               height: 80,
               borderRadius: 40,
               backgroundColor: palette.glow,
-              opacity: active ? 0.6 : 0.25,
+              opacity: active ? 0.55 : 0.22,
             }}
           />
 
@@ -309,74 +298,18 @@ function MallTile({
                 color: active ? palette.accent : TEXT,
                 fontSize: 14,
                 fontWeight: '700',
-                letterSpacing: 0.2,
               }}
               numberOfLines={1}
             >
               {item.label}
             </Text>
             {!!item.subtitle && (
-              <Text
-                style={{
-                  color: TEXT_MUTED,
-                  fontSize: 11,
-                  marginTop: 2,
-                }}
-                numberOfLines={1}
-              >
+              <Text style={{ color: TEXT_MUTED, fontSize: 11, marginTop: 2 }} numberOfLines={1}>
                 {item.subtitle}
               </Text>
             )}
           </View>
         </Animated.View>
-      </Pressable>
-    </FadeSlideIn>
-  )
-}
-
-function SuggestionRowCard({
-  children,
-  index,
-  onPress,
-  accent = GREEN,
-}: {
-  children: React.ReactNode
-  index: number
-  onPress: () => void
-  accent?: string
-}) {
-  return (
-    <FadeSlideIn index={index} delayBase={60}>
-      <Pressable
-        onPress={onPress}
-        style={({ pressed }) => [
-          {
-            flexDirection: 'row',
-            alignItems: 'center',
-            marginHorizontal: 16,
-            marginBottom: 9,
-            paddingVertical: 10,
-            paddingHorizontal: 12,
-            borderRadius: 14,
-            backgroundColor: SURFACE_CARD,
-            borderWidth: 1,
-            borderColor: pressed ? accent : LINE,
-            overflow: 'hidden',
-          },
-          pressed && { backgroundColor: `${accent}14`, transform: [{ scale: 0.985 }] },
-        ]}
-      >
-        <View
-          style={{
-            position: 'absolute',
-            left: 0,
-            top: 0,
-            bottom: 0,
-            width: 3,
-            backgroundColor: accent,
-          }}
-        />
-        {children}
       </Pressable>
     </FadeSlideIn>
   )
@@ -408,10 +341,11 @@ export default function PlazoreNavigationHub({
 
   const [query, setQuery] = useState('')
   const [debounced, setDebounced] = useState('')
-  const [allProducts, setAllProducts] = useState<Product[]>([])
+  const [serverProducts, setServerProducts] = useState<any[]>([])
   const [aiPhrases, setAiPhrases] = useState<string[]>([])
   const [aiFloors, setAiFloors] = useState<string[]>([])
   const [searchLoading, setSearchLoading] = useState(false)
+  const [allProducts, setAllProducts] = useState<Product[]>([])
 
   const pad = 16
   const gap = 12
@@ -422,12 +356,13 @@ export default function PlazoreNavigationHub({
   const bottomInset = Math.max(insets.bottom, 12)
   const isSearching = query.trim().length >= 1
 
+  // Prefetch products for store matching
   useEffect(() => {
     if (!visible) return
     let alive = true
     ;(async () => {
       try {
-        const res = await api.get('/products?limit=60')
+        const res = await api.get('/products?limit=80')
         if (!alive) return
         if (res.data?.success) setAllProducts(res.data.data || [])
       } catch {}
@@ -437,31 +372,39 @@ export default function PlazoreNavigationHub({
     }
   }, [visible])
 
+  // Debounce
   useEffect(() => {
     const t = setTimeout(() => setDebounced(query.trim()), DEBOUNCE)
     return () => clearTimeout(t)
   }, [query])
 
+  // Server search-suggest
   useEffect(() => {
-    if (debounced.length < 2) {
+    if (debounced.length < 1) {
+      setServerProducts([])
       setAiPhrases([])
       setAiFloors([])
       setSearchLoading(false)
       return
     }
+
     let cancelled = false
     setSearchLoading(true)
+
     ;(async () => {
       try {
         const res = await api.get(
           `/ai/search-suggest?q=${encodeURIComponent(debounced)}`
         )
         if (cancelled || !res.data?.success) return
+
         const d = res.data.data
+        setServerProducts(Array.isArray(d?.products) ? d.products : [])
         setAiPhrases(Array.isArray(d?.suggestions) ? d.suggestions : [])
         setAiFloors(Array.isArray(d?.floors) ? d.floors : [])
       } catch {
         if (!cancelled) {
+          setServerProducts([])
           setAiPhrases([])
           setAiFloors([])
         }
@@ -469,13 +412,14 @@ export default function PlazoreNavigationHub({
         if (!cancelled) setSearchLoading(false)
       }
     })()
+
     return () => {
       cancelled = true
     }
   }, [debounced])
 
-  const getSeller = (p: Product): SellerInfo | null => {
-    const s = p.seller as any
+  const getSeller = (p: any): SellerInfo | null => {
+    const s = p.seller
     if (!s) return null
     if (typeof s === 'string') return { _id: s }
     if (!s._id) return null
@@ -489,33 +433,26 @@ export default function PlazoreNavigationHub({
 
   const groupedHits = useMemo(() => {
     const q = query.trim().toLowerCase()
-    if (q.length < 1) return { products: [], stores: [], categories: [], ai: [] }
+    if (q.length < 1) {
+      return { products: [], stores: [], categories: [], ai: [] }
+    }
 
-    const products: LocalHit[] = []
-    const storesMap = new Map<string, SellerInfo>()
-    const categories: LocalHit[] = []
-    const aiHits: LocalHit[] = []
-    const seen = new Set<string>()
-
-    allProducts.forEach((p) => {
-      if ((p.name || '').toLowerCase().includes(q) && products.length < 5) {
-        const seller = getSeller(p)
-        const key = `p:${p._id}`
-        if (!seen.has(key)) {
-          seen.add(key)
-          products.push({
-            type: 'product',
-            label: p.name,
-            id: p._id,
-            image: p.images?.[0],
-            price: p.price,
-            region: p.region,
-            storeName: seller?.storeName || seller?.name,
-          })
-        }
+    // Products from server
+    const products: LocalHit[] = (serverProducts || []).slice(0, 8).map((p: any) => {
+      const seller = getSeller(p)
+      return {
+        type: 'product' as const,
+        label: p.name,
+        id: p._id,
+        image: p.images?.[0],
+        price: p.price,
+        region: p.region,
+        storeName: seller?.storeName || seller?.name,
       }
     })
 
+    // Stores
+    const storesMap = new Map<string, SellerInfo>()
     allProducts.forEach((p) => {
       const s = getSeller(p)
       if (!s) return
@@ -525,7 +462,7 @@ export default function PlazoreNavigationHub({
 
     const stores: LocalHit[] = []
     storesMap.forEach((s) => {
-      if (stores.length < 3) {
+      if (stores.length < 4) {
         stores.push({
           type: 'store',
           label: s.storeName || s.name || 'Store',
@@ -535,25 +472,27 @@ export default function PlazoreNavigationHub({
       }
     })
 
+    // Categories + AI floors
+    const categories: LocalHit[] = []
     CATEGORY_LIST.forEach((c) => {
       if (c.toLowerCase().includes(q) && categories.length < 4) {
         categories.push({ type: 'category', label: c })
       }
     })
     aiFloors.forEach((f) => {
-      if (categories.length < 5) {
+      if (categories.length < 6 && !categories.some((c) => c.label === f)) {
         categories.push({ type: 'category', label: f })
       }
     })
 
-    aiPhrases.forEach((phrase) => {
-      if (aiHits.length < 4) {
-        aiHits.push({ type: 'ai', label: phrase })
-      }
-    })
+    // AI phrases
+    const aiHits: LocalHit[] = aiPhrases.slice(0, 5).map((phrase) => ({
+      type: 'ai' as const,
+      label: phrase,
+    }))
 
     return { products, stores, categories, ai: aiHits }
-  }, [query, allProducts, aiPhrases, aiFloors])
+  }, [query, serverProducts, allProducts, aiPhrases, aiFloors])
 
   const totalHitsCount =
     groupedHits.products.length +
@@ -564,6 +503,7 @@ export default function PlazoreNavigationHub({
   const resetSearch = () => {
     setQuery('')
     setDebounced('')
+    setServerProducts([])
     setAiPhrases([])
     setAiFloors([])
   }
@@ -602,6 +542,7 @@ export default function PlazoreNavigationHub({
     })
   }
 
+  // Smooth open / close
   useEffect(() => {
     if (visible) {
       setMounted(true)
@@ -618,8 +559,8 @@ export default function PlazoreNavigationHub({
         }),
         Animated.timing(contentFade, {
           toValue: 1,
-          duration: OPEN_MS * 0.7,
-          delay: 180,
+          duration: OPEN_MS * 0.85,
+          delay: 80,
           easing: EASE_LUXURY,
           useNativeDriver: true,
         }),
@@ -634,7 +575,7 @@ export default function PlazoreNavigationHub({
         }),
         Animated.timing(contentFade, {
           toValue: 0,
-          duration: 250,
+          duration: 280,
           useNativeDriver: true,
         }),
       ]).start(({ finished }) => {
@@ -709,91 +650,6 @@ export default function PlazoreNavigationHub({
     })
   }
 
-  const renderProductCard = (h: LocalHit, i: number) => {
-    if (h.type !== 'product') return null
-    const priceText = formatProduct(h.price, h.region)
-    return (
-      <SuggestionRowCard key={`prod-${h.id}`} index={i} onPress={() => onHitPress(h)} accent={GREEN}>
-        <View
-          style={{
-            width: THUMB_SIZE,
-            height: THUMB_SIZE,
-            borderRadius: 10,
-            backgroundColor: SURFACE_2,
-            overflow: 'hidden',
-            borderWidth: 1,
-            borderColor: 'rgba(0,229,117,0.3)',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          {h.image ? (
-            <ExpoImage source={{ uri: h.image }} style={{ width: '100%', height: '100%' }} contentFit="cover" />
-          ) : (
-            <Ionicons name="bag-handle-outline" size={20} color={TEXT_MUTED} />
-          )}
-        </View>
-
-        <View style={{ flex: 1, marginLeft: 12 }}>
-          <Text style={{ color: TEXT, fontSize: 14, fontWeight: '600' }} numberOfLines={1}>
-            {h.label}
-          </Text>
-          <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 3, gap: 6 }}>
-            <Text style={{ color: GREEN, fontSize: 13, fontWeight: '700' }}>{priceText}</Text>
-            {h.storeName ? (
-              <>
-                <Text style={{ color: TEXT_MUTED, fontSize: 11 }}>•</Text>
-                <Text style={{ color: TEXT_DIM, fontSize: 11, flexShrink: 1 }} numberOfLines={1}>
-                  {h.storeName}
-                </Text>
-              </>
-            ) : null}
-          </View>
-        </View>
-
-        <Ionicons name="chevron-forward" size={16} color={TEXT_MUTED} style={{ marginLeft: 8 }} />
-      </SuggestionRowCard>
-    )
-  }
-
-  const renderStoreCard = (h: LocalHit, i: number) => {
-    if (h.type !== 'store') return null
-    return (
-      <SuggestionRowCard key={`store-${h.id}`} index={i} onPress={() => onHitPress(h)} accent={BLUE}>
-        <View
-          style={{
-            width: THUMB_SIZE,
-            height: THUMB_SIZE,
-            borderRadius: 10,
-            backgroundColor: 'rgba(59,130,246,0.12)',
-            overflow: 'hidden',
-            borderWidth: 1,
-            borderColor: 'rgba(59,130,246,0.4)',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          {h.logo ? (
-            <ExpoImage source={{ uri: h.logo }} style={{ width: '100%', height: '100%' }} contentFit="cover" />
-          ) : (
-            <Ionicons name="storefront" size={20} color={BLUE} />
-          )}
-        </View>
-
-        <View style={{ flex: 1, marginLeft: 12 }}>
-          <Text style={{ color: TEXT, fontSize: 14, fontWeight: '600' }} numberOfLines={1}>
-            {h.label}
-          </Text>
-          <Text style={{ color: BLUE, fontSize: 10, marginTop: 2, fontWeight: '700', letterSpacing: 0.6 }}>
-            OFFICIAL STOREFRONT
-          </Text>
-        </View>
-
-        <Ionicons name="chevron-forward" size={16} color={TEXT_MUTED} style={{ marginLeft: 8 }} />
-      </SuggestionRowCard>
-    )
-  }
-
   if (!mounted) return null
 
   let tileIndex = 0
@@ -807,7 +663,7 @@ export default function PlazoreNavigationHub({
       onRequestClose={onClose}
     >
       <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
-      <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)' }}>
+      <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }}>
         <Animated.View
           style={{
             ...StyleSheet.absoluteFillObject,
@@ -817,10 +673,10 @@ export default function PlazoreNavigationHub({
             paddingBottom: bottomInset,
           }}
         >
+          {/* Close */}
           <View
             style={{
               flexDirection: 'row',
-              alignItems: 'center',
               justifyContent: 'flex-end',
               paddingHorizontal: 16,
               minHeight: 44,
@@ -844,11 +700,11 @@ export default function PlazoreNavigationHub({
             </Pressable>
           </View>
 
+          {/* Logo */}
           <Animated.View
             style={{
               paddingHorizontal: 20,
               alignItems: 'center',
-              justifyContent: 'center',
               minHeight: 64,
               opacity: contentFade,
             }}
@@ -860,6 +716,7 @@ export default function PlazoreNavigationHub({
             />
           </Animated.View>
 
+          {/* Search Bar */}
           <Animated.View
             style={{
               marginHorizontal: 16,
@@ -917,70 +774,216 @@ export default function PlazoreNavigationHub({
             onScrollBeginDrag={() => Keyboard.dismiss()}
           >
             {isSearching ? (
-              <View style={{ paddingTop: 4 }}>
+              <View style={{ paddingHorizontal: 16, paddingTop: 8 }}>
                 {searchLoading && totalHitsCount === 0 ? (
-                  <View style={{ paddingHorizontal: 20, paddingVertical: 28, alignItems: 'center' }}>
-                    <Text style={{ color: TEXT_DIM, fontSize: 14, fontWeight: '500' }}>
-                      Searching Plazore Catalog…
-                    </Text>
+                  <View style={{ paddingVertical: 40, alignItems: 'center' }}>
+                    <Text style={{ color: TEXT_DIM, fontSize: 14 }}>Searching Plazore…</Text>
                   </View>
                 ) : totalHitsCount === 0 ? (
-                  <View style={{ paddingHorizontal: 20, paddingVertical: 36, alignItems: 'center' }}>
-                    <Ionicons name="search-outline" size={32} color={TEXT_MUTED} />
-                    <Text style={{ color: TEXT_DIM, fontSize: 14, marginTop: 10, textAlign: 'center' }}>
-                      No matches found for “{query.trim()}”
+                  <View style={{ paddingVertical: 40, alignItems: 'center' }}>
+                    <Ionicons name="search-outline" size={30} color={TEXT_MUTED} />
+                    <Text style={{ color: TEXT_DIM, fontSize: 14, marginTop: 10 }}>
+                      No results for “{query.trim()}”
                     </Text>
                   </View>
                 ) : (
                   <>
-                    {(groupedHits.categories.length > 0 || groupedHits.ai.length > 0) && (
-                      <View style={{ marginBottom: 20, marginHorizontal: 16, backgroundColor: SURFACE_2, borderRadius: 16, padding: 14, borderWidth: 1, borderColor: LINE }}>
-                        <Text style={[styles.sectionHeader, { paddingHorizontal: 0, marginBottom: 10 }]}>INTENTS & FLOORS</Text>
-                        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-                          {[...groupedHits.categories, ...groupedHits.ai].map((h, i) => {
-                            const isAi = h.type === 'ai'
-                            const accentColor = isAi ? PURPLE : CYAN
-                            return (
-                              <Pressable
-                                key={`hub-chip-${h.type}-${h.label}-${i}`}
-                                onPress={() => onHitPress(h)}
-                                style={({ pressed }) => [
-                                  {
-                                    flexDirection: 'row',
-                                    alignItems: 'center',
-                                    gap: 6,
-                                    paddingHorizontal: 12,
-                                    paddingVertical: 8,
-                                    borderRadius: 20,
-                                    backgroundColor: SURFACE_CARD,
-                                    borderWidth: 1,
-                                    borderColor: pressed ? accentColor : `${accentColor}40`,
-                                  },
-                                  pressed && { backgroundColor: `${accentColor}20` },
-                                ]}
-                              >
-                                <Ionicons name={isAi ? 'sparkles' : 'grid-outline'} size={14} color={accentColor} />
-                                <Text style={{ color: TEXT, fontSize: 13, fontWeight: '600' }} numberOfLines={1}>
-                                  {h.label}
-                                </Text>
-                              </Pressable>
-                            )
-                          })}
+                    {/* SUGGESTIONS */}
+                    {(groupedHits.ai.length > 0 || groupedHits.categories.length > 0) && (
+                      <View style={{ marginBottom: 28 }}>
+                        <View
+                          style={{
+                            flexDirection: 'row',
+                            justifyContent: 'space-between',
+                            marginBottom: 12,
+                          }}
+                        >
+                          <Text style={[styles.sectionHeader, { paddingHorizontal: 0 }]}>
+                            SUGGESTIONS
+                          </Text>
+                          <Text style={{ color: TEXT_MUTED, fontSize: 12 }}>
+                            {groupedHits.ai.length + groupedHits.categories.length}
+                          </Text>
                         </View>
+
+                        {[...groupedHits.ai, ...groupedHits.categories].map((h, i) => (
+                          <FadeSlideIn key={`sug-${i}`} index={i} delayBase={40} duration={600}>
+                            <Pressable
+                              onPress={() => onHitPress(h)}
+                              style={{ paddingVertical: 11 }}
+                            >
+                              <Text style={{ color: TEXT, fontSize: 15 }}>{h.label}</Text>
+                            </Pressable>
+                          </FadeSlideIn>
+                        ))}
                       </View>
                     )}
 
+                    {/* PRODUCTS */}
                     {groupedHits.products.length > 0 && (
-                      <View style={{ marginBottom: 16 }}>
-                        <Text style={styles.sectionHeader}>PRODUCTS</Text>
-                        {groupedHits.products.map((h, i) => renderProductCard(h, i))}
+                      <View style={{ marginBottom: 24 }}>
+                        <View
+                          style={{
+                            flexDirection: 'row',
+                            justifyContent: 'space-between',
+                            marginBottom: 14,
+                          }}
+                        >
+                          <Text style={[styles.sectionHeader, { paddingHorizontal: 0 }]}>
+                            PRODUCTS
+                          </Text>
+                          <Text style={{ color: TEXT_MUTED, fontSize: 12 }}>
+                            {groupedHits.products.length}
+                          </Text>
+                        </View>
+
+                        {groupedHits.products.map((h, i) => {
+                          if (h.type !== 'product') return null
+                          const priceText = formatProduct(h.price, h.region)
+
+                          return (
+                            <FadeSlideIn key={h.id} index={i} delayBase={80} duration={650}>
+                              <Pressable
+                                onPress={() => onHitPress(h)}
+                                style={{
+                                  flexDirection: 'row',
+                                  alignItems: 'center',
+                                  marginBottom: 16,
+                                }}
+                              >
+                                <View
+                                  style={{
+                                    width: 70,
+                                    height: 70,
+                                    borderRadius: 10,
+                                    backgroundColor: SURFACE_2,
+                                    overflow: 'hidden',
+                                    marginRight: 14,
+                                  }}
+                                >
+                                  {h.image ? (
+                                    <ExpoImage
+                                      source={{ uri: h.image }}
+                                      style={{ width: 70, height: 70 }}
+                                      contentFit="cover"
+                                    />
+                                  ) : (
+                                    <View
+                                      style={{
+                                        flex: 1,
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                      }}
+                                    >
+                                      <Ionicons
+                                        name="image-outline"
+                                        size={22}
+                                        color={TEXT_MUTED}
+                                      />
+                                    </View>
+                                  )}
+                                </View>
+
+                                <View style={{ flex: 1 }}>
+                                  <Text
+                                    style={{ color: TEXT, fontSize: 15, fontWeight: '500' }}
+                                    numberOfLines={2}
+                                  >
+                                    {h.label}
+                                  </Text>
+                                  <Text
+                                    style={{
+                                      color: GREEN,
+                                      fontSize: 14,
+                                      fontWeight: '600',
+                                      marginTop: 4,
+                                    }}
+                                  >
+                                    {priceText}
+                                  </Text>
+                                </View>
+                              </Pressable>
+                            </FadeSlideIn>
+                          )
+                        })}
                       </View>
                     )}
 
+                    {/* STORES */}
                     {groupedHits.stores.length > 0 && (
                       <View style={{ marginBottom: 16 }}>
-                        <Text style={styles.sectionHeader}>STORES & BOUTIQUES</Text>
-                        {groupedHits.stores.map((h, i) => renderStoreCard(h, i))}
+                        <View
+                          style={{
+                            flexDirection: 'row',
+                            justifyContent: 'space-between',
+                            marginBottom: 14,
+                          }}
+                        >
+                          <Text style={[styles.sectionHeader, { paddingHorizontal: 0 }]}>
+                            STORES
+                          </Text>
+                          <Text style={{ color: TEXT_MUTED, fontSize: 12 }}>
+                            {groupedHits.stores.length}
+                          </Text>
+                        </View>
+
+                        {groupedHits.stores.map((h, i) => {
+                          if (h.type !== 'store') return null
+                          return (
+                            <FadeSlideIn key={h.id} index={i} delayBase={60} duration={600}>
+                              <Pressable
+                                onPress={() => onHitPress(h)}
+                                style={{
+                                  flexDirection: 'row',
+                                  alignItems: 'center',
+                                  marginBottom: 14,
+                                }}
+                              >
+                                <View
+                                  style={{
+                                    width: 56,
+                                    height: 56,
+                                    borderRadius: 10,
+                                    backgroundColor: SURFACE_2,
+                                    overflow: 'hidden',
+                                    marginRight: 14,
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                  }}
+                                >
+                                  {h.logo ? (
+                                    <ExpoImage
+                                      source={{ uri: h.logo }}
+                                      style={{ width: 56, height: 56 }}
+                                      contentFit="cover"
+                                    />
+                                  ) : (
+                                    <Ionicons name="storefront" size={20} color={BLUE} />
+                                  )}
+                                </View>
+
+                                <View style={{ flex: 1 }}>
+                                  <Text
+                                    style={{ color: TEXT, fontSize: 15, fontWeight: '500' }}
+                                    numberOfLines={1}
+                                  >
+                                    {h.label}
+                                  </Text>
+                                  <Text
+                                    style={{
+                                      color: BLUE,
+                                      fontSize: 12,
+                                      marginTop: 3,
+                                      fontWeight: '600',
+                                    }}
+                                  >
+                                    Official Storefront
+                                  </Text>
+                                </View>
+                              </Pressable>
+                            </FadeSlideIn>
+                          )
+                        })}
                       </View>
                     )}
                   </>
@@ -988,6 +991,7 @@ export default function PlazoreNavigationHub({
               </View>
             ) : (
               <>
+                {/* Seller CTA */}
                 <FadeSlideIn index={0} delayBase={100}>
                   <Pressable
                     onPress={handleSellerCta}
@@ -1045,10 +1049,24 @@ export default function PlazoreNavigationHub({
                   </Pressable>
                 </FadeSlideIn>
 
-                {slots?.profile ? <View style={{ marginBottom: 12, paddingHorizontal: 16 }}>{slots.profile}</View> : null}
-                {slots?.recommendations ? <View style={{ marginBottom: 12, paddingHorizontal: 16 }}>{slots.recommendations}</View> : null}
-                {slots?.recentlyViewed ? <View style={{ marginBottom: 12, paddingHorizontal: 16 }}>{slots.recentlyViewed}</View> : null}
-                {slots?.sellerShortcuts ? <View style={{ marginBottom: 12, paddingHorizontal: 16 }}>{slots.sellerShortcuts}</View> : null}
+                {slots?.profile && (
+                  <View style={{ marginBottom: 12, paddingHorizontal: 16 }}>{slots.profile}</View>
+                )}
+                {slots?.recommendations && (
+                  <View style={{ marginBottom: 12, paddingHorizontal: 16 }}>
+                    {slots.recommendations}
+                  </View>
+                )}
+                {slots?.recentlyViewed && (
+                  <View style={{ marginBottom: 12, paddingHorizontal: 16 }}>
+                    {slots.recentlyViewed}
+                  </View>
+                )}
+                {slots?.sellerShortcuts && (
+                  <View style={{ marginBottom: 12, paddingHorizontal: 16 }}>
+                    {slots.sellerShortcuts}
+                  </View>
+                )}
 
                 {SECTIONS.map((section) => (
                   <View key={section.id} style={{ marginBottom: 24 }}>
@@ -1079,12 +1097,13 @@ export default function PlazoreNavigationHub({
                   </View>
                 ))}
 
-                {slots?.musicSettings ? (
+                {slots?.musicSettings && (
                   <View style={{ marginTop: 4, marginBottom: 12, paddingHorizontal: 16 }}>
                     {slots.musicSettings}
                   </View>
-                ) : null}
+                )}
 
+                {/* Profile footer */}
                 <FadeSlideIn index={12} delayBase={160}>
                   <View
                     style={{
@@ -1130,17 +1149,23 @@ export default function PlazoreNavigationHub({
                         </View>
                       )}
                       <View style={{ flex: 1 }}>
-                        <Text style={{ color: TEXT, fontSize: 14, fontWeight: '700' }} numberOfLines={1}>
+                        <Text
+                          style={{ color: TEXT, fontSize: 14, fontWeight: '700' }}
+                          numberOfLines={1}
+                        >
                           {user?.firstName || user?.username || 'Guest'}
                         </Text>
-                        <Text style={{ color: TEXT_MUTED, fontSize: 11, marginTop: 1 }} numberOfLines={1}>
+                        <Text
+                          style={{ color: TEXT_MUTED, fontSize: 11, marginTop: 1 }}
+                          numberOfLines={1}
+                        >
                           {isSignedIn ? 'View profile details' : 'Sign in to sync saved items'}
                         </Text>
                       </View>
                       <Ionicons name="chevron-forward" size={15} color={TEXT_MUTED} />
                     </Pressable>
 
-                    {isSignedIn ? (
+                    {isSignedIn && (
                       <Pressable
                         onPress={handleLogout}
                         style={{
@@ -1161,7 +1186,7 @@ export default function PlazoreNavigationHub({
                           Log out
                         </Text>
                       </Pressable>
-                    ) : null}
+                    )}
                   </View>
                 </FadeSlideIn>
               </>
