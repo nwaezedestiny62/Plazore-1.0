@@ -23,7 +23,7 @@ export default function FadeUpOnAppear({
   const hasAnimated = useRef(false)
 
   useEffect(() => {
-    if (hasAnimated.current) return
+    if (once && hasAnimated.current) return
     hasAnimated.current = true
 
     const timer = setTimeout(() => {
@@ -44,7 +44,7 @@ export default function FadeUpOnAppear({
     }, delay)
 
     return () => clearTimeout(timer)
-  }, [delay, duration])
+  }, [delay, duration, once])
 
   return (
     <Animated.View

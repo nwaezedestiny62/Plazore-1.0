@@ -4,115 +4,122 @@ import { Dimensions, StyleSheet, Text, View } from 'react-native'
 import ShowroomProductCard from './ShowroomProductCard'
 import ScrollFadeUp from './ScrollFadeUp'
 
-const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window')
+const { width: SCREEN_W } = Dimensions.get('window')
 
 interface RoomTwoProps {
   products: Product[]
-  variant?: 'default' | 'heroSplit'
+  title?: string
+  subtitle?: string
 }
 
-export default function RoomTwo({ products, variant = 'default' }: RoomTwoProps) {
-  // --- HERO SPLIT: 2 products, full-screen dramatic vertical stack ---
-  if (variant === 'heroSplit' && products.length === 2) {
-    return (
-      <View style={[styles.room, { backgroundColor: '#FFFFFF' }]}>
-        {/* Dramatic divider */}
-        <ScrollFadeUp delay={200} duration={600} distance={30} style={styles.dividerRow}>
-          <View style={styles.dividerLine} />
-        </ScrollFadeUp>
+export default function RoomTwo({
+  products,
+  title = 'THE CHAMBER',
+  subtitle = 'Private Selection',
+}: RoomTwoProps) {
+  // Take first two products for the dual focus
+  const left = products[0]
+  const right = products[1]
+  const rest = products.slice(2)
 
-        <ScrollFadeUp delay={400} duration={700} distance={40} style={styles.labelWrap}>
-          <Text style={styles.sectionLabel}>CHAPTER 02</Text>
-          <Text style={[styles.sectionTitle, { color: '#0A0A0A' }]}>The Collection</Text>
-        </ScrollFadeUp>
-
-        {/* Each product gets its own full-height moment */}
-        <ScrollFadeUp delay={600} duration={800} distance={60} scale style={styles.heroItem}>
-          <ShowroomProductCard product={products[0]} size="full" />
-        </ScrollFadeUp>
-
-        <View style={styles.dividerLine} />
-
-        <ScrollFadeUp delay={800} duration={800} distance={60} scale style={styles.heroItem}>
-          <ShowroomProductCard product={products[1]} size="full" />
-        </ScrollFadeUp>
-      </View>
-    )
-  }
-
-  // --- DEFAULT: Dramatic staggered vertical stack — each product is its own moment ---
-  // Like cristianoronaldo.com: vertical portrait tiles, full-screen height
   return (
-    <View style={[styles.room, { backgroundColor: '#F5F3F0' }]}>
-      <View style={styles.headerRow}>
-        <ScrollFadeUp delay={100} duration={600} distance={30}>
-          <Text style={[styles.sectionLabel, { color: '#8B8680' }]}>EXPLORE</Text>
+    <View style={styles.room}>
+      {/* Header */}
+      <View style={styles.header}>
+        <ScrollFadeUp delay={40} duration={550} distance={16}>
+          <Text style={styles.kicker}>{title}</Text>
         </ScrollFadeUp>
-        <ScrollFadeUp delay={200} duration={700} distance={30}>
-          <Text style={[styles.sectionTitle, { color: '#1A1A1A' }]}>The Showroom</Text>
+        <ScrollFadeUp delay={100} duration={600} distance={18}>
+          <Text style={styles.title}>{subtitle}</Text>
+        </ScrollFadeUp>
+        <ScrollFadeUp delay={150} duration={500} distance={10}>
+          <View style={styles.line} />
         </ScrollFadeUp>
       </View>
 
-      {products.map((product, index) => (
-        <ScrollFadeUp
-          key={product._id}
-          style={styles.productItem}
-          delay={350 + index * 200}
-          duration={800}
-          distance={50}
-          staggerIndex={index}
-          staggerDelay={0}
-          scale
-        >
-          <ShowroomProductCard product={product} size="grid" dark={index % 2 !== 0} />
-        </ScrollFadeUp>
-      ))}
+      {/* Dual large products */}
+      <View style={styles.dual}>
+        {left && (
+          <ScrollFadeUp delay={200} duration={700} distance={30} style={styles.dualItem}>
+            <ShowroomProductCard product={left} />
+          </ScrollFadeUp>
+        )}
+        {right && (
+          <ScrollFadeUp delay={280} duration={700} distance={30} style={styles.dualItem}>
+            <ShowroomProductCard product={right} />
+          </ScrollFadeUp>
+        )}
+      </View>
+
+      {/* Remaining products in a quieter secondary row if any */}
+      {rest.length > 0 && (
+        <View style={styles.secondary}>
+          {rest.map((product, index) => (
+            <ScrollFadeUp
+              key={`${product._id}-s-${index}`}
+              delay={360 + index * 70}
+              duration={600}
+              distance={22}
+              style={styles.secondaryItem}
+            >
+              <ShowroomProductCard product={product} />
+            </ScrollFadeUp>
+          ))}
+        </View>
+      )}
     </View>
   )
 }
 
 const styles = StyleSheet.create({
   room: {
-    paddingTop: 48,
-    paddingBottom: 48,
-    minHeight: SCREEN_H * 0.9,
+    backgroundColor: '#F4EFE8',
+    paddingTop: 52,
+    paddingBottom: 60,
+    width: SCREEN_W,
   },
-  headerRow: {
-    paddingHorizontal: 28,
+  header: {
+    paddingHorizontal: 24,
     marginBottom: 36,
   },
-  labelWrap: {
-    paddingHorizontal: 28,
-    marginBottom: 36,
-  },
-  sectionLabel: {
-    fontSize: 10,
-    fontWeight: '600',
-    letterSpacing: 4,
+  kicker: {
+    fontFamily: 'Manrope_600SemiBold',
+    fontSize: 11,
+    letterSpacing: 3.6,
     textTransform: 'uppercase',
-    fontFamily: 'Manrope_600SemiBold',
+    color: '#8C7B6B',
+    marginBottom: 6,
   },
-  sectionTitle: {
+  title: {
+    fontFamily: 'Manrope_700Bold',
     fontSize: 28,
-    fontWeight: '600',
     letterSpacing: -0.5,
-    marginTop: 6,
-    fontFamily: 'Manrope_600SemiBold',
+    color: '#2C241B',
+    marginBottom: 16,
   },
-  dividerRow: {
-    paddingHorizontal: 28,
-    marginBottom: 28,
+  line: {
+    height: 1.5,
+    width: 48,
+    backgroundColor: '#2C241B',
+    opacity: 0.2,
   },
-  dividerLine: {
-    height: 1,
-    backgroundColor: 'rgba(0,0,0,0.08)',
-    marginHorizontal: 28,
-    marginVertical: 24,
+  dual: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    marginBottom: 32,
   },
-  heroItem: {
-    marginHorizontal: 0,
+  dualItem: {
+    width: (SCREEN_W - 44) / 2,
   },
-  productItem: {
-    marginBottom: 8,
+  secondary: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    rowGap: 24,
+  },
+  secondaryItem: {
+    width: (SCREEN_W - 44) / 2,
   },
 })

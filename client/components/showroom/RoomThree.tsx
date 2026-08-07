@@ -1,119 +1,322 @@
+/**
+ * RoomThree — THE SIGNAL
+ * Single-product focus stage.
+ * Dark, deliberate, almost ceremonial.
+ * Cart button is rendered only once (no stacking).
+ */
+
 import { Product } from '@/constants/types'
-import React from 'react'
-import { Dimensions, StyleSheet, Text, View } from 'react-native'
-import ShowroomProductCard from './ShowroomProductCard'
+import { Image } from 'expo-image'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
+import {
+  Animated,
+  Dimensions,
+  Easing,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native'
+import { Ionicons } from '@expo/vector-icons'
+import { useMarketplace } from '@/context/MarketplaceContext'
+import { Link } from 'expo-router'
 import ScrollFadeUp from './ScrollFadeUp'
 
-const { width: SCREEN_W } = Dimensions.get('window')
+const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window')
 
-// Cool shade palettes
-const TONES = {
-  ice: { bg: '#F0F9FF', text: '#0369A1', sub: '#0EA5E9' },
-  mint: { bg: '#ECFDF5', text: '#047857', sub: '#10B981' },
-  lavender: { bg: '#F5F3FF', text: '#6D28D9', sub: '#8B5CF6' },
-  slate: { bg: '#F8FAFC', text: '#334155', sub: '#64748B' },
-  dusk: { bg: '#F1F5F9', text: '#1E293B', sub: '#475569' },
-}
-
-type Tone = keyof typeof TONES
+const HOLD_MS = 5200
+const CROSSFADE_MS = 1800
+const EASE = Easing.bezier(0.4, 0.0, 0.2, 1.0)
 
 interface RoomThreeProps {
   products: Product[]
-  tone?: Tone
   title?: string
   subtitle?: string
 }
 
-export default function RoomThree({ 
-  products, 
-  tone = 'ice',
-  title = "COLLECTION",
-  subtitle = "Selected Pieces"
+export default function RoomThree({
+  products,
+  title = 'THE SIGNAL',
+  subtitle = 'Worth Your Attention',
 }: RoomThreeProps) {
-  const colors = TONES[tone] || TONES.ice
+  const { formatProduct } = useMarketplace()
+  const [current, setCurrent] = useState(0)
+  const currentRef = useRef(0)
+  const busy = useRef(false)
+  const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const opacities = useRef(
+    products.map((_, i) => new Animated.Value(i === 0 ? 1 : 0.01))
+  ).current
+
+  useEffect(() => {
+    currentRef.current = current
+  }, [current])
+
+  const clearHold = useCallback(() => {
+    if (holdTimer.current) {
+      clearTimeout(holdTimer.current)
+      holdTimer.current = null
+    }
+  }, [])
+
+  const scheduleHold = useCallback(() => {
+    clearHold()
+    if (products.length < 2) return
+    holdTimer.current = setTimeout(() => {
+      goTo(currentRef.current + 1)
+    }, HOLD_MS)
+  }, [products.length])
+
+  const goTo = useCallback(
+    (raw: number) => {
+      if (busy.current || products.length < 2) return
+      const from = currentRef.current
+      const target = ((raw % products.length) + products.length) % products.length
+      if (target === from) return
+
+      busy.current = true
+      clearHold()
+
+      Animated.parallel([
+        Animated.timing(opacities[from], {
+          toValue: 0.01,
+          duration: CROSSFADE_MS,
+          easing: EASE,
+          useNativeDriver: true,
+        }),
+        Animated.timing(opacities[target], {
+          toValue: 1,
+          duration: CROSSFADE_MS,
+          easing: EASE,
+          useNativeDriver: true,
+        }),
+      ]).start(({ finished }) => {
+        if (!finished) {
+          busy.current = false
+          return
+        }
+
+        products.forEach((_, i) => {
+          opacities[i].setValue(i === target ? 1 : 0.01)
+        })
+
+        currentRef.current = target
+        setCurrent(target)
+        busy.current = false
+        scheduleHold()
+      })
+    },
+    [products, opacities, scheduleHold]
+  )
+
+  useEffect(() => {
+    if (products.length < 2) return
+    scheduleHold()
+    return () => clearHold()
+  }, [products.length])
+
+  if (!products.length) return null
+
+  const active = products[current]
 
   return (
-    <View style={[styles.room, { backgroundColor: colors.bg }]}>
+    <View style={styles.room}>
       {/* Header */}
       <View style={styles.header}>
-        <ScrollFadeUp delay={100} duration={600} distance={20}>
-          <Text style={[styles.subtitle, { color: colors.sub }]}>{title}</Text>
+        <ScrollFadeUp delay={40} duration={600} distance={16}>
+          <Text style={styles.kicker}>{title}</Text>
         </ScrollFadeUp>
-        <ScrollFadeUp delay={200} duration={700} distance={20}>
-          <Text style={[styles.title, { color: colors.text }]}>{subtitle}</Text>
+        <ScrollFadeUp delay={100} duration={650} distance={18}>
+          <Text style={styles.title}>{subtitle}</Text>
         </ScrollFadeUp>
       </View>
 
-      {/* Vertical Product Feed */}
-      <View style={styles.feed}>
-        {products.map((product, index) => (
-          <ScrollFadeUp
+      {/* Main Stage */}
+      <View style={styles.stage}>
+        {/* Product layers (images + text only) */}
+        {products.map((product, i) => (
+          <Animated.View
             key={product._id}
-            delay={300 + index * 100}
-            duration={800}
-            distance={40}
+            pointerEvents={i === current ? 'auto' : 'none'}
+            style={[
+              StyleSheet.absoluteFillObject,
+              { opacity: opacities[i] },
+            ]}
           >
-            <ShowroomProductCard 
-              product={product} 
-              size="full" 
-              style={styles.card}
-            />
-          </ScrollFadeUp>
+            <Link href={`/product/${product._id}` as any} asChild>
+              <Pressable style={styles.stageInner}>
+                <View style={styles.imageWrap}>
+                  {product.images?.[0] ? (
+                    <Image
+                      source={{ uri: product.images[0] }}
+                      style={styles.image}
+                      contentFit="cover"
+                      transition={0}
+                    />
+                  ) : (
+                    <View style={[styles.image, styles.placeholder]} />
+                  )}
+                </View>
+
+                <View style={styles.info}>
+                  <Text style={styles.name} numberOfLines={2}>
+                    {product.name}
+                  </Text>
+                  <View style={styles.metaRow}>
+                    <Text style={styles.brand}>
+                      {(product.brand || 'plazore').toLowerCase()}
+                    </Text>
+                    <Text style={styles.divider}> | </Text>
+                    <Text style={styles.price}>
+                      {formatProduct(product.price, product.region)}
+                    </Text>
+                  </View>
+                </View>
+              </Pressable>
+            </Link>
+          </Animated.View>
         ))}
+
+        {/* SINGLE cart button — lives outside the layers so it never stacks */}
+        <Pressable
+          onPress={() => {
+            // wire add-to-cart for the current product here
+          }}
+          style={styles.cartButton}
+          hitSlop={12}
+        >
+          <Ionicons name="cart-outline" size={17} color="#111" />
+        </Pressable>
       </View>
-      
-      {/* Section Divider / Progress Bar hint from aura-rae */}
-      <View style={styles.dividerContainer}>
-        <View style={[styles.dividerBase, { backgroundColor: colors.sub + '20' }]}>
-          <View style={[styles.dividerActive, { backgroundColor: colors.sub }]} />
+
+      {/* Dots */}
+      {products.length > 1 && (
+        <View style={styles.dots}>
+          {products.map((_, i) => (
+            <Pressable
+              key={i}
+              onPress={() => goTo(i)}
+              style={[styles.dot, i === current && styles.dotActive]}
+            />
+          ))}
         </View>
-      </View>
+      )}
     </View>
   )
 }
 
 const styles = StyleSheet.create({
   room: {
-    paddingVertical: 60,
+    backgroundColor: '#07080C',
+    paddingTop: 52,
+    paddingBottom: 64,
     width: SCREEN_W,
+    minHeight: SCREEN_H * 0.92,
   },
   header: {
-    paddingHorizontal: 20,
-    marginBottom: 40,
-    alignItems: 'center',
+    paddingHorizontal: 24,
+    marginBottom: 36,
   },
-  subtitle: {
-    fontSize: 12,
-    fontWeight: '600',
+  kicker: {
+    fontFamily: 'Manrope_600SemiBold',
+    fontSize: 11,
     letterSpacing: 4,
+    color: 'rgba(255,255,255,0.4)',
     textTransform: 'uppercase',
     marginBottom: 8,
   },
   title: {
-    fontSize: 32,
-    fontWeight: '700',
+    fontFamily: 'Manrope_700Bold',
+    fontSize: 28,
+    color: '#FFFFFF',
     letterSpacing: -0.5,
-    textAlign: 'center',
   },
-  feed: {
-    paddingHorizontal: 16,
+  stage: {
+    width: SCREEN_W,
+    height: SCREEN_H * 0.58,
+    position: 'relative',
   },
-  card: {
-    marginBottom: 48,
+  stageInner: {
+    flex: 1,
   },
-  dividerContainer: {
-    paddingHorizontal: 20,
-    marginTop: 20,
+  imageWrap: {
+    width: SCREEN_W - 48,
+    height: '78%',
+    marginHorizontal: 24,
+    overflow: 'hidden',
+    position: 'relative',
+    backgroundColor: '#111',
+  },
+  image: {
+    width: '100%',
+    height: '100%',
+  },
+  placeholder: {
+    backgroundColor: '#1A1A1A',
+  },
+  // Single cart button — same design as product cards
+  cartButton: {
+    position: 'absolute',
+    // Position it relative to the image area
+    top: (SCREEN_H * 0.58 * 0.78) - 11 - 34, // bottom of image area
+    right: 24 + 11,
+    width: 34,
+    height: 34,
+    backgroundColor: '#FFFFFF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.13,
+    shadowRadius: 3,
+    elevation: 3,
+    zIndex: 20,
+  },
+  info: {
+    paddingHorizontal: 24,
+    paddingTop: 20,
+  },
+  name: {
+    fontFamily: 'Manrope_500Medium',
+    fontSize: 17,
+    color: '#FFFFFF',
+    letterSpacing: 0.2,
+    marginBottom: 6,
+  },
+  metaRow: {
+    flexDirection: 'row',
     alignItems: 'center',
   },
-  dividerBase: {
-    width: '100%',
-    height: 2,
-    borderRadius: 1,
+  brand: {
+    fontFamily: 'Manrope_400Regular',
+    fontSize: 13,
+    color: 'rgba(255,255,255,0.55)',
   },
-  dividerActive: {
-    width: '30%',
-    height: '100%',
-    borderRadius: 1,
+  divider: {
+    fontFamily: 'Manrope_400Regular',
+    fontSize: 13,
+    color: 'rgba(255,255,255,0.35)',
+  },
+  price: {
+    fontFamily: 'Manrope_500Medium',
+    fontSize: 13,
+    color: '#FFFFFF',
+  },
+  dots: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 28,
+  },
+  dot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: 'rgba(255,255,255,0.22)',
+  },
+  dotActive: {
+    backgroundColor: 'rgba(255,255,255,0.85)',
+    width: 18,
   },
 })

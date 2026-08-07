@@ -1,114 +1,206 @@
-import { ProductCardProps } from '@/constants/types'
+/**
+ * ShowroomProductCard — 2030 Premium Edition
+ * Completely flicker-free auto image rotation
+ * Supports dark mode for text colours
+ */
+
+import { Product } from '@/constants/types'
 import { useMarketplace } from '@/context/MarketplaceContext'
+import { Ionicons } from '@expo/vector-icons'
 import { Image } from 'expo-image'
 import { Link } from 'expo-router'
-import React, { useMemo } from 'react'
-import { Dimensions, StyleSheet, Text, TouchableOpacity, View } from 'react-native'
-import { Ionicons } from '@expo/vector-icons'
+import React, { useCallback, useEffect, useMemo, useRef } from 'react'
+import {
+  Animated,
+  Dimensions,
+  Easing,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native'
 
 const SCREEN_W = Dimensions.get('window').width
-const SCREEN_H = Dimensions.get('window').height
+const H_PADDING = 16
+const GAP = 12
+const CARD_WIDTH = (SCREEN_W - H_PADDING * 2 - GAP) / 2
 
-function resolveShipLocation(product: any): string {
+const IMAGE_ASPECT = 1.35
+
+const HOLD_MS = 4800
+const CROSSFADE_MS = 1600
+const EASE = Easing.bezier(0.4, 0.0, 0.2, 1.0)
+
+type Props = {
+  product: Product
+  style?: any
+  dark?: boolean
+}
+
+function resolveShipLocation(product: Product): string {
   const fl = product?.fulfillmentLocation
+  if (fl?.displayLabel) return fl.displayLabel
   if (fl) {
-    if (fl.displayLabel) return String(fl.displayLabel)
     const parts = [fl.city, fl.state, fl.country].filter(Boolean)
-    if (parts.length) return parts.join(', ')
-  }
-  const addr = product?.seller?.shippingDefaults?.address
-  if (addr) {
-    const parts = [addr.city, addr.state, addr.country].filter(Boolean)
     if (parts.length) return parts.join(', ')
   }
   return ''
 }
 
-type CardSize = 'hero' | 'full' | 'rail' | 'grid'
-
-interface ShowroomProductCardProps extends ProductCardProps {
-  size?: CardSize
-  style?: any
-  dark?: boolean
+function resolveBrand(product: Product): string {
+  if (product.brand) return product.brand
+  if (typeof product.seller === 'object' && product.seller?.storeName) {
+    return product.seller.storeName
+  }
+  return 'plazore'
 }
 
 export default function ShowroomProductCard({
   product,
-  size = 'rail',
   style,
   dark = false,
-}: ShowroomProductCardProps) {
+}: Props) {
   const { formatProduct } = useMarketplace()
   const location = useMemo(() => resolveShipLocation(product), [product])
+  const brand = useMemo(() => resolveBrand(product), [product])
 
-  // Size calculations — cinematic, full-bleed
-  let imageHeight: number
+  const images = product.images?.length ? product.images : []
+  const hasMultiple = images.length > 1
 
-  switch (size) {
-    case 'hero':
-      imageHeight = SCREEN_H * 0.75
-      break
-    case 'full':
-      imageHeight = SCREEN_H * 0.7
-      break
-    case 'rail':
-      imageHeight = SCREEN_H * 0.65
-      break
-    case 'grid':
-      imageHeight = SCREEN_H * 0.45
-      break
-    default:
-      imageHeight = SCREEN_H * 0.65
-  }
+  // Start at 0.01 — never pure 0 (anti-flicker)
+  const opacities = useRef(
+    images.map((_, i) => new Animated.Value(i === 0 ? 1 : 0.01))
+  ).current
 
-  const textPrimary = dark ? '#FFFFFF' : '#000000'
-  const textSecondary = dark ? 'rgba(255,255,255,0.7)' : '#666666'
+  const currentRef = useRef(0)
+  const busy = useRef(false)
+  const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const clearHold = useCallback(() => {
+    if (holdTimer.current) {
+      clearTimeout(holdTimer.current)
+      holdTimer.current = null
+    }
+  }, [])
+
+  const scheduleHold = useCallback(() => {
+    clearHold()
+    if (!hasMultiple) return
+    holdTimer.current = setTimeout(() => goTo(currentRef.current + 1), HOLD_MS)
+  }, [hasMultiple])
+
+  const goTo = useCallback(
+    (raw: number) => {
+      if (busy.current || !hasMultiple) return
+      const from = currentRef.current
+      const target = ((raw % images.length) + images.length) % images.length
+      if (target === from) return
+
+      busy.current = true
+      clearHold()
+
+      Animated.parallel([
+        Animated.timing(opacities[from], {
+          toValue: 0.01,
+          duration: CROSSFADE_MS,
+          easing: EASE,
+          useNativeDriver: true,
+        }),
+        Animated.timing(opacities[target], {
+          toValue: 1,
+          duration: CROSSFADE_MS,
+          easing: EASE,
+          useNativeDriver: true,
+        }),
+      ]).start(({ finished }) => {
+        if (!finished) {
+          busy.current = false
+          return
+        }
+
+        images.forEach((_, i) => {
+          opacities[i].setValue(i === target ? 1 : 0.01)
+        })
+
+        currentRef.current = target
+        busy.current = false
+        scheduleHold()
+      })
+    },
+    [hasMultiple, images, opacities, scheduleHold]
+  )
+
+  useEffect(() => {
+    if (!hasMultiple) return
+    scheduleHold()
+    return () => clearHold()
+  }, [hasMultiple])
+
+  const imageHeight = CARD_WIDTH * IMAGE_ASPECT
+
+  // Dynamic colours based on dark mode
+  const textPrimary = dark ? '#FFFFFF' : '#111111'
+  const textSecondary = dark ? 'rgba(255,255,255,0.65)' : '#6B7280'
+  const textMuted = dark ? 'rgba(255,255,255,0.42)' : '#9CA3AF'
 
   return (
     <Link href={`/product/${product._id}` as any} asChild>
-      <TouchableOpacity
-        activeOpacity={0.9}
-        style={[styles.card, style]}
-      >
-        {/* Image — edge-to-edge, no rounded corners */}
+      <Pressable style={[styles.card, { width: CARD_WIDTH }, style]}>
         <View style={[styles.imageWrap, { height: imageHeight }]}>
-          {product.images?.[0] ? (
-            <Image
-              source={{ uri: product.images[0] }}
-              style={styles.image}
-              contentFit="cover"
-              cachePolicy="memory-disk"
-            />
+          {images.length > 0 ? (
+            images.map((uri, i) => (
+              <Animated.View
+                key={`${product._id}-img-${i}`}
+                pointerEvents="none"
+                style={[StyleSheet.absoluteFillObject, { opacity: opacities[i] }]}
+              >
+                <Image
+                  source={{ uri }}
+                  style={styles.image}
+                  contentFit="cover"
+                  cachePolicy="memory-disk"
+                  transition={0}
+                />
+              </Animated.View>
+            ))
           ) : (
             <View style={[styles.image, styles.placeholder]} />
           )}
-          
-          {/* Quick Add / Cart Icon Button — as seen in aura-rae */}
-          <View style={styles.cartButton}>
-            <Ionicons name="cart-outline" size={20} color="#000" />
-          </View>
+
+          {/* Cart button */}
+          <Pressable
+            onPress={(e) => {
+              e.stopPropagation?.()
+            }}
+            style={styles.cartButton}
+            hitSlop={12}
+          >
+            <Ionicons name="cart-outline" size={17} color="#111" />
+          </Pressable>
         </View>
 
-        {/* Text Content Below Image */}
-        <View style={styles.infoContainer}>
-          <Text
-            style={[styles.productName, { color: textPrimary }]}
-            numberOfLines={1}
-          >
+        <View style={styles.info}>
+          <Text style={[styles.name, { color: textPrimary }]} numberOfLines={1}>
             {product.name}
           </Text>
-          
+
           <View style={styles.metaRow}>
-            <Text style={[styles.location, { color: textSecondary }]} numberOfLines={1}>
-              {location.toLowerCase() || 'global'}
+            <Text style={[styles.brand, { color: textSecondary }]} numberOfLines={1}>
+              {brand.toLowerCase()}
             </Text>
-            <Text style={[styles.metaDivider, { color: textSecondary }]}> | </Text>
+            <Text style={[styles.divider, { color: textSecondary }]}> | </Text>
             <Text style={[styles.price, { color: textPrimary }]}>
-              {formatProduct(product.price, (product as any).region)}
+              {formatProduct(product.price, product.region)}
             </Text>
           </View>
+
+          {!!location && (
+            <Text style={[styles.location, { color: textMuted }]} numberOfLines={1}>
+              {location}
+            </Text>
+          )}
         </View>
-      </TouchableOpacity>
+      </Pressable>
     </Link>
   )
 }
@@ -116,65 +208,64 @@ export default function ShowroomProductCard({
 const styles = StyleSheet.create({
   card: {
     backgroundColor: 'transparent',
-    marginBottom: 24,
   },
   imageWrap: {
     width: '100%',
     overflow: 'hidden',
     position: 'relative',
+    backgroundColor: '#F1F1F1',
   },
   image: {
     width: '100%',
     height: '100%',
   },
   placeholder: {
-    backgroundColor: '#F3F4F6',
+    backgroundColor: '#E5E7EB',
   },
   cartButton: {
     position: 'absolute',
-    bottom: 16,
-    right: 16,
+    bottom: 11,
+    right: 11,
+    width: 34,
+    height: 34,
     backgroundColor: '#FFFFFF',
-    width: 40,
-    height: 40,
     justifyContent: 'center',
     alignItems: 'center',
-    // Minimal shadow for depth
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.13,
+    shadowRadius: 3,
+    elevation: 3,
   },
-  infoContainer: {
-    paddingTop: 16,
-    paddingHorizontal: 4,
+  info: {
+    paddingTop: 11,
+    paddingHorizontal: 2,
   },
-  productName: {
-    fontSize: 16,
-    fontWeight: '500',
-    letterSpacing: 0.2,
-    fontFamily: 'System', // Fallback to system if Manrope is not loaded
-    marginBottom: 4,
+  name: {
+    fontFamily: 'Manrope_500Medium',
+    fontSize: 13.5,
+    letterSpacing: 0.15,
+    marginBottom: 3,
   },
   metaRow: {
     flexDirection: 'row',
     alignItems: 'center',
   },
-  location: {
-    fontSize: 14,
-    fontWeight: '400',
-    letterSpacing: 0.3,
-    fontFamily: 'System',
-    flexShrink: 1,
+  brand: {
+    fontFamily: 'Manrope_400Regular',
+    fontSize: 12,
   },
-  metaDivider: {
-    fontSize: 14,
-    fontWeight: '400',
+  divider: {
+    fontFamily: 'Manrope_400Regular',
+    fontSize: 12,
   },
   price: {
-    fontSize: 14,
-    fontWeight: '600',
-    fontFamily: 'System',
+    fontFamily: 'Manrope_500Medium',
+    fontSize: 12,
+  },
+  location: {
+    fontFamily: 'Manrope_400Regular',
+    fontSize: 11,
+    marginTop: 3,
   },
 })

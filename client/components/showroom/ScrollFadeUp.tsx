@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useRef, useState } from 'react'
 import { Animated, Easing, View, ViewStyle } from 'react-native'
 
 interface ScrollFadeUpProps {
@@ -14,16 +14,8 @@ interface ScrollFadeUpProps {
 }
 
 /**
- * ScrollFadeUp — Cinematic entrance animation triggered when
- * the element scrolls into view. Designed for the dramatic,
- * exhibition-like feel of beyonce.com / cristianoronaldo.com.
- *
- * Features:
- * - Fade + translateY entrance
- * - Optional subtle scale-in for hero elements
- * - Staggered delays for sequential reveals
- * - GPU-accelerated with useNativeDriver
- * - Once mode: only animate on first appearance
+ * ScrollFadeUp — Cinematic entrance animation
+ * Fade + translateY (optional subtle scale)
  */
 export default function ScrollFadeUp({
   children,
@@ -40,8 +32,7 @@ export default function ScrollFadeUp({
   const hasAnimated = useRef(false)
   const translateY = useRef(new Animated.Value(distance)).current
   const opacity = useRef(new Animated.Value(0)).current
-  const scaleValue = useRef(new Animated.Value(scale ? 0.92 : 1)).current
-  const viewRef = useRef<View>(null)
+  const scaleValue = useRef(new Animated.Value(scale ? 0.94 : 1)).current
 
   const triggerAnimation = useCallback(() => {
     if (isVisible) return
@@ -85,11 +76,7 @@ export default function ScrollFadeUp({
   }, [isVisible, duration, delay, staggerIndex, staggerDelay, scale])
 
   return (
-    <View
-      ref={viewRef}
-      onLayout={triggerAnimation}
-      style={[{ opacity: isVisible ? undefined : 0 }, style]}
-    >
+    <View onLayout={triggerAnimation} style={[{ opacity: isVisible ? undefined : 0 }, style]}>
       <Animated.View
         style={{
           transform: [

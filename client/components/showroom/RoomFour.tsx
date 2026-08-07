@@ -1,132 +1,128 @@
+/**
+ * RoomFour — THE LOCALE
+ * Regional marketplace room.
+ * Bright, open, grounded — “The Walk”
+ */
+
 import { Product } from '@/constants/types'
 import React from 'react'
-import { Dimensions, ScrollView, StyleSheet, Text, View } from 'react-native'
+import {
+  Dimensions,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native'
 import ShowroomProductCard from './ShowroomProductCard'
 import ScrollFadeUp from './ScrollFadeUp'
 
-const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window')
-const CARD_W = SCREEN_W * 0.68
-const CARD_GAP = 14
+const { width: SCREEN_W } = Dimensions.get('window')
+const CARD_W = Math.min(SCREEN_W * 0.58, 220)
+const CARD_GAP = 16
 
 interface RoomFourProps {
   products: Product[]
+  title?: string
+  subtitle?: string
+  regionLabel?: string
 }
 
-export default function RoomFour({ products }: RoomFourProps) {
+export default function RoomFour({
+  products,
+  title = 'THE LOCALE',
+  subtitle = 'From Your Region',
+  regionLabel = 'Regional Selection',
+}: RoomFourProps) {
   return (
-    <View style={[styles.room, { backgroundColor: '#F8F7F5' }]}>
-      {/* Dramatic section break — like entering a new chapter */}
-      <ScrollFadeUp delay={100} duration={600} distance={30} style={styles.dividerRow}>
-        <View style={styles.dividerLine} />
-      </ScrollFadeUp>
-
-      <View style={styles.headerRow}>
-        <ScrollFadeUp delay={200} duration={600} distance={30}>
-          <Text style={styles.sectionLabel}>NEW ARRIVALS</Text>
+    <View style={styles.room}>
+      {/* Header */}
+      <View style={styles.header}>
+        <ScrollFadeUp delay={40} duration={550} distance={14}>
+          <Text style={styles.kicker}>{title}</Text>
         </ScrollFadeUp>
-        <ScrollFadeUp delay={300} duration={700} distance={30}>
-          <Text style={styles.sectionTitle}>Just Dropped</Text>
+        <ScrollFadeUp delay={100} duration={600} distance={16}>
+          <Text style={styles.title}>{subtitle}</Text>
+        </ScrollFadeUp>
+        <ScrollFadeUp delay={150} duration={500} distance={10}>
+          <Text style={styles.region}>{regionLabel}</Text>
         </ScrollFadeUp>
       </View>
 
-      {/* Horizontal rail — slightly different rhythm from Room One
-          Smaller cards, tighter spacing, lighter background */}
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.rail}
-        bounces={false}
-        decelerationRate="fast"
-        snapToInterval={CARD_W + CARD_GAP}
-        snapToAlignment="center"
-        pagingEnabled={products.length <= 3}
-      >
-        {products.map((product, index) => (
-          <ScrollFadeUp
-            key={product._id}
-            style={[styles.railItem, { width: CARD_W + CARD_GAP }] as any}
-            delay={400 + index * 120}
-            duration={600}
-            distance={40}
-            staggerIndex={index}
-            staggerDelay={0}
-            scale
-          >
-            <ShowroomProductCard product={product} size="rail" />
-          </ScrollFadeUp>
-        ))}
-      </ScrollView>
+      {/* The Walk — horizontal rail */}
+      <ScrollFadeUp delay={200} duration={650} distance={24}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.rail}
+          decelerationRate="fast"
+          snapToInterval={CARD_W + CARD_GAP}
+          snapToAlignment="start"
+        >
+          {products.map((product, index) => (
+            <View
+              key={`${product._id}-locale-${index}`}
+              style={[styles.cardWrap, { width: CARD_W, marginRight: CARD_GAP }]}
+            >
+              <ShowroomProductCard product={product} />
+            </View>
+          ))}
+        </ScrollView>
+      </ScrollFadeUp>
 
-      {/* Subtle scroll indicator */}
-      {products.length > 1 && (
-        <ScrollFadeUp delay={900} duration={500} distance={20} style={styles.scrollHint}>
-          <View style={styles.scrollDots}>
-            {products.map((_, i) => (
-              <View
-                key={i}
-                style={[styles.scrollDot, { opacity: i === 0 ? 0.8 : 0.25 }]}
-              />
-            ))}
-          </View>
-        </ScrollFadeUp>
-      )}
+      {/* Soft bottom note */}
+      <ScrollFadeUp delay={320} duration={500} distance={12}>
+        <Text style={styles.note}>
+          Prioritising products from your marketplace region
+        </Text>
+      </ScrollFadeUp>
     </View>
   )
 }
 
 const styles = StyleSheet.create({
   room: {
-    paddingTop: 40,
-    paddingBottom: 48,
-    minHeight: SCREEN_H * 0.9,
+    backgroundColor: '#F7F1E9',          // warm sand / light clay
+    paddingTop: 52,
+    paddingBottom: 60,
+    width: SCREEN_W,
   },
-  headerRow: {
-    paddingHorizontal: 28,
-    marginBottom: 28,
+  header: {
+    paddingHorizontal: 24,
+    marginBottom: 32,
   },
-  sectionLabel: {
-    color: '#94A3B8',
-    fontSize: 10,
-    fontWeight: '600',
-    letterSpacing: 4,
+  kicker: {
+    fontFamily: 'Manrope_600SemiBold',
+    fontSize: 11,
+    letterSpacing: 3.6,
     textTransform: 'uppercase',
-    fontFamily: 'Manrope_600SemiBold',
+    color: '#9C8B7A',
+    marginBottom: 6,
   },
-  sectionTitle: {
-    color: '#0F172A',
-    fontSize: 28,
-    fontWeight: '600',
-    letterSpacing: -0.5,
-    fontFamily: 'Manrope_600SemiBold',
+  title: {
+    fontFamily: 'Manrope_700Bold',
+    fontSize: 26,
+    letterSpacing: -0.4,
+    color: '#2C241B',
+    marginBottom: 8,
   },
-  dividerRow: {
-    paddingHorizontal: 28,
-    marginBottom: 28,
-  },
-  dividerLine: {
-    height: 1,
-    backgroundColor: 'rgba(0,0,0,0.06)',
+  region: {
+    fontFamily: 'Manrope_400Regular',
+    fontSize: 13,
+    color: '#8C7B6B',
   },
   rail: {
-    paddingHorizontal: 28,
-    flexDirection: 'row',
-    alignItems: 'center',
+    paddingHorizontal: 24,
+    paddingRight: 40,
   },
-  railItem: {
-    flexShrink: 0,
+  cardWrap: {
+    // slight lift so cards feel like they’re sitting on a plinth
   },
-  scrollHint: {
-    alignItems: 'center',
-    marginTop: 24,
-  },
-  scrollDots: {
-    flexDirection: 'row',
-    gap: 6,
-  },
-  scrollDot: {
-    width: 5,
-    height: 5,
-    borderRadius: 2.5,
-    backgroundColor: '#0F172A',
+  note: {
+    fontFamily: 'Manrope_400Regular',
+    fontSize: 12,
+    color: '#A89888',
+    textAlign: 'center',
+    marginTop: 28,
+    paddingHorizontal: 24,
   },
 })
