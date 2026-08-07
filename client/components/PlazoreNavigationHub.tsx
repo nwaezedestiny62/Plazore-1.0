@@ -40,8 +40,8 @@ const AMBER = '#F59E0B'
 const CYAN = '#22D3EE'
 const LINE = 'rgba(255,255,255,0.08)'
 
-/* ── Animation Speeds (Ultra-slow cinematic opening) ── */
-const OPEN_MS = 1800 // Very slow luxury entrance (1.8 seconds)
+/* ── Animation Speeds ── */
+const OPEN_MS = 1800
 const CLOSE_MS = 420
 const EASE_LUXURY = Easing.bezier(0.16, 1, 0.3, 1)
 const DEBOUNCE = 240
@@ -149,7 +149,6 @@ const SECTIONS: NavSection[] = [
   },
 ]
 
-/* ── Staggered entrance animation component ── */
 function FadeSlideIn({
   index,
   children,
@@ -197,7 +196,6 @@ function FadeSlideIn({
   )
 }
 
-/* ── Navigation Tile Component ── */
 function MallTile({
   item,
   active,
@@ -259,7 +257,6 @@ function MallTile({
             },
           ]}
         >
-          {/* Ambient Glow */}
           <View
             pointerEvents="none"
             style={{
@@ -274,7 +271,6 @@ function MallTile({
             }}
           />
 
-          {/* Active side indicator */}
           {active && (
             <View
               style={{
@@ -338,7 +334,6 @@ function MallTile({
   )
 }
 
-/* ── Sleek Horizontal Suggestion Card ── */
 function SuggestionRowCard({
   children,
   index,
@@ -371,7 +366,6 @@ function SuggestionRowCard({
           pressed && { backgroundColor: `${accent}14`, transform: [{ scale: 0.985 }] },
         ]}
       >
-        {/* Glowing left edge bar */}
         <View
           style={{
             position: 'absolute',
@@ -493,7 +487,6 @@ export default function PlazoreNavigationHub({
     }
   }
 
-  /* Group search results logically */
   const groupedHits = useMemo(() => {
     const q = query.trim().toLowerCase()
     if (q.length < 1) return { products: [], stores: [], categories: [], ai: [] }
@@ -504,7 +497,6 @@ export default function PlazoreNavigationHub({
     const aiHits: LocalHit[] = []
     const seen = new Set<string>()
 
-    // Products
     allProducts.forEach((p) => {
       if ((p.name || '').toLowerCase().includes(q) && products.length < 5) {
         const seller = getSeller(p)
@@ -524,7 +516,6 @@ export default function PlazoreNavigationHub({
       }
     })
 
-    // Stores
     allProducts.forEach((p) => {
       const s = getSeller(p)
       if (!s) return
@@ -544,7 +535,6 @@ export default function PlazoreNavigationHub({
       }
     })
 
-    // Categories & Brands
     CATEGORY_LIST.forEach((c) => {
       if (c.toLowerCase().includes(q) && categories.length < 4) {
         categories.push({ type: 'category', label: c })
@@ -556,7 +546,6 @@ export default function PlazoreNavigationHub({
       }
     })
 
-    // AI Suggestions
     aiPhrases.forEach((phrase) => {
       if (aiHits.length < 4) {
         aiHits.push({ type: 'ai', label: phrase })
@@ -613,7 +602,6 @@ export default function PlazoreNavigationHub({
     })
   }
 
-  /* Slow entrance controller */
   useEffect(() => {
     if (visible) {
       setMounted(true)
@@ -624,7 +612,7 @@ export default function PlazoreNavigationHub({
       Animated.parallel([
         Animated.timing(progress, {
           toValue: 1,
-          duration: OPEN_MS, // Slow cinematic opening duration
+          duration: OPEN_MS,
           easing: EASE_LUXURY,
           useNativeDriver: true,
         }),
@@ -721,13 +709,11 @@ export default function PlazoreNavigationHub({
     })
   }
 
-  /* ── Render Redesigned Horizontal Suggestion Card ── */
   const renderProductCard = (h: LocalHit, i: number) => {
     if (h.type !== 'product') return null
     const priceText = formatProduct(h.price, h.region)
     return (
       <SuggestionRowCard key={`prod-${h.id}`} index={i} onPress={() => onHitPress(h)} accent={GREEN}>
-        {/* Left Thumbnail Box */}
         <View
           style={{
             width: THUMB_SIZE,
@@ -748,7 +734,6 @@ export default function PlazoreNavigationHub({
           )}
         </View>
 
-        {/* Text Container (Horizontal Flex Guaranteed) */}
         <View style={{ flex: 1, marginLeft: 12 }}>
           <Text style={{ color: TEXT, fontSize: 14, fontWeight: '600' }} numberOfLines={1}>
             {h.label}
@@ -809,72 +794,6 @@ export default function PlazoreNavigationHub({
     )
   }
 
-  const renderCategoryCard = (h: LocalHit, i: number) => {
-    const accent = CYAN
-    return (
-      <SuggestionRowCard key={`cat-${h.label}-${i}`} index={i} onPress={() => onHitPress(h)} accent={accent}>
-        <View
-          style={{
-            width: THUMB_SIZE,
-            height: THUMB_SIZE,
-            borderRadius: 10,
-            backgroundColor: `${accent}16`,
-            borderWidth: 1,
-            borderColor: `${accent}35`,
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          <Ionicons name="grid-outline" size={20} color={accent} />
-        </View>
-
-        <View style={{ flex: 1, marginLeft: 12 }}>
-          <Text style={{ color: TEXT, fontSize: 14, fontWeight: '600' }} numberOfLines={1}>
-            {h.label}
-          </Text>
-          <Text style={{ color: accent, fontSize: 10, marginTop: 2, fontWeight: '700', letterSpacing: 0.6 }}>
-            MALL FLOOR
-          </Text>
-        </View>
-
-        <Ionicons name="arrow-forward" size={16} color={TEXT_MUTED} style={{ marginLeft: 8 }} />
-      </SuggestionRowCard>
-    )
-  }
-
-  const renderAiCard = (h: LocalHit, i: number) => {
-    const accent = PURPLE
-    return (
-      <SuggestionRowCard key={`ai-${h.label}-${i}`} index={i} onPress={() => onHitPress(h)} accent={accent}>
-        <View
-          style={{
-            width: THUMB_SIZE,
-            height: THUMB_SIZE,
-            borderRadius: 10,
-            backgroundColor: `${accent}16`,
-            borderWidth: 1,
-            borderColor: `${accent}35`,
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          <Ionicons name="sparkles" size={20} color={accent} />
-        </View>
-
-        <View style={{ flex: 1, marginLeft: 12 }}>
-          <Text style={{ color: TEXT, fontSize: 14, fontWeight: '600' }} numberOfLines={1}>
-            {h.label}
-          </Text>
-          <Text style={{ color: accent, fontSize: 10, marginTop: 2, fontWeight: '700', letterSpacing: 0.6 }}>
-            SMART SUGGESTION
-          </Text>
-        </View>
-
-        <Ionicons name="arrow-forward" size={16} color={TEXT_MUTED} style={{ marginLeft: 8 }} />
-      </SuggestionRowCard>
-    )
-  }
-
   if (!mounted) return null
 
   let tileIndex = 0
@@ -898,7 +817,6 @@ export default function PlazoreNavigationHub({
             paddingBottom: bottomInset,
           }}
         >
-          {/* Header Bar */}
           <View
             style={{
               flexDirection: 'row',
@@ -926,7 +844,6 @@ export default function PlazoreNavigationHub({
             </Pressable>
           </View>
 
-          {/* Logo Header */}
           <Animated.View
             style={{
               paddingHorizontal: 20,
@@ -943,7 +860,6 @@ export default function PlazoreNavigationHub({
             />
           </Animated.View>
 
-          {/* Search Input Bar */}
           <Animated.View
             style={{
               marginHorizontal: 16,
@@ -1017,7 +933,43 @@ export default function PlazoreNavigationHub({
                   </View>
                 ) : (
                   <>
-                    {/* Products Group */}
+                    {(groupedHits.categories.length > 0 || groupedHits.ai.length > 0) && (
+                      <View style={{ marginBottom: 20, marginHorizontal: 16, backgroundColor: SURFACE_2, borderRadius: 16, padding: 14, borderWidth: 1, borderColor: LINE }}>
+                        <Text style={[styles.sectionHeader, { paddingHorizontal: 0, marginBottom: 10 }]}>INTENTS & FLOORS</Text>
+                        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                          {[...groupedHits.categories, ...groupedHits.ai].map((h, i) => {
+                            const isAi = h.type === 'ai'
+                            const accentColor = isAi ? PURPLE : CYAN
+                            return (
+                              <Pressable
+                                key={`hub-chip-${h.type}-${h.label}-${i}`}
+                                onPress={() => onHitPress(h)}
+                                style={({ pressed }) => [
+                                  {
+                                    flexDirection: 'row',
+                                    alignItems: 'center',
+                                    gap: 6,
+                                    paddingHorizontal: 12,
+                                    paddingVertical: 8,
+                                    borderRadius: 20,
+                                    backgroundColor: SURFACE_CARD,
+                                    borderWidth: 1,
+                                    borderColor: pressed ? accentColor : `${accentColor}40`,
+                                  },
+                                  pressed && { backgroundColor: `${accentColor}20` },
+                                ]}
+                              >
+                                <Ionicons name={isAi ? 'sparkles' : 'grid-outline'} size={14} color={accentColor} />
+                                <Text style={{ color: TEXT, fontSize: 13, fontWeight: '600' }} numberOfLines={1}>
+                                  {h.label}
+                                </Text>
+                              </Pressable>
+                            )
+                          })}
+                        </View>
+                      </View>
+                    )}
+
                     {groupedHits.products.length > 0 && (
                       <View style={{ marginBottom: 16 }}>
                         <Text style={styles.sectionHeader}>PRODUCTS</Text>
@@ -1025,27 +977,10 @@ export default function PlazoreNavigationHub({
                       </View>
                     )}
 
-                    {/* Stores Group */}
                     {groupedHits.stores.length > 0 && (
                       <View style={{ marginBottom: 16 }}>
                         <Text style={styles.sectionHeader}>STORES & BOUTIQUES</Text>
                         {groupedHits.stores.map((h, i) => renderStoreCard(h, i))}
-                      </View>
-                    )}
-
-                    {/* Categories / Floors Group */}
-                    {groupedHits.categories.length > 0 && (
-                      <View style={{ marginBottom: 16 }}>
-                        <Text style={styles.sectionHeader}>CATEGORIES & FLOORS</Text>
-                        {groupedHits.categories.map((h, i) => renderCategoryCard(h, i))}
-                      </View>
-                    )}
-
-                    {/* AI Suggestions Group */}
-                    {groupedHits.ai.length > 0 && (
-                      <View style={{ marginBottom: 16 }}>
-                        <Text style={styles.sectionHeader}>AI SUGGESTIONS</Text>
-                        {groupedHits.ai.map((h, i) => renderAiCard(h, i))}
                       </View>
                     )}
                   </>
@@ -1053,7 +988,6 @@ export default function PlazoreNavigationHub({
               </View>
             ) : (
               <>
-                {/* Seller CTA Banner */}
                 <FadeSlideIn index={0} delayBase={100}>
                   <Pressable
                     onPress={handleSellerCta}
@@ -1116,7 +1050,6 @@ export default function PlazoreNavigationHub({
                 {slots?.recentlyViewed ? <View style={{ marginBottom: 12, paddingHorizontal: 16 }}>{slots.recentlyViewed}</View> : null}
                 {slots?.sellerShortcuts ? <View style={{ marginBottom: 12, paddingHorizontal: 16 }}>{slots.sellerShortcuts}</View> : null}
 
-                {/* Section grids */}
                 {SECTIONS.map((section) => (
                   <View key={section.id} style={{ marginBottom: 24 }}>
                     <Text style={styles.sectionHeader}>{section.title}</Text>
@@ -1152,7 +1085,6 @@ export default function PlazoreNavigationHub({
                   </View>
                 ) : null}
 
-                {/* Account card */}
                 <FadeSlideIn index={12} delayBase={160}>
                   <View
                     style={{
