@@ -739,7 +739,9 @@ export default function PlazoreNavigationHub({
               ref={inputRef}
               value={query}
               onChangeText={setQuery}
-              onSubmitEditing={submitSearch}
+             onSubmitEditing={() => {
+  Keyboard.dismiss()
+}}
               placeholder="Search products, stores, categories…"
               placeholderTextColor={TEXT_MUTED}
               style={{
@@ -788,37 +790,6 @@ export default function PlazoreNavigationHub({
                   </View>
                 ) : (
                   <>
-                    {/* SUGGESTIONS */}
-                    {(groupedHits.ai.length > 0 || groupedHits.categories.length > 0) && (
-                      <View style={{ marginBottom: 28 }}>
-                        <View
-                          style={{
-                            flexDirection: 'row',
-                            justifyContent: 'space-between',
-                            marginBottom: 12,
-                          }}
-                        >
-                          <Text style={[styles.sectionHeader, { paddingHorizontal: 0 }]}>
-                            SUGGESTIONS
-                          </Text>
-                          <Text style={{ color: TEXT_MUTED, fontSize: 12 }}>
-                            {groupedHits.ai.length + groupedHits.categories.length}
-                          </Text>
-                        </View>
-
-                        {[...groupedHits.ai, ...groupedHits.categories].map((h, i) => (
-                          <FadeSlideIn key={`sug-${i}`} index={i} delayBase={40} duration={600}>
-                            <Pressable
-                              onPress={() => onHitPress(h)}
-                              style={{ paddingVertical: 11 }}
-                            >
-                              <Text style={{ color: TEXT, fontSize: 15 }}>{h.label}</Text>
-                            </Pressable>
-                          </FadeSlideIn>
-                        ))}
-                      </View>
-                    )}
-
                     {/* PRODUCTS */}
                     {groupedHits.products.length > 0 && (
                       <View style={{ marginBottom: 24 }}>

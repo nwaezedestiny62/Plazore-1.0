@@ -14,15 +14,15 @@ import {
 } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
-const BAR_BG = 'rgba(8, 9, 14, 0.96)'
+const BAR_BG = 'rgba(8, 9, 14, 0.97)'
 const TEXT = '#F2F4F8'
-const TEXT_MUTED = 'rgba(242,244,248,0.36)'
+const TEXT_MUTED = 'rgba(242,244,248,0.38)'
 const ACTIVE = '#FFFFFF'
-const CENTER_A = '#00D4C8'   // electric cyan
-const CENTER_B = '#3A5BFF'   // deep electric indigo
-const CART = '#2DD4BF'       // soft teal — secondary only
+const CENTER_A = '#00D4C8'
+const CENTER_B = '#3A5BFF'
+const CART = '#2DD4BF'
 
-const EASE = Easing.bezier(0.25, 0.1, 0.25, 1)
+const EASE = Easing.bezier(0.22, 1, 0.36, 1)
 
 type Props = {
   visibleProgress: number
@@ -39,59 +39,110 @@ export default function PlazoreFloatingNav({
   const { itemCount } = useCart()
 
   const anim = useRef(new Animated.Value(0)).current
-  const cartBreath = useRef(new Animated.Value(0)).current
+  const cartPulse = useRef(new Animated.Value(0)).current
+  const cartScale = useRef(new Animated.Value(1)).current
+  const pillarGlow = useRef(new Animated.Value(0)).current
+  const prevCount = useRef(itemCount)
 
+  // Entrance / exit
   useEffect(() => {
     const p = Math.min(1, Math.max(0, visibleProgress))
     Animated.timing(anim, {
       toValue: p,
-      duration: 240,
+      duration: 280,
       easing: EASE,
       useNativeDriver: true,
     }).start()
   }, [visibleProgress, anim])
 
-  // Extremely quiet ambient breath — never spins, never screams
+  // Soft living glow on the Lounge pillar
   useEffect(() => {
-    if (itemCount > 0) {
-      cartBreath.setValue(0)
-      const loop = Animated.loop(
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pillarGlow, {
+          toValue: 1,
+          duration: 2800,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
+        Animated.timing(pillarGlow, {
+          toValue: 0,
+          duration: 2800,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
+      ])
+    )
+    loop.start()
+    return () => loop.stop()
+  }, [pillarGlow])
+
+  // Cart add animation — elegant scale + soft pulse
+  useEffect(() => {
+    if (itemCount > prevCount.current) {
+      // Item was added
+      cartScale.setValue(1)
+      cartPulse.setValue(0)
+
+      Animated.parallel([
         Animated.sequence([
-          Animated.timing(cartBreath, {
+          Animated.timing(cartScale, {
+            toValue: 1.22,
+            duration: 160,
+            easing: Easing.out(Easing.back(1.6)),
+            useNativeDriver: true,
+          }),
+          Animated.timing(cartScale, {
             toValue: 1,
-            duration: 2200,
-            easing: Easing.inOut(Easing.quad),
+            duration: 280,
+            easing: EASE,
             useNativeDriver: true,
           }),
-          Animated.timing(cartBreath, {
+        ]),
+        Animated.sequence([
+          Animated.timing(cartPulse, {
+            toValue: 1,
+            duration: 220,
+            easing: Easing.out(Easing.quad),
+            useNativeDriver: true,
+          }),
+          Animated.timing(cartPulse, {
             toValue: 0,
-            duration: 2200,
-            easing: Easing.inOut(Easing.quad),
+            duration: 480,
+            easing: EASE,
             useNativeDriver: true,
           }),
-        ])
-      )
-      loop.start()
-      return () => loop.stop()
+        ]),
+      ]).start()
     }
-    cartBreath.setValue(0)
-  }, [itemCount, cartBreath])
+    prevCount.current = itemCount
+  }, [itemCount, cartScale, cartPulse])
 
   const translateY = anim.interpolate({
     inputRange: [0, 0.2, 1],
-    outputRange: [120, 28, 0],
+    outputRange: [110, 24, 0],
     extrapolate: 'clamp',
   })
 
   const opacity = anim.interpolate({
-    inputRange: [0, 0.12, 0.35, 1],
+    inputRange: [0, 0.15, 0.4, 1],
     outputRange: [0, 0, 1, 1],
     extrapolate: 'clamp',
   })
 
-  const breathOpacity = cartBreath.interpolate({
+  const pulseScale = cartPulse.interpolate({
     inputRange: [0, 1],
-    outputRange: [0.25, 0.7],
+    outputRange: [1, 1.8],
+  })
+
+  const pulseOpacity = cartPulse.interpolate({
+    inputRange: [0, 0.4, 1],
+    outputRange: [0, 0.35, 0],
+  })
+
+  const pillarGlowOpacity = pillarGlow.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.35, 0.75],
   })
 
   const go = (href: string) => {
@@ -132,9 +183,7 @@ export default function PlazoreFloatingNav({
       ]}
     >
       <View style={styles.bar}>
-        {/* sharp top light line */}
         <View style={styles.barTopEdge} pointerEvents="none" />
-        {/* subtle bottom depth line */}
         <View style={styles.barBottomEdge} pointerEvents="none" />
 
         {/* 1. Mall */}
@@ -145,35 +194,44 @@ export default function PlazoreFloatingNav({
           onPress={() => go('/(tabs)')}
         />
 
-        {/* 2. Search */}
+        {/* 2. Browse */}
         <NavItem
           icon={isSearch ? 'search' : 'search-outline'}
-          label="Search"
+          label="Browse"
           active={!!isSearch}
           onPress={() => go('/(tabs)/search')}
         />
 
-        {/* 3. Lounge — architectural center pillar */}
-        <Pressable
-          onPress={onMenuPress}
-          accessibilityRole="button"
-          accessibilityLabel="Open navigation hub"
-          style={styles.centerHit}
-        >
-          <LinearGradient
-            colors={[CENTER_A, CENTER_B]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.centerBtn}
-          >
-            <View style={styles.centerInner}>
-              <MaterialCommunityIcons name="pillar" size={22} color="#FFFFFF" />
-            </View>
-          </LinearGradient>
-          <Text style={styles.centerLabel}>Lounge</Text>
-        </Pressable>
+        {/* 3. Lounge — living center pillar */}
+        {/* 3. Lounge — sharp 3D architectural pillar */}
+<Pressable
+  onPress={onMenuPress}
+  accessibilityRole="button"
+  accessibilityLabel="Open navigation hub"
+  style={styles.centerHit}
+>
+  <View style={styles.centerOuter}>
+    {/* Outer depth layer */}
+    <View style={styles.centerDepth} />
 
-        {/* 4. Cart — quiet teal accent */}
+    <LinearGradient
+      colors={[CENTER_A, CENTER_B]}
+      start={{ x: 0, y: 0 }}
+      end={{ x: 1, y: 1 }}
+      style={styles.centerBtn}
+    >
+      {/* Top highlight for 3D edge */}
+      <View style={styles.centerHighlight} />
+
+      <View style={styles.centerInner}>
+        <MaterialCommunityIcons name="pillar" size={22} color="#FFFFFF" />
+      </View>
+    </LinearGradient>
+  </View>
+  <Text style={styles.centerLabel}>Lounge</Text>
+</Pressable>
+
+        {/* 4. Cart — refined add animation */}
         <Pressable
           onPress={() => go('/(tabs)/cart')}
           style={styles.item}
@@ -181,18 +239,27 @@ export default function PlazoreFloatingNav({
           accessibilityLabel="Cart"
         >
           <View style={styles.cartIconWrap}>
+            {/* Soft expanding ring when item is added */}
             {hasCart && (
               <Animated.View
                 pointerEvents="none"
-                style={[styles.cartAccent, { opacity: breathOpacity }]}
+                style={[
+                  styles.cartPulseRing,
+                  {
+                    opacity: pulseOpacity,
+                    transform: [{ scale: pulseScale }],
+                  },
+                ]}
               />
             )}
 
-            <Ionicons
-              name={isCart ? 'bag-handle' : 'bag-handle-outline'}
-              size={22}
-              color={hasCart ? CART : isCart ? ACTIVE : TEXT_MUTED}
-            />
+            <Animated.View style={{ transform: [{ scale: cartScale }] }}>
+              <Ionicons
+                name={isCart ? 'bag-handle' : 'bag-handle-outline'}
+                size={22}
+                color={hasCart ? CART : isCart ? ACTIVE : TEXT_MUTED}
+              />
+            </Animated.View>
 
             {hasCart && (
               <View style={styles.badge}>
@@ -243,15 +310,15 @@ function NavItem({
       onPress={onPress}
       onPressIn={() =>
         Animated.timing(scale, {
-          toValue: 0.9,
-          duration: 80,
+          toValue: 0.88,
+          duration: 90,
           useNativeDriver: true,
         }).start()
       }
       onPressOut={() =>
         Animated.timing(scale, {
           toValue: 1,
-          duration: 150,
+          duration: 180,
           easing: EASE,
           useNativeDriver: true,
         }).start()
@@ -296,15 +363,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
     paddingTop: 14,
     paddingBottom: 12,
-    // pure rectangle — no radius
     ...Platform.select({
       ios: {
         shadowColor: '#000',
-        shadowOffset: { width: 0, height: 16 },
-        shadowOpacity: 0.48,
-        shadowRadius: 32,
+        shadowOffset: { width: 0, height: 18 },
+        shadowOpacity: 0.5,
+        shadowRadius: 34,
       },
-      android: { elevation: 20 },
+      android: { elevation: 22 },
     }),
   },
   barTopEdge: {
@@ -313,7 +379,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     height: StyleSheet.hairlineWidth,
-    backgroundColor: 'rgba(255,255,255,0.14)',
+    backgroundColor: 'rgba(255,255,255,0.13)',
   },
   barBottomEdge: {
     position: 'absolute',
@@ -321,7 +387,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     height: StyleSheet.hairlineWidth,
-    backgroundColor: 'rgba(0,0,0,0.4)',
+    backgroundColor: 'rgba(0,0,0,0.45)',
   },
   item: {
     flex: 1,
@@ -334,84 +400,102 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '600',
     color: TEXT_MUTED,
-    letterSpacing: 0.5,
+    letterSpacing: 0.4,
   },
   itemLabelActive: {
     color: ACTIVE,
   },
-  centerHit: {
-    alignItems: 'center',
-    marginTop: -28,
-    paddingHorizontal: 4,
-  },
-  centerBtn: {
-    width: 54,
-    height: 54,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1.5,
-    borderColor: 'rgba(255,255,255,0.2)',
-    // sharp — no radius
-    ...Platform.select({
-      ios: {
-        shadowColor: CENTER_B,
-        shadowOffset: { width: 0, height: 8 },
-        shadowOpacity: 0.55,
-        shadowRadius: 16,
-      },
-      android: { elevation: 14 },
-    }),
-  },
-  centerInner: {
-    width: 46,
-    height: 46,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.16)',
-  },
-  centerLabel: {
-    marginTop: 6,
-    fontSize: 10,
-    fontWeight: '700',
-    color: TEXT,
-    letterSpacing: 0.6,
-  },
+
+  // Center Lounge — 3D architectural
+centerHit: {
+  alignItems: 'center',
+  marginTop: -30,
+  paddingHorizontal: 4,
+},
+centerOuter: {
+  width: 56,
+  height: 56,
+  alignItems: 'center',
+  justifyContent: 'center',
+},
+centerDepth: {
+  position: 'absolute',
+  width: 56,
+  height: 56,
+  backgroundColor: 'rgba(0,0,0,0.45)',
+  top: 4,
+  left: 2,
+},
+centerBtn: {
+  width: 54,
+  height: 54,
+  alignItems: 'center',
+  justifyContent: 'center',
+  borderWidth: 1.5,
+  borderColor: 'rgba(255,255,255,0.28)',
+  overflow: 'hidden',
+  ...Platform.select({
+    ios: {
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 10 },
+      shadowOpacity: 0.55,
+      shadowRadius: 16,
+    },
+    android: { elevation: 18 },
+  }),
+},
+centerHighlight: {
+  position: 'absolute',
+  top: 0,
+  left: 0,
+  right: 0,
+  height: 1.5,
+  backgroundColor: 'rgba(255,255,255,0.35)',
+},
+centerInner: {
+  width: 44,
+  height: 44,
+  alignItems: 'center',
+  justifyContent: 'center',
+  borderWidth: StyleSheet.hairlineWidth,
+  borderColor: 'rgba(255,255,255,0.18)',
+  backgroundColor: 'rgba(0,0,0,0.12)',
+},
+centerLabel: {
+  marginTop: 6,
+  fontSize: 10,
+  fontWeight: '700',
+  color: TEXT,
+  letterSpacing: 0.5,
+},
+
+  // Cart
   cartIconWrap: {
-    width: 32,
-    height: 32,
+    width: 34,
+    height: 34,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  // thin vertical line that gently breathes — lives behind the icon
-  cartAccent: {
+  cartPulseRing: {
     position: 'absolute',
-    width: 1.5,
-    height: 26,
-    backgroundColor: CART,
-    ...Platform.select({
-      ios: {
-        shadowColor: CART,
-        shadowOffset: { width: 0, height: 0 },
-        shadowOpacity: 0.6,
-        shadowRadius: 4,
-      },
-      android: {},
-    }),
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderColor: CART,
   },
   badge: {
     position: 'absolute',
-    top: -4,
-    right: -10,
-    minWidth: 15,
-    height: 15,
+    top: -5,
+    right: -11,
+    minWidth: 16,
+    height: 16,
     paddingHorizontal: 3,
     backgroundColor: CART,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1.5,
     borderColor: '#08090E',
-    // sharp rectangle — no radius
   },
   badgeText: {
     color: '#041412',
