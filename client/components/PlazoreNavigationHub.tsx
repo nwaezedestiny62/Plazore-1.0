@@ -46,17 +46,22 @@ const EASE_LUXURY = Easing.bezier(0.22, 1, 0.36, 1)
 const DEBOUNCE = 280
 
 const TILE_COLORS: Record<string, { bg: string; accent: string; glow: string }> = {
-  home:       { bg: '#0A1C14', accent: '#00E575', glow: 'rgba(0,229,117,0.25)' },
-  cart:       { bg: '#0D172A', accent: '#3B82F6', glow: 'rgba(59,130,246,0.25)' },
-  wishlist:   { bg: '#230E19', accent: '#F43F5E', glow: 'rgba(244,63,94,0.25)' },
-  profile:    { bg: '#1A0E2A', accent: '#A78BFA', glow: 'rgba(167,139,250,0.25)' },
-  categories: { bg: '#0B1E28', accent: '#22D3EE', glow: 'rgba(34,211,238,0.25)' },
-  new:        { bg: '#251A0A', accent: '#FBBF24', glow: 'rgba(251,191,36,0.25)' },
-  trending:   { bg: '#28120A', accent: '#FB923C', glow: 'rgba(251,146,60,0.25)' },
-  stores:     { bg: '#121430', accent: '#6366F1', glow: 'rgba(99,102,241,0.25)' },
-  help:       { bg: '#0D2623', accent: '#2DD4BF', glow: 'rgba(45,212,191,0.25)' },
-  contact:    { bg: '#181230', accent: '#818CF8', glow: 'rgba(129,140,248,0.25)' },
-  about:      { bg: '#0C1C18', accent: '#34D399', glow: 'rgba(52,211,153,0.25)' },
+  home:             { bg: '#0A1C14', accent: '#00E575', glow: 'rgba(0,229,117,0.25)' },
+  cart:             { bg: '#0D172A', accent: '#3B82F6', glow: 'rgba(59,130,246,0.25)' },
+  wishlist:         { bg: '#230E19', accent: '#F43F5E', glow: 'rgba(244,63,94,0.25)' },
+  profile:          { bg: '#1A0E2A', accent: '#A78BFA', glow: 'rgba(167,139,250,0.25)' },
+  showroom_horizon: { bg: '#091520', accent: '#38BDF8', glow: 'rgba(56,189,248,0.25)' },
+  showroom_chamber: { bg: '#1F180F', accent: '#F59E0B', glow: 'rgba(245,158,11,0.25)' },
+  showroom_signal:  { bg: '#1E0E28', accent: '#C084FC', glow: 'rgba(192,132,252,0.25)' },
+  showroom_locale:  { bg: '#1E1710', accent: '#FB923C', glow: 'rgba(251,146,60,0.25)' },
+  showroom_atelier: { bg: '#1D1810', accent: '#C5A880', glow: 'rgba(197,168,128,0.25)' },
+  categories:       { bg: '#0B1E28', accent: '#22D3EE', glow: 'rgba(34,211,238,0.25)' },
+  new:              { bg: '#251A0A', accent: '#FBBF24', glow: 'rgba(251,191,36,0.25)' },
+  trending:         { bg: '#28120A', accent: '#FB923C', glow: 'rgba(251,146,60,0.25)' },
+  stores:           { bg: '#121430', accent: '#6366F1', glow: 'rgba(99,102,241,0.25)' },
+  help:             { bg: '#0D2623', accent: '#2DD4BF', glow: 'rgba(45,212,191,0.25)' },
+  contact:          { bg: '#181230', accent: '#818CF8', glow: 'rgba(129,140,248,0.25)' },
+  about:            { bg: '#0C1C18', accent: '#34D399', glow: 'rgba(52,211,153,0.25)' },
 }
 
 type NavItem = {
@@ -123,6 +128,17 @@ const SECTIONS: NavSection[] = [
       { id: 'cart', label: 'Cart', subtitle: 'Your bag', icon: 'bag-handle', href: '/(tabs)/cart' },
       { id: 'wishlist', label: 'Wishlist', subtitle: 'Saved pieces', icon: 'heart', href: '/(tabs)/favorites' },
       { id: 'profile', label: 'Profile', subtitle: 'Account', icon: 'person', href: '/(tabs)/profile' },
+    ],
+  },
+  {
+    id: 'showroom_rooms',
+    title: 'Showroom Floors & Rooms',
+    items: [
+      { id: 'showroom_horizon', label: '01. Horizon', subtitle: 'Expanded view', icon: 'eye-outline', href: '/(tabs)' },
+      { id: 'showroom_chamber', label: '02. Chamber', subtitle: 'Private selection', icon: 'key-outline', href: '/(tabs)' },
+      { id: 'showroom_signal', label: '03. Signal', subtitle: 'Spotlight focus', icon: 'radio-outline', href: '/(tabs)' },
+      { id: 'showroom_locale', label: '04. Locale', subtitle: 'Regional walk', icon: 'location-outline', href: '/(tabs)' },
+      { id: 'showroom_atelier', label: '05. Atelier', subtitle: 'Curated gallery', icon: 'sparkles-outline', href: '/(tabs)' },
     ],
   },
   {
@@ -739,9 +755,9 @@ export default function PlazoreNavigationHub({
               ref={inputRef}
               value={query}
               onChangeText={setQuery}
-             onSubmitEditing={() => {
-  Keyboard.dismiss()
-}}
+              onSubmitEditing={() => {
+                Keyboard.dismiss()
+              }}
               placeholder="Search products, stores, categories…"
               placeholderTextColor={TEXT_MUTED}
               style={{

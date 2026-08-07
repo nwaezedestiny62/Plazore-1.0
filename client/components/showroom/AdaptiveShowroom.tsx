@@ -5,6 +5,7 @@ import RoomOne from './RoomOne'
 import RoomTwo from './RoomTwo'
 import RoomThree from './RoomThree'
 import RoomFour from './RoomFour'
+import RoomFive from './RoomFive'
 
 interface AdaptiveShowroomProps {
   products: Product[]
@@ -45,6 +46,12 @@ export default function AdaptiveShowroom({ products, loading }: AdaptiveShowroom
           subtitle: 'From Your Region',
           regionLabel: 'Regional Selection',
         },
+        {
+          type: 'five' as const,
+          products: p,
+          title: 'THE ATELIER',
+          subtitle: 'Curated Masterpieces',
+        },
       ]
     }
 
@@ -74,6 +81,12 @@ export default function AdaptiveShowroom({ products, loading }: AdaptiveShowroom
         title: 'THE LOCALE',
         subtitle: 'From Your Region',
         regionLabel: 'Regional Selection',
+      },
+      {
+        type: 'five' as const,
+        products: p.slice(16, 20).length > 0 ? p.slice(16, 20) : p.slice(16),
+        title: 'THE ATELIER',
+        subtitle: 'Curated Masterpieces',
       },
     ].filter((s) => s.products.length > 0)
   }, [products])
@@ -127,13 +140,23 @@ export default function AdaptiveShowroom({ products, loading }: AdaptiveShowroom
             />
           )
         }
+        if (section.type === 'four') {
+          return (
+            <RoomFour
+              key={idx}
+              products={section.products}
+              title={section.title}
+              subtitle={section.subtitle}
+              regionLabel={section.regionLabel}
+            />
+          )
+        }
         return (
-          <RoomFour
+          <RoomFive
             key={idx}
             products={section.products}
             title={section.title}
             subtitle={section.subtitle}
-            regionLabel={section.regionLabel}
           />
         )
       })}
