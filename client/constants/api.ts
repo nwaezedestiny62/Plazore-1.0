@@ -16,7 +16,7 @@ const getBaseURL = () => {
       // return "http://10.0.2.2:3000/api";
 
       // For physical Android phone (your current setup)
-      return "http://192.168.18.5:3000/api";
+      return "http://10.91.160.77:3000/api";
     }``
 
     // iOS Simulator
@@ -26,7 +26,7 @@ const getBaseURL = () => {
   }
 
   // 3. Fallback for physical devices
-  return "http://192.168.18.5:3000/api";
+  return "http://10.91.160.77:3000/api";
 };
 
 const api = axios.create({

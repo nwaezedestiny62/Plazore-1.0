@@ -1,3 +1,7 @@
+// ============================================================
+// FILE: client/components/PlazoreNavigationHub.tsx
+// ============================================================
+
 import api from '@/constants/api'
 import { CATEGORY_LIST } from '@/constants/productCatalog'
 import { Product } from '@/constants/types'
@@ -64,6 +68,15 @@ const TILE_COLORS: Record<string, { bg: string; accent: string; glow: string }> 
   about:            { bg: '#0C1C18', accent: '#34D399', glow: 'rgba(52,211,153,0.25)' },
 }
 
+/* ── Showroom tile ID → room number mapping ── */
+const SHOWROOM_ID_TO_ROOM: Record<string, number> = {
+  showroom_horizon: 1,
+  showroom_chamber: 2,
+  showroom_signal: 3,
+  showroom_locale: 4,
+  showroom_atelier: 5,
+}
+
 type NavItem = {
   id: string
   label: string
@@ -110,6 +123,7 @@ type SellerInfo = {
 export type PlazoreNavigationHubProps = {
   visible: boolean
   onClose: () => void
+  onScrollToRoom?: (roomNumber: number) => void
   slots?: {
     profile?: React.ReactNode
     recommendations?: React.ReactNode
@@ -334,6 +348,7 @@ function MallTile({
 export default function PlazoreNavigationHub({
   visible,
   onClose,
+  onScrollToRoom,
   slots,
 }: PlazoreNavigationHubProps) {
   const insets = useSafeAreaInsets()
@@ -626,7 +641,13 @@ export default function PlazoreNavigationHub({
     const map: Record<string, boolean> = {}
     SECTIONS.forEach((s) =>
       s.items.forEach((item) => {
-        map[item.id] = isActive(item.href)
+        // Showroom room tiles are scroll targets, not separate routes —
+        // don't mark them active just because we're on the home page
+        if (SHOWROOM_ID_TO_ROOM[item.id]) {
+          map[item.id] = false
+        } else {
+          map[item.id] = isActive(item.href)
+        }
       })
     )
     if (
@@ -640,7 +661,16 @@ export default function PlazoreNavigationHub({
     return map
   }, [pathname])
 
-  const navigate = (href?: string) => {
+  const navigate = (href?: string, itemId?: string) => {
+    // If it's a showroom room tile, scroll to that room instead of routing
+    if (itemId && SHOWROOM_ID_TO_ROOM[itemId]) {
+      onClose()
+      requestAnimationFrame(() => {
+        onScrollToRoom?.(SHOWROOM_ID_TO_ROOM[itemId])
+      })
+      return
+    }
+
     onClose()
     if (!href) return
     requestAnimationFrame(() => {
@@ -801,7 +831,7 @@ export default function PlazoreNavigationHub({
                   <View style={{ paddingVertical: 40, alignItems: 'center' }}>
                     <Ionicons name="search-outline" size={30} color={TEXT_MUTED} />
                     <Text style={{ color: TEXT_DIM, fontSize: 14, marginTop: 10 }}>
-                      No results for “{query.trim()}”
+                      No results for "{query.trim()}"
                     </Text>
                   </View>
                 ) : (
@@ -1073,7 +1103,7 @@ export default function PlazoreNavigationHub({
                             key={item.id}
                             item={item}
                             active={!!activeMap[item.id]}
-                            onPress={() => navigate(item.href)}
+                            onPress={() => navigate(item.href, item.id)}
                             width={tileW}
                             height={tileH}
                             index={idx}
