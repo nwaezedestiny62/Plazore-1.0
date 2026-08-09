@@ -155,14 +155,14 @@ const SECTIONS: NavSection[] = [
       { id: 'showroom_atelier', label: '05. Atelier', subtitle: 'Curated gallery', icon: 'sparkles-outline', href: '/(tabs)' },
     ],
   },
-  {
+{
     id: 'explore',
     title: 'Explore the Mall',
     items: [
-      { id: 'categories', label: 'Categories', subtitle: 'Browse by room', icon: 'apps', href: '/shop' },
-      { id: 'new', label: 'New Arrivals', subtitle: 'Just in', icon: 'sparkles', href: '/shop' },
-      { id: 'trending', label: 'Trending', subtitle: 'Moving now', icon: 'flame', href: '/shop' },
-      { id: 'stores', label: 'Stores', subtitle: 'Seller floors', icon: 'storefront', href: '/shop' },
+      { id: 'categories', label: 'Categories', subtitle: 'Browse by room', icon: 'apps' },
+      { id: 'new', label: 'New Arrivals', subtitle: 'Just in', icon: 'sparkles' },
+      { id: 'trending', label: 'Trending', subtitle: 'Moving now', icon: 'flame' },
+      { id: 'stores', label: 'Stores', subtitle: 'Seller floors', icon: 'storefront' },
     ],
   },
   {
@@ -661,24 +661,52 @@ export default function PlazoreNavigationHub({
     return map
   }, [pathname])
 
-  const navigate = (href?: string, itemId?: string) => {
-    // If it's a showroom room tile, scroll to that room instead of routing
-    if (itemId && SHOWROOM_ID_TO_ROOM[itemId]) {
-      onClose()
-      requestAnimationFrame(() => {
-        onScrollToRoom?.(SHOWROOM_ID_TO_ROOM[itemId])
-      })
-      return
-    }
-
+const navigate = (href?: string, itemId?: string) => {
+  // Showroom room tiles → scroll instead of route
+  if (itemId && SHOWROOM_ID_TO_ROOM[itemId]) {
     onClose()
-    if (!href) return
     requestAnimationFrame(() => {
-      try {
-        router.push(href as any)
-      } catch {}
+      onScrollToRoom?.(SHOWROOM_ID_TO_ROOM[itemId])
     })
+    return
   }
+
+  onClose()
+
+  // Explore the Mall tiles
+  if (itemId === 'categories') {
+    requestAnimationFrame(() => {
+      router.push({ pathname: '/shop', params: { mode: 'categories' } } as any)
+    })
+    return
+  }
+  if (itemId === 'new') {
+    requestAnimationFrame(() => {
+      router.push({ pathname: '/shop', params: { mode: 'new' } } as any)
+    })
+    return
+  }
+  if (itemId === 'trending') {
+    requestAnimationFrame(() => {
+      router.push({ pathname: '/shop', params: { mode: 'trending' } } as any)
+    })
+    return
+  }
+  if (itemId === 'stores') {
+    requestAnimationFrame(() => {
+      router.push({ pathname: '/shop', params: { mode: 'stores' } } as any)
+    })
+    return
+  }
+
+  // Everything else
+  if (!href) return
+  requestAnimationFrame(() => {
+    try {
+      router.push(href as any)
+    } catch {}
+  })
+}
 
   const handleLogout = async () => {
     onClose()

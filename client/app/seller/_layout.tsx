@@ -162,6 +162,16 @@ export default function SellerLayout() {
         }}
       />
       <Tabs.Screen
+  name="chat"
+  options={{
+    title: 'Chat',
+    headerShown: false,
+    tabBarIcon: ({ color, size }) => (
+      <Ionicons name="chatbubbles-outline" size={size - 1} color={color} />
+    ),
+  }}
+/>
+      <Tabs.Screen
         name="subscription"
         options={{
           title: 'Plan',
@@ -174,7 +184,8 @@ export default function SellerLayout() {
       <Tabs.Screen
         name="ai"
         options={{
-          title: 'AI',
+          href: null,
+          title: 'Plazore AI',
           headerShown: false,
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="sparkles-outline" size={size - 1} color={color} />

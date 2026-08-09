@@ -23,6 +23,7 @@ import {
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { COLORS } from '@/constants'
+import { useAuth } from '@clerk/clerk-expo'
 
 const { width, height } = Dimensions.get('window')
 const GALLERY_H = Math.min(width * 1.12, 460)
@@ -51,12 +52,16 @@ export default function ProductDetails() {
   const { id: rawId } = useLocalSearchParams<{ id: string | string[] }>()
   const id = Array.isArray(rawId) ? rawId[0] : rawId
   const router = useRouter()
+  const { getToken, isSignedIn } = useAuth()
 
   const [product, setProduct] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [wishlistCount, setWishlistCount] = useState(0)
   const [liked, setLiked] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [messaging, setMessaging] = useState(false)
+  const [isOwnProduct, setIsOwnProduct] = useState(false)
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null)
 
   const [aiData, setAiData] = useState<PlazoreAIData | null>(null)
   const [aiLoading, setAiLoading] = useState(false)
@@ -77,6 +82,71 @@ export default function ProductDetails() {
   const [floatingHearts, setFloatingHearts] = useState<
     { id: number; x: number; anim: Animated.Value }[]
   >([])
+
+  // ─────────────────────────────────────────────
+  // Load current user (MongoDB _id)
+  // ─────────────────────────────────────────────
+  useEffect(() => {
+    const loadCurrentUser = async () => {
+      if (!isSignedIn) {
+        setCurrentUserId(null)
+        setIsOwnProduct(false)
+        return
+      }
+
+      try {
+        const token = await getToken()
+        if (!token) return
+
+        // Try common endpoints for current user
+        const endpoints = ['/users/me', '/users/profile', '/user/me']
+        let myId: string | null = null
+
+        for (const endpoint of endpoints) {
+          try {
+            const res = await api.get(endpoint, {
+              headers: { Authorization: `Bearer ${token}` },
+            })
+            if (res.data?.success && res.data?.data?._id) {
+              myId = String(res.data.data._id)
+              break
+            }
+            if (res.data?._id) {
+              myId = String(res.data._id)
+              break
+            }
+          } catch {
+            // try next endpoint
+          }
+        }
+
+        setCurrentUserId(myId)
+      } catch {
+        setCurrentUserId(null)
+      }
+    }
+
+    loadCurrentUser()
+  }, [isSignedIn, getToken])
+
+  // ─────────────────────────────────────────────
+  // Check if this product belongs to current user
+  // ─────────────────────────────────────────────
+  useEffect(() => {
+    if (!product || !currentUserId) {
+      setIsOwnProduct(false)
+      return
+    }
+
+    const sellerId =
+      typeof product.seller === 'object' && product.seller?._id
+        ? String(product.seller._id)
+        : typeof product.seller === 'string'
+          ? String(product.seller)
+          : null
+
+    setIsOwnProduct(!!sellerId && sellerId === currentUserId)
+  }, [product, currentUserId])
 
   // Load product
   useEffect(() => {
@@ -248,6 +318,54 @@ export default function ProductDetails() {
     }
   }
 
+  // ─────────────────────────────────────────────
+  // Message Seller
+  // ─────────────────────────────────────────────
+  const handleMessageSeller = async () => {
+    if (!product?._id || messaging || isOwnProduct) return
+
+    if (!isSignedIn) {
+      console.log('User not signed in')
+      return
+    }
+
+    try {
+      setMessaging(true)
+
+      const token = await getToken()
+      if (!token) {
+        console.log('No auth token available')
+        return
+      }
+
+      const res = await api.post(
+        '/chat/start',
+        { productId: product._id },
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      )
+
+      if (res.data.success) {
+        const conversationId = res.data.data._id
+        router.push(`/chat/${conversationId}` as any)
+      }
+    } catch (error: any) {
+      console.log('Start chat error:', error)
+      console.log('Server response:', error?.response?.data)
+
+      // If backend says you can't message yourself, hide the button
+      const msg = error?.response?.data?.message || ''
+      if (msg.toLowerCase().includes('yourself')) {
+        setIsOwnProduct(true)
+      }
+    } finally {
+      setMessaging(false)
+    }
+  }
+
   // ✅ ALL HOOKS ABOVE — never after early returns
   const specifications = useMemo(
     () => normalizeSpecs(product?.specifications),
@@ -325,6 +443,9 @@ export default function ProductDetails() {
       .filter(Boolean)
       .join(', ')
 
+  // Show Message Seller only when signed in AND not the owner
+  const showMessageSeller = isSignedIn && !isOwnProduct
+
   return (
     <View className="flex-1 bg-[#EEF3F8]">
       <StatusBar barStyle="dark-content" />
@@ -354,7 +475,7 @@ export default function ProductDetails() {
         }}
       >
         <ScrollView
-          contentContainerStyle={{ paddingBottom: 140 }}
+          contentContainerStyle={{ paddingBottom: showMessageSeller ? 160 : 120 }}
           showsVerticalScrollIndicator={false}
           bounces
         >
@@ -784,9 +905,11 @@ export default function ProductDetails() {
           </View>
         </ScrollView>
 
-        {/* Bottom bar */}
+        {/* ─────────────────────────────────────────────
+            Bottom Action Bar
+        ───────────────────────────────────────────── */}
         <View
-          className="absolute bottom-0 left-0 right-0 px-4 pt-3.5 pb-9 border-t border-[#E2E8F0] bg-white/95 flex-row gap-3 items-center"
+          className="absolute bottom-0 left-0 right-0 px-4 pt-3 pb-8 border-t border-[#E2E8F0] bg-white/95"
           style={{
             shadowColor: '#0F172A',
             shadowOpacity: 0.06,
@@ -794,50 +917,79 @@ export default function ProductDetails() {
             shadowOffset: { width: 0, height: -4 },
           }}
         >
-          <TouchableOpacity
-            onPress={() => addToCart(product, '')}
-            className="flex-1 border border-[#CBD5E1] py-[16px] rounded-2xl items-center bg-[#F8FAFC]"
-            activeOpacity={0.85}
-          >
-            <Text className="text-[#0F172A] font-bold text-[14.5px]">
-              Add to Bag
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            onPress={() => {
-              addToCart(product, '')
-              router.push('/(tabs)/checkout' as any)
-            }}
-            activeOpacity={0.9}
-            className="flex-1 overflow-hidden rounded-2xl"
-          >
-            <LinearGradient
-              colors={[COLORS.primary, '#5B9FE8']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              className="py-[16px] items-center"
+          {/* Message Seller — only if NOT the owner */}
+          {showMessageSeller && (
+            <TouchableOpacity
+              onPress={handleMessageSeller}
+              disabled={messaging}
+              activeOpacity={0.85}
+              className="w-full mb-3 py-[14px] rounded-2xl border border-[#CBD5E1] bg-[#F8FAFC] flex-row items-center justify-center"
             >
-              <Text className="text-white font-extrabold text-[14.5px]">
-                Buy Now
-              </Text>
-            </LinearGradient>
-          </TouchableOpacity>
+              {messaging ? (
+                <ActivityIndicator size="small" color="#0F172A" />
+              ) : (
+                <>
+                  <Ionicons
+                    name="chatbubble-ellipses-outline"
+                    size={18}
+                    color="#0F172A"
+                    style={{ marginRight: 8 }}
+                  />
+                  <Text className="text-[#0F172A] font-semibold text-[14.5px]">
+                    Message Seller
+                  </Text>
+                </>
+              )}
+            </TouchableOpacity>
+          )}
 
-          <TouchableOpacity
-            onPress={() => router.push('/(tabs)/cart')}
-            className="w-[52px] h-[52px] rounded-2xl bg-[#F1F5F9] border border-[#E2E8F0] items-center justify-center relative"
-            activeOpacity={0.85}
-          >
-            <Ionicons name="bag-handle-outline" size={22} color="#0F172A" />
-            {itemCount > 0 && (
-              <View className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 bg-primary rounded-full items-center justify-center">
-                <Text className="text-white text-[10px] font-bold">
-                  {itemCount}
+          {/* Main actions row */}
+          <View className="flex-row gap-3 items-center">
+            <TouchableOpacity
+              onPress={() => addToCart(product, '')}
+              className="flex-1 border border-[#CBD5E1] py-[15px] rounded-2xl items-center bg-white"
+              activeOpacity={0.85}
+            >
+              <Text className="text-[#0F172A] font-bold text-[14.5px]">
+                Add to Bag
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={() => {
+                addToCart(product, '')
+                router.push('/(tabs)/checkout' as any)
+              }}
+              activeOpacity={0.9}
+              className="flex-1 overflow-hidden rounded-2xl"
+            >
+              <LinearGradient
+                colors={[COLORS.primary, '#5B9FE8']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                className="py-[15px] items-center"
+              >
+                <Text className="text-white font-extrabold text-[14.5px]">
+                  Buy Now
                 </Text>
-              </View>
-            )}
-          </TouchableOpacity>
+              </LinearGradient>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={() => router.push('/(tabs)/cart')}
+              className="w-[50px] h-[50px] rounded-2xl bg-[#F1F5F9] border border-[#E2E8F0] items-center justify-center relative"
+              activeOpacity={0.85}
+            >
+              <Ionicons name="bag-handle-outline" size={22} color="#0F172A" />
+              {itemCount > 0 && (
+                <View className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 bg-primary rounded-full items-center justify-center">
+                  <Text className="text-white text-[10px] font-bold">
+                    {itemCount}
+                  </Text>
+                </View>
+              )}
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* Top bar */}

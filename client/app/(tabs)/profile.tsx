@@ -16,6 +16,13 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 
 const LOUNGE_MENU = [
   {
+    id: 'messages',
+    title: 'Messages',
+    subtitle: 'Chats with sellers about products',
+    icon: 'chatbubbles-outline',
+    route: '/messages',
+  },
+  {
     id: 'orders',
     title: 'My Orders',
     subtitle: 'Track purchases & deliveries',
@@ -52,22 +59,40 @@ export default function Profile() {
   const router = useRouter()
 
   const [unreadCount, setUnreadCount] = useState(0)
+  const [unreadMessages, setUnreadMessages] = useState(0)
 
   const role = (clerkUser?.publicMetadata?.role as string) || 'buyer'
 
   const fetchUnread = useCallback(async () => {
     if (!isSignedIn) {
       setUnreadCount(0)
+      setUnreadMessages(0)
       return
     }
     try {
       const token = await getToken()
+
+      // Notifications
       const res = await api.get('/notifications', {
         headers: { Authorization: `Bearer ${token}` },
       })
       if (res.data.success && Array.isArray(res.data.data)) {
         const n = res.data.data.filter((x: any) => !x.isRead).length
         setUnreadCount(n)
+      }
+
+      // Unread messages (from conversations)
+      const chatRes = await api.get('/chat/conversations', {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (chatRes.data.success && Array.isArray(chatRes.data.data)) {
+        const totalUnread = chatRes.data.data.reduce((sum: number, conv: any) => {
+          // If current user is buyer → use unreadByBuyer
+          // If current user is seller → use unreadBySeller
+          // For now we sum both carefully (we'll refine later)
+          return sum + (conv.unreadByBuyer || 0) + (conv.unreadBySeller || 0)
+        }, 0)
+        setUnreadMessages(totalUnread)
       }
     } catch {
       // keep previous count
@@ -87,6 +112,9 @@ export default function Profile() {
 
   const badgeLabel =
     unreadCount > 99 ? '99+' : unreadCount > 0 ? String(unreadCount) : ''
+
+  const messagesBadge =
+    unreadMessages > 99 ? '99+' : unreadMessages > 0 ? String(unreadMessages) : ''
 
   return (
     <SafeAreaView className="flex-1 bg-[#060B14]" edges={['top']}>
@@ -110,9 +138,7 @@ export default function Profile() {
           >
             <Ionicons name="notifications-outline" size={22} color="#DCEBFF" />
             {unreadCount > 0 && (
-              <View
-                className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-[#FF6B8A] items-center justify-center border border-[#060B14]"
-              >
+              <View className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-[#FF6B8A] items-center justify-center border border-[#060B14]">
                 <Text className="text-white text-[10px] font-bold">
                   {badgeLabel}
                 </Text>
@@ -164,6 +190,7 @@ export default function Profile() {
           </View>
         ) : (
           <>
+            {/* Profile Card */}
             <View className="px-5 mt-1">
               <LinearGradient
                 colors={['#0F1C2E', '#0A1420']}
@@ -218,6 +245,7 @@ export default function Profile() {
               </LinearGradient>
             </View>
 
+            {/* Become Seller / Seller Lounge */}
             <View className="px-5 mt-5">
               {role === 'buyer' ? (
                 <TouchableOpacity
@@ -294,11 +322,33 @@ export default function Profile() {
               )}
             </View>
 
+            {/* Quick Access */}
             <View className="px-5 mt-8">
               <Text className="text-[#6B8299] text-[11px] font-semibold tracking-[2.5px] uppercase mb-3">
                 Quick Access
               </Text>
               <View className="flex-row gap-3">
+                <TouchableOpacity
+                  onPress={() => router.push('/messages' as any)}
+                  activeOpacity={0.85}
+                  className="flex-1 bg-[#0C1520] border border-[#1A2A3A] rounded-[24px] p-5"
+                >
+                  <View className="w-11 h-11 rounded-2xl bg-[#13263B] items-center justify-center mb-3 relative">
+                    <Ionicons name="chatbubbles-outline" size={22} color="#DCEBFF" />
+                    {unreadMessages > 0 && (
+                      <View className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-[#FF6B8A] items-center justify-center">
+                        <Text className="text-white text-[9px] font-bold">
+                          {messagesBadge}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                  <Text className="text-white font-bold text-[15px]">Messages</Text>
+                  <Text className="text-[#6B8299] text-[12px] mt-0.5">
+                    Chats with sellers
+                  </Text>
+                </TouchableOpacity>
+
                 <TouchableOpacity
                   onPress={() => router.push('/orders')}
                   activeOpacity={0.85}
@@ -312,25 +362,10 @@ export default function Profile() {
                     Track purchases
                   </Text>
                 </TouchableOpacity>
-
-                <TouchableOpacity
-                  onPress={() => router.push('/(tabs)/favorites')}
-                  activeOpacity={0.85}
-                  className="flex-1 bg-[#0C1520] border border-[#1A2A3A] rounded-[24px] p-5"
-                >
-                  <View className="w-11 h-11 rounded-2xl bg-[#13263B] items-center justify-center mb-3">
-                    <Ionicons name="heart-outline" size={22} color="#DCEBFF" />
-                  </View>
-                  <Text className="text-white font-bold text-[15px]">
-                    Wishlist
-                  </Text>
-                  <Text className="text-[#6B8299] text-[12px] mt-0.5">
-                    Saved items
-                  </Text>
-                </TouchableOpacity>
               </View>
             </View>
 
+            {/* Lounge Menu */}
             <View className="px-5 mt-8">
               <Text className="text-[#6B8299] text-[11px] font-semibold tracking-[2.5px] uppercase mb-3">
                 Lounge
@@ -363,6 +398,15 @@ export default function Profile() {
                         {item.subtitle}
                       </Text>
                     </View>
+
+                    {item.id === 'messages' && unreadMessages > 0 && (
+                      <View className="min-w-[20px] h-5 px-1.5 rounded-full bg-[#FF6B8A] items-center justify-center mr-2">
+                        <Text className="text-white text-[10px] font-bold">
+                          {messagesBadge}
+                        </Text>
+                      </View>
+                    )}
+
                     {item.id === 'notifications' && unreadCount > 0 && (
                       <View className="min-w-[20px] h-5 px-1.5 rounded-full bg-[#FF6B8A] items-center justify-center mr-2">
                         <Text className="text-white text-[10px] font-bold">
@@ -370,6 +414,7 @@ export default function Profile() {
                         </Text>
                       </View>
                     )}
+
                     <Ionicons
                       name="chevron-forward"
                       size={18}
@@ -380,6 +425,7 @@ export default function Profile() {
               </View>
             </View>
 
+            {/* Sign Out */}
             <View className="px-5 mt-8">
               <TouchableOpacity
                 onPress={handleLogout}

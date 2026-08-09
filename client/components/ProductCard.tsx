@@ -1,5 +1,5 @@
+// client/components/ProductCard.tsx
 import { ProductCardProps } from '@/constants/types'
-import { useCart } from '@/context/CartContext'
 import { useMarketplace } from '@/context/MarketplaceContext'
 import { Ionicons } from '@expo/vector-icons'
 import { Link } from 'expo-router'
@@ -23,7 +23,7 @@ function resolveShipLocation(product: any): string {
   if (product?.brand) return product.brand
   if (product?.subCategory) return product.subCategory
 
-  return 'honey'
+  return ''
 }
 
 interface AuraProductCardProps extends ProductCardProps {
@@ -36,7 +36,6 @@ export default function ProductCard({
   cardWidth,
 }: AuraProductCardProps) {
   const { formatProduct } = useMarketplace()
-  const { addToCart } = useCart()
 
   const location = useMemo(
     () => resolveShipLocation(product),
@@ -46,15 +45,6 @@ export default function ProductCard({
   const formattedPrice = useMemo(() => {
     return formatProduct(product.price, (product as any).region)
   }, [product, formatProduct])
-
-  const handleQuickAdd = async (e: any) => {
-    e?.stopPropagation?.()
-    try {
-      await addToCart(product)
-    } catch (err) {
-      console.log('Cart add error:', err)
-    }
-  }
 
   return (
     <Link href={`/product/${product._id}` as any} asChild>
@@ -67,7 +57,7 @@ export default function ProductCard({
           borderRadius: 0,
         }}
       >
-        {/* Image Container - Zero Border Radius */}
+        {/* Image */}
         <View
           style={{
             position: 'relative',
@@ -97,31 +87,7 @@ export default function ProductCard({
             </View>
           )}
 
-          {/* Floating Cart Button - Bottom Right Crisp White Square */}
-          <TouchableOpacity
-            activeOpacity={0.8}
-            onPress={handleQuickAdd}
-            style={{
-              position: 'absolute',
-              bottom: 10,
-              right: 10,
-              width: 36,
-              height: 36,
-              backgroundColor: '#FFFFFF',
-              borderRadius: 0,
-              alignItems: 'center',
-              justifyContent: 'center',
-              shadowColor: '#000',
-              shadowOffset: { width: 0, height: 2 },
-              shadowOpacity: 0.12,
-              shadowRadius: 4,
-              elevation: 3,
-            }}
-          >
-            <Ionicons name="cart-outline" size={18} color="#0F172A" />
-          </TouchableOpacity>
-
-          {/* Featured Tag */}
+          {/* Featured Tag only */}
           {product.isFeatured && (
             <View
               style={{
@@ -148,9 +114,8 @@ export default function ProductCard({
           )}
         </View>
 
-        {/* Info Box Below Image - Clean Aura Rae Typography */}
+        {/* Info */}
         <View style={{ paddingTop: 12, paddingHorizontal: 4, alignItems: 'center' }}>
-          {/* Line 1: Title */}
           <Text
             style={{
               color: '#0F172A',
@@ -164,7 +129,6 @@ export default function ProductCard({
             {product.name}
           </Text>
 
-          {/* Line 2: Location | Price */}
           <Text
             style={{
               color: '#475569',
@@ -175,8 +139,12 @@ export default function ProductCard({
             }}
             numberOfLines={1}
           >
-            <Text style={{ color: '#64748B' }}>{location.toLowerCase()}</Text>
-            <Text style={{ color: '#94A3B8' }}> | </Text>
+            {location ? (
+              <>
+                <Text style={{ color: '#64748B' }}>{location.toLowerCase()}</Text>
+                <Text style={{ color: '#94A3B8' }}> | </Text>
+              </>
+            ) : null}
             <Text style={{ color: '#0F172A', fontWeight: '500' }}>{formattedPrice}</Text>
           </Text>
         </View>

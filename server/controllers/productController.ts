@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import Product from "../models/Products.js";
 import User from "../models/User.js";
 import ProductAI from "../models/ProductAI.js";
+import ProductPerformance from "../models/ProductPerformance.js";
 import { trackProductPerformance } from "../utils/performance.js";
 import cloudinary from "../config/cloudinary.js";
 import { enqueueProductAI } from "../services/jobs/generateProductAI.js";
@@ -174,19 +175,25 @@ function parseExistingDocuments(body: any, fallback: any[] = []): any[] {
 }
 
 // ======================================================
-// PUBLIC - Get products (regional prioritization)
+// PUBLIC - Get products (regional prioritization + sort)
 // ======================================================
 export const getProducts = async (req: Request, res: Response) => {
   try {
     const page = Math.max(1, Number(req.query.page) || 1);
     const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 12));
     const buyerRegion = String(req.query.region || "NG").trim() || "NG";
+    const sortParam = String(req.query.sort || "").toLowerCase().trim();
 
     const baseQuery: any = { isActive: true };
 
-    if (req.query.seller) baseQuery.seller = req.query.seller;
+    if (req.query.seller) {
+      baseQuery.seller = req.query.seller;
+    }
     if (req.query.category) {
       baseQuery.category = String(req.query.category).trim();
+    }
+    if (req.query.subCategory) {
+      baseQuery.subCategory = String(req.query.subCategory).trim();
     }
 
     const localQuery = {
@@ -203,10 +210,19 @@ export const getProducts = async (req: Request, res: Response) => {
       region: { $nin: [buyerRegion, null] },
     };
 
+    // Default sort: featured first, then newest
+    let mongoSort: any = { isFeatured: -1, createdAt: -1 };
+
+    if (sortParam === "newest") {
+      mongoSort = { createdAt: -1 };
+    }
+    // For "trending" we still fetch with a reasonable sort,
+    // then re-rank in memory using ProductPerformance + wishlistCount
+
     const [localProducts, total, localCount] = await Promise.all([
       Product.find(localQuery)
         .populate("seller", SELLER_PUBLIC_FIELDS)
-        .sort({ isFeatured: -1, createdAt: -1 })
+        .sort(mongoSort)
         .skip((page - 1) * limit)
         .limit(limit)
         .lean(),
@@ -221,11 +237,52 @@ export const getProducts = async (req: Request, res: Response) => {
       const remaining = limit - usedLocal;
       const otherProducts = await Product.find(otherQuery)
         .populate("seller", SELLER_PUBLIC_FIELDS)
-        .sort({ isFeatured: -1, createdAt: -1 })
+        .sort(mongoSort)
         .limit(remaining)
         .lean();
 
       products = [...products, ...otherProducts];
+    }
+
+    // ── Trending re-rank (real performance data + wishlist) ──
+    if (sortParam === "trending" && products.length > 0) {
+      const ids = products.map((p: any) => p._id);
+
+      const perfs = await ProductPerformance.find({
+        product: { $in: ids },
+      })
+        .select("product score purchases cartAdds views")
+        .lean();
+
+      const scoreMap = new Map<string, number>();
+
+      perfs.forEach((p: any) => {
+        // Weighted score: purchases heavily favored, then carts, then views
+        const computed =
+          (p.purchases || 0) * 15 +
+          (p.cartAdds || 0) * 5 +
+          (p.views || 0) * 1 +
+          (p.score || 0);
+
+        scoreMap.set(String(p.product), computed);
+      });
+
+      products.sort((a: any, b: any) => {
+        const sa = scoreMap.get(String(a._id)) || 0;
+        const sb = scoreMap.get(String(b._id)) || 0;
+
+        // Secondary signal: wishlistCount
+        const wa = a.wishlistCount || 0;
+        const wb = b.wishlistCount || 0;
+
+        if (sb !== sa) return sb - sa;
+        if (wb !== wa) return wb - wa;
+
+        // Final fallback: newest
+        return (
+          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        );
+      });
     }
 
     res.json({
@@ -241,6 +298,7 @@ export const getProducts = async (req: Request, res: Response) => {
         prioritizedRegion: buyerRegion,
         localCount,
         showingLocal: usedLocal,
+        sort: sortParam || "default",
       },
     });
   } catch (error: any) {
@@ -445,7 +503,7 @@ export const createProduct = async (req: Request, res: Response) => {
       verificationDocuments,
     });
 
-    // ── Plazore AI: enqueue generation (non-blocking) — not modified ──
+    // ── Plazore AI: enqueue generation (non-blocking) ──
     enqueueProductAI(String(product._id));
 
     res.status(201).json({ success: true, data: product });
