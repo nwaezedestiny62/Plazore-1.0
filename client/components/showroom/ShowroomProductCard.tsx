@@ -2,9 +2,11 @@
  * ShowroomProductCard — 2030 Premium Edition
  * Completely flicker-free auto image rotation
  * Supports dark mode for text colours
+ * Cart button triggers fly-to-cart (never navigates)
  */
 
 import { Product } from '@/constants/types'
+import { useCart } from '@/context/CartContext'
 import { useMarketplace } from '@/context/MarketplaceContext'
 import { Ionicons } from '@expo/vector-icons'
 import { Image } from 'expo-image'
@@ -19,10 +21,11 @@ import {
   Text,
   View,
 } from 'react-native'
+import { useShowroomFlyCart } from './ShowroomFlyCart'
 
 const SCREEN_W = Dimensions.get('window').width
 const H_PADDING = 16
-const GAP = 12
+const GAP = 4   // was 12 — tight space between cards
 const CARD_WIDTH = (SCREEN_W - H_PADDING * 2 - GAP) / 2
 
 const IMAGE_ASPECT = 1.35
@@ -61,13 +64,17 @@ export default function ShowroomProductCard({
   dark = false,
 }: Props) {
   const { formatProduct } = useMarketplace()
+  const { addToCart } = useCart()
+  const flyCart = useShowroomFlyCart()
+
   const location = useMemo(() => resolveShipLocation(product), [product])
   const brand = useMemo(() => resolveBrand(product), [product])
 
   const images = product.images?.length ? product.images : []
   const hasMultiple = images.length > 1
 
-  // Start at 0.01 — never pure 0 (anti-flicker)
+  const cartBtnRef = useRef<View>(null)
+
   const opacities = useRef(
     images.map((_, i) => new Animated.Value(i === 0 ? 1 : 0.01))
   ).current
@@ -136,56 +143,78 @@ export default function ShowroomProductCard({
     return () => clearHold()
   }, [hasMultiple])
 
+  const handleAddToCart = useCallback(() => {
+    cartBtnRef.current?.measureInWindow((x, y, width, height) => {
+      if (width <= 0 || height <= 0) {
+        addToCart(product)
+        return
+      }
+      if (flyCart) {
+        flyCart.flyAdd(product, { x, y, width, height })
+      } else {
+        addToCart(product)
+      }
+    })
+  }, [product, flyCart, addToCart])
+
+  // Same width behavior as original: base CARD_WIDTH, style can override
   const imageHeight = CARD_WIDTH * IMAGE_ASPECT
 
-  // Dynamic colours based on dark mode
   const textPrimary = dark ? '#FFFFFF' : '#111111'
   const textSecondary = dark ? 'rgba(255,255,255,0.65)' : '#6B7280'
   const textMuted = dark ? 'rgba(255,255,255,0.42)' : '#9CA3AF'
 
   return (
-    <Link href={`/product/${product._id}` as any} asChild>
-      <Pressable style={[styles.card, { width: CARD_WIDTH }, style]}>
-        <View style={[styles.imageWrap, { height: imageHeight }]}>
-          {images.length > 0 ? (
-            images.map((uri, i) => (
-              <Animated.View
-                key={`${product._id}-img-${i}`}
-                pointerEvents="none"
-                style={[StyleSheet.absoluteFillObject, { opacity: opacities[i] }]}
-              >
-                <Image
-                  source={{ uri }}
-                  style={styles.image}
-                  contentFit="cover"
-                  cachePolicy="memory-disk"
-                  transition={0}
-                />
-              </Animated.View>
-            ))
-          ) : (
-            <View style={[styles.image, styles.placeholder]} />
-          )}
-
-          {/* Cart button */}
-          <Pressable
-            onPress={(e) => {
-              e.stopPropagation?.()
-            }}
-            style={styles.cartButton}
-            hitSlop={12}
-          >
-            <Ionicons name="cart-outline" size={17} color="#111" />
+    <View style={[styles.card, { width: CARD_WIDTH }, style]}>
+      <View style={[styles.imageWrap, { height: imageHeight }]}>
+        <Link href={`/product/${product._id}` as any} asChild>
+          <Pressable style={StyleSheet.absoluteFillObject}>
+            {images.length > 0 ? (
+              images.map((uri, i) => (
+                <Animated.View
+                  key={`${product._id}-img-${i}`}
+                  pointerEvents="none"
+                  style={[
+                    StyleSheet.absoluteFillObject,
+                    { opacity: opacities[i] },
+                  ]}
+                >
+                  <Image
+                    source={{ uri }}
+                    style={styles.image}
+                    contentFit="cover"
+                    cachePolicy="memory-disk"
+                    transition={0}
+                  />
+                </Animated.View>
+              ))
+            ) : (
+              <View style={[styles.image, styles.placeholder]} />
+            )}
           </Pressable>
-        </View>
+        </Link>
 
-        <View style={styles.info}>
+        <Pressable
+          ref={cartBtnRef}
+          onPress={handleAddToCart}
+          style={styles.cartButton}
+          hitSlop={12}
+        >
+          <Ionicons name="cart-outline" size={17} color="#111" />
+        </Pressable>
+      </View>
+
+      <Link href={`/product/${product._id}` as any} asChild>
+        <Pressable style={styles.info}>
           <Text style={[styles.name, { color: textPrimary }]} numberOfLines={1}>
             {product.name}
           </Text>
 
           <View style={styles.metaRow}>
-            <Text style={[styles.brand, { color: textSecondary }]} numberOfLines={1}>
+            <Text
+              style={[styles.brand, { color: textSecondary }]}
+              numberOfLines={1}
+            >
               {brand.toLowerCase()}
             </Text>
             <Text style={[styles.divider, { color: textSecondary }]}> | </Text>
@@ -195,13 +224,16 @@ export default function ShowroomProductCard({
           </View>
 
           {!!location && (
-            <Text style={[styles.location, { color: textMuted }]} numberOfLines={1}>
+            <Text
+              style={[styles.location, { color: textMuted }]}
+              numberOfLines={1}
+            >
               {location}
             </Text>
           )}
-        </View>
-      </Pressable>
-    </Link>
+        </Pressable>
+      </Link>
+    </View>
   )
 }
 
@@ -236,6 +268,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.13,
     shadowRadius: 3,
     elevation: 3,
+    zIndex: 10,
   },
   info: {
     paddingTop: 11,

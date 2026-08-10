@@ -18,6 +18,8 @@ import {
   View,
 } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
+import { useShowroomFlyCart } from './ShowroomFlyCart'
+import { useCart } from '@/context/CartContext'
 import { useMarketplace } from '@/context/MarketplaceContext'
 import { Link } from 'expo-router'
 import ScrollFadeUp from './ScrollFadeUp'
@@ -59,6 +61,24 @@ export default function RoomThree({
       holdTimer.current = null
     }
   }, [])
+
+  // inside component:
+const flyCart = useShowroomFlyCart()
+const { addToCart } = useCart()
+const cartBtnRef = useRef<View>(null)
+
+const handleAddToCart = () => {
+  const product = products[currentRef.current]
+  if (!product) return
+
+  cartBtnRef.current?.measureInWindow((x, y, width, height) => {
+    if (flyCart) {
+      flyCart.flyAdd(product, { x, y, width, height })
+    } else {
+      addToCart(product)
+    }
+  })
+}
 
   const scheduleHold = useCallback(() => {
     clearHold()
@@ -179,15 +199,15 @@ export default function RoomThree({
         ))}
 
         {/* SINGLE cart button — lives outside the layers so it never stacks */}
-        <Pressable
-          onPress={() => {
-            // wire add-to-cart for the current product here
-          }}
-          style={styles.cartButton}
-          hitSlop={12}
-        >
-          <Ionicons name="cart-outline" size={17} color="#111" />
-        </Pressable>
+        {/* SINGLE cart button — outside layers so it never stacks */}
+<Pressable
+  ref={cartBtnRef}
+  onPress={handleAddToCart}
+  style={styles.cartButton}
+  hitSlop={12}
+>
+  <Ionicons name="cart-outline" size={17} color="#111" />
+</Pressable>
       </View>
 
       {/* Dots */}

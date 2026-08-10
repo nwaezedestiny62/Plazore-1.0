@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons'
 import { BlurView } from 'expo-blur'
 import { LinearGradient } from 'expo-linear-gradient'
-import React, { useRef, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import {
   Animated,
   Image,
@@ -19,6 +19,8 @@ const GLASS = 'rgba(12,12,12,0.82)'
 type Props = {
   /** 0 = at top (fully visible), 1 = scrolled (hidden) */
   scrollProgress: number
+  /** Shared Animated.Value from Home — locks fade to scroll frames */
+  progressAnim?: Animated.Value
   hasUnreadNotifications?: boolean
   onMenuPress?: () => void
   onMusicPress?: () => void
@@ -88,6 +90,7 @@ function IconButton({
 
 export default function PlazoreTitleBar({
   scrollProgress,
+  progressAnim,
   hasUnreadNotifications = false,
   onMenuPress,
   onMusicPress,
@@ -99,36 +102,34 @@ export default function PlazoreTitleBar({
   const musicOn =
     typeof musicControlled === 'boolean' ? musicControlled : musicLocal
 
-  // Drive slide/fade from parent numeric progress (0–1)
-  const anim = useRef(new Animated.Value(0)).current
+  const localAnim = useRef(new Animated.Value(0)).current
+  const anim = progressAnim ?? localAnim
 
-  React.useEffect(() => {
+  // Only drive local anim when parent did not pass progressAnim
+  useEffect(() => {
+    if (progressAnim) return
     const p = Math.min(1, Math.max(0, scrollProgress))
-    Animated.timing(anim, {
-      toValue: p,
-      duration: 180,
-      useNativeDriver: true,
-    }).start()
-  }, [scrollProgress, anim])
+    localAnim.setValue(p)
+  }, [scrollProgress, progressAnim, localAnim])
 
-  const slideUp = anim.interpolate({
-    inputRange: [0, 0.25, 1],
-    outputRange: [0, -24, -130],
-    extrapolate: 'clamp',
-  })
-
+  // Feathered curve: starts fading very lightly, then smooth out towards the end
   const barOpacity = anim.interpolate({
-    inputRange: [0, 0.2, 0.5],
-    outputRange: [1, 0.7, 0],
+    inputRange: [0, 0.25, 0.75, 1],
+    outputRange: [1, 0.9, 0.25, 0],
+    extrapolate: 'clamp',
+  })
+  const slideUp = anim.interpolate({
+    inputRange: [0, 0.25, 0.75, 1],
+    outputRange: [0, -10, -50, -100],
     extrapolate: 'clamp',
   })
 
-  // Glass strengthens slightly as you start scrolling, then fades with the bar
   const glassOpacity = anim.interpolate({
-    inputRange: [0, 0.15, 0.45],
-    outputRange: [0, 0.55, 0],
+    inputRange: [0, 0.4, 0.8, 1],
+    outputRange: [0, 0.15, 0.3, 0],
     extrapolate: 'clamp',
   })
+
 
   const handleMusic = () => {
     if (typeof musicControlled !== 'boolean') {
@@ -138,7 +139,7 @@ export default function PlazoreTitleBar({
   }
 
   const topPad = Math.max(insets.top - 6, 4)
-  const hidden = scrollProgress > 0.55
+  const hidden = scrollProgress > 0.92
 
   return (
     <Animated.View
@@ -152,7 +153,6 @@ export default function PlazoreTitleBar({
         },
       ]}
     >
-      {/* Glass */}
       <Animated.View
         pointerEvents="none"
         style={[StyleSheet.absoluteFill, { opacity: glassOpacity }]}
@@ -166,8 +166,7 @@ export default function PlazoreTitleBar({
           style={[
             StyleSheet.absoluteFill,
             {
-              backgroundColor:
-                Platform.OS === 'ios' ? GLASS : 'transparent',
+              backgroundColor: Platform.OS === 'ios' ? GLASS : 'transparent',
             },
           ]}
         />
@@ -333,9 +332,7 @@ const styles = StyleSheet.create({
         shadowOpacity: 0.4,
         shadowRadius: 3,
       },
-      android: {
-        elevation: 2,
-      },
+      android: { elevation: 2 },
     }),
   },
 })

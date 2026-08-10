@@ -13,7 +13,7 @@ import ScrollFadeUp from './ScrollFadeUp'
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window')
 const CARD_W = Math.min(SCREEN_W * 0.58, 220)
-const CARD_GAP = 14
+const CARD_GAP = 4 // was 14 — tight spacing between cards
 
 interface RoomOneProps {
   products: Product[]
@@ -28,13 +28,11 @@ export default function RoomOne({
 }: RoomOneProps) {
   const featureImage = products[0]?.images?.[0]
 
-  // Split products into two rails for visual rhythm
   const railA = products
-  const railB = [...products].reverse() // reverse for variety
+  const railB = [...products].reverse()
 
   return (
     <View style={styles.room}>
-      {/* Large cinematic banner */}
       <ScrollFadeUp delay={50} duration={750} distance={32}>
         <View style={styles.banner}>
           {featureImage ? (
@@ -45,7 +43,12 @@ export default function RoomOne({
               transition={500}
             />
           ) : (
-            <View style={[StyleSheet.absoluteFillObject, { backgroundColor: '#151A22' }]} />
+            <View
+              style={[
+                StyleSheet.absoluteFillObject,
+                { backgroundColor: '#151A22' },
+              ]}
+            />
           )}
 
           <View style={styles.bannerOverlay} />
@@ -57,7 +60,6 @@ export default function RoomOne({
         </View>
       </ScrollFadeUp>
 
-      {/* First rail */}
       <View style={styles.railSection}>
         <ScrollFadeUp delay={160} duration={550} distance={18}>
           <Text style={styles.railLabel}>IN THIS SPACE</Text>
@@ -78,13 +80,16 @@ export default function RoomOne({
               distance={24}
               style={{ width: CARD_W, marginRight: CARD_GAP }}
             >
-              <ShowroomProductCard product={product} dark />
+              <ShowroomProductCard
+                product={product}
+                dark
+                style={{ width: CARD_W }}
+              />
             </ScrollFadeUp>
           ))}
         </ScrollView>
       </View>
 
-      {/* Second rail – offset timing + reversed order for rhythm */}
       <View style={[styles.railSection, { paddingTop: 28 }]}>
         <ScrollView
           horizontal
@@ -101,7 +106,11 @@ export default function RoomOne({
               distance={24}
               style={{ width: CARD_W, marginRight: CARD_GAP }}
             >
-              <ShowroomProductCard product={product} dark />
+              <ShowroomProductCard
+                product={product}
+                dark
+                style={{ width: CARD_W }}
+              />
             </ScrollFadeUp>
           ))}
         </ScrollView>
@@ -118,7 +127,7 @@ const styles = StyleSheet.create({
   },
   banner: {
     width: SCREEN_W,
-    height: SCREEN_H * 0.40,
+    height: SCREEN_H * 0.4,
     overflow: 'hidden',
     position: 'relative',
   },

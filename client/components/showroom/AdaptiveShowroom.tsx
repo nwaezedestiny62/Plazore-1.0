@@ -10,9 +10,14 @@ import RoomFive from './RoomFive'
 interface AdaptiveShowroomProps {
   products: Product[]
   loading: boolean
+  onRoomLayout?: (roomNumber: number, y: number) => void
 }
 
-export default function AdaptiveShowroom({ products, loading }: AdaptiveShowroomProps) {
+export default function AdaptiveShowroom({
+  products,
+  loading,
+  onRoomLayout,
+}: AdaptiveShowroomProps) {
   const count = products?.length || 0
 
   const sections = useMemo(() => {
@@ -110,54 +115,60 @@ export default function AdaptiveShowroom({ products, loading }: AdaptiveShowroom
   return (
     <View style={styles.showroom}>
       {sections.map((section, idx) => {
-        if (section.type === 'one') {
-          return (
+        const roomNumber =
+          section.type === 'one'
+            ? 1
+            : section.type === 'two'
+              ? 2
+              : section.type === 'three'
+                ? 3
+                : section.type === 'four'
+                  ? 4
+                  : 5
+
+        const content =
+          section.type === 'one' ? (
             <RoomOne
-              key={idx}
               products={section.products}
               title={section.title}
               subtitle={section.subtitle}
             />
-          )
-        }
-        if (section.type === 'two') {
-          return (
+          ) : section.type === 'two' ? (
             <RoomTwo
-              key={idx}
               products={section.products}
               title={section.title}
               subtitle={section.subtitle}
             />
-          )
-        }
-        if (section.type === 'three') {
-          return (
+          ) : section.type === 'three' ? (
             <RoomThree
-              key={idx}
               products={section.products}
               title={section.title}
               subtitle={section.subtitle}
             />
-          )
-        }
-        if (section.type === 'four') {
-          return (
+          ) : section.type === 'four' ? (
             <RoomFour
-              key={idx}
               products={section.products}
               title={section.title}
               subtitle={section.subtitle}
               regionLabel={section.regionLabel}
             />
+          ) : (
+            <RoomFive
+              products={section.products}
+              title={section.title}
+              subtitle={section.subtitle}
+            />
           )
-        }
+
         return (
-          <RoomFive
+          <View
             key={idx}
-            products={section.products}
-            title={section.title}
-            subtitle={section.subtitle}
-          />
+            onLayout={(e) => {
+              onRoomLayout?.(roomNumber, e.nativeEvent.layout.y)
+            }}
+          >
+            {content}
+          </View>
         )
       })}
     </View>

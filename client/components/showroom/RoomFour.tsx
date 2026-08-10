@@ -18,7 +18,7 @@ import ScrollFadeUp from './ScrollFadeUp'
 
 const { width: SCREEN_W } = Dimensions.get('window')
 const CARD_W = Math.min(SCREEN_W * 0.58, 220)
-const CARD_GAP = 16
+const CARD_GAP = 4 // was 16 — tight spacing between cards
 
 interface RoomFourProps {
   products: Product[]
@@ -35,7 +35,6 @@ export default function RoomFour({
 }: RoomFourProps) {
   return (
     <View style={styles.room}>
-      {/* Header */}
       <View style={styles.header}>
         <ScrollFadeUp delay={40} duration={550} distance={14}>
           <Text style={styles.kicker}>{title}</Text>
@@ -48,7 +47,6 @@ export default function RoomFour({
         </ScrollFadeUp>
       </View>
 
-      {/* The Walk — horizontal rail */}
       <ScrollFadeUp delay={200} duration={650} distance={24}>
         <ScrollView
           horizontal
@@ -63,13 +61,15 @@ export default function RoomFour({
               key={`${product._id}-locale-${index}`}
               style={[styles.cardWrap, { width: CARD_W, marginRight: CARD_GAP }]}
             >
-              <ShowroomProductCard product={product} />
+              <ShowroomProductCard
+                product={product}
+                style={{ width: CARD_W }}
+              />
             </View>
           ))}
         </ScrollView>
       </ScrollFadeUp>
 
-      {/* Soft bottom note */}
       <ScrollFadeUp delay={320} duration={500} distance={12}>
         <Text style={styles.note}>
           Prioritising products from your marketplace region
@@ -81,7 +81,7 @@ export default function RoomFour({
 
 const styles = StyleSheet.create({
   room: {
-    backgroundColor: '#F7F1E9',          // warm sand / light clay
+    backgroundColor: '#F7F1E9',
     paddingTop: 52,
     paddingBottom: 60,
     width: SCREEN_W,
@@ -114,9 +114,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingRight: 40,
   },
-  cardWrap: {
-    // slight lift so cards feel like they’re sitting on a plinth
-  },
+  cardWrap: {},
   note: {
     fontFamily: 'Manrope_400Regular',
     fontSize: 12,
