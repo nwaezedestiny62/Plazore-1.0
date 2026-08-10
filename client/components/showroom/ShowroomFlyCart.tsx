@@ -78,8 +78,8 @@ export function ShowroomFlyCartProvider({
   useEffect(() => {
     const p = Math.min(1, Math.max(0, visibleProgress))
     Animated.timing(appear, {
-      toValue: p > 0.55 ? 1 : 0,
-      duration: p > 0.55 ? 720 : 380,
+      toValue: p > 0.08 ? 1 : 0,
+      duration: p > 0.08 ? 520 : 260,
       easing: EASE,
       useNativeDriver: true,
     }).start()
@@ -94,19 +94,19 @@ export function ShowroomFlyCartProvider({
   const playReceive = useCallback(() => {
     bounce.setValue(1)
     pulse.setValue(0)
-    badgePop.setValue(0.6)
+    badgePop.setValue(0.7)
 
     Animated.parallel([
       Animated.sequence([
         Animated.timing(bounce, {
-          toValue: 1.28,
-          duration: 180,
-          easing: Easing.out(Easing.back(2.2)),
+          toValue: 1.22,
+          duration: 120,
+          easing: Easing.out(Easing.back(2)),
           useNativeDriver: true,
         }),
         Animated.timing(bounce, {
           toValue: 1,
-          duration: 320,
+          duration: 220,
           easing: EASE,
           useNativeDriver: true,
         }),
@@ -114,39 +114,38 @@ export function ShowroomFlyCartProvider({
       Animated.sequence([
         Animated.timing(pulse, {
           toValue: 1,
-          duration: 240,
+          duration: 180,
           easing: Easing.out(Easing.quad),
           useNativeDriver: true,
         }),
         Animated.timing(pulse, {
           toValue: 0,
-          duration: 520,
+          duration: 350,
           easing: EASE,
           useNativeDriver: true,
         }),
       ]),
       Animated.spring(badgePop, {
         toValue: 1,
-        friction: 4,
-        tension: 160,
+        friction: 3,
+        tension: 180,
         useNativeDriver: true,
       }),
     ]).start()
   }, [bounce, pulse, badgePop])
-const flyAdd = useCallback(
-  (product: Product, origin: Origin) => {
-    if (origin.width < 2 || origin.height < 2) {
-      addToCart(product)
-      return
-    }
 
-    addToCart(product)
+  const flyAdd = useCallback(
+    (product: Product, origin: Origin) => {
+      if (origin.width < 2 || origin.height < 2) {
+        addToCart(product)
+        playReceive()
+        return
+      }
 
-    // measure cart first, then spawn fly on next frame
-    cartRef.current?.measureInWindow((cx, cy, cw, ch) => {
-      cartWindowPos.current = { x: cx + cw / 2, y: cy + ch / 2 }
+      // Measure cart position immediately before spawning clone
+      cartRef.current?.measureInWindow((cx, cy, cw, ch) => {
+        cartWindowPos.current = { x: cx + cw / 2, y: cy + ch / 2 }
 
-      requestAnimationFrame(() => {
         const job: FlyJob = {
           id: `${product._id}-${Date.now()}`,
           image: product.images?.[0],
@@ -154,10 +153,12 @@ const flyAdd = useCallback(
         }
         setFlyJobs((prev) => [...prev, job])
       })
-    })
-  },
-  [addToCart]
-)
+
+      // Add to cart state immediately so badge increments seamlessly as item lands
+      addToCart(product)
+    },
+    [addToCart, playReceive]
+  )
 
   const onFlyComplete = useCallback(
     (id: string) => {
@@ -167,30 +168,31 @@ const flyAdd = useCallback(
     [playReceive]
   )
 
-const bottomOffset = Math.max(insets.bottom, 8) + 58
+  // Shifted much higher so it floats cleanly above the nav and preserves the same timing curve.
+  const bottomOffset = Math.max(insets.bottom, 12) + 150
 
   const translateY = appear.interpolate({
     inputRange: [0, 1],
-    outputRange: [28, 0],
+    outputRange: [30, 0],
   })
   const scaleIn = appear.interpolate({
     inputRange: [0, 1],
-    outputRange: [0.82, 1],
+    outputRange: [0.88, 1],
   })
 
   const pulseScale = pulse.interpolate({
     inputRange: [0, 1],
-    outputRange: [1, 2.1],
+    outputRange: [1, 2.0],
   })
   const pulseOpacity = pulse.interpolate({
-    inputRange: [0, 0.35, 1],
-    outputRange: [0, 0.4, 0],
+    inputRange: [0, 0.3, 1],
+    outputRange: [0, 0.45, 0],
   })
 
   const badgeLabel =
     itemCount > 99 ? '99+' : itemCount > 0 ? String(itemCount) : ''
 
-  const hidden = visibleProgress < 0.45
+  const hidden = visibleProgress < 0.02
 
   return (
     <FlyCartContext.Provider value={{ flyAdd }}>
@@ -290,45 +292,43 @@ function FlyingClone({
   const endX = target.x - FLY_SIZE / 2
   const endY = target.y - FLY_SIZE / 2
 
-  // Arc control point (curves upward then into cart)
   const midX = startX + (endX - startX) * 0.45
-  const midY = Math.min(startY, endY) - 90
+  const midY = Math.min(startY, endY) - 80
 
   useEffect(() => {
     progress.setValue(0)
     Animated.timing(progress, {
       toValue: 1,
-      duration: 680,
+      duration: 520, // Snappy & ultra smooth
       easing: Easing.bezier(0.2, 0.8, 0.2, 1),
       useNativeDriver: true,
     }).start(({ finished }) => {
-      if (finished && !done.current) {
+      if ((finished || !finished) && !done.current) {
         done.current = true
         onComplete()
       }
     })
   }, [])
 
-  // Approximate quadratic bezier via interpolation layers
   const translateX = progress.interpolate({
     inputRange: [0, 0.5, 1],
     outputRange: [startX, midX, endX],
   })
   const translateY = progress.interpolate({
-    inputRange: [0, 0.45, 1],
+    inputRange: [0, 0.5, 1],
     outputRange: [startY, midY, endY],
   })
   const scale = progress.interpolate({
-    inputRange: [0, 0.25, 0.7, 1],
-    outputRange: [1, 1.12, 0.55, 0.2],
+    inputRange: [0, 0.2, 0.8, 1],
+    outputRange: [1, 1.1, 0.5, 0.2],
   })
-const opacity = progress.interpolate({
-  inputRange: [0, 0.85, 1],
-  outputRange: [1, 1, 0.01], // never pure 0 mid-flight
-})
+  const opacity = progress.interpolate({
+    inputRange: [0, 0.85, 1],
+    outputRange: [1, 1, 0],
+  })
   const rotate = progress.interpolate({
     inputRange: [0, 1],
-    outputRange: ['0deg', '28deg'],
+    outputRange: ['0deg', '20deg'],
   })
 
   return (
@@ -365,11 +365,11 @@ const opacity = progress.interpolate({
 const styles = StyleSheet.create({
   floatWrap: {
     position: 'absolute',
-    right: 18,
+    right: 20,
     zIndex: 80,
   },
   hit: {
-    padding: 4,
+    padding: 6,
   },
   cartBtn: {
     width: CART_SIZE,
@@ -381,11 +381,11 @@ const styles = StyleSheet.create({
     ...Platform.select({
       ios: {
         shadowColor: GREEN,
-        shadowOffset: { width: 0, height: 8 },
-        shadowOpacity: 0.45,
-        shadowRadius: 16,
+        shadowOffset: { width: 0, height: 10 },
+        shadowOpacity: 0.5,
+        shadowRadius: 18,
       },
-      android: { elevation: 12 },
+      android: { elevation: 14 },
     }),
   },
   pulseRing: {
