@@ -1,4 +1,5 @@
 import api from '@/constants/api'
+import PlazoreNavigationHub from '@/components/PlazoreNavigationHub'
 import { useAuth, useClerk, useUser } from '@clerk/clerk-expo'
 import { Ionicons } from '@expo/vector-icons'
 import { LinearGradient } from 'expo-linear-gradient'
@@ -6,6 +7,7 @@ import { useFocusEffect, useRouter } from 'expo-router'
 import React, { useCallback, useState } from 'react'
 import {
   Image,
+  Pressable,
   StatusBar,
   Text,
   TouchableOpacity,
@@ -52,12 +54,39 @@ const LOUNGE_MENU = [
   },
 ]
 
+/* Bold custom 3-line toggle */
+function MenuToggle({ onPress }: { onPress: () => void }) {
+  return (
+    <Pressable
+      onPress={onPress}
+      hitSlop={12}
+      style={{
+        width: 44,
+        height: 44,
+        borderRadius: 16,
+        backgroundColor: '#0C1520',
+        borderWidth: 1,
+        borderColor: '#1A2A3A',
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+    >
+      <View style={{ width: 20, gap: 5 }}>
+        <View style={{ height: 2.4, backgroundColor: '#DCEBFF', borderRadius: 2, width: 20 }} />
+        <View style={{ height: 2.4, backgroundColor: '#DCEBFF', borderRadius: 2, width: 13 }} />
+        <View style={{ height: 2.4, backgroundColor: '#DCEBFF', borderRadius: 2, width: 20 }} />
+      </View>
+    </Pressable>
+  )
+}
+
 export default function Profile() {
   const { user, signOut } = useClerk()
   const { user: clerkUser } = useUser()
   const { getToken, isSignedIn } = useAuth()
   const router = useRouter()
 
+  const [hubOpen, setHubOpen] = useState(false)
   const [unreadCount, setUnreadCount] = useState(0)
   const [unreadMessages, setUnreadMessages] = useState(0)
 
@@ -72,7 +101,6 @@ export default function Profile() {
     try {
       const token = await getToken()
 
-      // Notifications
       const res = await api.get('/notifications', {
         headers: { Authorization: `Bearer ${token}` },
       })
@@ -81,15 +109,11 @@ export default function Profile() {
         setUnreadCount(n)
       }
 
-      // Unread messages (from conversations)
       const chatRes = await api.get('/chat/conversations', {
         headers: { Authorization: `Bearer ${token}` },
       })
       if (chatRes.data.success && Array.isArray(chatRes.data.data)) {
         const totalUnread = chatRes.data.data.reduce((sum: number, conv: any) => {
-          // If current user is buyer → use unreadByBuyer
-          // If current user is seller → use unreadBySeller
-          // For now we sum both carefully (we'll refine later)
           return sum + (conv.unreadByBuyer || 0) + (conv.unreadBySeller || 0)
         }, 0)
         setUnreadMessages(totalUnread)
@@ -121,13 +145,16 @@ export default function Profile() {
       <StatusBar barStyle="light-content" />
 
       <View className="px-5 pt-2 pb-3 flex-row items-center justify-between">
-        <View>
-          <Text className="text-[#6B8299] text-[11px] font-semibold tracking-[3px] uppercase">
-            Plazore
-          </Text>
-          <Text className="text-white text-[22px] font-extrabold mt-0.5">
-            Lounge
-          </Text>
+        <View className="flex-row items-center gap-3">
+          <MenuToggle onPress={() => setHubOpen(true)} />
+          <View>
+            <Text className="text-[#6B8299] text-[11px] font-semibold tracking-[3px] uppercase">
+              Plazore
+            </Text>
+            <Text className="text-white text-[22px] font-extrabold mt-0.5">
+              Lounge
+            </Text>
+          </View>
         </View>
 
         <View className="flex-row items-center gap-3">
@@ -190,7 +217,6 @@ export default function Profile() {
           </View>
         ) : (
           <>
-            {/* Profile Card */}
             <View className="px-5 mt-1">
               <LinearGradient
                 colors={['#0F1C2E', '#0A1420']}
@@ -245,7 +271,6 @@ export default function Profile() {
               </LinearGradient>
             </View>
 
-            {/* Become Seller / Seller Lounge */}
             <View className="px-5 mt-5">
               {role === 'buyer' ? (
                 <TouchableOpacity
@@ -322,7 +347,6 @@ export default function Profile() {
               )}
             </View>
 
-            {/* Quick Access */}
             <View className="px-5 mt-8">
               <Text className="text-[#6B8299] text-[11px] font-semibold tracking-[2.5px] uppercase mb-3">
                 Quick Access
@@ -365,7 +389,6 @@ export default function Profile() {
               </View>
             </View>
 
-            {/* Lounge Menu */}
             <View className="px-5 mt-8">
               <Text className="text-[#6B8299] text-[11px] font-semibold tracking-[2.5px] uppercase mb-3">
                 Lounge
@@ -425,7 +448,6 @@ export default function Profile() {
               </View>
             </View>
 
-            {/* Sign Out */}
             <View className="px-5 mt-8">
               <TouchableOpacity
                 onPress={handleLogout}
@@ -440,6 +462,11 @@ export default function Profile() {
           </>
         )}
       </ScrollView>
+
+      <PlazoreNavigationHub
+        visible={hubOpen}
+        onClose={() => setHubOpen(false)}
+      />
     </SafeAreaView>
   )
 }

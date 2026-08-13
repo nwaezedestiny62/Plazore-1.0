@@ -1,6 +1,6 @@
 // client/app/shop.tsx
-import Header from '@/components/Header'
 import ProductCard from '@/components/ProductCard'
+import PlazoreNavigationHub from '@/components/PlazoreNavigationHub'
 import api from '@/constants/api'
 import { PRODUCT_CATEGORIES, CATEGORY_LIST } from '@/constants/productCatalog'
 import { Product } from '@/constants/types'
@@ -22,9 +22,6 @@ import {
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 
-/* ──────────────────────────────────────────────────────────
-   CATEGORY IMAGES – primary + 2 backups
-────────────────────────────────────────────────────────── */
 const CATEGORY_IMAGES: Record<string, [string, string, string]> = {
   Electronics: [
     'https://images.unsplash.com/photo-1498049794561-7780e7231661?w=600&q=80',
@@ -190,6 +187,59 @@ function CategoryImage({ category }: { category: string }) {
   )
 }
 
+/* Bold 3-line menu that opens Plazore Navigation Hub */
+function MenuToggle({ onPress }: { onPress: () => void }) {
+  return (
+    <Pressable
+      onPress={onPress}
+      hitSlop={12}
+      style={{
+        width: 40,
+        height: 40,
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+    >
+      <View style={{ width: 22, gap: 5 }}>
+        <View style={{ height: 2.5, backgroundColor: '#0F172A', borderRadius: 2 }} />
+        <View style={{ height: 2.5, backgroundColor: '#0F172A', borderRadius: 2, width: '70%' }} />
+        <View style={{ height: 2.5, backgroundColor: '#0F172A', borderRadius: 2 }} />
+      </View>
+    </Pressable>
+  )
+}
+
+function ShopHeader({ title, onMenu }: { title: string; onMenu: () => void }) {
+  return (
+    <View
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: 12,
+        paddingVertical: 10,
+        backgroundColor: '#FFFFFF',
+        borderBottomWidth: 1,
+        borderBottomColor: '#E2E8F0',
+      }}
+    >
+      <MenuToggle onPress={onMenu} />
+      <Text
+        style={{
+          flex: 1,
+          textAlign: 'center',
+          fontSize: 17,
+          fontWeight: '700',
+          color: '#0F172A',
+          marginRight: 40,
+        }}
+        numberOfLines={1}
+      >
+        {title}
+      </Text>
+    </View>
+  )
+}
+
 export default function Shop() {
   const { region } = useMarketplace()
   const router = useRouter()
@@ -202,6 +252,7 @@ export default function Shop() {
   const isCategories = mode === 'categories' && !selectedCategory
   const isStores = mode === 'stores'
 
+  const [hubOpen, setHubOpen] = useState(false)
   const [products, setProducts] = useState<Product[]>([])
   const [stores, setStores] = useState<StoreItem[]>([])
   const [loading, setLoading] = useState(true)
@@ -212,7 +263,6 @@ export default function Shop() {
   const [maxPrice, setMaxPrice] = useState('')
   const [inStockOnly, setInStockOnly] = useState(false)
 
-  // ── Load ───────────────────────────────────────────────
   const load = useCallback(async () => {
     if (isCategories) {
       setLoading(false)
@@ -225,7 +275,6 @@ export default function Shop() {
 
     try {
       if (isStores) {
-        // Fetch products and extract unique stores
         const res = await api.get(`/products?limit=100&region=${region || 'NG'}`)
         const map = new Map<string, StoreItem>()
 
@@ -247,7 +296,6 @@ export default function Shop() {
         setStores(Array.from(map.values()))
         setProducts([])
       } else {
-        // Products (new / trending / category)
         const qs = new URLSearchParams()
         qs.set('page', '1')
         qs.set('limit', '20')
@@ -282,7 +330,6 @@ export default function Shop() {
     load()
   }, [load])
 
-  // ── Filtered products ──────────────────────────────────
   const displayedProducts = useMemo(() => {
     let list = [...products]
 
@@ -304,7 +351,6 @@ export default function Shop() {
     return list
   }, [products, search, minPrice, maxPrice, inStockOnly])
 
-  // ── Filtered stores ────────────────────────────────────
   const displayedStores = useMemo(() => {
     if (!search.trim()) return stores
     const q = search.toLowerCase()
@@ -328,11 +374,12 @@ export default function Shop() {
               : selectedCategory
             : 'Categories'
 
-  // ── Categories screen ──────────────────────────────────
+  // ── Categories ─────────────────────────────────────────
   if (isCategories) {
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: '#F8FAFC' }} edges={['top']}>
-        <Header title="Categories" showBack />
+        <ShopHeader title="Categories" onMenu={() => setHubOpen(true)} />
+
         <View style={{ paddingHorizontal: 16, paddingVertical: 10 }}>
           <View
             style={{
@@ -393,15 +440,17 @@ export default function Shop() {
             </Pressable>
           )}
         />
+
+        <PlazoreNavigationHub visible={hubOpen} onClose={() => setHubOpen(false)} />
       </SafeAreaView>
     )
   }
 
-  // ── Stores screen ──────────────────────────────────────
+  // ── Stores ─────────────────────────────────────────────
   if (isStores) {
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: '#F8FAFC' }} edges={['top']}>
-        <Header title="Stores" showBack />
+        <ShopHeader title="Stores" onMenu={() => setHubOpen(true)} />
 
         <View style={{ paddingHorizontal: 16, paddingVertical: 10 }}>
           <View
@@ -510,16 +559,17 @@ export default function Shop() {
             }
           />
         )}
+
+        <PlazoreNavigationHub visible={hubOpen} onClose={() => setHubOpen(false)} />
       </SafeAreaView>
     )
   }
 
-  // ── Products screen (New / Trending / Category) ─────────
+  // ── Products (New / Trending / Category) ───────────────
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#F8FAFC' }} edges={['top']}>
-      <Header title={title} showBack />
+      <ShopHeader title={title} onMenu={() => setHubOpen(true)} />
 
-      {/* Search + Filter */}
       <View style={{ flexDirection: 'row', gap: 8, marginHorizontal: 16, marginVertical: 10 }}>
         <View
           style={{
@@ -564,7 +614,6 @@ export default function Shop() {
         </TouchableOpacity>
       </View>
 
-      {/* Sub-categories chips */}
       {mode === 'category' && selectedCategory && (
         <View
           style={{
@@ -626,7 +675,6 @@ export default function Shop() {
         </View>
       )}
 
-      {/* Product list */}
       {loading ? (
         <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
           <ActivityIndicator size="large" color="#0F172A" />
@@ -651,7 +699,6 @@ export default function Shop() {
         />
       )}
 
-      {/* Filter Modal */}
       <Modal visible={filterOpen} transparent animationType="slide">
         <Pressable
           style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.4)' }}
@@ -742,6 +789,8 @@ export default function Shop() {
           </View>
         </View>
       </Modal>
+
+      <PlazoreNavigationHub visible={hubOpen} onClose={() => setHubOpen(false)} />
     </SafeAreaView>
   )
 }

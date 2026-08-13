@@ -8,16 +8,16 @@ import {
   Platform,
   Pressable,
   StyleSheet,
+  Text,
   View,
 } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 const ACCENT = '#C9A962'
 const ICON = '#FFFFFF'
-const GLASS = 'rgba(12,12,12,0.82)'
+const GLASS = 'rgba(8,8,10,0.55)'
 
 type Props = {
-  /** 0 = at top (fully visible), 1 = scrolled (hidden) */
   scrollProgress: number
   hasUnreadNotifications?: boolean
   onMenuPress?: () => void
@@ -40,31 +40,15 @@ function IconButton({
 
   const pressIn = () => {
     Animated.parallel([
-      Animated.timing(scale, {
-        toValue: 0.94,
-        duration: 120,
-        useNativeDriver: true,
-      }),
-      Animated.timing(opacity, {
-        toValue: 0.7,
-        duration: 120,
-        useNativeDriver: true,
-      }),
+      Animated.timing(scale, { toValue: 0.94, duration: 120, useNativeDriver: true }),
+      Animated.timing(opacity, { toValue: 0.7, duration: 120, useNativeDriver: true }),
     ]).start()
   }
 
   const pressOut = () => {
     Animated.parallel([
-      Animated.timing(scale, {
-        toValue: 1,
-        duration: 180,
-        useNativeDriver: true,
-      }),
-      Animated.timing(opacity, {
-        toValue: 1,
-        duration: 180,
-        useNativeDriver: true,
-      }),
+      Animated.timing(scale, { toValue: 1, duration: 180, useNativeDriver: true }),
+      Animated.timing(opacity, { toValue: 1, duration: 180, useNativeDriver: true }),
     ]).start()
   }
 
@@ -77,10 +61,34 @@ function IconButton({
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}
     >
-      <Animated.View
-        style={[styles.iconHit, { transform: [{ scale }], opacity }]}
-      >
+      <Animated.View style={[styles.iconHit, { transform: [{ scale }], opacity }]}>
         {children}
+      </Animated.View>
+    </Pressable>
+  )
+}
+
+function MenuToggle({ onPress }: { onPress?: () => void }) {
+  const scale = useRef(new Animated.Value(1)).current
+
+  return (
+    <Pressable
+      onPress={onPress}
+      onPressIn={() =>
+        Animated.timing(scale, { toValue: 0.9, duration: 90, useNativeDriver: true }).start()
+      }
+      onPressOut={() =>
+        Animated.timing(scale, { toValue: 1, duration: 160, useNativeDriver: true }).start()
+      }
+      hitSlop={14}
+      accessibilityRole="button"
+      accessibilityLabel="Open navigation"
+      style={styles.iconHit}
+    >
+      <Animated.View style={[styles.menuLines, { transform: [{ scale }] }]}>
+        <View style={[styles.line, { width: 22 }]} />
+        <View style={[styles.line, { width: 15 }]} />
+        <View style={[styles.line, { width: 22 }]} />
       </Animated.View>
     </Pressable>
   )
@@ -96,10 +104,10 @@ export default function PlazoreTitleBar({
 }: Props) {
   const insets = useSafeAreaInsets()
   const [musicLocal, setMusicLocal] = useState(false)
+  const [logoLoaded, setLogoLoaded] = useState(false)
   const musicOn =
     typeof musicControlled === 'boolean' ? musicControlled : musicLocal
 
-  // Drive slide/fade from parent numeric progress (0–1)
   const anim = useRef(new Animated.Value(0)).current
 
   React.useEffect(() => {
@@ -123,10 +131,9 @@ export default function PlazoreTitleBar({
     extrapolate: 'clamp',
   })
 
-  // Glass strengthens slightly as you start scrolling, then fades with the bar
   const glassOpacity = anim.interpolate({
     inputRange: [0, 0.15, 0.45],
-    outputRange: [0, 0.55, 0],
+    outputRange: [0.35, 0.55, 0],
     extrapolate: 'clamp',
   })
 
@@ -152,49 +159,46 @@ export default function PlazoreTitleBar({
         },
       ]}
     >
-      {/* Glass */}
       <Animated.View
         pointerEvents="none"
         style={[StyleSheet.absoluteFill, { opacity: glassOpacity }]}
       >
         {Platform.OS === 'ios' ? (
-          <BlurView intensity={52} tint="dark" style={StyleSheet.absoluteFill} />
+          <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} />
         ) : (
           <View style={[StyleSheet.absoluteFill, { backgroundColor: GLASS }]} />
         )}
         <View
           style={[
             StyleSheet.absoluteFill,
-            {
-              backgroundColor:
-                Platform.OS === 'ios' ? GLASS : 'transparent',
-            },
+            { backgroundColor: 'rgba(0,0,0,0.28)' },
           ]}
         />
       </Animated.View>
 
       <LinearGradient
         pointerEvents="none"
-        colors={['rgba(0,0,0,0.32)', 'rgba(0,0,0,0)']}
+        colors={['rgba(0,0,0,0.38)', 'rgba(0,0,0,0)']}
         style={styles.topVeil}
       />
 
+      {/* Logo + PLAZORE text fallback underneath */}
       <View style={styles.logoWrap} pointerEvents="none">
+        <Text style={[styles.logoFallback, logoLoaded && styles.logoFallbackHidden]}>
+          PLAZORE
+        </Text>
         <Image
           source={require('../assets/logo.png')}
           style={styles.logo}
           resizeMode="contain"
+          onLoad={() => setLogoLoaded(true)}
+          onError={() => setLogoLoaded(false)}
         />
       </View>
 
       <View style={styles.row}>
         <View style={styles.side}>
-          <IconButton
-            onPress={onMenuPress}
-            accessibilityLabel="Open navigation"
-          >
-            <Ionicons name="menu" size={26} color={ICON} />
-          </IconButton>
+          <MenuToggle onPress={onMenuPress} />
         </View>
 
         <View style={styles.center} />
@@ -276,6 +280,17 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     zIndex: 1,
   },
+  logoFallback: {
+    position: 'absolute',
+    color: '#FFFFFF',
+    fontSize: 28,
+    fontWeight: '800',
+    letterSpacing: 6,
+    opacity: 0.95,
+  },
+  logoFallbackHidden: {
+    opacity: 0,
+  },
   logo: {
     height: 99,
     width: 280,
@@ -306,6 +321,16 @@ const styles = StyleSheet.create({
     height: 40,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  menuLines: {
+    width: 22,
+    gap: 5.5,
+    alignItems: 'flex-start',
+  },
+  line: {
+    height: 2.6,
+    backgroundColor: ICON,
+    borderRadius: 2,
   },
   dot: {
     position: 'absolute',

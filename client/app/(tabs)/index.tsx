@@ -3,9 +3,10 @@ import PlazoreFloatingNav from '@/components/PlazoreFloatingNav'
 import PlazoreNavigationHub from '@/components/PlazoreNavigationHub'
 import PlazoreTitleBar from '@/components/PlazoreTitleBar'
 import { AdaptiveShowroom } from '@/components/showroom'
+import { ShowroomFlyCartProvider } from '@/components/showroom/ShowroomFlyCart'
 import api from '@/constants/api'
 import { Product } from '@/constants/types'
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import {
   NativeScrollEvent,
   NativeSyntheticEvent,
@@ -24,6 +25,7 @@ export default function Home() {
   const heroH = Math.max(windowH, 1)
 
   const showroomY = useRef(0)
+  const roomYs = useRef<Record<number, number>>({})
   const scrollRef = useRef<ScrollView>(null)
 
   const fetchProducts = async () => {
@@ -49,7 +51,6 @@ export default function Home() {
 
   const onMainScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
     const y = e.nativeEvent.contentOffset.y
-    // 0 at top → 1 after ~35% of hero height
     const p = Math.min(1, Math.max(0, y / (heroH * 0.35)))
     setScrollProgress(p)
   }
@@ -61,49 +62,69 @@ export default function Home() {
     })
   }
 
+  const onRoomLayout = useCallback((roomNumber: number, y: number) => {
+    roomYs.current[roomNumber] = y
+  }, [])
+
+  const onScrollToRoom = useCallback((roomNumber: number) => {
+    const roomOffset = roomYs.current[roomNumber]
+    if (roomOffset == null) {
+      scrollToShowroom()
+      return
+    }
+    scrollRef.current?.scrollTo({
+      y: Math.max(showroomY.current + roomOffset - 12, 0),
+      animated: true,
+    })
+  }, [])
+
   return (
-    <View style={{ flex: 1, backgroundColor: '#0E0E0E' }}>
-      <PlazoreTitleBar
-        scrollProgress={scrollProgress}
-        hasUnreadNotifications={false}
-        onMenuPress={() => setHubOpen(true)}
-        onMusicPress={() => {}}
-        onNotificationsPress={() => {}}
-      />
+    <ShowroomFlyCartProvider visibleProgress={scrollProgress}>
+      <View style={{ flex: 1, backgroundColor: '#0E0E0E' }}>
+        <PlazoreTitleBar
+          scrollProgress={scrollProgress}
+          hasUnreadNotifications={false}
+          onMenuPress={() => setHubOpen(true)}
+          onMusicPress={() => {}}
+          onNotificationsPress={() => {}}
+        />
 
-      <ScrollView
-        ref={scrollRef}
-        showsVerticalScrollIndicator={false}
-        bounces
-        scrollEventThrottle={16}
-        decelerationRate="fast"
-        onScroll={onMainScroll}
-        style={{ flex: 1 }}
-      >
-        {/* HERO */}
-        <HeroBanner topChrome={0} onScrollToShowroom={scrollToShowroom} />
-
-        {/* SHOWROOM */}
-        <View
-          onLayout={(e) => {
-            showroomY.current = e.nativeEvent.layout.y
-          }}
-          style={{ width: '100%' }}
+        <ScrollView
+          ref={scrollRef}
+          showsVerticalScrollIndicator={false}
+          bounces
+          scrollEventThrottle={16}
+          decelerationRate="fast"
+          onScroll={onMainScroll}
+          style={{ flex: 1 }}
         >
-          <AdaptiveShowroom products={products} loading={loading} />
-        </View>
-      </ScrollView>
+          <HeroBanner topChrome={0} onScrollToShowroom={scrollToShowroom} />
 
-      {/* Floating Nav — still here */}
-      <PlazoreFloatingNav
-        visibleProgress={scrollProgress}
-        onMenuPress={() => setHubOpen(true)}
-      />
+          <View
+            onLayout={(e) => {
+              showroomY.current = e.nativeEvent.layout.y
+            }}
+            style={{ width: '100%' }}
+          >
+            <AdaptiveShowroom
+              products={products}
+              loading={loading}
+              onRoomLayout={onRoomLayout}
+            />
+          </View>
+        </ScrollView>
 
-      <PlazoreNavigationHub
-        visible={hubOpen}
-        onClose={() => setHubOpen(false)}
-      />
-    </View>
+        <PlazoreFloatingNav
+          visibleProgress={scrollProgress}
+          onMenuPress={() => setHubOpen(true)}
+        />
+
+        <PlazoreNavigationHub
+          visible={hubOpen}
+          onClose={() => setHubOpen(false)}
+          onScrollToRoom={onScrollToRoom}
+        />
+      </View>
+    </ShowroomFlyCartProvider>
   )
 }
