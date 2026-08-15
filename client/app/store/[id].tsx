@@ -12,12 +12,14 @@ import {
   NativeScrollEvent,
   Easing,
   StyleSheet,
+  ActivityIndicator,
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { BlurView } from "expo-blur";
+import { useAuth } from "@clerk/clerk-expo";
 import api from "@/constants/api";
 import { useMarketplace } from "@/context/MarketplaceContext";
 
@@ -40,7 +42,8 @@ const AI_GREEN = "#10B981";
 const AI_BLUE = "#3B82F6";
 
 type StorePublic = {
-  id: string;
+  id?: string;
+  _id?: string;
   storeName: string;
   storeDescription: string;
   businessGoal: string;
@@ -74,9 +77,6 @@ function StorePreloader() {
     outputRange: ["0deg", "360deg"],
   });
 
-  const [descExpanded, setDescExpanded] = useState(false);
-const [goalExpanded, setGoalExpanded] = useState(false);
-
   return (
     <View style={styles.loaderRoot}>
       <View style={styles.orbWrapper}>
@@ -98,14 +98,16 @@ export default function PublicStorefront() {
   const id = Array.isArray(rawId) ? rawId[0] : rawId;
   const router = useRouter();
   const { formatProduct } = useMarketplace();
+  const { getToken, isSignedIn } = useAuth();
 
   const [store, setStore] = useState<StorePublic | null>(null);
   const [products, setProducts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [saved, setSaved] = useState(false);
+  const [saveBusy, setSaveBusy] = useState(false);
   const [featuredIndex, setFeaturedIndex] = useState(0);
   const [descExpanded, setDescExpanded] = useState(false);
-const [goalExpanded, setGoalExpanded] = useState(false);
+  const [goalExpanded, setGoalExpanded] = useState(false);
 
   const door = useRef(new Animated.Value(0)).current;
   const content = useRef(new Animated.Value(0)).current;
@@ -113,7 +115,12 @@ const [goalExpanded, setGoalExpanded] = useState(false);
   const featuredRef = useRef<ScrollView>(null);
   const featuredIndexRef = useRef(0);
   const userTouching = useRef(false);
+  const saveInFlight = useRef(false);
 
+  // Resolve the store's Mongo id (backend uses User _id)
+  const storeId = store?._id || store?.id || id || "";
+
+  // ── Load store + products ──
   useEffect(() => {
     const load = async () => {
       if (!id) {
@@ -139,6 +146,36 @@ const [goalExpanded, setGoalExpanded] = useState(false);
     load();
   }, [id]);
 
+  // ── Check if this store is already saved ──
+  useEffect(() => {
+    const checkSaved = async () => {
+      if (!isSignedIn || !storeId) {
+        setSaved(false);
+        return;
+      }
+      try {
+        const token = await getToken();
+        if (!token) return;
+
+        const res = await api.get("/saved-stores", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+
+        if (res.data?.success && Array.isArray(res.data.data)) {
+          const isSaved = res.data.data.some(
+            (s: any) => String(s._id || s.id) === String(storeId),
+          );
+          setSaved(isSaved);
+        }
+      } catch (e) {
+        console.log("Check saved store error:", e);
+      }
+    };
+
+    checkSaved();
+  }, [isSignedIn, storeId, getToken]);
+
+  // ── Entrance animation ──
   useEffect(() => {
     if (loading || !store) return;
 
@@ -166,7 +203,7 @@ const [goalExpanded, setGoalExpanded] = useState(false);
     ]).start();
   }, [loading, store]);
 
-  // Auto-carousel
+  // ── Auto-carousel ──
   useEffect(() => {
     if (products.length <= 1) return;
 
@@ -195,6 +232,57 @@ const [goalExpanded, setGoalExpanded] = useState(false);
     },
     [products.length],
   );
+
+  // ── Toggle save store (wired to backend) ──
+  const handleToggleSave = async () => {
+    if (!storeId || saveInFlight.current) return;
+
+    if (!isSignedIn) {
+      router.push("/(auth)/sign-in" as any);
+      return;
+    }
+
+    const previous = saved;
+    // Optimistic update
+    setSaved(!previous);
+    setSaveBusy(true);
+    saveInFlight.current = true;
+
+    try {
+      const token = await getToken();
+      if (!token) {
+        setSaved(previous);
+        return;
+      }
+
+      const res = await api.post(
+        "/saved-stores/toggle",
+        { storeId },
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+
+      if (res.data?.success) {
+        // Prefer server truth when available
+        if (typeof res.data.saved === "boolean") {
+          setSaved(res.data.saved);
+        }
+      } else {
+        setSaved(previous);
+      }
+    } catch (error: any) {
+      console.log("Toggle saved store error:", error?.response?.data || error);
+      setSaved(previous);
+
+      // If backend rejects "own store", keep it unsaved
+      const msg = error?.response?.data?.message || "";
+      if (msg.toLowerCase().includes("own store")) {
+        setSaved(false);
+      }
+    } finally {
+      setSaveBusy(false);
+      saveInFlight.current = false;
+    }
+  };
 
   const locationLabel = [store?.location?.state, store?.location?.country]
     .filter(Boolean)
@@ -234,7 +322,7 @@ const [goalExpanded, setGoalExpanded] = useState(false);
       <ScrollView
         showsVerticalScrollIndicator={false}
         bounces={false}
-        decelerationRate={0.998}
+        decelerationRate="normal"
         contentContainerStyle={{ paddingBottom: 70 }}
       >
         {/* ========== ENTRANCE ========== */}
@@ -332,11 +420,7 @@ const [goalExpanded, setGoalExpanded] = useState(false);
 
                 {!!locationLabel && (
                   <View style={styles.locationRow}>
-                    <Ionicons
-                      name="location-outline"
-                      size={13}
-                      color={MUTED}
-                    />
+                    <Ionicons name="location-outline" size={13} color={MUTED} />
                     <Text style={styles.locationText} numberOfLines={1}>
                       {locationLabel}
                     </Text>
@@ -346,71 +430,72 @@ const [goalExpanded, setGoalExpanded] = useState(false);
             </View>
 
             {!!store.storeDescription && (
-  <View style={{ marginTop: 16 }}>
-    <Text
-      style={styles.desc}
-      numberOfLines={descExpanded ? undefined : 3}
-    >
-      {store.storeDescription}
-    </Text>
-    {store.storeDescription.length > 110 && (
-      <TouchableOpacity
-        onPress={() => setDescExpanded((v) => !v)}
-        activeOpacity={0.7}
-        style={{ marginTop: 6 }}
-      >
-        <Text style={styles.seeMore}>
-          {descExpanded ? "See less" : "See more"}
-        </Text>
-      </TouchableOpacity>
-    )}
-  </View>
-)}
+              <View style={{ marginTop: 16 }}>
+                <Text
+                  style={styles.desc}
+                  numberOfLines={descExpanded ? undefined : 3}
+                >
+                  {store.storeDescription}
+                </Text>
+                {store.storeDescription.length > 110 && (
+                  <TouchableOpacity
+                    onPress={() => setDescExpanded((v) => !v)}
+                    activeOpacity={0.7}
+                    style={{ marginTop: 6 }}
+                  >
+                    <Text style={styles.seeMore}>
+                      {descExpanded ? "See less" : "See more"}
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            )}
 
-{!!store.businessGoal && (
-  <View style={styles.goalBox}>
-    <Text style={styles.goalLabel}>Our goal</Text>
-    <Text
-      style={styles.goalText}
-      numberOfLines={goalExpanded ? undefined : 2}
-    >
-      {store.businessGoal}
-    </Text>
-    {store.businessGoal.length > 80 && (
-      <TouchableOpacity
-        onPress={() => setGoalExpanded((v) => !v)}
-        activeOpacity={0.7}
-        style={{ marginTop: 6 }}
-      >
-        <Text style={styles.seeMore}>
-          {goalExpanded ? "See less" : "See more"}
-        </Text>
-      </TouchableOpacity>
-    )}
-  </View>
-)}
+            {!!store.businessGoal && (
+              <View style={styles.goalBox}>
+                <Text style={styles.goalLabel}>Our goal</Text>
+                <Text
+                  style={styles.goalText}
+                  numberOfLines={goalExpanded ? undefined : 2}
+                >
+                  {store.businessGoal}
+                </Text>
+                {store.businessGoal.length > 80 && (
+                  <TouchableOpacity
+                    onPress={() => setGoalExpanded((v) => !v)}
+                    activeOpacity={0.7}
+                    style={{ marginTop: 6 }}
+                  >
+                    <Text style={styles.seeMore}>
+                      {goalExpanded ? "See less" : "See more"}
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            )}
 
             <View style={styles.actionRow}>
               <TouchableOpacity
-                onPress={() => setSaved((s) => !s)}
+                onPress={handleToggleSave}
                 activeOpacity={0.88}
-                style={[
-                  styles.saveBtn,
-                  saved && styles.saveBtnActive,
-                ]}
+                disabled={saveBusy}
+                style={[styles.saveBtn, saved && styles.saveBtnActive]}
               >
-                <Ionicons
-                  name={saved ? "bookmark" : "bookmark-outline"}
-                  size={16}
-                  color={saved ? BG : TEXT}
-                  style={{ marginRight: 7 }}
-                />
-                <Text
-                  style={[
-                    styles.saveBtnText,
-                    saved && { color: BG },
-                  ]}
-                >
+                {saveBusy ? (
+                  <ActivityIndicator
+                    size="small"
+                    color={saved ? BG : TEXT}
+                    style={{ marginRight: 7 }}
+                  />
+                ) : (
+                  <Ionicons
+                    name={saved ? "bookmark" : "bookmark-outline"}
+                    size={16}
+                    color={saved ? BG : TEXT}
+                    style={{ marginRight: 7 }}
+                  />
+                )}
+                <Text style={[styles.saveBtnText, saved && { color: BG }]}>
                   {saved ? "Saved" : "Save store"}
                 </Text>
               </TouchableOpacity>
@@ -458,7 +543,12 @@ const [goalExpanded, setGoalExpanded] = useState(false);
                   style={{ width: slideW }}
                 >
                   <View style={styles.featuredCard}>
-                    <View style={{ height: FEATURED_H, backgroundColor: SURFACE_2 }}>
+                    <View
+                      style={{
+                        height: FEATURED_H,
+                        backgroundColor: SURFACE_2,
+                      }}
+                    >
                       {p.images?.[0] ? (
                         <Image
                           source={{ uri: p.images[0] }}
@@ -511,7 +601,9 @@ const [goalExpanded, setGoalExpanded] = useState(false);
                       height: 5,
                       borderRadius: 3,
                       backgroundColor:
-                        i === featuredIndex ? AI_GREEN : "rgba(255,255,255,0.2)",
+                        i === featuredIndex
+                          ? AI_GREEN
+                          : "rgba(255,255,255,0.2)",
                       marginHorizontal: 3,
                     }}
                   />
@@ -792,7 +884,6 @@ const styles = StyleSheet.create({
     color: SECONDARY,
     fontSize: 14.5,
     lineHeight: 22,
-    marginTop: 16,
   },
   goalBox: {
     marginTop: 14,
@@ -1006,9 +1097,8 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
   },
   seeMore: {
-  color: AI_GREEN,
-  fontSize: 13,
-  fontWeight: "600",
-},
+    color: AI_GREEN,
+    fontSize: 13,
+    fontWeight: "600",
+  },
 });
-

@@ -498,19 +498,20 @@ export default function ProductDetails() {
           transform: [{ translateY: lift }],
         }}
       >
-        <Animated.ScrollView
-          style={{ flex: 1 }}
-          contentContainerStyle={{ paddingBottom: 140 }}
-          showsVerticalScrollIndicator={false}
-          bounces={false}
-          decelerationRate={0.998}
-          scrollEventThrottle={16}
-          overScrollMode="never"
-          onScroll={Animated.event(
-            [{ nativeEvent: { contentOffset: { y: scrollY } } }],
-            { useNativeDriver: true },
-          )}
-        >
+       <Animated.ScrollView
+  style={{ flex: 1 }}
+  contentContainerStyle={{ paddingBottom: 140 }}
+  showsVerticalScrollIndicator={false}
+  bounces={false}
+  decelerationRate="fast"
+  nestedScrollEnabled={false}
+  scrollEventThrottle={16}
+  overScrollMode="never"
+  onScroll={Animated.event(
+    [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+    { useNativeDriver: true },
+  )}
+>
           {/* IMAGE GALLERY - no sticky transform = no flicker */}
           <View style={{ height: GALLERY_H, backgroundColor: "#07080C" }}>
             {images.length > 0 ? (
@@ -921,46 +922,48 @@ export default function ProductDetails() {
               <Ionicons name="chevron-forward" size={14} color={MUTED} />
             </TouchableOpacity>
 
-            {/* Message Seller */}
-            <Text style={styles.sectionEyebrow}>Message Seller</Text>
-            {showProductCommunication && (
-              <TouchableOpacity
-                onPress={handleMessageSeller}
-                disabled={messaging}
-                activeOpacity={0.88}
-                style={styles.commCard}
-              >
-                <LinearGradient
-                  colors={["#13201A", "#111820"]}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 1 }}
-                  style={StyleSheet.absoluteFillObject}
-                />
+            {/* Message Seller — never show for the product's own seller */}
+{showProductCommunication && (
+  <>
+    <Text style={styles.sectionEyebrow}>Message Seller</Text>
+    <TouchableOpacity
+      onPress={handleMessageSeller}
+      disabled={messaging}
+      activeOpacity={0.88}
+      style={styles.commCard}
+    >
+      <LinearGradient
+        colors={["#13201A", "#111820"]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={StyleSheet.absoluteFillObject}
+      />
 
-                {messaging ? (
-                  <ActivityIndicator size="small" color={AI_GREEN} />
-                ) : (
-                  <>
-                    <View style={styles.commIcon}>
-                      <Ionicons
-                        name="chatbubble-ellipses"
-                        size={18}
-                        color={AI_GREEN}
-                      />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.commTitle}>Ask about this product</Text>
-                      <Text style={styles.commSub}>
-                        Ask questions · Continues inside Plazore
-                      </Text>
-                    </View>
-                    <View style={styles.commArrow}>
-                      <Ionicons name="arrow-forward" size={16} color={TEXT} />
-                    </View>
-                  </>
-                )}
-              </TouchableOpacity>
-            )}
+      {messaging ? (
+        <ActivityIndicator size="small" color={AI_GREEN} />
+      ) : (
+        <>
+          <View style={styles.commIcon}>
+            <Ionicons
+              name="chatbubble-ellipses"
+              size={18}
+              color={AI_GREEN}
+            />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.commTitle}>Ask about this product</Text>
+            <Text style={styles.commSub}>
+              Ask questions · Continues inside Plazore
+            </Text>
+          </View>
+          <View style={styles.commArrow}>
+            <Ionicons name="arrow-forward" size={16} color={TEXT} />
+          </View>
+        </>
+      )}
+    </TouchableOpacity>
+  </>
+)}
           </View>
         </Animated.ScrollView>
 
@@ -1237,7 +1240,7 @@ availableText: {
     color: "#FFFFFF",
     fontSize: 14.5,
     fontStyle: "italic",
-    fontWeight: "800",
+    fontWeight: "300",
     marginBottom: 12,
     marginTop: 1,
     opacity: 0.9,

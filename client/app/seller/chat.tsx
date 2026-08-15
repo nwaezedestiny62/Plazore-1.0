@@ -1,350 +1,572 @@
-import { Ionicons } from '@expo/vector-icons'
-import { useFocusEffect, useRouter } from 'expo-router'
-import React, { useCallback, useRef, useState } from 'react'
+import { Ionicons } from "@expo/vector-icons";
+import { useFocusEffect, useRouter } from "expo-router";
+import React, { useCallback, useMemo, useRef, useState } from "react";
 import {
-  ActivityIndicator,
   FlatList,
   Image,
   StatusBar,
+  StyleSheet,
   Text,
   TouchableOpacity,
   View,
-} from 'react-native'
-import { SafeAreaView } from 'react-native-safe-area-context'
-import { useAuth } from '@clerk/clerk-expo'
-import api from '@/constants/api'
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { useAuth } from "@clerk/clerk-expo";
+import api from "@/constants/api";
+
+const BG = "#090B0F";
+const SURFACE = "#11141A";
+const SURFACE_2 = "#171B22";
+const LINE = "#252A33";
+const TEXT = "#F5F7FA";
+const SECONDARY = "#A7ADB8";
+const MUTED = "#737A86";
+const AI_GREEN = "#10B981";
+const AI_BLUE = "#3B82F6";
+
+const INACTIVITY_MS = 2 * 24 * 60 * 60 * 1000; // 2 days
 
 type Conversation = {
-  _id: string
+  _id: string;
   product?: {
-    _id: string
-    name?: string
-    images?: string[]
-    price?: number
-  }
+    _id: string;
+    name?: string;
+    images?: string[];
+    price?: number;
+  };
   buyer?: {
-    _id: string
-    name?: string
-    image?: string
-  }
+    _id: string;
+    name?: string;
+    image?: string;
+  };
   seller?: {
-    _id: string
-    name?: string
-    storeName?: string
-    storeLogo?: string
-    image?: string
-  }
+    _id: string;
+    name?: string;
+    storeName?: string;
+    storeLogo?: string;
+    image?: string;
+  };
   lastMessage?: {
-    text?: string
-    createdAt?: string
-  }
-  unreadByBuyer?: number
-  unreadBySeller?: number
-  unreadCount?: number
-  myRole?: 'buyer' | 'seller' | null
-  updatedAt?: string
-  createdAt?: string
+    text?: string;
+    createdAt?: string;
+  };
+  unreadByBuyer?: number;
+  unreadBySeller?: number;
+  unreadCount?: number;
+  myRole?: "buyer" | "seller" | null;
+  updatedAt?: string;
+  createdAt?: string;
+};
+
+function getActivityTime(conv: Conversation): number {
+  const raw =
+    conv.lastMessage?.createdAt || conv.updatedAt || conv.createdAt || 0;
+  const t = new Date(raw).getTime();
+  return Number.isFinite(t) ? t : 0;
+}
+
+function isActiveConversation(conv: Conversation): boolean {
+  const activity = getActivityTime(conv);
+  if (!activity) return false;
+  return Date.now() - activity <= INACTIVITY_MS;
 }
 
 export default function SellerChat() {
-  const router = useRouter()
-  const { getToken, isSignedIn } = useAuth()
+  const router = useRouter();
+  const { getToken, isSignedIn } = useAuth();
 
-  const [conversations, setConversations] = useState<Conversation[]>([])
-  const [initialLoading, setInitialLoading] = useState(true)
-  const [refreshing, setRefreshing] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const getTokenRef = useRef(getToken);
+  getTokenRef.current = getToken;
 
-  const isFetching = useRef(false)
-  const mountedRef = useRef(true)
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [myUserId, setMyUserId] = useState<string | null>(null);
+  const [booted, setBooted] = useState(false);
+
+  const isFetching = useRef(false);
+  const mountedRef = useRef(true);
 
   React.useEffect(() => {
-    mountedRef.current = true
+    mountedRef.current = true;
     return () => {
-      mountedRef.current = false
+      mountedRef.current = false;
+    };
+  }, []);
+
+  const resolveMyUserId = useCallback(async (token: string) => {
+    const endpoints = ["/users/me", "/users/profile", "/user/me"];
+    for (const endpoint of endpoints) {
+      try {
+        const res = await api.get(endpoint, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const id = res.data?.data?._id || res.data?._id;
+        if (id) {
+          setMyUserId(String(id));
+          return String(id);
+        }
+      } catch {
+        // try next
+      }
     }
-  }, [])
+    return null;
+  }, []);
 
   const fetchConversations = useCallback(
     async (isRefresh = false) => {
       if (!isSignedIn) {
         if (mountedRef.current) {
-          setConversations([])
-          setInitialLoading(false)
-          setRefreshing(false)
+          setConversations([]);
+          setBooted(true);
+          setRefreshing(false);
         }
-        return
+        return;
       }
 
-      if (isFetching.current) return
-      isFetching.current = true
+      if (isFetching.current) return;
+      isFetching.current = true;
 
       try {
         if (mountedRef.current) {
-          setError(null)
-          if (isRefresh) setRefreshing(true)
+          setError(null);
+          if (isRefresh) setRefreshing(true);
         }
 
-        const token = await getToken()
+        const token = await getTokenRef.current();
         if (!token) {
-          if (mountedRef.current) setError('Please sign in again.')
-          return
+          if (mountedRef.current) setError("Please sign in again.");
+          return;
         }
 
-        const res = await api.get('/chat/conversations', {
+        // Resolve seller identity so we never show another store's threads
+        let uid = myUserId;
+        if (!uid) {
+          uid = await resolveMyUserId(token);
+        }
+
+        const res = await api.get("/chat/conversations", {
           headers: { Authorization: `Bearer ${token}` },
           timeout: 15000,
-        })
+        });
 
         if (res.data?.success) {
           const list: Conversation[] = Array.isArray(res.data.data)
             ? res.data.data
-            : []
+            : [];
 
-          // Seller only: keep chats where we are the seller, use unreadBySeller
+          const me = String(uid || "");
+
+          // ONLY conversations where THIS user is the seller for that product
           const sellerChats = list
+            .filter((conv) => {
+              if (conv.myRole === "seller") return true;
+              const sellerId = String(
+                (conv.seller as any)?._id || conv.seller || "",
+              );
+              return !!me && sellerId === me;
+            })
             .map((conv) => {
               const unread =
-                typeof conv.unreadCount === 'number' && conv.myRole === 'seller'
+                typeof conv.unreadCount === "number" && conv.myRole === "seller"
                   ? conv.unreadCount
-                  : conv.unreadBySeller || 0
+                  : conv.unreadBySeller || 0;
 
               return {
                 ...conv,
-                myRole: 'seller' as const,
+                myRole: "seller" as const,
                 unreadCount: unread,
-              }
+              };
             })
+            // 2 days of no messages → leave the dashboard
+            .filter(isActiveConversation);
 
-          if (mountedRef.current) setConversations(sellerChats)
+          if (mountedRef.current) setConversations(sellerChats);
         } else {
           if (mountedRef.current) {
-            setConversations([])
-            setError(res.data?.message || 'Failed to load chats')
+            setConversations([]);
+            setError(res.data?.message || "Failed to load chats");
           }
         }
       } catch (err: any) {
-        console.log('Seller chat fetch error:', err?.response?.data || err)
+        console.log("Seller chat fetch error:", err?.response?.data || err);
         if (mountedRef.current) {
           const msg =
             err?.response?.data?.message ||
             err?.message ||
-            'Network error. Please try again.'
-          if (msg === 'Network Error' || String(msg).toLowerCase().includes('network')) {
-            setError('No internet connection. Check your network and try again.')
+            "Network error. Please try again.";
+          if (
+            msg === "Network Error" ||
+            String(msg).toLowerCase().includes("network")
+          ) {
+            setError(
+              "No internet connection. Check your network and try again.",
+            );
           } else {
-            setError(msg)
+            setError(msg);
           }
         }
       } finally {
         if (mountedRef.current) {
-          setInitialLoading(false)
-          setRefreshing(false)
+          setBooted(true);
+          setRefreshing(false);
         }
-        isFetching.current = false
+        isFetching.current = false;
       }
     },
-    [getToken, isSignedIn]
-  )
+    [isSignedIn, myUserId, resolveMyUserId],
+  );
 
   useFocusEffect(
     useCallback(() => {
-      fetchConversations(false)
-    }, [fetchConversations])
-  )
+      fetchConversations(false);
+    }, [fetchConversations]),
+  );
 
-  const onRefresh = () => fetchConversations(true)
+  const onRefresh = () => fetchConversations(true);
 
   const formatTime = (dateString?: string) => {
-    if (!dateString) return ''
-    const date = new Date(dateString)
-    const now = new Date()
-    const diff = now.getTime() - date.getTime()
-    const days = Math.floor(diff / (1000 * 60 * 60 * 24))
+    if (!dateString) return "";
+    const date = new Date(dateString);
+    const now = new Date();
+    const diff = now.getTime() - date.getTime();
+    const days = Math.floor(diff / (1000 * 60 * 60 * 24));
 
     if (days === 0) {
-      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      return date.toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+      });
     }
-    if (days === 1) return 'Yesterday'
-    if (days < 7) return date.toLocaleDateString([], { weekday: 'short' })
-    return date.toLocaleDateString([], { day: 'numeric', month: 'short' })
-  }
+    if (days === 1) return "Yesterday";
+    if (days < 7) return date.toLocaleDateString([], { weekday: "short" });
+    return date.toLocaleDateString([], { day: "numeric", month: "short" });
+  };
 
   const getUnread = (conv: Conversation) =>
-    typeof conv.unreadCount === 'number'
+    typeof conv.unreadCount === "number"
       ? conv.unreadCount
-      : conv.unreadBySeller || 0
+      : conv.unreadBySeller || 0;
 
-  const getBuyerName = (conv: Conversation) => conv.buyer?.name || 'Buyer'
+  const getBuyerName = (conv: Conversation) => conv.buyer?.name || "Buyer";
 
-  if (initialLoading) {
-    return (
-      <View className="flex-1 bg-[#060D18] justify-center items-center">
-        <StatusBar barStyle="light-content" />
-        <ActivityIndicator size="large" color="#12B76A" />
-        <Text className="text-[#5A6F88] mt-5 text-[13px]">Loading chats…</Text>
-      </View>
-    )
-  }
+  const sorted = useMemo(() => {
+    return [...conversations].sort(
+      (a, b) => getActivityTime(b) - getActivityTime(a),
+    );
+  }, [conversations]);
 
   return (
-    <View className="flex-1 bg-[#060D18]">
+    <View style={styles.root}>
       <StatusBar barStyle="light-content" />
-
-      <SafeAreaView edges={['top']} className="flex-1">
-        {/* Header — breathing space */}
-        <View className="px-6 pt-6 pb-5">
-          <Text className="text-[#5A6F88] text-[11px] font-semibold tracking-[2.5px] uppercase mb-1">
-            Seller Lounge
-          </Text>
-          <Text className="text-[#E8F1FF] font-extrabold text-[26px] leading-8">
-            Chats
-          </Text>
-          <Text className="text-[#5A6F88] text-[14px] mt-2 leading-5">
-            Messages from buyers about your products. Chats clear after 2 days of inactivity.
+      <SafeAreaView edges={["top"]} style={{ flex: 1 }}>
+        {/* Header */}
+        <View style={styles.header}>
+          <Text style={styles.eyebrow}>STOREFRONT</Text>
+          <Text style={styles.title}>Buyer messages</Text>
+          <Text style={styles.subtitle}>
+            Only chats about your products. Threads with no activity for 2 days
+            leave this list automatically.
           </Text>
         </View>
 
         {!!error && (
-          <View className="mx-6 mb-4 bg-[#140E12] border border-[#3A1F2A] rounded-2xl px-5 py-4">
-            <Text className="text-[#FF8A9A] text-[13px] text-center leading-5">
-              {error}
-            </Text>
+          <View style={styles.errorBox}>
+            <Text style={styles.errorText}>{error}</Text>
             <TouchableOpacity
               onPress={() => fetchConversations(false)}
-              activeOpacity={0.8}
-              className="mt-3 items-center"
+              activeOpacity={0.85}
+              style={styles.errorRetry}
             >
-              <Text className="text-[#9EC5FF] font-semibold text-[13px]">
-                Try again
-              </Text>
+              <Text style={styles.errorRetryText}>Try again</Text>
             </TouchableOpacity>
           </View>
         )}
 
         <FlatList
-          data={conversations}
+          data={sorted}
           keyExtractor={(item) => item._id}
-          contentContainerStyle={{
-            paddingHorizontal: 20,
-            paddingTop: 4,
-            paddingBottom: 120,
-            flexGrow: 1,
-          }}
+          contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
           refreshing={refreshing}
           onRefresh={onRefresh}
-          ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
+          ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
           ListEmptyComponent={
-            <View className="flex-1 items-center justify-center pt-20 px-8">
-              <View
-                className="bg-[#0C1520] border border-[#1A2A3A] items-center justify-center mb-6"
-                style={{ width: 88, height: 88, borderRadius: 28 }}
-              >
-                <Ionicons name="chatbubbles-outline" size={36} color="#12B76A" />
-              </View>
-
-              <Text className="text-[#E8F1FF] font-bold text-[20px] text-center">
-                No chats yet
-              </Text>
-
-              <Text className="text-[#5A6F88] text-[14px] mt-3 text-center leading-6">
-                When a buyer messages you about one of your products, it will show up here.
-              </Text>
-
-              <View className="mt-8 px-4 py-3 rounded-2xl bg-[#0C1520] border border-[#1A2A3A]">
-                <Text className="text-[#3A4A5C] text-[12px] text-center leading-5">
-                  Conversations automatically disappear after 2 days of no activity.
+            booted ? (
+              <View style={styles.empty}>
+                <View style={styles.emptyIcon}>
+                  <Ionicons
+                    name="chatbubbles-outline"
+                    size={28}
+                    color={AI_GREEN}
+                  />
+                </View>
+                <Text style={styles.emptyTitle}>No buyer messages</Text>
+                <Text style={styles.emptyBody}>
+                  When someone messages you about one of your products, it will
+                  appear here — only on this storefront.
                 </Text>
               </View>
-            </View>
+            ) : (
+              <View style={styles.empty} />
+            )
           }
           renderItem={({ item }) => {
-            const unread = getUnread(item)
-            const product = item.product
-            const lastText = item.lastMessage?.text || 'No messages yet'
+            const unread = getUnread(item);
+            const product = item.product;
+            const lastText = item.lastMessage?.text || "No messages yet";
             const time = formatTime(
-              item.lastMessage?.createdAt || item.updatedAt || item.createdAt
-            )
-            const hasUnread = unread > 0
+              item.lastMessage?.createdAt || item.updatedAt || item.createdAt,
+            );
+            const hasUnread = unread > 0;
 
             return (
               <TouchableOpacity
                 activeOpacity={0.88}
                 onPress={() => router.push(`/chat/${item._id}` as any)}
-                className="bg-[#0C1520] border rounded-[24px] px-4 py-4 flex-row items-center"
-                style={{
-                  borderColor: hasUnread ? 'rgba(18,183,106,0.4)' : '#1A2A3A',
-                }}
+                style={[styles.card, hasUnread && styles.cardUnread]}
               >
-                <View className="relative">
+                <View style={styles.thumbWrap}>
                   {product?.images?.[0] ? (
                     <Image
                       source={{ uri: product.images[0] }}
-                      className="w-14 h-14 rounded-2xl bg-[#13263B]"
+                      style={styles.thumb}
                     />
                   ) : item.buyer?.image ? (
                     <Image
                       source={{ uri: item.buyer.image }}
-                      className="w-14 h-14 rounded-2xl bg-[#13263B]"
+                      style={styles.thumb}
                     />
                   ) : (
-                    <View className="w-14 h-14 rounded-2xl bg-[#13263B] items-center justify-center">
-                      <Ionicons name="person-outline" size={22} color="#5A6F88" />
+                    <View style={[styles.thumb, styles.thumbFallback]}>
+                      <Ionicons
+                        name="person-outline"
+                        size={20}
+                        color={MUTED}
+                      />
                     </View>
                   )}
-                  {hasUnread && (
-                    <View
-                      className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-[#12B76A]"
-                      style={{ borderWidth: 2, borderColor: '#0C1520' }}
-                    />
-                  )}
+                  {hasUnread ? <View style={styles.unreadDot} /> : null}
                 </View>
 
-                <View className="ml-3.5 flex-1">
-                  <View className="flex-row items-center justify-between">
-                    <Text
-                      className="text-[#E8F1FF] font-bold text-[15px] flex-1 pr-2"
-                      numberOfLines={1}
-                    >
+                <View style={styles.cardBody}>
+                  <View style={styles.rowTop}>
+                    <Text style={styles.partyName} numberOfLines={1}>
                       {getBuyerName(item)}
                     </Text>
-                    <Text className="text-[#5A6F88] text-[11px]">{time}</Text>
+                    <Text style={styles.time}>{time}</Text>
                   </View>
 
-                  <Text
-                    className="text-[#7A93A8] text-[12.5px] mt-1"
-                    numberOfLines={1}
-                  >
-                    {product?.name || 'Product conversation'}
+                  <Text style={styles.productLine} numberOfLines={1}>
+                    {product?.name || "Product conversation"}
                   </Text>
 
-                  <View className="flex-row items-center mt-2">
+                  <View style={styles.rowBottom}>
                     <Text
-                      className={`text-[13px] flex-1 leading-5 ${
-                        hasUnread
-                          ? 'text-[#B8D4FF] font-semibold'
-                          : 'text-[#5A6F88]'
-                      }`}
+                      style={[
+                        styles.preview,
+                        hasUnread && styles.previewUnread,
+                      ]}
                       numberOfLines={1}
                     >
                       {lastText}
                     </Text>
-
-                    {hasUnread && (
-                      <View className="min-w-[22px] h-[22px] px-1.5 rounded-full bg-[#12B76A] items-center justify-center ml-2">
-                        <Text className="text-[#04140C] text-[10px] font-bold">
-                          {unread > 99 ? '99+' : unread}
+                    {hasUnread ? (
+                      <View style={styles.badge}>
+                        <Text style={styles.badgeText}>
+                          {unread > 99 ? "99+" : unread}
                         </Text>
                       </View>
-                    )}
+                    ) : null}
                   </View>
                 </View>
               </TouchableOpacity>
-            )
+            );
           }}
         />
       </SafeAreaView>
     </View>
-  )
+  );
 }
+
+const styles = StyleSheet.create({
+  root: {
+    flex: 1,
+    backgroundColor: BG,
+  },
+
+  header: {
+    paddingHorizontal: 20,
+    paddingTop: 10,
+    paddingBottom: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: LINE,
+  },
+  eyebrow: {
+    color: AI_GREEN,
+    fontSize: 10,
+    fontWeight: "700",
+    letterSpacing: 1.8,
+    marginBottom: 4,
+  },
+  title: {
+    color: TEXT,
+    fontSize: 24,
+    fontWeight: "800",
+    letterSpacing: -0.5,
+  },
+  subtitle: {
+    marginTop: 10,
+    color: SECONDARY,
+    fontSize: 13,
+    lineHeight: 19,
+  },
+
+  errorBox: {
+    marginHorizontal: 20,
+    marginTop: 12,
+    backgroundColor: "rgba(249,112,102,0.1)",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "rgba(249,112,102,0.35)",
+    padding: 14,
+  },
+  errorText: {
+    color: "#FECACA",
+    fontSize: 13,
+    textAlign: "center",
+    lineHeight: 19,
+  },
+  errorRetry: {
+    marginTop: 10,
+    alignItems: "center",
+  },
+  errorRetryText: {
+    color: AI_BLUE,
+    fontWeight: "600",
+    fontSize: 13,
+  },
+
+  listContent: {
+    paddingHorizontal: 20,
+    paddingTop: 14,
+    paddingBottom: 120,
+    flexGrow: 1,
+  },
+
+  empty: {
+    alignItems: "center",
+    paddingTop: 72,
+    paddingHorizontal: 28,
+  },
+  emptyIcon: {
+    width: 64,
+    height: 64,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(16,185,129,0.1)",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "rgba(16,185,129,0.25)",
+    marginBottom: 18,
+  },
+  emptyTitle: {
+    color: TEXT,
+    fontSize: 18,
+    fontWeight: "700",
+    letterSpacing: -0.2,
+  },
+  emptyBody: {
+    color: SECONDARY,
+    fontSize: 13,
+    textAlign: "center",
+    marginTop: 8,
+    lineHeight: 20,
+  },
+
+  card: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: SURFACE,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: LINE,
+    padding: 12,
+  },
+  cardUnread: {
+    borderColor: "rgba(16,185,129,0.4)",
+  },
+  thumbWrap: {
+    position: "relative",
+  },
+  thumb: {
+    width: 52,
+    height: 52,
+    backgroundColor: SURFACE_2,
+  },
+  thumbFallback: {
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  unreadDot: {
+    position: "absolute",
+    top: -2,
+    right: -2,
+    width: 10,
+    height: 10,
+    backgroundColor: AI_GREEN,
+    borderWidth: 2,
+    borderColor: SURFACE,
+  },
+  cardBody: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  rowTop: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+  },
+  partyName: {
+    flex: 1,
+    color: TEXT,
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  time: {
+    color: MUTED,
+    fontSize: 11,
+  },
+  productLine: {
+    color: MUTED,
+    fontSize: 12,
+    marginTop: 3,
+  },
+  rowBottom: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 6,
+    gap: 8,
+  },
+  preview: {
+    flex: 1,
+    color: MUTED,
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  previewUnread: {
+    color: TEXT,
+    fontWeight: "600",
+  },
+  badge: {
+    minWidth: 22,
+    height: 22,
+    paddingHorizontal: 6,
+    backgroundColor: AI_GREEN,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  badgeText: {
+    color: BG,
+    fontSize: 10,
+    fontWeight: "800",
+  },
+});

@@ -145,8 +145,6 @@ export default function PlazoreAIScreen() {
               </View>
             </View>
           </View>
-
-          <Text style={styles.loaderText}>Interpreting this piece…</Text>
         </View>
       ) : (
         /* ── CONTENT ── */
@@ -155,7 +153,7 @@ export default function PlazoreAIScreen() {
           contentContainerStyle={{ padding: 20, paddingBottom: 70 }}
           showsVerticalScrollIndicator={false}
           bounces={false}
-          decelerationRate={0.998}
+          decelerationRate="normal"
         >
           <Animated.View
             style={{

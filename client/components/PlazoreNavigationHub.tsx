@@ -52,13 +52,13 @@ const DEBOUNCE = 280
 const TILE_COLORS: Record<string, { bg: string; accent: string; glow: string }> = {
   home:             { bg: '#0A1C14', accent: '#00E575', glow: 'rgba(0,229,117,0.25)' },
   cart:             { bg: '#0D172A', accent: '#3B82F6', glow: 'rgba(59,130,246,0.25)' },
-  wishlist:         { bg: '#230E19', accent: '#F43F5E', glow: 'rgba(244,63,94,0.25)' },
+  saved_stores: { bg: '#1A160E', accent: '#D4A853', glow: 'rgba(212,168,83,0.25)' },
   profile:          { bg: '#1A0E2A', accent: '#A78BFA', glow: 'rgba(167,139,250,0.25)' },
   showroom_horizon: { bg: '#091520', accent: '#38BDF8', glow: 'rgba(56,189,248,0.25)' },
-  showroom_chamber: { bg: '#1F180F', accent: '#F59E0B', glow: 'rgba(245,158,11,0.25)' },
+  showroom_chamber: { bg: '#0A1818', accent: '#2DD4BF', glow: 'rgba(45,212,191,0.25)' },
   showroom_signal:  { bg: '#1E0E28', accent: '#C084FC', glow: 'rgba(192,132,252,0.25)' },
   showroom_locale:  { bg: '#1E1710', accent: '#FB923C', glow: 'rgba(251,146,60,0.25)' },
-  showroom_atelier: { bg: '#1D1810', accent: '#C5A880', glow: 'rgba(197,168,128,0.25)' },
+  showroom_atelier: { bg: '#1A0F14', accent: '#F472B6', glow: 'rgba(244,114,182,0.25)' },
   categories:       { bg: '#0B1E28', accent: '#22D3EE', glow: 'rgba(34,211,238,0.25)' },
   new:              { bg: '#251A0A', accent: '#FBBF24', glow: 'rgba(251,191,36,0.25)' },
   trending:         { bg: '#28120A', accent: '#FB923C', glow: 'rgba(251,146,60,0.25)' },
@@ -140,7 +140,7 @@ const SECTIONS: NavSection[] = [
     items: [
       { id: 'home', label: 'Home', subtitle: 'Main showroom', icon: 'home', href: '/(tabs)' },
       { id: 'cart', label: 'Cart', subtitle: 'Your bag', icon: 'bag-handle', href: '/(tabs)/cart' },
-      { id: 'wishlist', label: 'Wishlist', subtitle: 'Saved pieces', icon: 'heart', href: '/(tabs)/favorites' },
+{ id: 'saved_stores', label: 'Saved Stores', subtitle: 'Your floors', icon: 'bookmark', href: '/saved-stores' },
       { id: 'profile', label: 'Profile', subtitle: 'Account', icon: 'person', href: '/(tabs)/profile' },
     ],
   },
@@ -1082,7 +1082,7 @@ const navigate = (href?: string, itemId?: string) => {
                     </View>
                     <View style={{ flex: 1 }}>
                       <Text style={{ color: TEXT, fontSize: 15, fontWeight: '700' }}>
-                        {isSeller ? 'Seller Dashboard' : 'Open a Store'}
+                        {isSeller ? 'Storefront' : 'Open a Store'}
                       </Text>
                       <Text style={{ color: TEXT_DIM, fontSize: 12, marginTop: 2 }}>
                         {isSeller

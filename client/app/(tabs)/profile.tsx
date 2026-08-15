@@ -1,472 +1,912 @@
-import api from '@/constants/api'
-import PlazoreNavigationHub from '@/components/PlazoreNavigationHub'
-import { useAuth, useClerk, useUser } from '@clerk/clerk-expo'
-import { Ionicons } from '@expo/vector-icons'
-import { LinearGradient } from 'expo-linear-gradient'
-import { useFocusEffect, useRouter } from 'expo-router'
-import React, { useCallback, useState } from 'react'
+import api from "@/constants/api";
+import PlazoreNavigationHub from "@/components/PlazoreNavigationHub";
+import { useAuth, useClerk, useUser } from "@clerk/clerk-expo";
+import { Ionicons } from "@expo/vector-icons";
+import { useFocusEffect, useRouter } from "expo-router";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
+  Animated,
+  Easing,
   Image,
   Pressable,
   StatusBar,
+  StyleSheet,
   Text,
   TouchableOpacity,
   View,
-} from 'react-native'
-import { ScrollView } from 'react-native-gesture-handler'
-import { SafeAreaView } from 'react-native-safe-area-context'
+} from "react-native";
+import { ScrollView } from "react-native-gesture-handler";
+import { SafeAreaView } from "react-native-safe-area-context";
 
-const LOUNGE_MENU = [
-  {
-    id: 'messages',
-    title: 'Messages',
-    subtitle: 'Chats with sellers about products',
-    icon: 'chatbubbles-outline',
-    route: '/messages',
-  },
-  {
-    id: 'orders',
-    title: 'My Orders',
-    subtitle: 'Track purchases & deliveries',
-    icon: 'cube-outline',
-    route: '/orders',
-  },
-  {
-    id: 'addresses',
-    title: 'Shipping Addresses',
-    subtitle: 'Manage delivery locations',
-    icon: 'location-outline',
-    route: '/addresses',
-  },
-  {
-    id: 'notifications',
-    title: 'Notifications',
-    subtitle: 'Orders, updates & alerts',
-    icon: 'notifications-outline',
-    route: '/notifications',
-  },
-  {
-    id: 'settings',
-    title: 'Settings',
-    subtitle: 'Profile, region & preferences',
-    icon: 'settings-outline',
-    route: '/settings',
-  },
-]
+const BG = "#090B0F";
+const SURFACE = "#11141A";
+const SURFACE_2 = "#171B22";
+const LINE = "#252A33";
+const TEXT = "#F5F7FA";
+const SECONDARY = "#A7ADB8";
+const MUTED = "#737A86";
+const AI_GREEN = "#10B981";
+const AI_BLUE = "#3B82F6";
+const DANGER = "#F97066";
 
-/* Bold custom 3-line toggle */
+const MENU = [
+  {
+    id: "messages",
+    title: "Messages",
+    subtitle: "Product conversations",
+    icon: "chatbubbles-outline" as const,
+    route: "/messages",
+  },
+  {
+    id: "orders",
+    title: "Orders",
+    subtitle: "Purchases & delivery",
+    icon: "cube-outline" as const,
+    route: "/orders",
+  },
+  {
+    id: "addresses",
+    title: "Addresses",
+    subtitle: "Shipping locations",
+    icon: "location-outline" as const,
+    route: "/addresses",
+  },
+  {
+    id: "notifications",
+    title: "Notifications",
+    subtitle: "Orders & alerts",
+    icon: "notifications-outline" as const,
+    route: "/notifications",
+  },
+  {
+    id: "settings",
+    title: "Settings",
+    subtitle: "Account & preferences",
+    icon: "settings-outline" as const,
+    route: "/settings",
+  },
+];
+
 function MenuToggle({ onPress }: { onPress: () => void }) {
+  const scale = useRef(new Animated.Value(1)).current;
+
   return (
     <Pressable
       onPress={onPress}
-      hitSlop={12}
-      style={{
-        width: 44,
-        height: 44,
-        borderRadius: 16,
-        backgroundColor: '#0C1520',
-        borderWidth: 1,
-        borderColor: '#1A2A3A',
-        alignItems: 'center',
-        justifyContent: 'center',
-      }}
+      onPressIn={() =>
+        Animated.timing(scale, {
+          toValue: 0.9,
+          duration: 90,
+          useNativeDriver: true,
+        }).start()
+      }
+      onPressOut={() =>
+        Animated.timing(scale, {
+          toValue: 1,
+          duration: 160,
+          useNativeDriver: true,
+        }).start()
+      }
+      hitSlop={14}
+      accessibilityRole="button"
+      accessibilityLabel="Open navigation"
+      style={styles.menuHit}
     >
-      <View style={{ width: 20, gap: 5 }}>
-        <View style={{ height: 2.4, backgroundColor: '#DCEBFF', borderRadius: 2, width: 20 }} />
-        <View style={{ height: 2.4, backgroundColor: '#DCEBFF', borderRadius: 2, width: 13 }} />
-        <View style={{ height: 2.4, backgroundColor: '#DCEBFF', borderRadius: 2, width: 20 }} />
-      </View>
+      <Animated.View style={[styles.menuLines, { transform: [{ scale }] }]}>
+        <View style={[styles.menuLine, { width: 22 }]} />
+        <View style={[styles.menuLine, { width: 15 }]} />
+        <View style={[styles.menuLine, { width: 22 }]} />
+      </Animated.View>
     </Pressable>
-  )
+  );
+}
+
+function ProfilePreloader() {
+  const rotation = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.timing(rotation, {
+        toValue: 1,
+        duration: 2600,
+        easing: Easing.linear,
+        useNativeDriver: true,
+      }),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, []);
+
+  const rotate = rotation.interpolate({
+    inputRange: [0, 1],
+    outputRange: ["0deg", "360deg"],
+  });
+
+  return (
+    <View style={styles.loaderRoot}>
+      <StatusBar barStyle="light-content" />
+      <View style={styles.orbWrapper}>
+        <Animated.View style={[styles.orbRing, { transform: [{ rotate }] }]} />
+        <View style={styles.orbLogoWrap}>
+          <Image
+            source={require("@/assets/logo-1.png")}
+            style={styles.loaderLogo}
+            resizeMode="contain"
+          />
+        </View>
+      </View>
+      <Text style={styles.loaderText}>Opening profile…</Text>
+    </View>
+  );
+}
+
+function Badge({ value }: { value: number }) {
+  if (value <= 0) return null;
+  const label = value > 99 ? "99+" : String(value);
+  return (
+    <View style={styles.badge}>
+      <Text style={styles.badgeText}>{label}</Text>
+    </View>
+  );
 }
 
 export default function Profile() {
-  const { user, signOut } = useClerk()
-  const { user: clerkUser } = useUser()
-  const { getToken, isSignedIn } = useAuth()
-  const router = useRouter()
+  const { user, signOut } = useClerk();
+  const { user: clerkUser } = useUser();
+  const { getToken, isSignedIn } = useAuth();
+  const router = useRouter();
 
-  const [hubOpen, setHubOpen] = useState(false)
-  const [unreadCount, setUnreadCount] = useState(0)
-  const [unreadMessages, setUnreadMessages] = useState(0)
+  const getTokenRef = useRef(getToken);
+  getTokenRef.current = getToken;
 
-  const role = (clerkUser?.publicMetadata?.role as string) || 'buyer'
+  const [hubOpen, setHubOpen] = useState(false);
+  const [unreadNotifs, setUnreadNotifs] = useState(0);
+  const [unreadMessages, setUnreadMessages] = useState(0);
+  const [booting, setBooting] = useState(true);
+  const [storeLogo, setStoreLogo] = useState<string | null>(null);
+
+  const inFlight = useRef(false);
+  const role = (clerkUser?.publicMetadata?.role as string) || "buyer";
 
   const fetchUnread = useCallback(async () => {
     if (!isSignedIn) {
-      setUnreadCount(0)
-      setUnreadMessages(0)
-      return
+      setUnreadNotifs(0);
+      setUnreadMessages(0);
+      setBooting(false);
+      return;
     }
+    if (inFlight.current) return;
+    inFlight.current = true;
+
     try {
-      const token = await getToken()
-
-      const res = await api.get('/notifications', {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-      if (res.data.success && Array.isArray(res.data.data)) {
-        const n = res.data.data.filter((x: any) => !x.isRead).length
-        setUnreadCount(n)
+      const token = await getTokenRef.current();
+      if (!token) {
+        setUnreadNotifs(0);
+        setUnreadMessages(0);
+        return;
       }
 
-      const chatRes = await api.get('/chat/conversations', {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-      if (chatRes.data.success && Array.isArray(chatRes.data.data)) {
-        const totalUnread = chatRes.data.data.reduce((sum: number, conv: any) => {
-          return sum + (conv.unreadByBuyer || 0) + (conv.unreadBySeller || 0)
-        }, 0)
-        setUnreadMessages(totalUnread)
+      try {
+        const res = await api.get("/notifications", {
+          headers: { Authorization: `Bearer ${token}` },
+          timeout: 12000,
+        });
+        if (res.data?.success && Array.isArray(res.data.data)) {
+          setUnreadNotifs(res.data.data.filter((x: any) => !x.isRead).length);
+        } else {
+          setUnreadNotifs(0);
+        }
+      } catch {
+        setUnreadNotifs(0);
       }
-    } catch {
-      // keep previous count
+
+      try {
+        const chatRes = await api.get("/chat/conversations", {
+          headers: { Authorization: `Bearer ${token}` },
+          timeout: 12000,
+        });
+        if (chatRes.data?.success && Array.isArray(chatRes.data.data)) {
+          const total = chatRes.data.data.reduce((sum: number, conv: any) => {
+            const myRole = conv.myRole as "buyer" | "seller" | null | undefined;
+            if (myRole === "buyer") return sum + (conv.unreadByBuyer || 0);
+            if (myRole === "seller") return sum + (conv.unreadBySeller || 0);
+            return sum + (conv.unreadByBuyer || 0);
+          }, 0);
+          setUnreadMessages(total);
+        } else {
+          setUnreadMessages(0);
+        }
+      } catch {
+        setUnreadMessages(0);
+      }
+    } finally {
+      inFlight.current = false;
+      setBooting(false);
     }
-  }, [getToken, isSignedIn])
+  }, [isSignedIn]);
 
   useFocusEffect(
     useCallback(() => {
-      fetchUnread()
-    }, [fetchUnread])
-  )
+      fetchUnread();
+    }, [fetchUnread]),
+  );
+
+  // Store logo for seller CTA — MUST be above any early return
+  useEffect(() => {
+    if (role !== "seller" || !isSignedIn) {
+      setStoreLogo(null);
+      return;
+    }
+
+    let alive = true;
+
+    (async () => {
+      try {
+        const token = await getTokenRef.current();
+        if (!token) return;
+
+        const endpoints = [
+          "/seller/store",
+          "/seller/me",
+          "/users/me",
+          "/users/profile",
+        ];
+
+        for (const ep of endpoints) {
+          try {
+            const res = await api.get(ep, {
+              headers: { Authorization: `Bearer ${token}` },
+              timeout: 10000,
+            });
+            const data = res.data?.data || res.data;
+            const logo =
+              data?.storeLogo ||
+              data?.store?.storeLogo ||
+              data?.logo ||
+              null;
+            if (logo && alive) {
+              setStoreLogo(String(logo));
+              return;
+            }
+          } catch {
+            // try next
+          }
+        }
+        if (alive) setStoreLogo(null);
+      } catch {
+        if (alive) setStoreLogo(null);
+      }
+    })();
+
+    return () => {
+      alive = false;
+    };
+  }, [role, isSignedIn]);
 
   const handleLogout = async () => {
-    await signOut()
-    router.replace('/sign-in')
+    await signOut();
+    router.replace("/sign-in");
+  };
+
+  // Early return ONLY after all hooks
+  if (booting && isSignedIn) {
+    return <ProfilePreloader />;
   }
 
-  const badgeLabel =
-    unreadCount > 99 ? '99+' : unreadCount > 0 ? String(unreadCount) : ''
-
-  const messagesBadge =
-    unreadMessages > 99 ? '99+' : unreadMessages > 0 ? String(unreadMessages) : ''
-
   return (
-    <SafeAreaView className="flex-1 bg-[#060B14]" edges={['top']}>
+    <View style={styles.root}>
       <StatusBar barStyle="light-content" />
+      <SafeAreaView edges={["top"]} style={{ flex: 1 }}>
+        <View style={styles.header}>
+          <View style={styles.headerLeft}>
+            <MenuToggle onPress={() => setHubOpen(true)} />
+            <Text style={styles.title}>Profile</Text>
+          </View>
 
-      <View className="px-5 pt-2 pb-3 flex-row items-center justify-between">
-        <View className="flex-row items-center gap-3">
-          <MenuToggle onPress={() => setHubOpen(true)} />
-          <View>
-            <Text className="text-[#6B8299] text-[11px] font-semibold tracking-[3px] uppercase">
-              Plazore
-            </Text>
-            <Text className="text-white text-[22px] font-extrabold mt-0.5">
-              Lounge
-            </Text>
+          <View style={styles.headerRight}>
+            <TouchableOpacity
+              onPress={() => router.push("/notifications" as any)}
+              activeOpacity={0.85}
+              style={styles.iconBtn}
+            >
+              <Ionicons name="notifications-outline" size={20} color={TEXT} />
+              {unreadNotifs > 0 && (
+                <View style={styles.iconBadge}>
+                  <Text style={styles.iconBadgeText}>
+                    {unreadNotifs > 99 ? "99+" : unreadNotifs}
+                  </Text>
+                </View>
+              )}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={() => router.push("/settings" as any)}
+              activeOpacity={0.85}
+              style={styles.iconBtn}
+            >
+              <Ionicons name="settings-outline" size={20} color={TEXT} />
+            </TouchableOpacity>
           </View>
         </View>
 
-        <View className="flex-row items-center gap-3">
-          <TouchableOpacity
-            onPress={() => router.push('/notifications' as any)}
-            activeOpacity={0.8}
-            className="w-11 h-11 rounded-2xl bg-[#0C1520] border border-[#1A2A3A] items-center justify-center"
-          >
-            <Ionicons name="notifications-outline" size={22} color="#DCEBFF" />
-            {unreadCount > 0 && (
-              <View className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-[#FF6B8A] items-center justify-center border border-[#060B14]">
-                <Text className="text-white text-[10px] font-bold">
-                  {badgeLabel}
-                </Text>
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={styles.scrollContent}
+          decelerationRate="fast"
+          bounces={false}
+        >
+          {!user ? (
+            <View style={styles.guestCard}>
+              <View style={styles.guestAvatar}>
+                <Ionicons name="person-outline" size={32} color={MUTED} />
               </View>
-            )}
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            onPress={() => router.push('/settings' as any)}
-            activeOpacity={0.8}
-            className="w-11 h-11 rounded-2xl bg-[#0C1520] border border-[#1A2A3A] items-center justify-center"
-          >
-            <Ionicons name="settings-outline" size={22} color="#DCEBFF" />
-          </TouchableOpacity>
-        </View>
-      </View>
-
-      <ScrollView
-        showsVerticalScrollIndicator={false}
-        className="flex-1"
-        contentContainerStyle={{ paddingBottom: 140 }}
-      >
-        {!user ? (
-          <View className="flex-1 items-center justify-center px-6 pt-16">
-            <LinearGradient
-              colors={['#0F1C2E', '#0A1420']}
-              className="w-full rounded-[36px] border border-[#1B314B] p-8 items-center"
-            >
-              <View className="w-28 h-28 rounded-full bg-[#13263C] items-center justify-center border border-[#28435F]">
-                <Ionicons name="person-outline" size={48} color="#A8C0D4" />
-              </View>
-              <Text className="text-white text-[26px] font-extrabold mt-6">
-                Welcome to Plazore
-              </Text>
-              <Text className="text-[#8EA4B8] text-center mt-3 text-[15px] leading-6 px-2">
-                Step into the digital mall. Bright aisles, cool air, and everything
-                you need in one place.
+              <Text style={styles.guestTitle}>Welcome to Plazore</Text>
+              <Text style={styles.guestBody}>
+                Sign in to manage orders, messages, and your account.
               </Text>
               <TouchableOpacity
-                onPress={() => router.push('/sign-in')}
+                onPress={() => router.push("/sign-in")}
                 activeOpacity={0.9}
-                className="bg-[#DCEBFF] mt-8 w-full py-4 rounded-2xl items-center"
+                style={styles.guestCta}
               >
-                <Text className="text-[#07111F] font-bold text-[16px]">
-                  Enter the Lounge
-                </Text>
+                <Text style={styles.guestCtaText}>Sign in</Text>
               </TouchableOpacity>
-            </LinearGradient>
-          </View>
-        ) : (
-          <>
-            <View className="px-5 mt-1">
-              <LinearGradient
-                colors={['#0F1C2E', '#0A1420']}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                className="rounded-[32px] border border-[#1E334A] overflow-hidden"
-              >
-                <View className="px-6 pt-7 pb-6">
-                  <View className="flex-row items-center">
-                    <View className="relative">
-                      <Image
-                        source={{ uri: user.imageUrl }}
-                        style={{
-                          width: 84,
-                          height: 84,
-                          borderRadius: 28,
-                          borderWidth: 2,
-                          borderColor: '#2A4560',
-                        }}
-                      />
-                      {role === 'seller' && (
-                        <View className="absolute -bottom-1 -right-1 w-7 h-7 rounded-full bg-[#1A2F28] border border-[#2A4A3A] items-center justify-center">
-                          <Ionicons
-                            name="shield-checkmark"
-                            size={14}
-                            color="#8FE3B0"
-                          />
-                        </View>
-                      )}
-                    </View>
-
-                    <View className="ml-4 flex-1">
-                      <View className="flex-row items-center gap-2 mb-1.5">
-                        <View className="bg-[#13263B] px-3 py-1 rounded-full border border-[#21374D]">
-                          <Text className="text-[#AFC3D6] text-[10px] font-semibold tracking-widest uppercase">
-                            {role === 'seller' ? 'Seller' : 'Member'}
-                          </Text>
-                        </View>
-                      </View>
-                      <Text className="text-white text-[22px] font-extrabold">
-                        {user.firstName || 'Member'}
-                      </Text>
-                      <Text
-                        className="text-[#7A93A8] text-[13px] mt-0.5"
-                        numberOfLines={1}
-                      >
-                        {user.emailAddresses[0]?.emailAddress}
-                      </Text>
-                    </View>
-                  </View>
-                </View>
-              </LinearGradient>
             </View>
+          ) : (
+            <>
+              <View style={styles.identity}>
+                <View style={styles.avatarWrap}>
+                  <Image
+                    source={{ uri: user.imageUrl }}
+                    style={styles.avatar}
+                  />
+                  {role === "seller" && (
+                    <View style={styles.sellerMark}>
+                      <Ionicons
+                        name="shield-checkmark"
+                        size={12}
+                        color={AI_GREEN}
+                      />
+                    </View>
+                  )}
+                </View>
+                <View style={{ flex: 1 }}>
+                  <View style={styles.rolePill}>
+                    <Text style={styles.roleText}>
+                      {role === "seller" ? "Seller" : "Member"}
+                    </Text>
+                  </View>
+                  <Text style={styles.name}>
+                    {user.firstName || "Member"}
+                  </Text>
+                  <Text style={styles.email} numberOfLines={1}>
+                    {user.emailAddresses[0]?.emailAddress}
+                  </Text>
+                </View>
+              </View>
 
-            <View className="px-5 mt-5">
-              {role === 'buyer' ? (
+              {role === "buyer" ? (
                 <TouchableOpacity
                   activeOpacity={0.9}
-                  onPress={() => router.push('/seller-register' as any)}
+                  onPress={() => router.push("/seller-register" as any)}
+                  style={styles.ctaCard}
                 >
-                  <LinearGradient
-                    colors={['#12243A', '#0C1A2A']}
-                    className="rounded-[28px] border border-[#243B55] p-5"
-                  >
-                    <View className="flex-row items-center">
-                      <View
-                        className="rounded-2xl bg-[#1C334D] items-center justify-center"
-                        style={{ width: 52, height: 52 }}
-                      >
-                        <Ionicons
-                          name="storefront-outline"
-                          size={26}
-                          color="#DCEBFF"
-                        />
-                      </View>
-                      <View className="ml-4 flex-1">
-                        <Text className="text-white text-[17px] font-bold">
-                          Become a Seller
-                        </Text>
-                        <Text className="text-[#7A93A8] text-[13px] mt-0.5 leading-5">
-                          Open your store and start selling
-                        </Text>
-                      </View>
-                      <Ionicons
-                        name="chevron-forward"
-                        size={20}
-                        color="#7A93A8"
-                      />
-                    </View>
-                  </LinearGradient>
+                  <View style={styles.ctaIcon}>
+                    <Ionicons
+                      name="storefront-outline"
+                      size={22}
+                      color={TEXT}
+                    />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.ctaTitle}>Become a Seller</Text>
+                    <Text style={styles.ctaSub}>
+                      Open your storefront on Plazore
+                    </Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color={MUTED} />
                 </TouchableOpacity>
               ) : (
                 <TouchableOpacity
                   activeOpacity={0.9}
-                  onPress={() => router.push('/seller' as any)}
+                  onPress={() => router.push("/seller" as any)}
+                  style={styles.ctaCardActive}
                 >
-                  <LinearGradient
-                    colors={['#DCEBFF', '#B8D4F0']}
-                    className="rounded-[28px] p-5"
-                  >
-                    <View className="flex-row items-center">
-                      <View
-                        className="rounded-2xl bg-white/40 items-center justify-center"
-                        style={{ width: 52, height: 52 }}
-                      >
-                        <Ionicons
-                          name="storefront"
-                          size={26}
-                          color="#07111F"
-                        />
-                      </View>
-                      <View className="ml-4 flex-1">
-                        <Text className="text-[#07111F] text-[17px] font-extrabold">
-                          Seller Lounge
-                        </Text>
-                        <Text className="text-[#3A5068] text-[13px] mt-0.5">
-                          Products, orders & analytics
-                        </Text>
-                      </View>
-                      <Ionicons
-                        name="arrow-forward"
-                        size={20}
-                        color="#07111F"
+                  <View style={styles.ctaIconActive}>
+                    {storeLogo ? (
+                      <Image
+                        source={{ uri: storeLogo }}
+                        style={styles.ctaStoreLogo}
+                        resizeMode="cover"
                       />
-                    </View>
-                  </LinearGradient>
-                </TouchableOpacity>
-              )}
-            </View>
-
-            <View className="px-5 mt-8">
-              <Text className="text-[#6B8299] text-[11px] font-semibold tracking-[2.5px] uppercase mb-3">
-                Quick Access
-              </Text>
-              <View className="flex-row gap-3">
-                <TouchableOpacity
-                  onPress={() => router.push('/messages' as any)}
-                  activeOpacity={0.85}
-                  className="flex-1 bg-[#0C1520] border border-[#1A2A3A] rounded-[24px] p-5"
-                >
-                  <View className="w-11 h-11 rounded-2xl bg-[#13263B] items-center justify-center mb-3 relative">
-                    <Ionicons name="chatbubbles-outline" size={22} color="#DCEBFF" />
-                    {unreadMessages > 0 && (
-                      <View className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-[#FF6B8A] items-center justify-center">
-                        <Text className="text-white text-[9px] font-bold">
-                          {messagesBadge}
-                        </Text>
-                      </View>
+                    ) : (
+                      <Ionicons name="chevron-forward" size={20} color={BG} />
                     )}
                   </View>
-                  <Text className="text-white font-bold text-[15px]">Messages</Text>
-                  <Text className="text-[#6B8299] text-[12px] mt-0.5">
-                    Chats with sellers
-                  </Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.ctaTitle, { color: BG }]}>
+                      Storefront
+                    </Text>
+                    <Text
+                      style={[
+                        styles.ctaSub,
+                        { color: "rgba(9,11,15,0.65)" },
+                      ]}
+                    >
+                      Products, orders & chats
+                    </Text>
+                  </View>
+                  <Ionicons name="arrow-forward" size={18} color={BG} />
+                </TouchableOpacity>
+              )}
+
+              <Text style={styles.sectionLabel}>QUICK ACCESS</Text>
+              <View style={styles.quickRow}>
+                <TouchableOpacity
+                  onPress={() => router.push("/messages" as any)}
+                  activeOpacity={0.85}
+                  style={styles.quickTile}
+                >
+                  <View style={styles.quickIconWrap}>
+                    <Ionicons
+                      name="chatbubbles-outline"
+                      size={20}
+                      color={TEXT}
+                    />
+                    <Badge value={unreadMessages} />
+                  </View>
+                  <Text style={styles.quickTitle}>Messages</Text>
+                  <Text style={styles.quickSub}>Inbox</Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity
-                  onPress={() => router.push('/orders')}
+                  onPress={() => router.push("/orders")}
                   activeOpacity={0.85}
-                  className="flex-1 bg-[#0C1520] border border-[#1A2A3A] rounded-[24px] p-5"
+                  style={styles.quickTile}
                 >
-                  <View className="w-11 h-11 rounded-2xl bg-[#13263B] items-center justify-center mb-3">
-                    <Ionicons name="cube-outline" size={22} color="#DCEBFF" />
+                  <View style={styles.quickIconWrap}>
+                    <Ionicons name="cube-outline" size={20} color={TEXT} />
                   </View>
-                  <Text className="text-white font-bold text-[15px]">Orders</Text>
-                  <Text className="text-[#6B8299] text-[12px] mt-0.5">
-                    Track purchases
-                  </Text>
+                  <Text style={styles.quickTitle}>Orders</Text>
+                  <Text style={styles.quickSub}>Track</Text>
                 </TouchableOpacity>
               </View>
-            </View>
 
-            <View className="px-5 mt-8">
-              <Text className="text-[#6B8299] text-[11px] font-semibold tracking-[2.5px] uppercase mb-3">
-                Lounge
-              </Text>
-              <View className="bg-[#0C1520] border border-[#1A2A3A] rounded-[28px] overflow-hidden">
-                {LOUNGE_MENU.map((item, index) => (
+              <Text style={styles.sectionLabel}>ACCOUNT</Text>
+              <View style={styles.menuCard}>
+                {MENU.map((item, index) => (
                   <TouchableOpacity
                     key={item.id}
                     onPress={() => router.push(item.route as any)}
-                    activeOpacity={0.8}
-                    className={`px-5 flex-row items-center ${
-                      index !== LOUNGE_MENU.length - 1
-                        ? 'border-b border-[#132030]'
-                        : ''
-                    }`}
-                    style={{ paddingVertical: 18 }}
+                    activeOpacity={0.85}
+                    style={[
+                      styles.menuRow,
+                      index < MENU.length - 1 && styles.menuRowBorder,
+                    ]}
                   >
-                    <View className="w-11 h-11 rounded-2xl bg-[#13263B] items-center justify-center">
-                      <Ionicons
-                        name={item.icon as any}
-                        size={21}
-                        color="#DCEBFF"
-                      />
+                    <View style={styles.menuIcon}>
+                      <Ionicons name={item.icon} size={18} color={TEXT} />
                     </View>
-                    <View className="ml-4 flex-1">
-                      <Text className="text-white font-semibold text-[15px]">
-                        {item.title}
-                      </Text>
-                      <Text className="text-[#5A7088] text-[12px] mt-0.5">
-                        {item.subtitle}
-                      </Text>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.menuTitle}>{item.title}</Text>
+                      <Text style={styles.menuSub}>{item.subtitle}</Text>
                     </View>
 
-                    {item.id === 'messages' && unreadMessages > 0 && (
-                      <View className="min-w-[20px] h-5 px-1.5 rounded-full bg-[#FF6B8A] items-center justify-center mr-2">
-                        <Text className="text-white text-[10px] font-bold">
-                          {messagesBadge}
-                        </Text>
-                      </View>
+                    {item.id === "messages" && (
+                      <Badge value={unreadMessages} />
                     )}
-
-                    {item.id === 'notifications' && unreadCount > 0 && (
-                      <View className="min-w-[20px] h-5 px-1.5 rounded-full bg-[#FF6B8A] items-center justify-center mr-2">
-                        <Text className="text-white text-[10px] font-bold">
-                          {badgeLabel}
-                        </Text>
-                      </View>
+                    {item.id === "notifications" && (
+                      <Badge value={unreadNotifs} />
                     )}
 
                     <Ionicons
                       name="chevron-forward"
-                      size={18}
-                      color="#4A6078"
+                      size={16}
+                      color={MUTED}
+                      style={{ marginLeft: 8 }}
                     />
                   </TouchableOpacity>
                 ))}
               </View>
-            </View>
 
-            <View className="px-5 mt-8">
               <TouchableOpacity
                 onPress={handleLogout}
                 activeOpacity={0.85}
-                className="bg-[#140E12] border border-[#3A1F2A] rounded-2xl py-4 items-center"
+                style={styles.logoutBtn}
               >
-                <Text className="text-[#FF8A9A] font-bold text-[15px]">
-                  Sign Out
-                </Text>
+                <Text style={styles.logoutText}>Sign out</Text>
               </TouchableOpacity>
-            </View>
-          </>
-        )}
-      </ScrollView>
+            </>
+          )}
+        </ScrollView>
+      </SafeAreaView>
 
       <PlazoreNavigationHub
         visible={hubOpen}
         onClose={() => setHubOpen(false)}
       />
-    </SafeAreaView>
-  )
+    </View>
+  );
 }
+
+const styles = StyleSheet.create({
+  root: {
+    flex: 1,
+    backgroundColor: BG,
+  },
+
+  menuHit: {
+    width: 42,
+    height: 42,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  menuLines: {
+    width: 22,
+    gap: 5.5,
+    alignItems: "flex-start",
+  },
+  menuLine: {
+    height: 2.6,
+    backgroundColor: TEXT,
+  },
+
+  loaderRoot: {
+    flex: 1,
+    backgroundColor: BG,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  orbWrapper: {
+    width: 110,
+    height: 110,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  orbRing: {
+    position: "absolute",
+    width: 110,
+    height: 110,
+    borderWidth: 2.4,
+    borderColor: "transparent",
+    borderTopColor: AI_GREEN,
+    borderRightColor: AI_BLUE,
+    borderBottomColor: "transparent",
+    borderLeftColor: AI_GREEN,
+  },
+  orbLogoWrap: {
+    width: 56,
+    height: 56,
+    backgroundColor: "rgba(16,185,129,0.1)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  loaderLogo: {
+    width: 32,
+    height: 32,
+  },
+  loaderText: {
+    marginTop: 28,
+    color: MUTED,
+    fontSize: 13,
+    letterSpacing: 0.8,
+  },
+
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    paddingTop: 6,
+    paddingBottom: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: LINE,
+  },
+  headerLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  title: {
+    color: TEXT,
+    fontSize: 22,
+    fontWeight: "800",
+    letterSpacing: -0.4,
+  },
+  headerRight: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  iconBtn: {
+    width: 42,
+    height: 42,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: SURFACE,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: LINE,
+  },
+  iconBadge: {
+    position: "absolute",
+    top: 4,
+    right: 4,
+    minWidth: 16,
+    height: 16,
+    paddingHorizontal: 3,
+    backgroundColor: DANGER,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  iconBadgeText: {
+    color: TEXT,
+    fontSize: 9,
+    fontWeight: "800",
+  },
+
+  scrollContent: {
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 120,
+  },
+
+  guestCard: {
+    marginTop: 24,
+    backgroundColor: SURFACE,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: LINE,
+    padding: 28,
+    alignItems: "center",
+  },
+  guestAvatar: {
+    width: 72,
+    height: 72,
+    backgroundColor: SURFACE_2,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: LINE,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 18,
+  },
+  guestTitle: {
+    color: TEXT,
+    fontSize: 20,
+    fontWeight: "800",
+    letterSpacing: -0.3,
+  },
+  guestBody: {
+    color: SECONDARY,
+    fontSize: 14,
+    textAlign: "center",
+    marginTop: 8,
+    lineHeight: 21,
+  },
+  guestCta: {
+    marginTop: 22,
+    backgroundColor: TEXT,
+    paddingVertical: 14,
+    paddingHorizontal: 28,
+    alignSelf: "stretch",
+    alignItems: "center",
+  },
+  guestCtaText: {
+    color: BG,
+    fontWeight: "800",
+    fontSize: 14,
+  },
+
+  identity: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: SURFACE,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: LINE,
+    padding: 16,
+    gap: 14,
+    marginBottom: 12,
+  },
+  avatarWrap: {
+    position: "relative",
+  },
+  avatar: {
+    width: 72,
+    height: 72,
+    backgroundColor: SURFACE_2,
+  },
+  sellerMark: {
+    position: "absolute",
+    bottom: -2,
+    right: -2,
+    width: 22,
+    height: 22,
+    backgroundColor: SURFACE,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "rgba(16,185,129,0.4)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  rolePill: {
+    alignSelf: "flex-start",
+    backgroundColor: SURFACE_2,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: LINE,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    marginBottom: 6,
+  },
+  roleText: {
+    color: MUTED,
+    fontSize: 10,
+    fontWeight: "700",
+    letterSpacing: 1,
+    textTransform: "uppercase",
+  },
+  name: {
+    color: TEXT,
+    fontSize: 20,
+    fontWeight: "800",
+    letterSpacing: -0.3,
+  },
+  email: {
+    color: SECONDARY,
+    fontSize: 13,
+    marginTop: 2,
+  },
+
+  ctaCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: SURFACE,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: LINE,
+    padding: 14,
+    gap: 12,
+    marginBottom: 22,
+  },
+  ctaCardActive: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: TEXT,
+    padding: 14,
+    gap: 12,
+    marginBottom: 22,
+  },
+  ctaIcon: {
+    width: 44,
+    height: 44,
+    backgroundColor: SURFACE_2,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  ctaIconActive: {
+    width: 44,
+    height: 44,
+    backgroundColor: "rgba(9,11,15,0.08)",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "rgba(9,11,15,0.12)",
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden",
+  },
+  ctaStoreLogo: {
+    width: 44,
+    height: 44,
+  },
+  ctaTitle: {
+    color: TEXT,
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  ctaSub: {
+    color: MUTED,
+    fontSize: 12,
+    marginTop: 2,
+  },
+
+  sectionLabel: {
+    color: MUTED,
+    fontSize: 10,
+    fontWeight: "700",
+    letterSpacing: 1.6,
+    marginBottom: 10,
+  },
+
+  quickRow: {
+    flexDirection: "row",
+    gap: 10,
+    marginBottom: 22,
+  },
+  quickTile: {
+    flex: 1,
+    backgroundColor: SURFACE,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: LINE,
+    padding: 14,
+  },
+  quickIconWrap: {
+    width: 40,
+    height: 40,
+    backgroundColor: SURFACE_2,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: LINE,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 12,
+    position: "relative",
+  },
+  quickTitle: {
+    color: TEXT,
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  quickSub: {
+    color: MUTED,
+    fontSize: 12,
+    marginTop: 2,
+  },
+
+  menuCard: {
+    backgroundColor: SURFACE,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: LINE,
+    marginBottom: 22,
+  },
+  menuRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+  },
+  menuRowBorder: {
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: LINE,
+  },
+  menuIcon: {
+    width: 40,
+    height: 40,
+    backgroundColor: SURFACE_2,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: LINE,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 12,
+  },
+  menuTitle: {
+    color: TEXT,
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  menuSub: {
+    color: MUTED,
+    fontSize: 12,
+    marginTop: 2,
+  },
+
+  badge: {
+    minWidth: 20,
+    height: 20,
+    paddingHorizontal: 5,
+    backgroundColor: DANGER,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 4,
+  },
+  badgeText: {
+    color: TEXT,
+    fontSize: 10,
+    fontWeight: "800",
+  },
+
+  logoutBtn: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "rgba(249,112,102,0.35)",
+    backgroundColor: "rgba(249,112,102,0.08)",
+    paddingVertical: 14,
+    alignItems: "center",
+  },
+  logoutText: {
+    color: DANGER,
+    fontSize: 14,
+    fontWeight: "700",
+  },
+});
