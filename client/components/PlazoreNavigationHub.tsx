@@ -785,7 +785,7 @@ const navigate = (href?: string, itemId?: string) => {
           >
             <Image
               source={require('../assets/logo-2.png')}
-              style={{ width: 140, height: 82 }}
+              style={{ width: 190, height: 140 }}
               resizeMode="contain"
             />
           </Animated.View>
