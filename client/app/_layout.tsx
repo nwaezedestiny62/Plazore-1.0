@@ -14,7 +14,8 @@ import {
   Manrope_600SemiBold,
   Manrope_700Bold,
 } from '@expo-google-fonts/manrope'
-import { View, ActivityIndicator } from 'react-native'
+import { View, ActivityIndicator, StatusBar, Platform } from 'react-native'
+import { StatusBar as ExpoStatusBar } from 'expo-status-bar'
 
 export default function RootLayout() {
   const [fontsLoaded] = useFonts({
@@ -29,18 +30,33 @@ export default function RootLayout() {
       <View
         style={{
           flex: 1,
-          backgroundColor: '#0E0E0E',
+          backgroundColor: '#090B0F',
           alignItems: 'center',
           justifyContent: 'center',
         }}
       >
+        <StatusBar
+          barStyle="light-content"
+          backgroundColor="#090B0F"
+          translucent={false}
+        />
         <ActivityIndicator color="#FFFFFF" />
       </View>
     )
   }
 
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
+    <GestureHandlerRootView style={{ flex: 1, backgroundColor: '#090B0F' }}>
+      {/* Global black status bar */}
+      <ExpoStatusBar style="light" backgroundColor="#090B0F" />
+      {Platform.OS === 'android' && (
+        <StatusBar
+          barStyle="light-content"
+          backgroundColor="#090B0F"
+          translucent={false}
+        />
+      )}
+
       <ThemeProvider>
         <ClerkProvider tokenCache={tokenCache}>
           <MarketplaceProvider>

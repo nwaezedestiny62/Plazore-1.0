@@ -1,4 +1,6 @@
+// client/components/showroom/ShowroomFlyCart.tsx
 import { useCart } from '@/context/CartContext'
+import { Product } from '@/constants/types'
 import { Ionicons } from '@expo/vector-icons'
 import { Image } from 'expo-image'
 import React, {
@@ -11,7 +13,6 @@ import React, {
   useState,
 } from 'react'
 import { Animated, Easing, StyleSheet, View } from 'react-native'
-import { Product } from '@/constants/types'
 
 type Origin = { x: number; y: number; width: number; height: number }
 
@@ -19,7 +20,6 @@ type FlyJob = {
   id: string
   image?: string
   origin: Origin
-  /** locked at spawn — never changes mid-flight */
   target: { x: number; y: number }
 }
 
@@ -35,12 +35,14 @@ export function useShowroomFlyCart() {
 }
 
 const FLY = 40
-const DURATION = 500
+const DURATION = 520
+const ARC = 78 // how high the arc goes above the lower of start/end
 
 export function ShowroomFlyCartProvider({
   children,
 }: {
   children: React.ReactNode
+  /** kept for API compat with home — not required for flight */
   visibleProgress?: number
 }) {
   const { addToCart } = useCart()
@@ -48,30 +50,41 @@ export function ShowroomFlyCartProvider({
   const [jobs, setJobs] = useState<FlyJob[]>([])
 
   const registerTarget = useCallback((x: number, y: number) => {
-    if (x > 0 && y > 0) {
+    // Floating nav bag center — ignore bad reads
+    if (x > 8 && y > 8) {
       pos.current = { x, y }
     }
   }, [])
 
   const flyAdd = useCallback(
     (product: Product, origin: Origin) => {
+      // Always add to cart first
       addToCart(product)
 
-      if (origin.width < 2 || origin.height < 2) return
+      // No valid origin → silent add only
+      if (!origin || origin.width < 2 || origin.height < 2) return
 
-      const tx = pos.current.x
-      const ty = pos.current.y
+      let tx = pos.current.x
+      let ty = pos.current.y
+
+      // Target not registered yet — skip flight, item still in bag
       if (tx < 1 || ty < 1) return
 
-      const id = `${product._id}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+      const id = `${product._id}-${Date.now()}-${Math.random()
+        .toString(36)
+        .slice(2, 7)}`
 
-      // snapshot target + origin once — no mid-flight updates
-      setJobs((p) => [
-        ...p,
+      setJobs((prev) => [
+        ...prev,
         {
           id,
           image: product.images?.[0],
-          origin: { ...origin },
+          origin: {
+            x: origin.x,
+            y: origin.y,
+            width: origin.width,
+            height: origin.height,
+          },
           target: { x: tx, y: ty },
         },
       ])
@@ -80,8 +93,7 @@ export function ShowroomFlyCartProvider({
   )
 
   const onDone = useCallback((id: string) => {
-    // remove only after fully faded — avoids pop/flicker
-    setJobs((p) => p.filter((j) => j.id !== id))
+    setJobs((prev) => prev.filter((j) => j.id !== id))
   }, [])
 
   return (
@@ -103,19 +115,19 @@ function FlyingClone({
   job: FlyJob
   onComplete: (id: string) => void
 }) {
-  // create value once, start at 0 — no setValue mid-mount
   const progress = useRef(new Animated.Value(0)).current
   const done = useRef(false)
 
+  // Path locked once per job — never recomputed mid-flight
   const path = useMemo(() => {
     const sx = job.origin.x + job.origin.width / 2 - FLY / 2
     const sy = job.origin.y + job.origin.height / 2 - FLY / 2
     const ex = job.target.x - FLY / 2
     const ey = job.target.y - FLY / 2
-    const mx = sx + (ex - sx) * 0.42
-    const my = Math.min(sy, ey) - 72
+    const mx = sx + (ex - sx) * 0.45
+    const my = Math.min(sy, ey) - ARC
     return { sx, sy, ex, ey, mx, my }
-  }, [job.id]) // locked to this job only
+  }, [job.id])
 
   useEffect(() => {
     const anim = Animated.timing(progress, {
@@ -126,18 +138,13 @@ function FlyingClone({
     })
 
     anim.start(({ finished }) => {
-      if (!done.current) {
-        done.current = true
-        // small delay so last opacity frame paints before unmount
-        requestAnimationFrame(() => {
-          onComplete(job.id)
-        })
-      }
+      if (!finished || done.current) return
+      done.current = true
+      // Let last opacity frame paint before unmount
+      requestAnimationFrame(() => onComplete(job.id))
     })
 
-    return () => {
-      anim.stop()
-    }
+    return () => anim.stop()
   }, [])
 
   const translateX = progress.interpolate({
@@ -149,17 +156,16 @@ function FlyingClone({
     outputRange: [path.sy, path.my, path.ey],
   })
   const scale = progress.interpolate({
-    inputRange: [0, 0.12, 0.82, 1],
-    outputRange: [1, 1.08, 0.32, 0.08],
+    inputRange: [0, 0.1, 0.85, 1],
+    outputRange: [1, 1.1, 0.28, 0.06],
   })
-  // stay fully visible until the very end, then soft fade — no mid-flight blink
   const opacity = progress.interpolate({
-    inputRange: [0, 0.9, 1],
+    inputRange: [0, 0.88, 1],
     outputRange: [1, 1, 0],
   })
   const rotate = progress.interpolate({
     inputRange: [0, 1],
-    outputRange: ['0deg', '14deg'],
+    outputRange: ['0deg', '16deg'],
   })
 
   return (
@@ -170,12 +176,7 @@ function FlyingClone({
         styles.clone,
         {
           opacity,
-          transform: [
-            { translateX },
-            { translateY },
-            { scale },
-            { rotate },
-          ],
+          transform: [{ translateX }, { translateY }, { scale }, { rotate }],
         },
       ]}
     >
@@ -200,8 +201,8 @@ function FlyingClone({
 const styles = StyleSheet.create({
   layer: {
     ...StyleSheet.absoluteFillObject,
-    zIndex: 999,
-    elevation: 999,
+    zIndex: 9999,
+    elevation: 9999,
   },
   clone: {
     position: 'absolute',
@@ -217,7 +218,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     backgroundColor: '#1A1A1A',
     borderWidth: 1.5,
-    borderColor: 'rgba(255,255,255,0.25)',
+    borderColor: 'rgba(255,255,255,0.28)',
   },
   fallback: {
     alignItems: 'center',

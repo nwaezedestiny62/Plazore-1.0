@@ -1,6 +1,6 @@
 /**
- * Wishlist — Plazore digital mall private collection
- * Left-aligned title (Browse style), sort config, floor-docked nav.
+ * Wishlist / Saved Products — Plazore dark
+ * No cart button on cards (unlike showroom / search)
  */
 
 import ProductCard from '@/components/ProductCard'
@@ -23,17 +23,18 @@ import {
 } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
-const BG = '#FFFFFF'
-const TEXT = '#0F172A'
-const MUTED = '#64748B'
-const DIM = '#94A3B8'
-const LINE = '#E2E8F0'
-const SURFACE = '#F8FAFC'
-const ACCENT = '#0F172A'
+const BG = '#090B0F'
+const SURFACE = '#11141A'
+const SURFACE_2 = '#171B22'
+const TEXT = '#F5F7FA'
+const MUTED = '#A7ADB8'
+const DIM = '#737A86'
+const LINE = '#252A33'
+const ACCENT = '#10B981'
 const PINK = '#F472B6'
 
 const W = Dimensions.get('window').width
-const PAD = 20
+const PAD = 16
 const GAP = 14
 const CARD_W = (W - PAD * 2 - GAP) / 2
 
@@ -78,7 +79,6 @@ export default function Favorites() {
 
     switch (sortKey) {
       case 'oldest':
-        // Assume array order is newest-last from server; reverse for oldest-first
         return list.slice().reverse()
       case 'name_az':
         return list.sort((a, b) =>
@@ -109,7 +109,6 @@ export default function Favorites() {
 
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
-      {/* ── Header (Browse-style) ── */}
       <View style={styles.header}>
         <Text style={styles.title}>Saved Products</Text>
 
@@ -136,7 +135,6 @@ export default function Favorites() {
         </View>
       </View>
 
-      {/* ── Body ── */}
       {loading && count === 0 ? (
         <View style={styles.center}>
           <ActivityIndicator size="large" color={ACCENT} />
@@ -147,7 +145,6 @@ export default function Favorites() {
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.scrollContent}
         >
-          {/* Editorial kicker */}
           <View style={styles.kickerRow}>
             <View style={styles.kickerLine} />
             <Text style={styles.kicker}>YOUR SAVED PICKS</Text>
@@ -156,6 +153,7 @@ export default function Favorites() {
 
           <View style={styles.grid}>
             {sorted.map((product) => (
+              /* ProductCard only — no cart button on image */
               <ProductCard
                 key={product._id}
                 product={product}
@@ -171,19 +169,19 @@ export default function Favorites() {
           </View>
           <Text style={styles.emptyTitle}>Nothing saved yet</Text>
           <Text style={styles.emptyBody}>
-           Save products while exploring the showroom. Your picks will be waiting here.
+            Save products while exploring the showroom. Your picks will be
+            waiting here.
           </Text>
           <Pressable
             onPress={() => router.push('/(tabs)' as any)}
             style={styles.emptyCta}
           >
             <Text style={styles.emptyCtaText}>Explore the showroom</Text>
-            <Ionicons name="arrow-forward" size={16} color="#FFFFFF" />
+            <Ionicons name="arrow-forward" size={16} color={BG} />
           </Pressable>
         </View>
       )}
 
-      {/* Floor-docked nav */}
       <PlazoreFloatingNav
         visibleProgress={1}
         onMenuPress={() => setHubOpen(true)}
@@ -193,23 +191,25 @@ export default function Favorites() {
         onClose={() => setHubOpen(false)}
       />
 
-      {/* Sort sheet */}
       <Modal
         visible={sortOpen}
         transparent
-        animationType="slide"
+        animationType="fade"
         onRequestClose={() => setSortOpen(false)}
       >
         <Pressable
           style={styles.sheetScrim}
           onPress={() => setSortOpen(false)}
         />
-        <View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, 20) }]}>
+        <View
+          style={[
+            styles.sheet,
+            { paddingBottom: Math.max(insets.bottom, 20) },
+          ]}
+        >
           <View style={styles.sheetHandle} />
           <Text style={styles.sheetTitle}>Sort your picks</Text>
-          <Text style={styles.sheetSub}>
-           Organize your saved products
-          </Text>
+          <Text style={styles.sheetSub}>Organize your saved products</Text>
 
           {SORT_OPTIONS.map((opt) => {
             const active = opt.key === sortKey
@@ -224,7 +224,10 @@ export default function Favorites() {
               >
                 <View style={{ flex: 1 }}>
                   <Text
-                    style={[styles.sortLabel, active && styles.sortLabelActive]}
+                    style={[
+                      styles.sortLabel,
+                      active && styles.sortLabelActive,
+                    ]}
                   >
                     {opt.label}
                   </Text>
@@ -232,7 +235,7 @@ export default function Favorites() {
                 </View>
                 {active ? (
                   <View style={styles.check}>
-                    <Ionicons name="checkmark" size={14} color="#FFFFFF" />
+                    <Ionicons name="checkmark" size={14} color={BG} />
                   </View>
                 ) : (
                   <View style={styles.checkEmpty} />
@@ -256,6 +259,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: PAD,
     paddingTop: 6,
     paddingBottom: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(255,255,255,0.06)',
   },
   title: {
     fontSize: 28,
@@ -309,7 +314,7 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingHorizontal: PAD,
     paddingBottom: 140,
-    paddingTop: 4,
+    paddingTop: 12,
   },
 
   kickerRow: {
@@ -348,7 +353,9 @@ const styles = StyleSheet.create({
     height: 64,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(244,114,182,0.1)',
+    backgroundColor: 'rgba(244,114,182,0.12)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(244,114,182,0.25)',
     marginBottom: 20,
   },
   emptyTitle: {
@@ -369,12 +376,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    backgroundColor: ACCENT,
+    backgroundColor: TEXT,
     paddingHorizontal: 22,
     paddingVertical: 14,
   },
   emptyCtaText: {
-    color: '#FFFFFF',
+    color: BG,
     fontSize: 14,
     fontWeight: '700',
     letterSpacing: 0.2,
@@ -382,10 +389,10 @@ const styles = StyleSheet.create({
 
   sheetScrim: {
     flex: 1,
-    backgroundColor: 'rgba(15,23,42,0.4)',
+    backgroundColor: 'rgba(0,0,0,0.65)',
   },
   sheet: {
-    backgroundColor: BG,
+    backgroundColor: SURFACE,
     paddingHorizontal: 20,
     paddingTop: 10,
     borderTopWidth: StyleSheet.hairlineWidth,
@@ -420,7 +427,7 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   sortRowActive: {
-    backgroundColor: SURFACE,
+    backgroundColor: SURFACE_2,
     marginHorizontal: -8,
     paddingHorizontal: 8,
   },

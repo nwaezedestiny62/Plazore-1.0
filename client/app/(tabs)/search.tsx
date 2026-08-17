@@ -1,7 +1,8 @@
-// client/app/(tabs)/browse.tsx  (or wherever your Browse screen lives)
-import ProductCard from '@/components/ProductCard'
+// client/app/(tabs)/search.tsx
 import PlazoreFloatingNav from '@/components/PlazoreFloatingNav'
 import PlazoreNavigationHub from '@/components/PlazoreNavigationHub'
+import ShowroomProductCard from '@/components/showroom/ShowroomProductCard'
+import { ShowroomFlyCartProvider } from '@/components/showroom/ShowroomFlyCart'
 import api from '@/constants/api'
 import { CATEGORY_LIST } from '@/constants/productCatalog'
 import { Product } from '@/constants/types'
@@ -22,38 +23,42 @@ import {
   TextInput,
   View,
 } from 'react-native'
-import Animated, {
-  FadeIn,
-  FadeInDown,
-  FadeInRight,
-  Layout,
-  ZoomIn,
-} from 'react-native-reanimated'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
-/* ── Palette ── */
-const BG = '#FFFFFF'
-const SURFACE = '#F8FAFC'
-const TEXT = '#0F172A'
-const MUTED = '#64748B'
-const DIM = '#94A3B8'
-const LINE = '#E2E8F0'
-const ACCENT = '#0F172A'
+/* ── Plazore dark ── */
+const BG = '#090B0F'
+const SURFACE = '#11141A'
+const SURFACE_2 = '#171B22'
+const TEXT = '#F5F7FA'
+const MUTED = '#A7ADB8'
+const DIM = '#737A86'
+const LINE = '#252A33'
+const ACCENT = '#10B981'
 
 const RECENT_KEY = 'plazore_recent_searches'
 const MAX_RECENT = 8
 const DEBOUNCE = 240
 
-const W = Dimensions.get('window').width
-const PAD = 20
-const GAP = 14
-const CARD_W = (W - PAD * 2 - GAP) / 2
+const PAD = 16
+const GAP = 4
 
-/* ── Category floors with 2 backups each ── */
-const FLOORS: { id: string; short: string; images: [string, string, string] }[] = [
+/**
+ * Floors = human labels.
+ * Each floor owns one or more real CATEGORY_LIST keys.
+ * Every app category is covered exactly once.
+ */
+const FLOORS: {
+  id: string
+  short: string
+  hint: string
+  match: string[]
+  images: [string, string, string]
+}[] = [
   {
     id: 'Fashion',
     short: 'Fashion',
+    hint: 'Clothing, shoes, bags',
+    match: ['Fashion', 'Luxury Goods'],
     images: [
       'https://images.unsplash.com/photo-1483985988355-763728e1935b?w=500&q=80',
       'https://images.unsplash.com/photo-1445205170230-053b83016050?w=500&q=80',
@@ -61,8 +66,10 @@ const FLOORS: { id: string; short: string; images: [string, string, string] }[] 
     ],
   },
   {
-    id: 'Electronics',
+    id: 'Tech',
     short: 'Tech',
+    hint: 'Phones, computers, gadgets',
+    match: ['Electronics', 'Phones & Accessories', 'Computers'],
     images: [
       'https://images.unsplash.com/photo-1519389950473-47ba0277781c?w=500&q=80',
       'https://images.unsplash.com/photo-1498049794561-7780e7231661?w=500&q=80',
@@ -70,8 +77,10 @@ const FLOORS: { id: string; short: string; images: [string, string, string] }[] 
     ],
   },
   {
-    id: 'Beauty & Personal Care',
+    id: 'Beauty',
     short: 'Beauty',
+    hint: 'Skincare, makeup, fragrance',
+    match: ['Beauty & Personal Care'],
     images: [
       'https://images.unsplash.com/photo-1596462502278-27bfdc403348?w=500&q=80',
       'https://images.unsplash.com/photo-1522335789203-aabd1fc54bc9?w=500&q=80',
@@ -79,8 +88,10 @@ const FLOORS: { id: string; short: string; images: [string, string, string] }[] 
     ],
   },
   {
-    id: 'Home & Living',
+    id: 'Home',
     short: 'Home',
+    hint: 'Living, furniture, kitchen',
+    match: ['Home & Living', 'Furniture', 'Kitchen & Dining'],
     images: [
       'https://images.unsplash.com/photo-1618221195710-dd6b41faaea6?w=500&q=80',
       'https://images.unsplash.com/photo-1586023492125-27b2c045efd7?w=500&q=80',
@@ -88,8 +99,10 @@ const FLOORS: { id: string; short: string; images: [string, string, string] }[] 
     ],
   },
   {
-    id: 'Sports & Outdoors',
+    id: 'Sport',
     short: 'Sport',
+    hint: 'Fitness, outdoor, cycling',
+    match: ['Sports & Outdoors'],
     images: [
       'https://images.unsplash.com/photo-1517836357463-d25dfeac3438?w=500&q=80',
       'https://images.unsplash.com/photo-1461896836934-ffe607ba6851?w=500&q=80',
@@ -97,15 +110,116 @@ const FLOORS: { id: string; short: string; images: [string, string, string] }[] 
     ],
   },
   {
-    id: 'Jewelry & Watches',
+    id: 'Jewelry',
     short: 'Jewelry',
+    hint: 'Jewelry & watches',
+    match: ['Jewelry & Watches'],
     images: [
       'https://images.unsplash.com/photo-1515562141207-7a88fb7ce338?w=500&q=80',
       'https://images.unsplash.com/photo-1611591437281-460bfbe1220a?w=500&q=80',
       'https://images.unsplash.com/photo-1605100804763-247f67b3557e?w=500&q=80',
     ],
   },
+  {
+    id: 'Health',
+    short: 'Health',
+    hint: 'Wellness & medical',
+    match: ['Health'],
+    images: [
+      'https://images.unsplash.com/photo-1505751172876-fa206803aee1?w=500&q=80',
+      'https://images.unsplash.com/photo-1576091160399-112ba8d25d1d?w=500&q=80',
+      'https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?w=500&q=80',
+    ],
+  },
+  {
+    id: 'Kids',
+    short: 'Kids',
+    hint: 'Toys, baby, play',
+    match: ['Toys & Games', 'Baby Products'],
+    images: [
+      'https://images.unsplash.com/photo-1515488042361-ee00e0ddd4e4?w=500&q=80',
+      'https://images.unsplash.com/photo-1566576912321-d58ddd7a6088?w=500&q=80',
+      'https://images.unsplash.com/photo-1596461404969-9ae70f2830c1?w=500&q=80',
+    ],
+  },
+  {
+    id: 'Pets',
+    short: 'Pets',
+    hint: 'Pet supplies',
+    match: ['Pet Supplies'],
+    images: [
+      'https://images.unsplash.com/photo-1450778869180-41d0601e046e?w=500&q=80',
+      'https://images.unsplash.com/photo-1587300003388-59208cc962cb?w=500&q=80',
+      'https://images.unsplash.com/photo-1548199973-03cce0bbc87b?w=500&q=80',
+    ],
+  },
+  {
+    id: 'Auto',
+    short: 'Auto',
+    hint: 'Parts & tools',
+    match: ['Automotive'],
+    images: [
+      'https://images.unsplash.com/photo-1492144534655-ae79c964c9d7?w=500&q=80',
+      'https://images.unsplash.com/photo-1486262715619-67b85e0b08d3?w=500&q=80',
+      'https://images.unsplash.com/photo-1503376780353-7e6692767b70?w=500&q=80',
+    ],
+  },
+  {
+    id: 'Food',
+    short: 'Food',
+    hint: 'Groceries & pantry',
+    match: ['Groceries'],
+    images: [
+      'https://images.unsplash.com/photo-1542838132-92c53300491e?w=500&q=80',
+      'https://images.unsplash.com/photo-1498837167922-ddd27525d352?w=500&q=80',
+      'https://images.unsplash.com/photo-1506617420156-8e4536971650?w=500&q=80',
+    ],
+  },
+  {
+    id: 'Work',
+    short: 'Work',
+    hint: 'Office, books, craft',
+    match: ['Books', 'Office Supplies', 'Art & Crafts', 'Musical Instruments'],
+    images: [
+      'https://images.unsplash.com/photo-1497633762265-9d179a990aa6?w=500&q=80',
+      'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?w=500&q=80',
+      'https://images.unsplash.com/photo-14565130808af5207b36797abb?w=500&q=80',
+    ],
+  },
+  {
+    id: 'Build',
+    short: 'Build',
+    hint: 'Tools, industrial, farm',
+    match: ['Industrial Equipment', 'Agriculture', 'Building Materials'],
+    images: [
+      'https://images.unsplash.com/photo-1504148455328-c376907d081c?w=500&q=80',
+      'https://images.unsplash.com/photo-1581094794329-c8112a89af12?w=500&q=80',
+      'https://images.unsplash.com/photo-1504307651254-35680f356dfd?w=500&q=80',
+    ],
+  },
+  {
+    id: 'Collect',
+    short: 'Collect',
+    hint: 'Collectibles & more',
+    match: ['Collectibles', 'Others'],
+    images: [
+      'https://images.unsplash.com/photo-1578662996442-48f60103fc96?w=500&q=80',
+      'https://images.unsplash.com/photo-1607083206869-4c797ed044a?w=500&q=80',
+      'https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=500&q=80',
+    ],
+  },
 ]
+
+/** category name → floor id */
+const CATEGORY_TO_FLOOR = (() => {
+  const map: Record<string, string> = {}
+  FLOORS.forEach((f) => {
+    f.match.forEach((c) => {
+      map[c.toLowerCase()] = f.id
+    })
+  })
+  return map
+})()
 
 type SellerInfo = {
   _id: string
@@ -114,7 +228,12 @@ type SellerInfo = {
   storeLogo?: string
 }
 
-/** Floor image with automatic backup */
+function getProductCategory(p: any): string {
+  if (typeof p.category === 'string') return p.category
+  return String(p.category?.name || '')
+}
+
+/** Floor tile — no fade transition, backup on error only */
 function FloorImage({ images }: { images: [string, string, string] }) {
   const [idx, setIdx] = useState(0)
   return (
@@ -122,12 +241,25 @@ function FloorImage({ images }: { images: [string, string, string] }) {
       source={{ uri: images[idx] }}
       style={StyleSheet.absoluteFillObject}
       contentFit="cover"
-      transition={200}
+      transition={0}
+      cachePolicy="memory-disk"
       onError={() => {
         if (idx < 2) setIdx((i) => i + 1)
       }}
     />
   )
+}
+
+/**
+ * Static product for card: first image only
+ * → ShowroomProductCard skips multi-image rotation (no crossfade flicker)
+ */
+function toStaticProduct(p: Product): Product {
+  const imgs = Array.isArray(p.images) ? p.images.filter(Boolean) : []
+  return {
+    ...p,
+    images: imgs.length ? [imgs[0]] : [],
+  }
 }
 
 export default function BrowseScreen() {
@@ -142,17 +274,16 @@ export default function BrowseScreen() {
   const [trending, setTrending] = useState<Product[]>([])
   const [loading, setLoading] = useState(true)
   const [recent, setRecent] = useState<string[]>([])
+  /** floor id OR exact CATEGORY_LIST name */
   const [activeCategory, setActiveCategory] = useState<string | null>(null)
   const [serverProducts, setServerProducts] = useState<any[]>([])
   const [searchLoading, setSearchLoading] = useState(false)
 
-  // Filter state (only used when searching)
   const [filterOpen, setFilterOpen] = useState(false)
   const [minPrice, setMinPrice] = useState('')
   const [maxPrice, setMaxPrice] = useState('')
   const [inStockOnly, setInStockOnly] = useState(false)
 
-  // Boot
   useEffect(() => {
     let alive = true
     ;(async () => {
@@ -184,13 +315,11 @@ export default function BrowseScreen() {
     }
   }, [])
 
-  // Debounce
   useEffect(() => {
     const t = setTimeout(() => setDebounced(query.trim()), DEBOUNCE)
     return () => clearTimeout(t)
   }, [query])
 
-  // Server search suggest
   useEffect(() => {
     if (debounced.length < 1 || activeCategory) {
       setServerProducts([])
@@ -203,9 +332,13 @@ export default function BrowseScreen() {
 
     ;(async () => {
       try {
-        const res = await api.get(`/ai/search-suggest?q=${encodeURIComponent(debounced)}`)
+        const res = await api.get(
+          `/ai/search-suggest?q=${encodeURIComponent(debounced)}`
+        )
         if (cancelled || !res.data?.success) return
-        setServerProducts(Array.isArray(res.data.data?.products) ? res.data.data.products : [])
+        setServerProducts(
+          Array.isArray(res.data.data?.products) ? res.data.data.products : []
+        )
       } catch {
         if (!cancelled) setServerProducts([])
       } finally {
@@ -231,6 +364,33 @@ export default function BrowseScreen() {
     }
   }
 
+  /** Product matches floor or exact category */
+  const matchesActive = useCallback(
+    (p: any, active: string) => {
+      const cat = getProductCategory(p)
+      const catL = cat.toLowerCase()
+
+      // Exact category (from chips)
+      if (catL === active.toLowerCase()) return true
+
+      // Floor group
+      const floor = FLOORS.find((f) => f.id === active)
+      if (floor) {
+        return floor.match.some((m) => m.toLowerCase() === catL)
+      }
+
+      // CATEGORY_LIST key that maps to a floor
+      const floorId = CATEGORY_TO_FLOOR[active.toLowerCase()]
+      if (floorId) {
+        const f = FLOORS.find((x) => x.id === floorId)
+        return !!f?.match.some((m) => m.toLowerCase() === catL)
+      }
+
+      return false
+    },
+    []
+  )
+
   const live = useMemo(() => {
     const q = debounced.toLowerCase()
     if (!q && !activeCategory) {
@@ -245,23 +405,16 @@ export default function BrowseScreen() {
     let products = serverProducts.length > 0 ? serverProducts : allProducts
 
     if (activeCategory) {
-      products = products.filter((p: any) => {
-        const cat = typeof p.category === 'string' ? p.category : p.category?.name
-        return String(cat || '').toLowerCase() === activeCategory.toLowerCase()
-      })
+      products = products.filter((p: any) => matchesActive(p, activeCategory))
     } else if (q) {
       products = products.filter((p: any) => {
         const name = (p.name || '').toLowerCase()
         const brand = (p.brand || '').toLowerCase()
-        const cat =
-          typeof p.category === 'string'
-            ? p.category.toLowerCase()
-            : String(p.category?.name || '').toLowerCase()
+        const cat = getProductCategory(p).toLowerCase()
         return name.includes(q) || brand.includes(q) || cat.includes(q)
       })
     }
 
-    // Apply filters
     const min = Number(minPrice)
     const max = Number(maxPrice)
     if (Number.isFinite(min) && min > 0) {
@@ -275,35 +428,49 @@ export default function BrowseScreen() {
     }
 
     const storesMap = new Map<string, SellerInfo>()
-    allProducts.forEach((p) => {
-      const s = getSeller(p)
-      if (!s) return
-      const name = (s.storeName || s.name || '').toLowerCase()
-      if (name && name.includes(q)) storesMap.set(s._id, s)
-    })
+    if (q) {
+      allProducts.forEach((p) => {
+        const s = getSeller(p)
+        if (!s) return
+        const name = (s.storeName || s.name || '').toLowerCase()
+        if (name && name.includes(q)) storesMap.set(s._id, s)
+      })
+    }
     const stores = Array.from(storesMap.values()).slice(0, 8)
 
     const brandSet = new Set<string>()
-    allProducts.forEach((p) => {
-      if (p.brand && p.brand.toLowerCase().includes(q)) brandSet.add(p.brand)
-    })
+    if (q) {
+      allProducts.forEach((p) => {
+        if (p.brand && p.brand.toLowerCase().includes(q)) brandSet.add(p.brand)
+      })
+    }
     const brands = Array.from(brandSet).slice(0, 10)
 
     const categories = CATEGORY_LIST.filter((c) => {
+      if (!q) return false
       const lower = c.toLowerCase()
       return (
         lower.includes(q) ||
         q.split(' ').some((word) => word.length > 2 && lower.includes(word))
       )
-    }).slice(0, 8)
+    }).slice(0, 10)
 
     return {
-      products: products.slice(0, 14),
+      products: products.slice(0, 24),
       stores,
       brands,
       categories,
     }
-  }, [debounced, activeCategory, serverProducts, allProducts, minPrice, maxPrice, inStockOnly])
+  }, [
+    debounced,
+    activeCategory,
+    serverProducts,
+    allProducts,
+    minPrice,
+    maxPrice,
+    inStockOnly,
+    matchesActive,
+  ])
 
   const isSearching = debounced.length > 0 || !!activeCategory
   const hasResults =
@@ -312,14 +479,20 @@ export default function BrowseScreen() {
     live.brands.length > 0 ||
     live.categories.length > 0
 
+  const activeLabel = useMemo(() => {
+    if (!activeCategory) return debounced
+    const floor = FLOORS.find((f) => f.id === activeCategory)
+    return floor ? floor.short : activeCategory
+  }, [activeCategory, debounced])
+
   const pushRecent = useCallback(async (term: string) => {
     const clean = term.trim()
     if (!clean || clean.length < 2) return
     setRecent((prev) => {
-      const next = [clean, ...prev.filter((r) => r.toLowerCase() !== clean.toLowerCase())].slice(
-        0,
-        MAX_RECENT
-      )
+      const next = [
+        clean,
+        ...prev.filter((r) => r.toLowerCase() !== clean.toLowerCase()),
+      ].slice(0, MAX_RECENT)
       AsyncStorage.setItem(RECENT_KEY, JSON.stringify(next)).catch(() => {})
       return next
     })
@@ -336,14 +509,33 @@ export default function BrowseScreen() {
     inputRef.current?.focus()
   }
 
-  const selectFloor = (cat: string) => {
+  const selectFloor = (floorId: string) => {
+    setQuery('')
+    setDebounced('')
+    setActiveCategory(floorId)
+    Keyboard.dismiss()
+  }
+
+  const selectExactCategory = (cat: string) => {
     setQuery('')
     setDebounced('')
     setActiveCategory(cat)
     Keyboard.dismiss()
   }
 
-  // ── IDLE (Digital Mall home) ───────────────────────────
+  /** No entering/layout anims → no grid flicker */
+  const renderProductGrid = (items: Product[]) => (
+    <View style={styles.grid}>
+      {items.map((p) => (
+        <ShowroomProductCard
+          key={p._id}
+          product={toStaticProduct(p)}
+          dark
+        />
+      ))}
+    </View>
+  )
+
   const renderIdle = () => (
     <ScrollView
       showsVerticalScrollIndicator={false}
@@ -351,7 +543,6 @@ export default function BrowseScreen() {
       contentContainerStyle={{ paddingBottom: 150 }}
       onScrollBeginDrag={Keyboard.dismiss}
     >
-      {/* Floors / Categories */}
       <View style={styles.section}>
         <Text style={styles.sectionLabel}>FLOORS</Text>
         <ScrollView
@@ -359,26 +550,32 @@ export default function BrowseScreen() {
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={{ paddingHorizontal: PAD, gap: 12 }}
         >
-          {FLOORS.map((f, i) => (
-            <Animated.View key={f.id} entering={FadeInDown.delay(i * 40).springify()}>
-              <Pressable onPress={() => selectFloor(f.id)} style={styles.floorCard}>
-                <FloorImage images={f.images} />
-                <LinearGradient
-                  colors={['transparent', 'rgba(15,23,42,0.72)']}
-                  style={StyleSheet.absoluteFill}
-                />
-                <Text style={styles.floorLabel}>{f.short}</Text>
-              </Pressable>
-            </Animated.View>
+          {FLOORS.map((f) => (
+            <Pressable
+              key={f.id}
+              onPress={() => selectFloor(f.id)}
+              style={styles.floorCard}
+            >
+              <FloorImage images={f.images} />
+              <LinearGradient
+                colors={['transparent', 'rgba(9,11,15,0.88)']}
+                style={StyleSheet.absoluteFill}
+              />
+              <Text style={styles.floorLabel}>{f.short}</Text>
+              <Text style={styles.floorHint} numberOfLines={1}>
+                {f.hint}
+              </Text>
+            </Pressable>
           ))}
         </ScrollView>
       </View>
 
-      {/* Recent */}
       {recent.length > 0 && (
         <View style={styles.section}>
           <View style={styles.sectionHead}>
-            <Text style={styles.sectionLabel}>RECENT</Text>
+            <Text style={[styles.sectionLabel, { marginBottom: 0, paddingHorizontal: 0 }]}>
+              RECENT
+            </Text>
             <Pressable
               onPress={() => {
                 setRecent([])
@@ -406,7 +603,6 @@ export default function BrowseScreen() {
         </View>
       )}
 
-      {/* Moving now */}
       <View style={[styles.section, { marginTop: 28 }]}>
         <Text style={styles.sectionLabel}>MOVING NOW</Text>
         {loading ? (
@@ -414,19 +610,12 @@ export default function BrowseScreen() {
             <Text style={{ color: DIM, fontSize: 13 }}>Loading…</Text>
           </View>
         ) : (
-          <View style={styles.grid}>
-            {trending.map((p, i) => (
-              <Animated.View key={p._id} entering={FadeInDown.delay(i * 40).springify()}>
-                <ProductCard product={p} cardWidth={CARD_W} />
-              </Animated.View>
-            ))}
-          </View>
+          renderProductGrid(trending)
         )}
       </View>
     </ScrollView>
   )
 
-  // ── LIVE (search results) ──────────────────────────────
   const renderLive = () => (
     <ScrollView
       showsVerticalScrollIndicator={false}
@@ -435,9 +624,9 @@ export default function BrowseScreen() {
       onScrollBeginDrag={Keyboard.dismiss}
     >
       <View style={styles.meta}>
-        <View style={{ flex: 1 }}>
+        <View style={{ flex: 1, minWidth: 0 }}>
           <Text style={styles.metaText} numberOfLines={1}>
-            {activeCategory || debounced}
+            {activeLabel}
           </Text>
           <Text style={styles.metaCount}>
             {live.products.length + live.stores.length} results
@@ -448,219 +637,230 @@ export default function BrowseScreen() {
         </Pressable>
       </View>
 
-      {/* Products */}
       {live.products.length > 0 && (
-        <Animated.View entering={FadeInDown.duration(320)} layout={Layout.springify()}>
+        <View>
           <Text style={styles.groupTitle}>PRODUCTS</Text>
-          <View style={styles.grid}>
-            {live.products.map((p: any, i: number) => (
-              <Animated.View
-                key={p._id}
-                entering={FadeInDown.delay(i * 35).springify()}
-                layout={Layout.springify()}
-              >
-                <ProductCard product={p} cardWidth={CARD_W} />
-              </Animated.View>
-            ))}
-          </View>
-        </Animated.View>
+          {renderProductGrid(live.products as Product[])}
+        </View>
       )}
 
-      {/* Storefronts */}
       {live.stores.length > 0 && (
-        <Animated.View entering={FadeInDown.delay(60)} style={{ marginTop: 28 }}>
+        <View style={{ marginTop: 28 }}>
           <Text style={styles.groupTitle}>STOREFRONTS</Text>
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={{ paddingHorizontal: PAD, gap: 12 }}
           >
-            {live.stores.map((s, i) => (
-              <Animated.View key={s._id} entering={FadeInRight.delay(i * 35)}>
-                <Pressable
-                  onPress={() => router.push(`/store/${s._id}` as any)}
-                  style={styles.storeCard}
-                >
-                  <View style={styles.storeLogo}>
-                    {s.storeLogo ? (
-                      <Image
-                        source={{ uri: s.storeLogo }}
-                        style={{ width: 56, height: 56 }}
-                        contentFit="cover"
-                      />
-                    ) : (
-                      <Ionicons name="storefront-outline" size={22} color={MUTED} />
-                    )}
-                  </View>
-                  <Text style={styles.storeName} numberOfLines={1}>
-                    {s.storeName || s.name || 'Store'}
-                  </Text>
-                </Pressable>
-              </Animated.View>
+            {live.stores.map((s) => (
+              <Pressable
+                key={s._id}
+                onPress={() => router.push(`/store/${s._id}` as any)}
+                style={styles.storeCard}
+              >
+                <View style={styles.storeLogo}>
+                  {s.storeLogo ? (
+                    <Image
+                      source={{ uri: s.storeLogo }}
+                      style={{ width: 56, height: 56 }}
+                      contentFit="cover"
+                      transition={0}
+                    />
+                  ) : (
+                    <Ionicons
+                      name="storefront-outline"
+                      size={22}
+                      color={MUTED}
+                    />
+                  )}
+                </View>
+                <Text style={styles.storeName} numberOfLines={1}>
+                  {s.storeName || s.name || 'Store'}
+                </Text>
+              </Pressable>
             ))}
           </ScrollView>
-        </Animated.View>
+        </View>
       )}
 
-      {/* Brands */}
       {live.brands.length > 0 && (
-        <Animated.View entering={FadeInDown.delay(90)} style={{ marginTop: 28 }}>
+        <View style={{ marginTop: 28 }}>
           <Text style={styles.groupTitle}>BRANDS</Text>
           <View style={styles.chipWrap}>
-            {live.brands.map((b, i) => (
-              <Animated.View key={b} entering={ZoomIn.delay(i * 25)}>
-                <Pressable
-                  onPress={() => {
-                    setQuery(b)
-                    setDebounced(b)
-                    pushRecent(b)
-                  }}
-                  style={styles.brandChip}
-                >
-                  <Text style={styles.brandText}>{b}</Text>
-                </Pressable>
-              </Animated.View>
+            {live.brands.map((b) => (
+              <Pressable
+                key={b}
+                onPress={() => {
+                  setQuery(b)
+                  setDebounced(b)
+                  pushRecent(b)
+                }}
+                style={styles.brandChip}
+              >
+                <Text style={styles.brandText}>{b}</Text>
+              </Pressable>
             ))}
           </View>
-        </Animated.View>
+        </View>
       )}
 
-      {/* Categories */}
       {live.categories.length > 0 && (
-        <Animated.View entering={FadeInDown.delay(110)} style={{ marginTop: 28, marginBottom: 8 }}>
+        <View style={{ marginTop: 28, marginBottom: 8 }}>
           <Text style={styles.groupTitle}>CATEGORIES</Text>
           <View style={styles.chipWrap}>
-            {live.categories.map((c, i) => (
-              <Animated.View key={c} entering={ZoomIn.delay(i * 25)}>
-                <Pressable onPress={() => selectFloor(c)} style={styles.catChip}>
-                  <Text style={styles.catText}>{c}</Text>
-                </Pressable>
-              </Animated.View>
+            {live.categories.map((c) => (
+              <Pressable
+                key={c}
+                onPress={() => selectExactCategory(c)}
+                style={styles.catChip}
+              >
+                <Text style={styles.catText}>{c}</Text>
+              </Pressable>
             ))}
           </View>
-        </Animated.View>
+        </View>
       )}
 
       {!hasResults && !searchLoading && (
         <View style={styles.empty}>
           <Text style={styles.emptyTitle}>Nothing found</Text>
-          <Text style={styles.emptyBody}>Try another term or explore the floors</Text>
+          <Text style={styles.emptyBody}>
+            Try another term or explore the floors
+          </Text>
         </View>
       )}
     </ScrollView>
   )
 
   return (
-    <View style={[styles.root, { paddingTop: insets.top }]}>
-      {/* Header */}
-      <View style={styles.header}>
-        <Text style={styles.title}>Browse</Text>
+    <ShowroomFlyCartProvider>
+      <View style={[styles.root, { paddingTop: insets.top }]}>
+        <View style={styles.header}>
+          <Text style={styles.title}>Browse</Text>
 
-        <View style={styles.searchRow}>
-          <View style={styles.searchShell}>
-            <Ionicons name="search" size={18} color={DIM} />
-            <TextInput
-              ref={inputRef}
-              value={query}
-              onChangeText={(t) => {
-                setQuery(t)
-                if (activeCategory) setActiveCategory(null)
-              }}
-              onSubmitEditing={() => {
-                if (query.trim()) pushRecent(query)
-                Keyboard.dismiss()
-              }}
-              placeholder="Products, stores, brands…"
-              placeholderTextColor={DIM}
-              style={styles.input}
-              returnKeyType="search"
-              autoCorrect={false}
-              autoCapitalize="none"
-            />
-            {(query.length > 0 || !!activeCategory) && (
-              <Pressable onPress={clearAll} hitSlop={12}>
-                <Ionicons name="close-circle" size={18} color={DIM} />
+          <View style={styles.searchRow}>
+            <View style={styles.searchShell}>
+              <Ionicons name="search" size={18} color={DIM} />
+              <TextInput
+                ref={inputRef}
+                value={query}
+                onChangeText={(t) => {
+                  setQuery(t)
+                  if (activeCategory) setActiveCategory(null)
+                }}
+                onSubmitEditing={() => {
+                  if (query.trim()) pushRecent(query)
+                  Keyboard.dismiss()
+                }}
+                placeholder="Products, stores, brands…"
+                placeholderTextColor={DIM}
+                style={styles.input}
+                returnKeyType="search"
+                autoCorrect={false}
+                autoCapitalize="none"
+                selectionColor={ACCENT}
+              />
+              {(query.length > 0 || !!activeCategory) && (
+                <Pressable onPress={clearAll} hitSlop={12}>
+                  <Ionicons name="close-circle" size={18} color={DIM} />
+                </Pressable>
+              )}
+            </View>
+
+            {isSearching && (
+              <Pressable
+                onPress={() => setFilterOpen(true)}
+                style={styles.filterBtn}
+              >
+                <Ionicons name="options-outline" size={20} color={TEXT} />
               </Pressable>
             )}
           </View>
-
-          {/* Filter only appears when searching */}
-          {isSearching && (
-            <Pressable onPress={() => setFilterOpen(true)} style={styles.filterBtn}>
-              <Ionicons name="options-outline" size={20} color="#FFFFFF" />
-            </Pressable>
-          )}
         </View>
-      </View>
 
-      <View style={styles.body}>{isSearching ? renderLive() : renderIdle()}</View>
+        <View style={styles.body}>
+          {isSearching ? renderLive() : renderIdle()}
+        </View>
 
-      <PlazoreFloatingNav visibleProgress={1} onMenuPress={() => setHubOpen(true)} />
-      <PlazoreNavigationHub visible={hubOpen} onClose={() => setHubOpen(false)} />
-
-      {/* Filter Modal – only relevant when searching */}
-      <Modal visible={filterOpen} transparent animationType="slide">
-        <Pressable
-          style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.4)' }}
-          onPress={() => setFilterOpen(false)}
+        <PlazoreFloatingNav
+          visibleProgress={1}
+          onMenuPress={() => setHubOpen(true)}
         />
-        <View style={styles.filterSheet}>
-          <Text style={styles.filterTitle}>Filters</Text>
+        <PlazoreNavigationHub
+          visible={hubOpen}
+          onClose={() => setHubOpen(false)}
+        />
 
-          <Text style={styles.filterLabel}>Price</Text>
-          <View style={{ flexDirection: 'row', gap: 10, marginBottom: 20 }}>
-            <TextInput
-              style={styles.filterInput}
-              placeholder="Min"
-              keyboardType="numeric"
-              value={minPrice}
-              onChangeText={setMinPrice}
-              placeholderTextColor={DIM}
-            />
-            <TextInput
-              style={styles.filterInput}
-              placeholder="Max"
-              keyboardType="numeric"
-              value={maxPrice}
-              onChangeText={setMaxPrice}
-              placeholderTextColor={DIM}
-            />
-          </View>
-
+        <Modal visible={filterOpen} transparent animationType="fade">
           <Pressable
-            onPress={() => setInStockOnly((v) => !v)}
-            style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 28 }}
-          >
-            <View
-              style={[
-                styles.checkBox,
-                inStockOnly && { backgroundColor: ACCENT, borderColor: ACCENT },
-              ]}
-            >
-              {inStockOnly && <Ionicons name="checkmark" size={14} color="#FFFFFF" />}
-            </View>
-            <Text style={{ fontSize: 14, color: TEXT }}>In stock only</Text>
-          </Pressable>
+            style={styles.modalScrim}
+            onPress={() => setFilterOpen(false)}
+          />
+          <View style={styles.filterSheet}>
+            <Text style={styles.filterTitle}>Filters</Text>
 
-          <View style={{ flexDirection: 'row', gap: 12 }}>
+            <Text style={styles.filterLabel}>Price range</Text>
+            <View style={{ flexDirection: 'row', gap: 10, marginBottom: 20 }}>
+              <TextInput
+                style={styles.filterInput}
+                placeholder="Min"
+                keyboardType="numeric"
+                value={minPrice}
+                onChangeText={setMinPrice}
+                placeholderTextColor={DIM}
+                selectionColor={ACCENT}
+              />
+              <TextInput
+                style={styles.filterInput}
+                placeholder="Max"
+                keyboardType="numeric"
+                value={maxPrice}
+                onChangeText={setMaxPrice}
+                placeholderTextColor={DIM}
+                selectionColor={ACCENT}
+              />
+            </View>
+
             <Pressable
-              onPress={() => {
-                setMinPrice('')
-                setMaxPrice('')
-                setInStockOnly(false)
-                setFilterOpen(false)
-              }}
-              style={styles.filterReset}
+              onPress={() => setInStockOnly((v) => !v)}
+              style={styles.checkRow}
             >
-              <Text style={{ fontWeight: '600', color: MUTED }}>Reset</Text>
+              <View
+                style={[
+                  styles.checkBox,
+                  inStockOnly && styles.checkBoxOn,
+                ]}
+              >
+                {inStockOnly && (
+                  <Ionicons name="checkmark" size={14} color={BG} />
+                )}
+              </View>
+              <Text style={{ fontSize: 14, color: TEXT }}>In stock only</Text>
             </Pressable>
-            <Pressable onPress={() => setFilterOpen(false)} style={styles.filterApply}>
-              <Text style={{ fontWeight: '600', color: '#FFFFFF' }}>Apply</Text>
-            </Pressable>
+
+            <View style={{ flexDirection: 'row', gap: 12 }}>
+              <Pressable
+                onPress={() => {
+                  setMinPrice('')
+                  setMaxPrice('')
+                  setInStockOnly(false)
+                  setFilterOpen(false)
+                }}
+                style={styles.filterReset}
+              >
+                <Text style={{ fontWeight: '600', color: MUTED }}>Reset</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => setFilterOpen(false)}
+                style={styles.filterApply}
+              >
+                <Text style={{ fontWeight: '700', color: BG }}>Apply</Text>
+              </Pressable>
+            </View>
           </View>
-        </View>
-      </Modal>
-    </View>
+        </Modal>
+      </View>
+    </ShowroomFlyCartProvider>
   )
 }
 
@@ -671,6 +871,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: PAD,
     paddingTop: 6,
     paddingBottom: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(255,255,255,0.06)',
   },
   title: {
     fontSize: 28,
@@ -705,7 +907,9 @@ const styles = StyleSheet.create({
   filterBtn: {
     width: 48,
     height: 48,
-    backgroundColor: ACCENT,
+    backgroundColor: SURFACE_2,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: LINE,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -735,19 +939,30 @@ const styles = StyleSheet.create({
   },
 
   floorCard: {
-    width: 108,
-    height: 136,
+    width: 112,
+    height: 148,
     overflow: 'hidden',
     backgroundColor: SURFACE,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: LINE,
   },
   floorLabel: {
     position: 'absolute',
-    bottom: 12,
+    bottom: 28,
     left: 12,
     right: 12,
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: '700',
     color: '#FFFFFF',
+  },
+  floorHint: {
+    position: 'absolute',
+    bottom: 10,
+    left: 12,
+    right: 12,
+    fontSize: 10,
+    fontWeight: '500',
+    color: 'rgba(255,255,255,0.55)',
   },
 
   chipWrap: {
@@ -774,6 +989,7 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: GAP,
     paddingHorizontal: PAD,
+    justifyContent: 'space-between',
   },
 
   meta: {
@@ -782,6 +998,7 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     paddingHorizontal: PAD,
     marginBottom: 16,
+    gap: 12,
   },
   metaText: {
     fontSize: 16,
@@ -813,7 +1030,7 @@ const styles = StyleSheet.create({
   storeLogo: {
     width: 56,
     height: 56,
-    backgroundColor: '#F1F5F9',
+    backgroundColor: SURFACE_2,
     overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'center',
@@ -829,7 +1046,9 @@ const styles = StyleSheet.create({
   brandChip: {
     paddingHorizontal: 14,
     paddingVertical: 9,
-    backgroundColor: 'rgba(15,23,42,0.06)',
+    backgroundColor: 'rgba(16,185,129,0.1)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(16,185,129,0.25)',
   },
   brandText: {
     fontSize: 13,
@@ -866,9 +1085,14 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
 
-  // Filter sheet
+  modalScrim: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.65)',
+  },
   filterSheet: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: SURFACE,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: LINE,
     paddingHorizontal: 20,
     paddingTop: 20,
     paddingBottom: 40,
@@ -882,39 +1106,50 @@ const styles = StyleSheet.create({
   filterLabel: {
     fontSize: 13,
     fontWeight: '600',
-    color: TEXT,
+    color: MUTED,
     marginBottom: 8,
   },
   filterInput: {
     flex: 1,
     height: 44,
-    borderWidth: 1,
+    borderWidth: StyleSheet.hairlineWidth,
     borderColor: LINE,
     paddingHorizontal: 12,
     fontSize: 14,
     color: TEXT,
-    backgroundColor: SURFACE,
+    backgroundColor: SURFACE_2,
+  },
+  checkRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 28,
   },
   checkBox: {
     width: 22,
     height: 22,
     borderWidth: 1.5,
-    borderColor: '#CBD5E1',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  filterReset: {
-    flex: 1,
-    height: 48,
-    borderWidth: 1,
     borderColor: LINE,
     alignItems: 'center',
     justifyContent: 'center',
   },
+  checkBoxOn: {
+    backgroundColor: ACCENT,
+    borderColor: ACCENT,
+  },
+  filterReset: {
+    flex: 1,
+    height: 48,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: LINE,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: SURFACE_2,
+  },
   filterApply: {
     flex: 1,
     height: 48,
-    backgroundColor: ACCENT,
+    backgroundColor: TEXT,
     alignItems: 'center',
     justifyContent: 'center',
   },
