@@ -128,7 +128,6 @@ function StorePreloader() {
           />
         </View>
       </View>
-      <Text style={styles.loaderText}>Gathering your collection…</Text>
     </View>
   );
 }
@@ -589,7 +588,6 @@ const styles = StyleSheet.create({
     backgroundColor: TEXT,
   },
 
-  // Preloader
   loaderRoot: {
     flex: 1,
     backgroundColor: BG,
@@ -606,6 +604,7 @@ const styles = StyleSheet.create({
     position: "absolute",
     width: 110,
     height: 110,
+    borderRadius: 55,
     borderWidth: 2.4,
     borderColor: "transparent",
     borderTopColor: AI_GREEN,
@@ -616,6 +615,7 @@ const styles = StyleSheet.create({
   orbLogoWrap: {
     width: 56,
     height: 56,
+    borderRadius: 28,
     backgroundColor: "rgba(16,185,129,0.1)",
     alignItems: "center",
     justifyContent: "center",
@@ -624,13 +624,6 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
   },
-  loaderText: {
-    marginTop: 28,
-    color: MUTED,
-    fontSize: 13,
-    letterSpacing: 0.8,
-  },
-
   // Header
   header: {
     paddingHorizontal: H_PAD,

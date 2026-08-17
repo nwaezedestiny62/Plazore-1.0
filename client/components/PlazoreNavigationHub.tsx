@@ -52,7 +52,7 @@ const DEBOUNCE = 280
 const TILE_COLORS: Record<string, { bg: string; accent: string; glow: string }> = {
   home:             { bg: '#0A1C14', accent: '#00E575', glow: 'rgba(0,229,117,0.25)' },
   cart:             { bg: '#0D172A', accent: '#3B82F6', glow: 'rgba(59,130,246,0.25)' },
-  saved_stores: { bg: '#1A160E', accent: '#D4A853', glow: 'rgba(212,168,83,0.25)' },
+  saved_stores:     { bg: '#1A160E', accent: '#D4A853', glow: 'rgba(212,168,83,0.25)' },
   profile:          { bg: '#1A0E2A', accent: '#A78BFA', glow: 'rgba(167,139,250,0.25)' },
   showroom_horizon: { bg: '#091520', accent: '#38BDF8', glow: 'rgba(56,189,248,0.25)' },
   showroom_chamber: { bg: '#0A1818', accent: '#2DD4BF', glow: 'rgba(45,212,191,0.25)' },
@@ -140,7 +140,7 @@ const SECTIONS: NavSection[] = [
     items: [
       { id: 'home', label: 'Home', subtitle: 'Main showroom', icon: 'home', href: '/(tabs)' },
       { id: 'cart', label: 'Cart', subtitle: 'Your bag', icon: 'bag-handle', href: '/(tabs)/cart' },
-{ id: 'saved_stores', label: 'Saved Stores', subtitle: 'Your floors', icon: 'bookmark', href: '/saved-stores' },
+      { id: 'saved_stores', label: 'Saved Stores', subtitle: 'Your floors', icon: 'bookmark', href: '/saved-stores' },
       { id: 'profile', label: 'Profile', subtitle: 'Account', icon: 'person', href: '/(tabs)/profile' },
     ],
   },
@@ -155,7 +155,7 @@ const SECTIONS: NavSection[] = [
       { id: 'showroom_atelier', label: '05. Atelier', subtitle: 'Curated gallery', icon: 'sparkles-outline', href: '/(tabs)' },
     ],
   },
-{
+  {
     id: 'explore',
     title: 'Explore the Mall',
     items: [
@@ -267,7 +267,7 @@ function MallTile({
             width,
             height,
             backgroundColor: palette.bg,
-            borderRadius: 16,
+            borderRadius: 0,
             borderWidth: 1,
             borderColor: active ? palette.accent : LINE,
             padding: 14,
@@ -307,7 +307,7 @@ function MallTile({
             style={{
               width: 42,
               height: 42,
-              borderRadius: 12,
+              borderRadius: 0,
               alignItems: 'center',
               justifyContent: 'center',
               backgroundColor: `${palette.accent}16`,
@@ -359,16 +359,22 @@ export default function PlazoreNavigationHub({
 
   const { user } = useUser()
   const { signOut } = useClerk()
-  const { isSignedIn } = useAuth()
+  const { isSignedIn, getToken } = useAuth()
 
   const role = (user?.publicMetadata?.role as string) || 'buyer'
   const isSeller = role === 'seller' || role === 'admin'
 
   const progress = useRef(new Animated.Value(0)).current
   const contentFade = useRef(new Animated.Value(0)).current
+  const logoOpacity = useRef(new Animated.Value(0)).current
+  const loungeOpacity = useRef(new Animated.Value(1)).current
   const [mounted, setMounted] = useState(visible)
   const [contentKey, setContentKey] = useState(0)
+  const [logoLoaded, setLogoLoaded] = useState(false)
+  const [storeLogo, setStoreLogo] = useState<string | null>(null)
   const inputRef = useRef<TextInput>(null)
+  const getTokenRef = useRef(getToken)
+  getTokenRef.current = getToken
 
   const [query, setQuery] = useState('')
   const [debounced, setDebounced] = useState('')
@@ -386,6 +392,73 @@ export default function PlazoreNavigationHub({
   const topInset = Math.max(insets.top, StatusBar.currentHeight ?? 0, 12)
   const bottomInset = Math.max(insets.bottom, 12)
   const isSearching = query.trim().length >= 1
+
+  // Smooth logo ↔ LOUNGE crossfade
+  useEffect(() => {
+    if (logoLoaded) {
+      Animated.parallel([
+        Animated.timing(logoOpacity, {
+          toValue: 1,
+          duration: 420,
+          easing: EASE_LUXURY,
+          useNativeDriver: true,
+        }),
+        Animated.timing(loungeOpacity, {
+          toValue: 0,
+          duration: 320,
+          easing: EASE_LUXURY,
+          useNativeDriver: true,
+        }),
+      ]).start()
+    } else {
+      logoOpacity.setValue(0)
+      loungeOpacity.setValue(1)
+    }
+  }, [logoLoaded])
+
+  // Fetch store logo for seller CTA (same pattern as profile)
+  useEffect(() => {
+    if (!visible || !isSeller || !isSignedIn) {
+      setStoreLogo(null)
+      return
+    }
+
+    let alive = true
+
+    ;(async () => {
+      try {
+        const token = await getTokenRef.current()
+        if (!token) return
+
+        const endpoints = ['/seller/store', '/seller/me', '/users/me', '/users/profile']
+
+        for (const ep of endpoints) {
+          try {
+            const res = await api.get(ep, {
+              headers: { Authorization: `Bearer ${token}` },
+              timeout: 10000,
+            })
+            const data = res.data?.data || res.data
+            const logo =
+              data?.storeLogo || data?.store?.storeLogo || data?.logo || null
+            if (logo && alive) {
+              setStoreLogo(String(logo))
+              return
+            }
+          } catch {
+            // try next
+          }
+        }
+        if (alive) setStoreLogo(null)
+      } catch {
+        if (alive) setStoreLogo(null)
+      }
+    })()
+
+    return () => {
+      alive = false
+    }
+  }, [visible, isSeller, isSignedIn])
 
   // Prefetch products for store matching
   useEffect(() => {
@@ -468,7 +541,6 @@ export default function PlazoreNavigationHub({
       return { products: [], stores: [], categories: [], ai: [] }
     }
 
-    // Products from server
     const products: LocalHit[] = (serverProducts || []).slice(0, 8).map((p: any) => {
       const seller = getSeller(p)
       return {
@@ -482,7 +554,6 @@ export default function PlazoreNavigationHub({
       }
     })
 
-    // Stores
     const storesMap = new Map<string, SellerInfo>()
     allProducts.forEach((p) => {
       const s = getSeller(p)
@@ -503,7 +574,6 @@ export default function PlazoreNavigationHub({
       }
     })
 
-    // Categories + AI floors
     const categories: LocalHit[] = []
     CATEGORY_LIST.forEach((c) => {
       if (c.toLowerCase().includes(q) && categories.length < 4) {
@@ -516,7 +586,6 @@ export default function PlazoreNavigationHub({
       }
     })
 
-    // AI phrases
     const aiHits: LocalHit[] = aiPhrases.slice(0, 5).map((phrase) => ({
       type: 'ai' as const,
       label: phrase,
@@ -578,6 +647,9 @@ export default function PlazoreNavigationHub({
     if (visible) {
       setMounted(true)
       setContentKey((k) => k + 1)
+      setLogoLoaded(false)
+      logoOpacity.setValue(0)
+      loungeOpacity.setValue(1)
       progress.setValue(0)
       contentFade.setValue(0)
 
@@ -613,6 +685,7 @@ export default function PlazoreNavigationHub({
         if (finished) {
           setMounted(false)
           resetSearch()
+          setLogoLoaded(false)
         }
       })
     }
@@ -641,8 +714,6 @@ export default function PlazoreNavigationHub({
     const map: Record<string, boolean> = {}
     SECTIONS.forEach((s) =>
       s.items.forEach((item) => {
-        // Showroom room tiles are scroll targets, not separate routes —
-        // don't mark them active just because we're on the home page
         if (SHOWROOM_ID_TO_ROOM[item.id]) {
           map[item.id] = false
         } else {
@@ -661,52 +732,49 @@ export default function PlazoreNavigationHub({
     return map
   }, [pathname])
 
-const navigate = (href?: string, itemId?: string) => {
-  // Showroom room tiles → scroll instead of route
-  if (itemId && SHOWROOM_ID_TO_ROOM[itemId]) {
+  const navigate = (href?: string, itemId?: string) => {
+    if (itemId && SHOWROOM_ID_TO_ROOM[itemId]) {
+      onClose()
+      requestAnimationFrame(() => {
+        onScrollToRoom?.(SHOWROOM_ID_TO_ROOM[itemId])
+      })
+      return
+    }
+
     onClose()
-    requestAnimationFrame(() => {
-      onScrollToRoom?.(SHOWROOM_ID_TO_ROOM[itemId])
-    })
-    return
-  }
 
-  onClose()
+    if (itemId === 'categories') {
+      requestAnimationFrame(() => {
+        router.push({ pathname: '/shop', params: { mode: 'categories' } } as any)
+      })
+      return
+    }
+    if (itemId === 'new') {
+      requestAnimationFrame(() => {
+        router.push({ pathname: '/shop', params: { mode: 'new' } } as any)
+      })
+      return
+    }
+    if (itemId === 'trending') {
+      requestAnimationFrame(() => {
+        router.push({ pathname: '/shop', params: { mode: 'trending' } } as any)
+      })
+      return
+    }
+    if (itemId === 'stores') {
+      requestAnimationFrame(() => {
+        router.push({ pathname: '/shop', params: { mode: 'stores' } } as any)
+      })
+      return
+    }
 
-  // Explore the Mall tiles
-  if (itemId === 'categories') {
+    if (!href) return
     requestAnimationFrame(() => {
-      router.push({ pathname: '/shop', params: { mode: 'categories' } } as any)
+      try {
+        router.push(href as any)
+      } catch {}
     })
-    return
   }
-  if (itemId === 'new') {
-    requestAnimationFrame(() => {
-      router.push({ pathname: '/shop', params: { mode: 'new' } } as any)
-    })
-    return
-  }
-  if (itemId === 'trending') {
-    requestAnimationFrame(() => {
-      router.push({ pathname: '/shop', params: { mode: 'trending' } } as any)
-    })
-    return
-  }
-  if (itemId === 'stores') {
-    requestAnimationFrame(() => {
-      router.push({ pathname: '/shop', params: { mode: 'stores' } } as any)
-    })
-    return
-  }
-
-  // Everything else
-  if (!href) return
-  requestAnimationFrame(() => {
-    try {
-      router.push(href as any)
-    } catch {}
-  })
-}
 
   const handleLogout = async () => {
     onClose()
@@ -761,7 +829,7 @@ const navigate = (href?: string, itemId?: string) => {
               style={{
                 width: 38,
                 height: 38,
-                borderRadius: 19,
+                borderRadius: 0,
                 alignItems: 'center',
                 justifyContent: 'center',
                 backgroundColor: SURFACE_2,
@@ -774,20 +842,49 @@ const navigate = (href?: string, itemId?: string) => {
             </Pressable>
           </View>
 
-          {/* Logo */}
+          {/* Logo + LOUNGE fallback (smooth crossfade) */}
           <Animated.View
             style={{
               paddingHorizontal: 20,
               alignItems: 'center',
-              minHeight: 64,
+              justifyContent: 'center',
+              minHeight: 72,
+              marginBottom: 4,
               opacity: contentFade,
             }}
           >
-            <Image
-              source={require('../assets/logo-2.png')}
-              style={{ width: 190, height: 140 }}
-              resizeMode="contain"
-            />
+            {/* Fallback text — visible until logo loads */}
+            <Animated.View
+              pointerEvents="none"
+              style={{
+                position: 'absolute',
+                alignItems: 'center',
+                justifyContent: 'center',
+                opacity: loungeOpacity,
+              }}
+            >
+              <Text
+                style={{
+                  color: TEXT,
+                  fontSize: 22,
+                  fontWeight: '800',
+                  letterSpacing: 6,
+                }}
+              >
+                LOUNGE
+              </Text>
+            </Animated.View>
+
+            {/* Logo — smaller, fades in when ready */}
+            <Animated.View style={{ opacity: logoOpacity }}>
+              <Image
+                source={require('../assets/logo-2.png')}
+                style={{ width: 140, height: 88 }}
+                resizeMode="contain"
+                onLoad={() => setLogoLoaded(true)}
+                onError={() => setLogoLoaded(false)}
+              />
+            </Animated.View>
           </Animated.View>
 
           {/* Search Bar */}
@@ -800,7 +897,7 @@ const navigate = (href?: string, itemId?: string) => {
               alignItems: 'center',
               gap: 10,
               backgroundColor: SURFACE,
-              borderRadius: 14,
+              borderRadius: 0,
               borderWidth: 1,
               borderColor: query.length > 0 ? GREEN : LINE,
               paddingHorizontal: 14,
@@ -900,7 +997,7 @@ const navigate = (href?: string, itemId?: string) => {
                                   style={{
                                     width: 70,
                                     height: 70,
-                                    borderRadius: 10,
+                                    borderRadius: 0,
                                     backgroundColor: SURFACE_2,
                                     overflow: 'hidden',
                                     marginRight: 14,
@@ -988,7 +1085,7 @@ const navigate = (href?: string, itemId?: string) => {
                                   style={{
                                     width: 56,
                                     height: 56,
-                                    borderRadius: 10,
+                                    borderRadius: 0,
                                     backgroundColor: SURFACE_2,
                                     overflow: 'hidden',
                                     marginRight: 14,
@@ -1036,61 +1133,100 @@ const navigate = (href?: string, itemId?: string) => {
               </View>
             ) : (
               <>
-                {/* Seller CTA */}
+                {/* Seller CTA — matched to profile style, no border radius */}
                 <FadeSlideIn index={0} delayBase={100}>
                   <Pressable
                     onPress={handleSellerCta}
-                    style={{
-                      marginHorizontal: 16,
-                      marginBottom: 22,
-                      flexDirection: 'row',
-                      alignItems: 'center',
-                      backgroundColor: SURFACE,
-                      borderRadius: 16,
-                      borderWidth: 1,
-                      borderColor: 'rgba(0,229,117,0.3)',
-                      paddingVertical: 14,
-                      paddingHorizontal: 14,
-                      gap: 12,
-                      overflow: 'hidden',
-                    }}
+                    style={
+                      isSeller
+                        ? {
+                            marginHorizontal: 16,
+                            marginBottom: 22,
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            backgroundColor: TEXT,
+                            borderRadius: 0,
+                            paddingVertical: 14,
+                            paddingHorizontal: 14,
+                            gap: 12,
+                            overflow: 'hidden',
+                          }
+                        : {
+                            marginHorizontal: 16,
+                            marginBottom: 22,
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            backgroundColor: SURFACE,
+                            borderRadius: 0,
+                            borderWidth: StyleSheet.hairlineWidth,
+                            borderColor: LINE,
+                            paddingVertical: 14,
+                            paddingHorizontal: 14,
+                            gap: 12,
+                            overflow: 'hidden',
+                          }
+                    }
                   >
-                    <LinearGradient
-                      colors={['rgba(0,229,117,0.12)', 'transparent']}
-                      start={{ x: 0, y: 0 }}
-                      end={{ x: 1, y: 1 }}
-                      style={StyleSheet.absoluteFillObject}
-                      pointerEvents="none"
-                    />
-                    <View
-                      style={{
-                        width: 44,
-                        height: 44,
-                        borderRadius: 12,
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        backgroundColor: 'rgba(0,229,117,0.14)',
-                        borderWidth: 1,
-                        borderColor: 'rgba(0,229,117,0.35)',
-                      }}
-                    >
-                      <Ionicons
-                        name={isSeller ? 'storefront' : 'storefront-outline'}
-                        size={22}
-                        color={GREEN}
-                      />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ color: TEXT, fontSize: 15, fontWeight: '700' }}>
-                        {isSeller ? 'Storefront' : 'Open a Store'}
-                      </Text>
-                      <Text style={{ color: TEXT_DIM, fontSize: 12, marginTop: 2 }}>
-                        {isSeller
-                          ? 'Manage inventory, orders & floor'
-                          : 'Become an official seller on Plazore'}
-                      </Text>
-                    </View>
-                    <Ionicons name="chevron-forward" size={16} color={TEXT_MUTED} />
+                    {isSeller ? (
+                      <>
+                        <View
+                          style={{
+                            width: 44,
+                            height: 44,
+                            borderRadius: 0,
+                            backgroundColor: 'rgba(9,11,15,0.08)',
+                            borderWidth: StyleSheet.hairlineWidth,
+                            borderColor: 'rgba(9,11,15,0.12)',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            overflow: 'hidden',
+                          }}
+                        >
+                          {storeLogo ? (
+                            <Image
+                              source={{ uri: storeLogo }}
+                              style={{ width: 44, height: 44 }}
+                              resizeMode="cover"
+                            />
+                          ) : (
+                            <Ionicons name="storefront" size={20} color={BG} />
+                          )}
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Text style={{ color: BG, fontSize: 15, fontWeight: '700' }}>
+                            Storefront
+                          </Text>
+                          <Text style={{ color: 'rgba(9,11,15,0.65)', fontSize: 12, marginTop: 2 }}>
+                            Products, orders & chats
+                          </Text>
+                        </View>
+                        <Ionicons name="arrow-forward" size={18} color={BG} />
+                      </>
+                    ) : (
+                      <>
+                        <View
+                          style={{
+                            width: 44,
+                            height: 44,
+                            borderRadius: 0,
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            backgroundColor: SURFACE_2,
+                          }}
+                        >
+                          <Ionicons name="storefront-outline" size={22} color={TEXT} />
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Text style={{ color: TEXT, fontSize: 15, fontWeight: '700' }}>
+                            Open a Store
+                          </Text>
+                          <Text style={{ color: TEXT_DIM, fontSize: 12, marginTop: 2 }}>
+                            Become an official seller on Plazore
+                          </Text>
+                        </View>
+                        <Ionicons name="chevron-forward" size={16} color={TEXT_MUTED} />
+                      </>
+                    )}
                   </Pressable>
                 </FadeSlideIn>
 
@@ -1155,7 +1291,7 @@ const navigate = (href?: string, itemId?: string) => {
                       marginHorizontal: 16,
                       marginBottom: 8,
                       backgroundColor: SURFACE,
-                      borderRadius: 16,
+                      borderRadius: 0,
                       borderWidth: 1,
                       borderColor: LINE,
                       padding: 14,
@@ -1172,7 +1308,7 @@ const navigate = (href?: string, itemId?: string) => {
                           style={{
                             width: 42,
                             height: 42,
-                            borderRadius: 21,
+                            borderRadius: 0,
                             borderWidth: 1.5,
                             borderColor: GREEN,
                           }}
@@ -1182,7 +1318,7 @@ const navigate = (href?: string, itemId?: string) => {
                           style={{
                             width: 42,
                             height: 42,
-                            borderRadius: 21,
+                            borderRadius: 0,
                             backgroundColor: SURFACE_2,
                             alignItems: 'center',
                             justifyContent: 'center',
@@ -1220,7 +1356,7 @@ const navigate = (href?: string, itemId?: string) => {
                           alignSelf: 'flex-start',
                           paddingVertical: 7,
                           paddingHorizontal: 12,
-                          borderRadius: 8,
+                          borderRadius: 0,
                           borderWidth: 1,
                           borderColor: LINE,
                           backgroundColor: 'rgba(255,255,255,0.03)',

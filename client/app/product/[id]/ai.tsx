@@ -1,4 +1,12 @@
 import { Ionicons } from "@expo/vector-icons";
+import MaskedView from "@react-native-masked-view/masked-view";
+import { SpaceGrotesk_500Medium } from "@expo-google-fonts/space-grotesk/500Medium";
+import { SpaceGrotesk_600SemiBold } from "@expo-google-fonts/space-grotesk/600SemiBold";
+import { PlusJakartaSans_400Regular } from "@expo-google-fonts/plus-jakarta-sans/400Regular";
+import { PlusJakartaSans_500Medium } from "@expo-google-fonts/plus-jakarta-sans/500Medium";
+import { PlusJakartaSans_600SemiBold } from "@expo-google-fonts/plus-jakarta-sans/600SemiBold";
+import { PlusJakartaSans_700Bold } from "@expo-google-fonts/plus-jakarta-sans/700Bold";
+import { useFonts } from "expo-font";
 import { LinearGradient } from "expo-linear-gradient";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
@@ -9,8 +17,10 @@ import {
   StatusBar,
   StyleSheet,
   Text,
+  TextStyle,
   TouchableOpacity,
   View,
+  StyleProp,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import api from "@/constants/api";
@@ -22,11 +32,61 @@ const SECONDARY = "#A7ADB8";
 const MUTED = "#737A86";
 const AI_GREEN = "#10B981";
 const AI_BLUE = "#3B82F6";
+const SURFACE = "#11141A";
+const LINE = "#252A33";
+
+const GRADIENT_COLORS = [AI_GREEN, "#14B8A6", AI_BLUE] as const;
+
+const FONT = {
+  space500: "SpaceGrotesk_500Medium",
+  space600: "SpaceGrotesk_600SemiBold",
+  jakarta400: "PlusJakartaSans_400Regular",
+  jakarta500: "PlusJakartaSans_500Medium",
+  jakarta600: "PlusJakartaSans_600SemiBold",
+  jakarta700: "PlusJakartaSans_700Bold",
+};
+
+function GradientText({
+  children,
+  style,
+}: {
+  children: string;
+  style?: StyleProp<TextStyle>;
+}) {
+  return (
+    <MaskedView
+      maskElement={
+        <Text style={[style, { backgroundColor: "transparent" }]}>
+          {children}
+        </Text>
+      }
+    >
+      <LinearGradient
+        colors={[...GRADIENT_COLORS]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 0 }}
+      >
+        <Text style={[style, { opacity: 0 }]}>{children}</Text>
+      </LinearGradient>
+    </MaskedView>
+  );
+}
 
 export default function PlazoreAIScreen() {
+  const [fontsLoaded] = useFonts({
+    SpaceGrotesk_500Medium,
+    SpaceGrotesk_600SemiBold,
+    PlusJakartaSans_400Regular,
+    PlusJakartaSans_500Medium,
+    PlusJakartaSans_600SemiBold,
+    PlusJakartaSans_700Bold,
+  });
+
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const [data, setData] = useState<PlazoreAIData | null>(null);
+  const [productImages, setProductImages] = useState<string[]>([]);
+  const [productName, setProductName] = useState<string>("");
   const [revealed, setRevealed] = useState(false);
 
   const orbRotation = useRef(new Animated.Value(0)).current;
@@ -70,15 +130,30 @@ export default function PlazoreAIScreen() {
 
   useEffect(() => {
     if (!id) return;
-    const fetchAI = async () => {
+
+    const fetchAll = async () => {
       try {
-        const res = await api.get(`/ai/product/${id}`);
-        if (res.data.success) setData(res.data.data);
+        const [aiRes, productRes] = await Promise.all([
+          api.get(`/ai/product/${id}`).catch(() => null),
+          api.get(`/products/${id}`).catch(() => null),
+        ]);
+
+        if (aiRes?.data?.success) setData(aiRes.data.data);
+
+        const p = productRes?.data?.data || productRes?.data?.product;
+        if (p) {
+          const imgs = Array.isArray(p.images)
+            ? p.images.filter((u: string) => !!u)
+            : [];
+          setProductImages(imgs);
+          if (p.name) setProductName(String(p.name));
+        }
       } catch {
         setData(null);
       }
     };
-    fetchAI();
+
+    fetchAll();
   }, [id]);
 
   const rotate = orbRotation.interpolate({
@@ -86,11 +161,14 @@ export default function PlazoreAIScreen() {
     outputRange: ["0deg", "360deg"],
   });
 
+  if (!fontsLoaded) {
+    return <View style={styles.container} />;
+  }
+
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" />
 
-      {/* Header */}
       <SafeAreaView edges={["top"]} style={styles.headerSafe}>
         <View style={styles.header}>
           <TouchableOpacity
@@ -102,13 +180,18 @@ export default function PlazoreAIScreen() {
           </TouchableOpacity>
 
           <View style={styles.headerCenter}>
-            <Image
-              source={require("@/assets/images/plazore-ai-logo.png")}
-              style={styles.headerLogo}
-              resizeMode="contain"
-            />
-            <Text style={styles.headerTitle}>Plazore AI</Text>
-            <Text style={styles.headerSub}>Product Intelligence</Text>
+            <View style={styles.titleRow}>
+              <Image
+                source={require("@/assets/images/plazore-ai-logo.png")}
+                style={styles.headerLogo}
+                resizeMode="contain"
+              />
+              {/* Space Grotesk 600 · white */}
+              <Text style={styles.headerTitle}>Plazore AI</Text>
+            </View>
+            <GradientText style={styles.headerSub}>
+              Product Intelligence
+            </GradientText>
           </View>
 
           <View style={{ width: 42 }} />
@@ -116,7 +199,6 @@ export default function PlazoreAIScreen() {
       </SafeAreaView>
 
       {!revealed ? (
-        /* ── PRELOADER ── */
         <View style={styles.loaderContainer}>
           <View style={styles.loaderCard}>
             <LinearGradient
@@ -125,17 +207,12 @@ export default function PlazoreAIScreen() {
               end={{ x: 1, y: 1 }}
               style={StyleSheet.absoluteFillObject}
             />
-
-            {/* Logo + ring around it */}
             <View style={styles.orbWrapper}>
-              {/* Rotating ring */}
               <Animated.View
                 style={[styles.orbRing, { transform: [{ rotate }] }]}
               >
                 <View style={styles.orbRingInner} />
               </Animated.View>
-
-              {/* Logo in the center */}
               <View style={styles.orbLogoWrap}>
                 <Image
                   source={require("@/assets/images/plazore-ai-logo.png")}
@@ -147,7 +224,6 @@ export default function PlazoreAIScreen() {
           </View>
         </View>
       ) : (
-        /* ── CONTENT ── */
         <Animated.ScrollView
           style={{ flex: 1 }}
           contentContainerStyle={{ padding: 20, paddingBottom: 70 }}
@@ -161,13 +237,7 @@ export default function PlazoreAIScreen() {
               transform: [{ translateY: revealLift }],
             }}
           >
-            {/* Simple title only — no extra logo */}
-            <View style={styles.heroBlock}>
-              <Text style={styles.heroTitle}>Product Interpretation</Text>
-              <Text style={styles.heroSub}>
-                A structured reading of this listing
-              </Text>
-            </View>
+            <ProductImageStack images={productImages} name={productName} />
 
             {data?.summary ? (
               <InsightSection eyebrow="Summary" title="Quick interpretation">
@@ -215,10 +285,21 @@ export default function PlazoreAIScreen() {
             {data?.buyerConfidence ? (
               <InsightSection eyebrow="Confidence" title="Buyer confidence">
                 <View style={styles.confidenceBadge}>
-                  <Ionicons name="shield-checkmark" size={15} color={AI_GREEN} />
-                  <Text style={styles.confidenceLevel}>
+                  <LinearGradient
+                    colors={[...GRADIENT_COLORS]}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={styles.confidenceIconBg}
+                  >
+                    <Ionicons
+                      name="shield-checkmark"
+                      size={14}
+                      color="#FFFFFF"
+                    />
+                  </LinearGradient>
+                  <GradientText style={styles.confidenceLevel}>
                     {data.buyerConfidence.level}
-                  </Text>
+                  </GradientText>
                 </View>
                 <Text style={[styles.bodyText, { marginTop: 10 }]}>
                   {data.confidenceExplanation}
@@ -235,6 +316,71 @@ export default function PlazoreAIScreen() {
           </Animated.View>
         </Animated.ScrollView>
       )}
+    </View>
+  );
+}
+
+function ProductImageStack({
+  images,
+  name,
+}: {
+  images: string[];
+  name?: string;
+}) {
+  const stack = images.slice(0, 3);
+  const hasImages = stack.length > 0;
+
+  return (
+    <View style={styles.stackBlock}>
+      <View style={styles.stackStage}>
+        {hasImages ? (
+          stack.map((uri, i) => {
+            const depth = stack.length - 1 - i;
+            const rotate = depth === 2 ? -8 : depth === 1 ? 7 : 0;
+            const offsetX = depth === 2 ? -14 : depth === 1 ? 14 : 0;
+            const offsetY = depth > 0 ? 6 : 0;
+            const scale = depth === 0 ? 1 : 0.92;
+            const zIndex = 10 - depth;
+
+            return (
+              <View
+                key={`${uri}-${i}`}
+                style={[
+                  styles.stackCard,
+                  {
+                    zIndex,
+                    transform: [
+                      { translateX: offsetX },
+                      { translateY: offsetY },
+                      { rotate: `${rotate}deg` },
+                      { scale },
+                    ],
+                  },
+                ]}
+              >
+                <Image
+                  source={{ uri }}
+                  style={styles.stackImg}
+                  resizeMode="cover"
+                />
+              </View>
+            );
+          })
+        ) : (
+          <View style={[styles.stackCard, styles.stackPlaceholder]}>
+            <Ionicons name="image-outline" size={28} color={MUTED} />
+          </View>
+        )}
+      </View>
+
+      {!!name && (
+        <Text style={styles.stackName} numberOfLines={2}>
+          {name}
+        </Text>
+      )}
+      <GradientText style={styles.stackCaption}>
+        Product interpretation
+      </GradientText>
     </View>
   );
 }
@@ -256,7 +402,7 @@ function InsightSection({
         end={{ x: 1, y: 1 }}
         style={StyleSheet.absoluteFillObject}
       />
-      <Text style={styles.sectionEyebrow}>{eyebrow}</Text>
+      <GradientText style={styles.sectionEyebrow}>{eyebrow}</GradientText>
       <Text style={styles.sectionTitle}>{title}</Text>
       {children}
     </View>
@@ -266,7 +412,12 @@ function InsightSection({
 function Bullet({ text }: { text: string }) {
   return (
     <View style={styles.bulletRow}>
-      <View style={styles.bullet} />
+      <LinearGradient
+        colors={[...GRADIENT_COLORS]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={styles.bullet}
+      />
       <Text style={styles.bulletText}>{text}</Text>
     </View>
   );
@@ -303,27 +454,31 @@ const styles = StyleSheet.create({
   headerCenter: {
     alignItems: "center",
   },
-  headerLogo: {
-    width: 20,
-    height: 20,
-    marginBottom: 3,
+  titleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
   },
+  headerLogo: {
+    width: 22,
+    height: 22,
+  },
+  /* Space Grotesk 600 · white */
   headerTitle: {
-    color: TEXT,
+    color: "#FFFFFF",
+    fontFamily: FONT.space600,
     fontSize: 16,
-    fontWeight: "700",
     letterSpacing: -0.2,
   },
+  /* Space Grotesk 500 via gradient mask */
   headerSub: {
-    color: AI_GREEN,
+    fontFamily: FONT.space500,
     fontSize: 9,
-    fontWeight: "600",
     letterSpacing: 1.8,
     textTransform: "uppercase",
-    marginTop: 2,
+    marginTop: 3,
   },
 
-  // Preloader
   loaderContainer: {
     flex: 1,
     alignItems: "center",
@@ -358,9 +513,7 @@ const styles = StyleSheet.create({
     borderBottomColor: "transparent",
     borderLeftColor: AI_GREEN,
   },
-  orbRingInner: {
-    // keeps the border visible
-  },
+  orbRingInner: {},
   orbLogoWrap: {
     width: 58,
     height: 58,
@@ -373,32 +526,60 @@ const styles = StyleSheet.create({
     width: 34,
     height: 34,
   },
-  loaderText: {
-    marginTop: 28,
-    color: MUTED,
-    fontSize: 13,
-    letterSpacing: 0.8,
-  },
 
-  // Hero (no logo)
-  heroBlock: {
-    marginBottom: 26,
-    marginTop: 6,
+  stackBlock: {
+    alignItems: "center",
+    marginBottom: 28,
+    marginTop: 4,
   },
-  heroTitle: {
+  stackStage: {
+    width: 132,
+    height: 148,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 14,
+  },
+  stackCard: {
+    position: "absolute",
+    width: 108,
+    height: 128,
+    borderRadius: 14,
+    overflow: "hidden",
+    backgroundColor: SURFACE,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "rgba(255,255,255,0.12)",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.35,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  stackImg: {
+    width: "100%",
+    height: "100%",
+  },
+  stackPlaceholder: {
+    alignItems: "center",
+    justifyContent: "center",
+    borderColor: LINE,
+  },
+  stackName: {
     color: TEXT,
-    fontSize: 22,
-    fontWeight: "700",
-    letterSpacing: -0.4,
+    fontFamily: FONT.jakarta700,
+    fontSize: 15,
+    textAlign: "center",
+    letterSpacing: -0.2,
+    paddingHorizontal: 24,
+    lineHeight: 20,
   },
-  heroSub: {
-    color: SECONDARY,
-    fontSize: 14.5,
+  stackCaption: {
+    fontFamily: FONT.space500,
+    fontSize: 11,
+    letterSpacing: 1.2,
+    textTransform: "uppercase",
     marginTop: 6,
-    lineHeight: 21,
   },
 
-  // Sections
   section: {
     borderRadius: 22,
     borderWidth: StyleSheet.hairlineWidth,
@@ -409,27 +590,26 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   sectionEyebrow: {
-    color: AI_GREEN,
+    fontFamily: FONT.space500,
     fontSize: 10,
-    fontWeight: "700",
     letterSpacing: 1.6,
     textTransform: "uppercase",
     marginBottom: 6,
   },
   sectionTitle: {
     color: TEXT,
+    fontFamily: FONT.jakarta700,
     fontSize: 17,
-    fontWeight: "700",
     marginBottom: 12,
     letterSpacing: -0.3,
   },
   bodyText: {
     color: SECONDARY,
+    fontFamily: FONT.jakarta400,
     fontSize: 15,
     lineHeight: 24,
   },
 
-  // Bullets
   bulletRow: {
     flexDirection: "row",
     alignItems: "flex-start",
@@ -439,37 +619,41 @@ const styles = StyleSheet.create({
     width: 5,
     height: 5,
     borderRadius: 2.5,
-    backgroundColor: AI_GREEN,
     marginTop: 8,
     marginRight: 11,
   },
   bulletText: {
     flex: 1,
     color: SECONDARY,
+    fontFamily: FONT.jakarta400,
     fontSize: 14.5,
     lineHeight: 22,
   },
 
-  // Confidence
   confidenceBadge: {
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
-    backgroundColor: "rgba(16,185,129,0.1)",
+    backgroundColor: "rgba(16,185,129,0.08)",
     alignSelf: "flex-start",
-    paddingHorizontal: 12,
-    paddingVertical: 7,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
     borderRadius: 999,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: "rgba(16,185,129,0.25)",
+    borderColor: "rgba(59,130,246,0.28)",
+  },
+  confidenceIconBg: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    alignItems: "center",
+    justifyContent: "center",
   },
   confidenceLevel: {
-    color: TEXT,
+    fontFamily: FONT.jakarta600,
     fontSize: 14.5,
-    fontWeight: "600",
   },
 
-  // Footer
   footer: {
     marginTop: 12,
     paddingTop: 22,
@@ -479,6 +663,7 @@ const styles = StyleSheet.create({
   footerText: {
     textAlign: "center",
     color: MUTED,
+    fontFamily: FONT.jakarta400,
     fontSize: 12.5,
     lineHeight: 19,
   },

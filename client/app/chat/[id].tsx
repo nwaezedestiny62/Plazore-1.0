@@ -69,82 +69,40 @@ type Conversation = {
   myRole?: "buyer" | "seller" | null;
 };
 
-function ChatPreloader() {
-  const spin = useRef(new Animated.Value(0)).current;
-  const pulse = useRef(new Animated.Value(0.55)).current;
+
+function StorePreloader() {
+  const rotation = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    const spinLoop = Animated.loop(
-      Animated.timing(spin, {
+    const loop = Animated.loop(
+      Animated.timing(rotation, {
         toValue: 1,
-        duration: 2800,
+        duration: 2600,
         easing: Easing.linear,
         useNativeDriver: true,
       }),
     );
-    const pulseLoop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulse, {
-          toValue: 1,
-          duration: 900,
-          easing: Easing.inOut(Easing.quad),
-          useNativeDriver: true,
-        }),
-        Animated.timing(pulse, {
-          toValue: 0.55,
-          duration: 900,
-          easing: Easing.inOut(Easing.quad),
-          useNativeDriver: true,
-        }),
-      ]),
-    );
-    spinLoop.start();
-    pulseLoop.start();
-    return () => {
-      spinLoop.stop();
-      pulseLoop.stop();
-    };
+    loop.start();
+    return () => loop.stop();
   }, []);
 
-  const rotate = spin.interpolate({
+  const rotate = rotation.interpolate({
     inputRange: [0, 1],
     outputRange: ["0deg", "360deg"],
   });
 
   return (
     <View style={styles.loaderRoot}>
-      <StatusBar barStyle="light-content" />
-      <View style={styles.diamondStage}>
-        <Animated.View
-          style={[
-            styles.diamondOuter,
-            { transform: [{ rotate }, { scale: pulse }] },
-          ]}
-        />
-        <Animated.View
-          style={[
-            styles.diamondInner,
-            {
-              transform: [
-                {
-                  rotate: spin.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: ["0deg", "-360deg"],
-                  }),
-                },
-              ],
-            },
-          ]}
-        />
-        <View style={styles.diamondCore}>
+      <View style={styles.orbWrapper}>
+        <Animated.View style={[styles.orbRing, { transform: [{ rotate }] }]} />
+        <View style={styles.orbLogoWrap}>
           <Image
             source={require("@/assets/logo-1.png")}
-            style={styles.loaderLogo}
+            style={styles.orbLogo}
             resizeMode="contain"
           />
         </View>
       </View>
-      <Text style={styles.loaderText}>Opening conversation…</Text>
     </View>
   );
 }
@@ -549,7 +507,7 @@ export default function ChatScreen() {
   };
 
   if (loading) {
-    return <ChatPreloader />;
+    return <StorePreloader />;
   }
 
   const product = conversation?.product;
@@ -781,41 +739,44 @@ const styles = StyleSheet.create({
     right: 0,
     height: 120,
   },
-
+  // Preloader
   loaderRoot: {
     flex: 1,
     backgroundColor: BG,
     alignItems: "center",
     justifyContent: "center",
   },
-  diamondStage: {
-    width: 120,
-    height: 120,
+  orbWrapper: {
+    width: 110,
+    height: 110,
     alignItems: "center",
     justifyContent: "center",
   },
-  diamondOuter: {
+  orbRing: {
     position: "absolute",
-    width: 88,
-    height: 88,
-    borderWidth: 2.2,
+    width: 110,
+    height: 110,
+    borderRadius: 55,
+    borderWidth: 2.4,
     borderColor: "transparent",
     borderTopColor: AI_GREEN,
     borderRightColor: AI_BLUE,
-    borderBottomColor: AI_GREEN,
-    borderLeftColor: "transparent",
-    transform: [{ rotate: "45deg" }],
+    borderBottomColor: "transparent",
+    borderLeftColor: AI_GREEN,
   },
-  diamondInner: {
-    position: "absolute",
+  orbLogoWrap: {
     width: 56,
     height: 56,
-    borderWidth: 1.6,
-    borderColor: "transparent",
-    borderTopColor: AI_BLUE,
-    borderBottomColor: AI_GREEN,
-    transform: [{ rotate: "45deg" }],
+    borderRadius: 28,
+    backgroundColor: "rgba(16,185,129,0.1)",
+    alignItems: "center",
+    justifyContent: "center",
   },
+  orbLogo: {
+    width: 32,
+    height: 32,
+  },
+
   diamondCore: {
     width: 48,
     height: 48,

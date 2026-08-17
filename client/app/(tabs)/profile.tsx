@@ -101,7 +101,7 @@ function MenuToggle({ onPress }: { onPress: () => void }) {
   );
 }
 
-function ProfilePreloader() {
+function StorePreloader() {
   const rotation = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -124,18 +124,16 @@ function ProfilePreloader() {
 
   return (
     <View style={styles.loaderRoot}>
-      <StatusBar barStyle="light-content" />
       <View style={styles.orbWrapper}>
         <Animated.View style={[styles.orbRing, { transform: [{ rotate }] }]} />
         <View style={styles.orbLogoWrap}>
           <Image
             source={require("@/assets/logo-1.png")}
-            style={styles.loaderLogo}
+            style={styles.orbLogo}
             resizeMode="contain"
           />
         </View>
       </View>
-      <Text style={styles.loaderText}>Opening profile…</Text>
     </View>
   );
 }
@@ -290,7 +288,7 @@ export default function Profile() {
 
   // Early return ONLY after all hooks
   if (booting && isSignedIn) {
-    return <ProfilePreloader />;
+    return <StorePreloader />;
   }
 
   return (
@@ -551,7 +549,7 @@ const styles = StyleSheet.create({
     backgroundColor: TEXT,
   },
 
-  loaderRoot: {
+   loaderRoot: {
     flex: 1,
     backgroundColor: BG,
     alignItems: "center",
@@ -567,6 +565,7 @@ const styles = StyleSheet.create({
     position: "absolute",
     width: 110,
     height: 110,
+    borderRadius: 55,
     borderWidth: 2.4,
     borderColor: "transparent",
     borderTopColor: AI_GREEN,
@@ -577,19 +576,14 @@ const styles = StyleSheet.create({
   orbLogoWrap: {
     width: 56,
     height: 56,
+    borderRadius: 28,
     backgroundColor: "rgba(16,185,129,0.1)",
     alignItems: "center",
     justifyContent: "center",
   },
-  loaderLogo: {
+  orbLogo: {
     width: 32,
     height: 32,
-  },
-  loaderText: {
-    marginTop: 28,
-    color: MUTED,
-    fontSize: 13,
-    letterSpacing: 0.8,
   },
 
   header: {

@@ -300,7 +300,7 @@ export default function PublicStorefront() {
         </View>
         <Text style={styles.emptyTitle}>Store not found</Text>
         <Text style={styles.emptySub}>
-          This aisle may have moved, or the doors are still closed.
+          This store is not reliable right now, check back soon.
         </Text>
         <TouchableOpacity
           onPress={() => router.back()}
@@ -416,7 +416,7 @@ export default function PublicStorefront() {
                   ) : null}
                 </View>
 
-                <Text style={styles.openLabel}>Open · Walk the aisles</Text>
+                <Text style={styles.openLabel}>Storefront · Explore the collection</Text>
 
                 {!!locationLabel && (
                   <View style={styles.locationRow}>
@@ -502,7 +502,7 @@ export default function PublicStorefront() {
 
               <View style={styles.countPill}>
                 <Text style={styles.countText}>
-                  {products.length} on floor
+                  {products.length} products
                 </Text>
               </View>
             </View>
@@ -513,8 +513,8 @@ export default function PublicStorefront() {
         {products.length > 0 && (
           <Animated.View style={{ opacity: content, marginTop: 36 }}>
             <View style={{ paddingHorizontal: H_PAD, marginBottom: 16 }}>
-              <Text style={styles.sectionEyebrow}>Front display</Text>
-              <Text style={styles.sectionTitle}>Featured on the floor</Text>
+              <Text style={styles.sectionEyebrow}>Featured</Text>
+              <Text style={styles.sectionTitle}>Featured products</Text>
             </View>
 
             <ScrollView
@@ -621,12 +621,12 @@ export default function PublicStorefront() {
             marginTop: 40,
           }}
         >
-          <Text style={styles.sectionEyebrow}>Aisles</Text>
-          <Text style={styles.sectionTitle}>Walk the collection</Text>
+          <Text style={styles.sectionEyebrow}>Collection</Text>
+          <Text style={styles.sectionTitle}>Explore the collection</Text>
 
           <View style={styles.dividerRow}>
             <View style={styles.dividerLine} />
-            <Text style={styles.dividerText}>Open floor</Text>
+            <Text style={styles.dividerText}>All products</Text>
             <View style={styles.dividerLine} />
           </View>
 
@@ -636,7 +636,7 @@ export default function PublicStorefront() {
                 <Ionicons name="cube-outline" size={26} color={MUTED} />
               </View>
               <Text style={styles.emptyFloorText}>
-                This store is still setting up the shelves.{"\n"}Check back soon.
+                This storefront is still being set up.{"\n"}Check back soon.
               </Text>
             </View>
           ) : (
@@ -692,7 +692,7 @@ export default function PublicStorefront() {
         {/* Footer */}
         <View style={styles.footer}>
           <View style={styles.footerLine} />
-          <Text style={styles.footerText}>Plazore · Premium Digital Mall</Text>
+          <Text style={styles.footerText}>Plazore · Digital Mall</Text>
         </View>
       </ScrollView>
     </View>

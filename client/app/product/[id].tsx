@@ -1,7 +1,12 @@
 import { useCart } from "@/context/CartContext";
 import { useMarketplace } from "@/context/MarketplaceContext";
 import { useWishlist } from "@/context/WishlistContext";
+import { SpaceGrotesk_500Medium } from "@expo-google-fonts/space-grotesk/500Medium";
+import { SpaceGrotesk_600SemiBold } from "@expo-google-fonts/space-grotesk/600SemiBold";
+import { useFonts } from "expo-font";
 import { Ionicons } from "@expo/vector-icons";
+import MaskedView from "@react-native-masked-view/masked-view";
+import { useAuth } from "@clerk/clerk-expo";
 import { LinearGradient } from "expo-linear-gradient";
 import * as WebBrowser from "expo-web-browser";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -20,17 +25,16 @@ import {
   Dimensions,
   Easing,
   Image,
-  NativeScrollEvent,
-  NativeSyntheticEvent,
+  Platform,
   StatusBar,
   StyleSheet,
   Text,
+  TextStyle,
   TouchableOpacity,
   View,
+  StyleProp,
 } from "react-native";
-import { ScrollView as GestureScrollView } from "react-native-gesture-handler";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useAuth } from "@clerk/clerk-expo";
 
 const { width, height: SCREEN_H } = Dimensions.get("window");
 const GALLERY_H = Math.min(Math.max(SCREEN_H * 0.58, width * 0.95), 440);
@@ -46,12 +50,126 @@ const AI_GREEN = "#10B981";
 const AI_BLUE = "#3B82F6";
 const ERROR = "#EF6262";
 
+const GRADIENT_COLORS = [AI_GREEN, "#14B8A6", AI_BLUE] as const;
+
+const FONT = {
+  space500: "SpaceGrotesk_500Medium",
+  space600: "SpaceGrotesk_600SemiBold",
+};
+
+function GradientText({
+  children,
+  style,
+}: {
+  children: string;
+  style?: StyleProp<TextStyle>;
+}) {
+  return (
+    <MaskedView
+      maskElement={
+        <Text style={[style, { backgroundColor: "transparent" }]}>
+          {children}
+        </Text>
+      }
+    >
+      <LinearGradient
+        colors={[...GRADIENT_COLORS]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 0 }}
+      >
+        <Text style={[style, { opacity: 0 }]}>{children}</Text>
+      </LinearGradient>
+    </MaskedView>
+  );
+}
+
+/** Clamps long text; shows Read more when needed */
+function ExpandableText({
+  text,
+  style,
+  numberOfLines = 3,
+}: {
+  text: string;
+  style?: StyleProp<TextStyle>;
+  numberOfLines?: number;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [needsMore, setNeedsMore] = useState(false);
+
+  if (!text?.trim()) return null;
+
+  return (
+    <View style={{ width: "100%" }}>
+      <Text
+        style={style}
+        numberOfLines={expanded ? undefined : numberOfLines}
+        onTextLayout={(e) => {
+          if (!expanded && e.nativeEvent.lines.length >= numberOfLines) {
+            setNeedsMore(true);
+          }
+        }}
+      >
+        {text}
+      </Text>
+      {needsMore && (
+        <TouchableOpacity
+          onPress={() => setExpanded((v) => !v)}
+          activeOpacity={0.7}
+          hitSlop={10}
+          style={{ marginTop: 6, alignSelf: "flex-start" }}
+        >
+          <Text style={styles.readMore}>
+            {expanded ? "Show less" : "Read more"}
+          </Text>
+        </TouchableOpacity>
+      )}
+    </View>
+  );
+}
+
 function formatSpecKey(key: string) {
   return key
     .replace(/([A-Z])/g, " $1")
     .replace(/_/g, " ")
     .trim()
     .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function StorePreloader() {
+  const rotation = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.timing(rotation, {
+        toValue: 1,
+        duration: 2600,
+        easing: Easing.linear,
+        useNativeDriver: true,
+      }),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, []);
+
+  const rotate = rotation.interpolate({
+    inputRange: [0, 1],
+    outputRange: ["0deg", "360deg"],
+  });
+
+  return (
+    <View style={styles.loaderRoot}>
+      <View style={styles.orbWrapper}>
+        <Animated.View style={[styles.orbRing, { transform: [{ rotate }] }]} />
+        <View style={styles.orbLogoWrap}>
+          <Image
+            source={require("@/assets/logo-1.png")}
+            style={styles.orbLogo}
+            resizeMode="contain"
+          />
+        </View>
+      </View>
+    </View>
+  );
 }
 
 function normalizeSpecs(raw: any): Record<string, string> {
@@ -96,7 +214,6 @@ function PlazoreAIOrb({ size = 64 }: { size?: number }) {
         justifyContent: "center",
       }}
     >
-      {/* Rotating ring around the logo */}
       <Animated.View
         style={{
           position: "absolute",
@@ -112,8 +229,6 @@ function PlazoreAIOrb({ size = 64 }: { size?: number }) {
           transform: [{ rotate }],
         }}
       />
-
-      {/* Logo in the center */}
       <View
         style={{
           width: size * 0.52,
@@ -126,10 +241,7 @@ function PlazoreAIOrb({ size = 64 }: { size?: number }) {
       >
         <Image
           source={require("@/assets/images/plazore-ai-logo.png")}
-          style={{
-            width: size * 0.32,
-            height: size * 0.32,
-          }}
+          style={{ width: size * 0.32, height: size * 0.32 }}
           resizeMode="contain"
         />
       </View>
@@ -138,6 +250,11 @@ function PlazoreAIOrb({ size = 64 }: { size?: number }) {
 }
 
 export default function ProductDetails() {
+  const [fontsLoaded] = useFonts({
+    SpaceGrotesk_500Medium,
+    SpaceGrotesk_600SemiBold,
+  });
+
   const { id: rawId } = useLocalSearchParams<{ id: string | string[] }>();
   const id = Array.isArray(rawId) ? rawId[0] : rawId;
   const router = useRouter();
@@ -158,7 +275,10 @@ export default function ProductDetails() {
   const aiLift = useRef(new Animated.Value(12)).current;
   const scrollY = useRef(new Animated.Value(0)).current;
   const scrollX = useRef(new Animated.Value(0)).current;
-  const [activeIndex, setActiveIndex] = useState(0);
+  const fadeIn = useRef(new Animated.Value(0)).current;
+  const lift = useRef(new Animated.Value(10)).current;
+  const heartScale = useRef(new Animated.Value(1)).current;
+  const topBarOpacity = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -186,10 +306,6 @@ export default function ProductDetails() {
     wishlistApi;
   const { addToCart, itemCount } = useCart();
   const { formatProduct } = useMarketplace();
-
-  const fadeIn = useRef(new Animated.Value(0)).current;
-  const lift = useRef(new Animated.Value(10)).current;
-  const heartScale = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
     const loadCurrentUser = async () => {
@@ -254,6 +370,8 @@ export default function ProductDetails() {
           setProduct(data);
           setWishlistCount(Number(data.wishlistCount) || 0);
           setLiked(!!isInWishlist?.(data._id));
+
+          topBarOpacity.setValue(0);
           Animated.parallel([
             Animated.timing(fadeIn, {
               toValue: 1,
@@ -264,6 +382,13 @@ export default function ProductDetails() {
             Animated.timing(lift, {
               toValue: 0,
               duration: 420,
+              easing: Easing.out(Easing.cubic),
+              useNativeDriver: true,
+            }),
+            Animated.timing(topBarOpacity, {
+              toValue: 1,
+              duration: 520,
+              delay: 180,
               easing: Easing.out(Easing.cubic),
               useNativeDriver: true,
             }),
@@ -388,17 +513,11 @@ export default function ProductDetails() {
     }
   };
 
-  const onCarouselScroll = Animated.event(
-    [{ nativeEvent: { contentOffset: { x: scrollX } } }],
-    {
+  const onCarouselScroll = useRef(
+    Animated.event([{ nativeEvent: { contentOffset: { x: scrollX } } }], {
       useNativeDriver: false,
-      listener: (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-        const x = e.nativeEvent.contentOffset.x;
-        const idx = Math.round(x / width);
-        if (idx !== activeIndex) setActiveIndex(idx);
-      },
-    },
-  );
+    }),
+  ).current;
 
   const specifications = useMemo(
     () => normalizeSpecs(product?.specifications),
@@ -416,13 +535,8 @@ export default function ProductDetails() {
     extrapolate: "clamp",
   });
 
-  if (loading) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color={AI_GREEN} />
-        <Text style={styles.loadingText}>Inspecting piece…</Text>
-      </View>
-    );
+  if (loading || !fontsLoaded) {
+    return <StorePreloader />;
   }
 
   if (!product) {
@@ -486,6 +600,7 @@ export default function ProductDetails() {
     null;
 
   const showProductCommunication = isSignedIn && !isOwnProduct;
+  const inStock = Number(product.stock) > 0;
 
   return (
     <View style={{ flex: 1, backgroundColor: BG }}>
@@ -498,43 +613,50 @@ export default function ProductDetails() {
           transform: [{ translateY: lift }],
         }}
       >
-       <Animated.ScrollView
-  style={{ flex: 1 }}
-  contentContainerStyle={{ paddingBottom: 140 }}
-  showsVerticalScrollIndicator={false}
-  bounces={false}
-  decelerationRate="fast"
-  nestedScrollEnabled={false}
-  scrollEventThrottle={16}
-  overScrollMode="never"
-  onScroll={Animated.event(
-    [{ nativeEvent: { contentOffset: { y: scrollY } } }],
-    { useNativeDriver: true },
-  )}
->
-          {/* IMAGE GALLERY - no sticky transform = no flicker */}
-          <View style={{ height: GALLERY_H, backgroundColor: "#07080C" }}>
+        <Animated.ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={{ paddingBottom: 140 }}
+          showsVerticalScrollIndicator={false}
+          bounces={false}
+          decelerationRate="fast"
+          nestedScrollEnabled
+          scrollEventThrottle={16}
+          overScrollMode="never"
+          onScroll={Animated.event(
+            [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+            { useNativeDriver: true },
+          )}
+        >
+          <View style={styles.galleryRoot} collapsable={false}>
             {images.length > 0 ? (
-              <GestureScrollView
+              <Animated.ScrollView
                 horizontal
                 pagingEnabled
                 showsHorizontalScrollIndicator={false}
                 bounces={false}
                 decelerationRate="fast"
+                disableIntervalMomentum
                 scrollEventThrottle={16}
                 onScroll={onCarouselScroll}
-                style={{ width, height: GALLERY_H }}
+                style={styles.galleryScroll}
+                removeClippedSubviews={false}
+                overScrollMode="never"
               >
                 {images.map((img, index) => (
-                  <View key={index} style={{ width, height: GALLERY_H }}>
+                  <View
+                    key={`g-${index}`}
+                    style={styles.gallerySlide}
+                    collapsable={false}
+                  >
                     <Image
                       source={{ uri: img }}
-                      style={{ width, height: GALLERY_H }}
+                      style={styles.galleryImage}
                       resizeMode="cover"
+                      fadeDuration={Platform.OS === "android" ? 0 : undefined}
                     />
                   </View>
                 ))}
-              </GestureScrollView>
+              </Animated.ScrollView>
             ) : (
               <View style={styles.noImage}>
                 <Ionicons name="image-outline" size={40} color="#3A3F4A" />
@@ -579,7 +701,7 @@ export default function ProductDetails() {
                   });
                   return (
                     <Animated.View
-                      key={index}
+                      key={`d-${index}`}
                       style={{
                         width: dotWidth,
                         opacity,
@@ -595,80 +717,83 @@ export default function ProductDetails() {
             )}
           </View>
 
-          {/* CONTENT */}
           <View style={styles.contentSheet}>
             <View style={styles.sheetHandle} />
 
-            {/* Identity */}
-<View style={styles.identityBlock}>
-  {/* Brand */}
-  {(product.brand || categoryLabel) && (
-    <Text style={styles.eyebrow}>
-      {product.brand || categoryLabel}
-    </Text>
-  )}
+            <View style={styles.identityBlock}>
+              {(product.brand || categoryLabel) && (
+                <Text style={styles.eyebrow} numberOfLines={1}>
+                  {product.brand || categoryLabel}
+                </Text>
+              )}
 
-  {/* Name */}
-  <Text style={styles.productName}>{product.name}</Text>
+              <ExpandableText
+                text={String(product.name || "")}
+                style={styles.productName}
+                numberOfLines={2}
+              />
 
-  {/* Price + Available row */}
-  <View style={styles.priceRow}>
-    <Text style={styles.price}>
-      {formatProduct(Number(product.price), productRegion)}
-    </Text>
+              <View style={styles.priceRow}>
+                <Text style={styles.price} numberOfLines={1}>
+                  {formatProduct(Number(product.price), productRegion)}
+                </Text>
 
-    <View
-      style={[
-        styles.availableBadge,
-        Number(product.stock) > 0
-          ? styles.availableBadgeOn
-          : styles.availableBadgeOff,
-      ]}
-    >
-      <View
-        style={[
-          styles.availableDot,
-          {
-            backgroundColor:
-              Number(product.stock) > 0 ? AI_GREEN : ERROR,
-          },
-        ]}
-      />
-      <Text
-        style={[
-          styles.availableText,
-          {
-            color: Number(product.stock) > 0 ? AI_GREEN : ERROR,
-          },
-        ]}
-      >
-        {Number(product.stock) > 0
-          ? `Available · ${product.stock}`
-          : "Unavailable"}
-      </Text>
-    </View>
-  </View>
+                <View
+                  style={[
+                    styles.availableBadge,
+                    inStock
+                      ? styles.availableBadgeOn
+                      : styles.availableBadgeOff,
+                  ]}
+                >
+                  {inStock ? (
+                    <LinearGradient
+                      colors={[...GRADIENT_COLORS]}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 1 }}
+                      style={styles.availableDot}
+                    />
+                  ) : (
+                    <View
+                      style={[styles.availableDot, { backgroundColor: ERROR }]}
+                    />
+                  )}
+                  {inStock ? (
+                    <GradientText style={styles.availableText}>
+                      {`Available · ${product.stock}`}
+                    </GradientText>
+                  ) : (
+                    <Text style={[styles.availableText, { color: ERROR }]}>
+                      Unavailable
+                    </Text>
+                  )}
+                </View>
+              </View>
 
-  {/* Category chips */}
-  {(categoryLabel || product.subCategory) && (
-    <View style={styles.chipRow}>
-      {!!categoryLabel && (
-        <View style={styles.chip}>
-          <Text style={styles.chipText}>{categoryLabel}</Text>
-        </View>
-      )}
-      {!!product.subCategory && (
-        <View style={styles.chip}>
-          <Text style={[styles.chipText, { color: MUTED }]}>
-            {product.subCategory}
-          </Text>
-        </View>
-      )}
-    </View>
-  )}
-</View>
+              {(categoryLabel || product.subCategory) && (
+                <View style={styles.chipRow}>
+                  {!!categoryLabel && (
+                    <View style={styles.chip}>
+                      <Text style={styles.chipText} numberOfLines={1}>
+                        {categoryLabel}
+                      </Text>
+                    </View>
+                  )}
+                  {!!product.subCategory && (
+                    <View style={styles.chip}>
+                      <Text
+                        style={[styles.chipText, { color: MUTED }]}
+                        numberOfLines={1}
+                      >
+                        {product.subCategory}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+              )}
+            </View>
 
-            {/* ── PLAZORE AI ── */}
+            {/* ═══ Plazore AI — Space Grotesk only here ═══ */}
             <View style={styles.aiCard}>
               <LinearGradient
                 colors={["rgba(20,24,32,0.85)", "rgba(17,20,26,0.9)"]}
@@ -691,29 +816,26 @@ export default function ProductDetails() {
                     paddingBottom: 14,
                   }}
                 >
-                  {/* Header with your local logo */}
                   <View style={styles.aiHeader}>
-                    {/* ========== CHANGE LOGO SIZE HERE ========== */}
                     <Image
-                      source={require("@/assets/images/plazore-ai-logo.png")} // ← put your image path here
-                      style={{
-                        width: 26,   // ← change this number to make logo bigger/smaller
-                        height: 26,  // ← change this number too
-                        borderRadius: 7,
-                      }}
+                      source={require("@/assets/images/plazore-ai-logo.png")}
+                      style={styles.aiLogo}
                       resizeMode="contain"
                     />
-                    {/* ========================================== */}
                     <Text style={styles.aiLabel}>Plazore AI</Text>
                   </View>
 
-                  <Text style={styles.aiQuickInsights}>Quick Insights</Text>
+                  <Text style={styles.aiQuickInsights}>Quick AI Insights</Text>
 
-                  <Text style={styles.aiSummary}>
-                    {aiData?.status === "ready"
-                      ? aiData.summary
-                      : "Plazore AI is preparing a thoughtful reading of this listing."}
-                  </Text>
+                  <ExpandableText
+                    text={
+                      aiData?.status === "ready"
+                        ? String(aiData.summary || "")
+                        : "Plazore AI is preparing a thoughtful reading of this listing."
+                    }
+                    style={styles.aiSummary}
+                    numberOfLines={4}
+                  />
 
                   {aiData?.status === "ready" &&
                     aiData.highlights?.length > 0 && (
@@ -721,16 +843,31 @@ export default function ProductDetails() {
                         <Text style={styles.aiSectionTitle}>Key Points</Text>
 
                         <View style={styles.highlightRow}>
-                          <View style={styles.bullet} />
-                          <Text style={styles.highlightText} numberOfLines={1}>
+                          <LinearGradient
+                            colors={[...GRADIENT_COLORS]}
+                            start={{ x: 0, y: 0 }}
+                            end={{ x: 1, y: 1 }}
+                            style={styles.bullet}
+                          />
+                          <Text style={styles.highlightText} numberOfLines={2}>
                             {aiData.highlights[0]}
                           </Text>
                         </View>
 
                         {aiData.highlights.length > 1 && (
-                          <View style={[styles.highlightRow, { opacity: 0.28 }]}>
-                            <View style={styles.bullet} />
-                            <Text style={styles.highlightText} numberOfLines={1}>
+                          <View
+                            style={[styles.highlightRow, { opacity: 0.28 }]}
+                          >
+                            <LinearGradient
+                              colors={[...GRADIENT_COLORS]}
+                              start={{ x: 0, y: 0 }}
+                              end={{ x: 1, y: 1 }}
+                              style={styles.bullet}
+                            />
+                            <Text
+                              style={styles.highlightText}
+                              numberOfLines={1}
+                            >
                               {aiData.highlights[1]}
                             </Text>
                           </View>
@@ -755,7 +892,7 @@ export default function ProductDetails() {
               )}
             </View>
 
-            {/* ── BUYER CONFIDENCE (premium) ── */}
+            {/* ═══ Buyer Confidence ═══ */}
             <View style={styles.confidenceCard}>
               <LinearGradient
                 colors={["rgba(16,185,129,0.08)", "rgba(59,130,246,0.06)"]}
@@ -764,29 +901,46 @@ export default function ProductDetails() {
                 style={StyleSheet.absoluteFillObject}
               />
               <View style={styles.confidenceHeader}>
-                <View style={styles.confidenceBadge}>
-                  <Ionicons name="shield-checkmark" size={14} color={AI_GREEN} />
-                </View>
-                <Text style={styles.sectionEyebrow}>Buyer Confidence</Text>
+                <LinearGradient
+                  colors={[...GRADIENT_COLORS]}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={styles.confidenceBadge}
+                >
+                  <Ionicons
+                    name="shield-checkmark"
+                    size={12}
+                    color="#FFFFFF"
+                  />
+                </LinearGradient>
+                <GradientText style={styles.confidenceEyebrow}>
+                  Buyer Confidence
+                </GradientText>
               </View>
-              <Text style={styles.confidenceLevel}>
+              <Text style={styles.confidenceLevel} numberOfLines={2}>
                 {aiData?.buyerConfidence?.level || "Verified Atelier Standard"}
               </Text>
-              <Text style={styles.confidenceBody}>
-                {aiData?.confidenceExplanation ||
-                  "Drawn from merchant verification history, transparent disclosures, and regional standards."}
-              </Text>
+              <ExpandableText
+                text={
+                  aiData?.confidenceExplanation ||
+                  "Drawn from merchant verification history, transparent disclosures, and regional standards."
+                }
+                style={styles.confidenceBody}
+                numberOfLines={3}
+              />
             </View>
 
-            {/* Description */}
             {!!product.description && (
               <View style={{ marginBottom: 28 }}>
                 <Text style={styles.sectionEyebrow}>Description</Text>
-                <Text style={styles.body}>{product.description}</Text>
+                <ExpandableText
+                  text={String(product.description)}
+                  style={styles.body}
+                  numberOfLines={4}
+                />
               </View>
             )}
 
-            {/* Specs */}
             {hasSpecs && (
               <View style={[styles.card, { marginBottom: 28 }]}>
                 <Text style={styles.cardTitle}>Specifications</Text>
@@ -799,15 +953,18 @@ export default function ProductDetails() {
                         index < arr.length - 1 && styles.specBorder,
                       ]}
                     >
-                      <Text style={styles.specKey}>{formatSpecKey(key)}</Text>
-                      <Text style={styles.specValue}>{value}</Text>
+                      <Text style={styles.specKey} numberOfLines={2}>
+                        {formatSpecKey(key)}
+                      </Text>
+                      <Text style={styles.specValue} numberOfLines={3}>
+                        {value}
+                      </Text>
                     </View>
                   ),
                 )}
               </View>
             )}
 
-            {/* Docs */}
             {hasDocs && (
               <View style={[styles.card, { marginBottom: 28 }]}>
                 <Text style={styles.cardTitle}>Verification Documents</Text>
@@ -830,11 +987,11 @@ export default function ProductDetails() {
                         color={SECONDARY}
                       />
                     </View>
-                    <View style={{ flex: 1, marginRight: 8 }}>
+                    <View style={{ flex: 1, marginRight: 8, minWidth: 0 }}>
                       <Text style={styles.docName} numberOfLines={1}>
                         {doc.documentName || "Document"}
                       </Text>
-                      <Text style={styles.docType}>
+                      <Text style={styles.docType} numberOfLines={1}>
                         {String(doc.documentType || "document").replace(
                           /_/g,
                           " ",
@@ -847,7 +1004,6 @@ export default function ProductDetails() {
               </View>
             )}
 
-            {/* Shipping */}
             <Text style={styles.sectionEyebrow}>Shipping Details</Text>
             <View style={[styles.card, { marginBottom: 10 }]}>
               <View style={styles.shipHeader}>
@@ -858,14 +1014,16 @@ export default function ProductDetails() {
                     color={SECONDARY}
                   />
                 </View>
-                <View style={{ flex: 1 }}>
+                <View style={{ flex: 1, minWidth: 0 }}>
                   <Text style={styles.shipLabel}>Delivery</Text>
-                  <Text style={styles.shipMethod}>{deliveryMethodLabel}</Text>
+                  <Text style={styles.shipMethod} numberOfLines={2}>
+                    {deliveryMethodLabel}
+                  </Text>
                 </View>
               </View>
               <View style={styles.shipFeeRow}>
                 <Text style={styles.shipFeeLabel}>Delivery fee</Text>
-                <Text style={styles.shipFeeValue}>
+                <Text style={styles.shipFeeValue} numberOfLines={1}>
                   {formatProduct(deliveryFee, productRegion)}
                 </Text>
               </View>
@@ -880,14 +1038,16 @@ export default function ProductDetails() {
                     color={SECONDARY}
                   />
                 </View>
-                <View style={{ flex: 1 }}>
+                <View style={{ flex: 1, minWidth: 0 }}>
                   <Text style={styles.shipLabel}>Ships from</Text>
-                  <Text style={styles.shipMethod}>{shipsFrom}</Text>
+                  <Text style={styles.shipMethod} numberOfLines={2}>
+                    {shipsFrom}
+                  </Text>
                 </View>
               </View>
             )}
 
-             <Text style={styles.sectionEyebrow}>Sold By</Text>
+            <Text style={styles.sectionEyebrow}>Sold By</Text>
             <TouchableOpacity
               activeOpacity={0.85}
               disabled={!sellerId}
@@ -910,9 +1070,9 @@ export default function ProductDetails() {
                   />
                 </View>
               )}
-              <View style={{ marginLeft: 12, flex: 1 }}>
+              <View style={{ marginLeft: 12, flex: 1, minWidth: 0 }}>
                 <Text style={styles.storeLabel}>Visit storefront</Text>
-                <Text style={styles.storeName}>
+                <Text style={styles.storeName} numberOfLines={1}>
                   {seller.storeName || seller.name || "Atelier Merchant"}
                 </Text>
                 <Text style={styles.storeDesc} numberOfLines={1}>
@@ -922,52 +1082,52 @@ export default function ProductDetails() {
               <Ionicons name="chevron-forward" size={14} color={MUTED} />
             </TouchableOpacity>
 
-            {/* Message Seller — never show for the product's own seller */}
-{showProductCommunication && (
-  <>
-    <Text style={styles.sectionEyebrow}>Message Seller</Text>
-    <TouchableOpacity
-      onPress={handleMessageSeller}
-      disabled={messaging}
-      activeOpacity={0.88}
-      style={styles.commCard}
-    >
-      <LinearGradient
-        colors={["#13201A", "#111820"]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={StyleSheet.absoluteFillObject}
-      />
+            {showProductCommunication && (
+              <>
+                <Text style={styles.sectionEyebrow}>Message Seller</Text>
+                <TouchableOpacity
+                  onPress={handleMessageSeller}
+                  disabled={messaging}
+                  activeOpacity={0.88}
+                  style={styles.commCard}
+                >
+                  <LinearGradient
+                    colors={["#13201A", "#111820"]}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={StyleSheet.absoluteFillObject}
+                  />
 
-      {messaging ? (
-        <ActivityIndicator size="small" color={AI_GREEN} />
-      ) : (
-        <>
-          <View style={styles.commIcon}>
-            <Ionicons
-              name="chatbubble-ellipses"
-              size={18}
-              color={AI_GREEN}
-            />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.commTitle}>Ask about this product</Text>
-            <Text style={styles.commSub}>
-              Ask questions · Continues inside Plazore
-            </Text>
-          </View>
-          <View style={styles.commArrow}>
-            <Ionicons name="arrow-forward" size={16} color={TEXT} />
-          </View>
-        </>
-      )}
-    </TouchableOpacity>
-  </>
-)}
+                  {messaging ? (
+                    <ActivityIndicator size="small" color={AI_GREEN} />
+                  ) : (
+                    <>
+                      <View style={styles.commIcon}>
+                        <Ionicons
+                          name="chatbubble-ellipses"
+                          size={18}
+                          color={AI_GREEN}
+                        />
+                      </View>
+                      <View style={{ flex: 1, minWidth: 0 }}>
+                        <Text style={styles.commTitle} numberOfLines={1}>
+                          Ask about this product
+                        </Text>
+                        <Text style={styles.commSub} numberOfLines={1}>
+                          Ask questions · Continues inside Plazore
+                        </Text>
+                      </View>
+                      <View style={styles.commArrow}>
+                        <Ionicons name="arrow-forward" size={16} color={TEXT} />
+                      </View>
+                    </>
+                  )}
+                </TouchableOpacity>
+              </>
+            )}
           </View>
         </Animated.ScrollView>
 
-        {/* Action Bar */}
         <View style={styles.actionBar}>
           <View style={styles.actionRow}>
             <TouchableOpacity
@@ -1004,13 +1164,12 @@ export default function ProductDetails() {
           </View>
         </View>
 
-        {/* Top controls */}
         <SafeAreaView
           edges={["top"]}
           style={styles.topBar}
           pointerEvents="box-none"
         >
-          <View style={styles.topRow}>
+          <Animated.View style={[styles.topRow, { opacity: topBarOpacity }]}>
             <TouchableOpacity
               onPress={() => router.back()}
               activeOpacity={0.85}
@@ -1044,7 +1203,7 @@ export default function ProductDetails() {
                 <Text style={styles.wishCount}>{wishlistCount}</Text>
               )}
             </View>
-          </View>
+          </Animated.View>
         </SafeAreaView>
       </Animated.View>
     </View>
@@ -1058,13 +1217,40 @@ const styles = StyleSheet.create({
     alignItems: "center",
     backgroundColor: BG,
   },
-  loadingText: {
-    color: MUTED,
-    marginTop: 14,
-    fontSize: 11,
-    letterSpacing: 1.8,
-    textTransform: "uppercase",
+  loaderRoot: {
+    flex: 1,
+    backgroundColor: BG,
+    alignItems: "center",
+    justifyContent: "center",
   },
+  orbWrapper: {
+    width: 110,
+    height: 110,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  orbRing: {
+    position: "absolute",
+    width: 110,
+    height: 110,
+    borderRadius: 55,
+    borderWidth: 2.4,
+    borderColor: "transparent",
+    borderTopColor: AI_GREEN,
+    borderRightColor: AI_BLUE,
+    borderBottomColor: "transparent",
+    borderLeftColor: AI_GREEN,
+  },
+  orbLogoWrap: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: "rgba(16,185,129,0.1)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  orbLogo: { width: 32, height: 32 },
+
   emptyIcon: {
     width: 56,
     height: 56,
@@ -1077,8 +1263,8 @@ const styles = StyleSheet.create({
   },
   emptyTitle: {
     color: TEXT,
-    fontWeight: "600",
     fontSize: 16,
+    fontWeight: "600",
     marginTop: 16,
   },
   emptyBtn: {
@@ -1088,8 +1274,21 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     backgroundColor: TEXT,
   },
-  emptyBtnText: { color: BG, fontWeight: "700", fontSize: 13 },
+  emptyBtnText: {
+    color: BG,
+    fontWeight: "700",
+    fontSize: 13,
+  },
 
+  galleryRoot: {
+    width,
+    height: GALLERY_H,
+    backgroundColor: "#07080C",
+    overflow: "hidden",
+  },
+  galleryScroll: { width, height: GALLERY_H },
+  gallerySlide: { width, height: GALLERY_H },
+  galleryImage: { width, height: GALLERY_H },
   noImage: {
     flex: 1,
     backgroundColor: SURFACE,
@@ -1134,9 +1333,7 @@ const styles = StyleSheet.create({
     marginBottom: 18,
   },
 
-  identityBlock: {
-    marginBottom: 22,
-  },
+  identityBlock: { marginBottom: 22, width: "100%" },
   eyebrow: {
     color: MUTED,
     fontSize: 11,
@@ -1145,54 +1342,56 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
     marginBottom: 7,
   },
-  priceRow: {
-  flexDirection: "row",
-  alignItems: "center",
-  justifyContent: "space-between",
-  marginTop: 2,
-  marginBottom: 2,
-  gap: 12,
-},
-availableBadge: {
-  flexDirection: "row",
-  alignItems: "center",
-  paddingHorizontal: 10,
-  paddingVertical: 5,
-  borderRadius: 999,
-  borderWidth: StyleSheet.hairlineWidth,
-  gap: 6,
-},
-availableBadgeOn: {
-  backgroundColor: "rgba(16,185,129,0.1)",
-  borderColor: "rgba(16,185,129,0.28)",
-},
-availableBadgeOff: {
-  backgroundColor: "rgba(239,98,98,0.1)",
-  borderColor: "rgba(239,98,98,0.28)",
-},
-availableDot: {
-  width: 6,
-  height: 6,
-  borderRadius: 3,
-},
-availableText: {
-  fontSize: 12,
-  fontWeight: "600",
-  letterSpacing: 0.2,
-},
   productName: {
     color: TEXT,
-    fontWeight: "700",
     fontSize: 24,
+    fontWeight: "700",
     lineHeight: 31,
     marginBottom: 8,
     letterSpacing: -0.4,
   },
+  priceRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: 2,
+    marginBottom: 2,
+    gap: 12,
+    flexWrap: "wrap",
+    width: "100%",
+  },
   price: {
     color: TEXT,
-    fontWeight: "700",
     fontSize: 25,
+    fontWeight: "700",
     letterSpacing: -0.3,
+    flexShrink: 1,
+    maxWidth: "58%",
+  },
+  availableBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+    borderWidth: StyleSheet.hairlineWidth,
+    gap: 6,
+    flexShrink: 0,
+    maxWidth: "100%",
+  },
+  availableBadgeOn: {
+    backgroundColor: "rgba(16,185,129,0.1)",
+    borderColor: "rgba(59,130,246,0.28)",
+  },
+  availableBadgeOff: {
+    backgroundColor: "rgba(239,98,98,0.1)",
+    borderColor: "rgba(239,98,98,0.28)",
+  },
+  availableDot: { width: 6, height: 6, borderRadius: 3 },
+  availableText: {
+    fontSize: 12,
+    fontWeight: "600",
+    letterSpacing: 0.2,
   },
   chipRow: {
     flexDirection: "row",
@@ -1207,10 +1406,15 @@ availableText: {
     borderRadius: 999,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: LINE,
+    maxWidth: width - 60,
   },
-  chipText: { color: SECONDARY, fontSize: 12.5, fontWeight: "500" },
+  chipText: {
+    color: SECONDARY,
+    fontSize: 12.5,
+    fontWeight: "500",
+  },
 
-  // ── Plazore AI (glass) ──
+  /* AI — Space Grotesk */
   aiCard: {
     borderRadius: 20,
     borderWidth: StyleSheet.hairlineWidth,
@@ -1227,23 +1431,22 @@ availableText: {
   aiHeader: {
     flexDirection: "row",
     alignItems: "center",
-    marginBottom: 3,
-    gap: 10,
+    marginBottom: 4,
+    gap: 8,
   },
+  aiLogo: { width: 22, height: 22 },
   aiLabel: {
     color: "#FFFFFF",
-    fontSize: 18,
-    fontWeight: "700",
+    fontFamily: FONT.space600,
+    fontSize: 17,
     letterSpacing: -0.3,
   },
   aiQuickInsights: {
-    color: "#FFFFFF",
-    fontSize: 14.5,
-    fontStyle: "italic",
-    fontWeight: "300",
+    color: "rgba(255,255,255,0.88)",
+    fontFamily: FONT.space500,
+    fontSize: 14,
     marginBottom: 12,
-    marginTop: 1,
-    opacity: 0.9,
+    marginTop: 2,
   },
   aiSummary: {
     color: TEXT,
@@ -1267,7 +1470,6 @@ availableText: {
     width: 4.5,
     height: 4.5,
     borderRadius: 2.5,
-    backgroundColor: SECONDARY,
     marginTop: 8,
     marginRight: 10,
   },
@@ -1294,32 +1496,48 @@ availableText: {
     fontWeight: "500",
   },
 
-  // ── Buyer Confidence (premium glass) ──
   confidenceCard: {
-    borderRadius: 20,
+    borderRadius: 16,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: "rgba(16,185,129,0.25)",
-    padding: 18,
-    marginBottom: 28,
+    borderColor: "rgba(16,185,129,0.22)",
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 24,
     overflow: "hidden",
     backgroundColor: "rgba(17,20,26,0.7)",
   },
   confidenceHeader: {
     flexDirection: "row",
     alignItems: "center",
-    marginBottom: 10,
-    gap: 9,
+    marginBottom: 6,
+    gap: 7,
   },
   confidenceBadge: {
-    width: 28,
-    height: 28,
-    borderRadius: 9,
-    backgroundColor: "rgba(16,185,129,0.15)",
+    width: 22,
+    height: 22,
+    borderRadius: 7,
     alignItems: "center",
     justifyContent: "center",
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: "rgba(16,185,129,0.3)",
   },
+  confidenceEyebrow: {
+    fontFamily: FONT.space500,
+    fontSize: 10,
+    letterSpacing: 1.2,
+    textTransform: "uppercase",
+  },
+  confidenceLevel: {
+    color: TEXT,
+    fontSize: 14.5,
+    fontWeight: "700",
+    marginBottom: 4,
+    letterSpacing: -0.2,
+  },
+  confidenceBody: {
+    color: SECONDARY,
+    fontSize: 13,
+    lineHeight: 19,
+  },
+
   sectionEyebrow: {
     color: "#FFFFFF",
     fontSize: 14,
@@ -1328,19 +1546,6 @@ availableText: {
     textTransform: "uppercase",
     marginBottom: 8,
   },
-  confidenceLevel: {
-    color: TEXT,
-    fontSize: 17,
-    fontWeight: "700",
-    marginBottom: 6,
-    letterSpacing: -0.3,
-  },
-  confidenceBody: {
-    color: SECONDARY,
-    fontSize: 14.5,
-    lineHeight: 22,
-  },
-
   card: {
     backgroundColor: SURFACE,
     borderRadius: 20,
@@ -1359,17 +1564,28 @@ availableText: {
     fontSize: 16,
     marginBottom: 12,
   },
+  readMore: {
+    color: AI_GREEN,
+    fontSize: 13,
+    fontWeight: "600",
+  },
 
   specRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     paddingVertical: 11,
+    gap: 10,
   },
   specBorder: {
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: LINE,
   },
-  specKey: { color: MUTED, fontSize: 13.5, marginRight: 12 },
+  specKey: {
+    color: MUTED,
+    fontSize: 13.5,
+    flexShrink: 0,
+    maxWidth: "40%",
+  },
   specValue: {
     color: TEXT,
     fontSize: 13.5,
@@ -1438,12 +1654,14 @@ availableText: {
     paddingTop: 13,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: LINE,
+    gap: 8,
   },
   shipFeeLabel: { color: SECONDARY, fontSize: 14.5 },
   shipFeeValue: {
     color: TEXT,
     fontWeight: "600",
     fontSize: 15.5,
+    flexShrink: 1,
   },
   shipsFromCard: {
     flexDirection: "row",

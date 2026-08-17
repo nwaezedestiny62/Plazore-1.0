@@ -1,9 +1,10 @@
 import { Ionicons } from '@expo/vector-icons'
 import { BlurView } from 'expo-blur'
 import { LinearGradient } from 'expo-linear-gradient'
-import React, { useRef, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import {
   Animated,
+  Easing,
   Image,
   Platform,
   Pressable,
@@ -16,6 +17,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 const ACCENT = '#C9A962'
 const ICON = '#FFFFFF'
 const GLASS = 'rgba(8,8,10,0.55)'
+const EASE = Easing.bezier(0.22, 1, 0.36, 1)
 
 type Props = {
   scrollProgress: number
@@ -109,8 +111,33 @@ export default function PlazoreTitleBar({
     typeof musicControlled === 'boolean' ? musicControlled : musicLocal
 
   const anim = useRef(new Animated.Value(0)).current
+  const logoOpacity = useRef(new Animated.Value(0)).current
+  const textOpacity = useRef(new Animated.Value(1)).current
 
-  React.useEffect(() => {
+  // Smooth crossfade: PLAZORE text ↔ logo (same pattern as LOUNGE in hub)
+  useEffect(() => {
+    if (logoLoaded) {
+      Animated.parallel([
+        Animated.timing(logoOpacity, {
+          toValue: 1,
+          duration: 420,
+          easing: EASE,
+          useNativeDriver: true,
+        }),
+        Animated.timing(textOpacity, {
+          toValue: 0,
+          duration: 320,
+          easing: EASE,
+          useNativeDriver: true,
+        }),
+      ]).start()
+    } else {
+      logoOpacity.setValue(0)
+      textOpacity.setValue(1)
+    }
+  }, [logoLoaded])
+
+  useEffect(() => {
     const p = Math.min(1, Math.max(0, scrollProgress))
     Animated.timing(anim, {
       toValue: p,
@@ -182,18 +209,26 @@ export default function PlazoreTitleBar({
         style={styles.topVeil}
       />
 
-      {/* Logo + PLAZORE text fallback underneath */}
+      {/* Logo + PLAZORE fallback — smooth crossfade, no clash */}
       <View style={styles.logoWrap} pointerEvents="none">
-        <Text style={[styles.logoFallback, logoLoaded && styles.logoFallbackHidden]}>
-          PLAZORE
-        </Text>
-        <Image
-          source={require('../assets/logo.png')}
-          style={styles.logo}
-          resizeMode="contain"
-          onLoad={() => setLogoLoaded(true)}
-          onError={() => setLogoLoaded(false)}
-        />
+        <Animated.View
+          style={[
+            styles.logoLayer,
+            { opacity: textOpacity },
+          ]}
+        >
+          <Text style={styles.logoFallback}>PLAZORE</Text>
+        </Animated.View>
+
+        <Animated.View style={[styles.logoLayer, { opacity: logoOpacity }]}>
+          <Image
+            source={require('../assets/logo.png')}
+            style={styles.logo}
+            resizeMode="contain"
+            onLoad={() => setLogoLoaded(true)}
+            onError={() => setLogoLoaded(false)}
+          />
+        </Animated.View>
       </View>
 
       <View style={styles.row}>
@@ -280,16 +315,16 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     zIndex: 1,
   },
-  logoFallback: {
+  logoLayer: {
     position: 'absolute',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  logoFallback: {
     color: '#FFFFFF',
     fontSize: 28,
     fontWeight: '800',
     letterSpacing: 6,
-    opacity: 0.95,
-  },
-  logoFallbackHidden: {
-    opacity: 0,
   },
   logo: {
     height: 99,

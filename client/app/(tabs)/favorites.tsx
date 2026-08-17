@@ -50,8 +50,8 @@ const SORT_OPTIONS: { key: SortKey; label: string; hint: string }[] = [
   { key: 'oldest', label: 'Oldest first', hint: 'First saved' },
   { key: 'name_az', label: 'Name A → Z', hint: 'Alphabetical' },
   { key: 'name_za', label: 'Name Z → A', hint: 'Reverse alpha' },
-  { key: 'price_low', label: 'Price · Low to high', hint: 'Budget first' },
-  { key: 'price_high', label: 'Price · High to low', hint: 'Premium first' },
+  { key: 'price_low', label: 'Price · Low to high', hint: 'Lowest price first' },
+  { key: 'price_high', label: 'Price · High to low', hint: 'Highest price first' },
 ]
 
 export default function Favorites() {
@@ -111,13 +111,13 @@ export default function Favorites() {
     <View style={[styles.root, { paddingTop: insets.top }]}>
       {/* ── Header (Browse-style) ── */}
       <View style={styles.header}>
-        <Text style={styles.title}>Wishlist</Text>
+        <Text style={styles.title}>Saved Products</Text>
 
         <View style={styles.metaRow}>
           <Text style={styles.count}>
             {count === 0
-              ? 'No pieces saved'
-              : `${count} piece${count === 1 ? '' : 's'} in your collection`}
+              ? 'Your showroom is waiting'
+              : `${count} product${count === 1 ? '' : 's'} saved`}
           </Text>
 
           {count > 0 && (
@@ -140,7 +140,7 @@ export default function Favorites() {
       {loading && count === 0 ? (
         <View style={styles.center}>
           <ActivityIndicator size="large" color={ACCENT} />
-          <Text style={styles.loadingHint}>Opening your collection…</Text>
+          <Text style={styles.loadingHint}>Opening your saved picks…</Text>
         </View>
       ) : count > 0 ? (
         <ScrollView
@@ -150,7 +150,7 @@ export default function Favorites() {
           {/* Editorial kicker */}
           <View style={styles.kickerRow}>
             <View style={styles.kickerLine} />
-            <Text style={styles.kicker}>PRIVATE COLLECTION</Text>
+            <Text style={styles.kicker}>YOUR SAVED PICKS</Text>
             <View style={styles.kickerLine} />
           </View>
 
@@ -171,14 +171,13 @@ export default function Favorites() {
           </View>
           <Text style={styles.emptyTitle}>Nothing saved yet</Text>
           <Text style={styles.emptyBody}>
-            Double-tap a product image or tap the heart while browsing the
-            showroom. Your picks live here — private, sorted, ready.
+           Save products while exploring the showroom. Your picks will be waiting here.
           </Text>
           <Pressable
             onPress={() => router.push('/(tabs)' as any)}
             style={styles.emptyCta}
           >
-            <Text style={styles.emptyCtaText}>Enter the mall</Text>
+            <Text style={styles.emptyCtaText}>Explore the showroom</Text>
             <Ionicons name="arrow-forward" size={16} color="#FFFFFF" />
           </Pressable>
         </View>
@@ -207,9 +206,9 @@ export default function Favorites() {
         />
         <View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, 20) }]}>
           <View style={styles.sheetHandle} />
-          <Text style={styles.sheetTitle}>Sort collection</Text>
+          <Text style={styles.sheetTitle}>Sort your picks</Text>
           <Text style={styles.sheetSub}>
-            Arrange pieces the way you shop
+           Organize your saved products
           </Text>
 
           {SORT_OPTIONS.map((opt) => {
