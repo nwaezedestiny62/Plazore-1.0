@@ -5,7 +5,6 @@ import RoomOne from './RoomOne'
 import RoomTwo from './RoomTwo'
 import RoomThree from './RoomThree'
 import RoomFour from './RoomFour'
-import RoomFive from './RoomFive'
 
 interface AdaptiveShowroomProps {
   products: Product[]
@@ -23,20 +22,20 @@ export default function AdaptiveShowroom({
   const sections = useMemo(() => {
     const p = products || []
 
-    // With 4 or fewer → fill all rooms
+    // Small catalog → still fill all four rooms (no Room 5)
     if (p.length > 0 && p.length <= 4) {
       return [
         {
           type: 'one' as const,
           products: p,
-          title: 'THE HORIZON',
-          subtitle: 'Expanded View',
+          title: 'THE SHOWROOM',
+          subtitle: 'Take a look around',
         },
         {
           type: 'two' as const,
           products: p,
-          title: 'THE CHAMBER',
-          subtitle: 'Private Selection',
+          title: 'THE EDIT',
+          subtitle: 'Side by Side',
         },
         {
           type: 'three' as const,
@@ -48,19 +47,13 @@ export default function AdaptiveShowroom({
           type: 'four' as const,
           products: p,
           title: 'THE LOCALE',
-          subtitle: 'From Your Region',
-          regionLabel: 'Regional Selection',
-        },
-        {
-          type: 'five' as const,
-          products: p,
-          title: 'THE ATELIER',
-          subtitle: 'Curated Masterpieces',
+          subtitle: 'From Around You',
+          regionLabel: 'A look at what\'s around you',
         },
       ]
     }
 
-    // Normal path
+    // Normal path — 4 rooms only (former Room 5 slice folded into Room 4)
     return [
       {
         type: 'one' as const,
@@ -82,16 +75,11 @@ export default function AdaptiveShowroom({
       },
       {
         type: 'four' as const,
-        products: p.slice(12, 16),
+        // Was 12–16; now takes the rest so nothing is dropped
+        products: p.slice(12),
         title: 'THE LOCALE',
         subtitle: 'From Your Region',
-        regionLabel: 'Regional Selection',
-      },
-      {
-        type: 'five' as const,
-        products: p.slice(16, 20).length > 0 ? p.slice(16, 20) : p.slice(16),
-        title: 'THE ATELIER',
-        subtitle: 'Curated Masterpieces',
+        regionLabel: 'A look at what\'s around you',
       },
     ].filter((s) => s.products.length > 0)
   }, [products])
@@ -122,9 +110,7 @@ export default function AdaptiveShowroom({
               ? 2
               : section.type === 'three'
                 ? 3
-                : section.type === 'four'
-                  ? 4
-                  : 5
+                : 4
 
         const content =
           section.type === 'one' ? (
@@ -145,18 +131,12 @@ export default function AdaptiveShowroom({
               title={section.title}
               subtitle={section.subtitle}
             />
-          ) : section.type === 'four' ? (
+          ) : (
             <RoomFour
               products={section.products}
               title={section.title}
               subtitle={section.subtitle}
               regionLabel={section.regionLabel}
-            />
-          ) : (
-            <RoomFive
-              products={section.products}
-              title={section.title}
-              subtitle={section.subtitle}
             />
           )
 

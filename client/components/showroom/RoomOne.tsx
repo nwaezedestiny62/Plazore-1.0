@@ -13,7 +13,7 @@ import ScrollFadeUp from './ScrollFadeUp'
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window')
 const CARD_W = Math.min(SCREEN_W * 0.58, 220)
-const CARD_GAP = 4 // was 14 — tight spacing between cards
+const CARD_GAP = 8 // was 14 — tight spacing between cards
 
 interface RoomOneProps {
   products: Product[]
@@ -23,8 +23,8 @@ interface RoomOneProps {
 
 export default function RoomOne({
   products,
-  title = 'THE HORIZON',
-  subtitle = 'Expanded View',
+  title = 'THE SHOWROOM',
+  subtitle = 'Take a look around',
 }: RoomOneProps) {
   const featureImage = products[0]?.images?.[0]
 
@@ -62,7 +62,7 @@ export default function RoomOne({
 
       <View style={styles.railSection}>
         <ScrollFadeUp delay={160} duration={550} distance={18}>
-          <Text style={styles.railLabel}>IN THIS SPACE</Text>
+          <Text style={styles.railLabel}>NOW SHOWING</Text>
         </ScrollFadeUp>
 
         <ScrollView

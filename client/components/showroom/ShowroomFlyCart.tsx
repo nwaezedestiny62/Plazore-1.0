@@ -12,7 +12,13 @@ import React, {
   useRef,
   useState,
 } from 'react'
-import { Animated, Easing, StyleSheet, View } from 'react-native'
+import {
+  Animated,
+  Dimensions,
+  Easing,
+  StyleSheet,
+  View,
+} from 'react-native'
 
 type Origin = { x: number; y: number; width: number; height: number }
 
@@ -34,41 +40,46 @@ export function useShowroomFlyCart() {
   return useContext(FlyCartContext)
 }
 
-const FLY = 40
-const DURATION = 520
-const ARC = 78 // how high the arc goes above the lower of start/end
+const FLY = 48
+const DURATION = 620
+const ARC = 90
+
+function fallbackTarget() {
+  const { width, height } = Dimensions.get('window')
+  // approx Cart tab on the floating pill (right side, above home indicator)
+  return {
+    x: width - 48,
+    y: height - 72,
+  }
+}
 
 export function ShowroomFlyCartProvider({
   children,
 }: {
   children: React.ReactNode
-  /** kept for API compat with home — not required for flight */
   visibleProgress?: number
 }) {
   const { addToCart } = useCart()
-  const pos = useRef({ x: 0, y: 0 })
+  const pos = useRef<{ x: number; y: number } | null>(null)
   const [jobs, setJobs] = useState<FlyJob[]>([])
 
   const registerTarget = useCallback((x: number, y: number) => {
-    // Floating nav bag center — ignore bad reads
-    if (x > 8 && y > 8) {
+    if (Number.isFinite(x) && Number.isFinite(y) && x > 0 && y > 0) {
       pos.current = { x, y }
     }
   }, [])
 
   const flyAdd = useCallback(
     (product: Product, origin: Origin) => {
-      // Always add to cart first
-      addToCart(product)
+      try {
+        addToCart(product)
+      } catch {
+        // still try visual if cart fails
+      }
 
-      // No valid origin → silent add only
       if (!origin || origin.width < 2 || origin.height < 2) return
 
-      let tx = pos.current.x
-      let ty = pos.current.y
-
-      // Target not registered yet — skip flight, item still in bag
-      if (tx < 1 || ty < 1) return
+      const target = pos.current ?? fallbackTarget()
 
       const id = `${product._id}-${Date.now()}-${Math.random()
         .toString(36)
@@ -85,7 +96,7 @@ export function ShowroomFlyCartProvider({
             width: origin.width,
             height: origin.height,
           },
-          target: { x: tx, y: ty },
+          target: { x: target.x, y: target.y },
         },
       ])
     },
@@ -99,6 +110,7 @@ export function ShowroomFlyCartProvider({
   return (
     <FlyCartContext.Provider value={{ flyAdd, registerTarget }}>
       {children}
+      {/* overlay above tab bar */}
       <View style={styles.layer} pointerEvents="none">
         {jobs.map((job) => (
           <FlyingClone key={job.id} job={job} onComplete={onDone} />
@@ -118,34 +130,33 @@ function FlyingClone({
   const progress = useRef(new Animated.Value(0)).current
   const done = useRef(false)
 
-  // Path locked once per job — never recomputed mid-flight
   const path = useMemo(() => {
     const sx = job.origin.x + job.origin.width / 2 - FLY / 2
     const sy = job.origin.y + job.origin.height / 2 - FLY / 2
     const ex = job.target.x - FLY / 2
     const ey = job.target.y - FLY / 2
-    const mx = sx + (ex - sx) * 0.45
+    const mx = sx + (ex - sx) * 0.4
     const my = Math.min(sy, ey) - ARC
     return { sx, sy, ex, ey, mx, my }
   }, [job.id])
 
   useEffect(() => {
+    progress.setValue(0)
     const anim = Animated.timing(progress, {
       toValue: 1,
       duration: DURATION,
-      easing: Easing.bezier(0.22, 0.82, 0.18, 1),
+      easing: Easing.bezier(0.2, 0.8, 0.2, 1),
       useNativeDriver: true,
     })
 
     anim.start(({ finished }) => {
       if (!finished || done.current) return
       done.current = true
-      // Let last opacity frame paint before unmount
       requestAnimationFrame(() => onComplete(job.id))
     })
 
     return () => anim.stop()
-  }, [])
+  }, [job.id])
 
   const translateX = progress.interpolate({
     inputRange: [0, 0.5, 1],
@@ -156,16 +167,16 @@ function FlyingClone({
     outputRange: [path.sy, path.my, path.ey],
   })
   const scale = progress.interpolate({
-    inputRange: [0, 0.1, 0.85, 1],
-    outputRange: [1, 1.1, 0.28, 0.06],
+    inputRange: [0, 0.12, 0.75, 1],
+    outputRange: [1, 1.15, 0.45, 0.12],
   })
   const opacity = progress.interpolate({
-    inputRange: [0, 0.88, 1],
+    inputRange: [0, 0.82, 1],
     outputRange: [1, 1, 0],
   })
   const rotate = progress.interpolate({
     inputRange: [0, 1],
-    outputRange: ['0deg', '16deg'],
+    outputRange: ['0deg', '18deg'],
   })
 
   return (
@@ -191,7 +202,7 @@ function FlyingClone({
         />
       ) : (
         <View style={[styles.img, styles.fallback]}>
-          <Ionicons name="cube-outline" size={15} color="#fff" />
+          <Ionicons name="cube-outline" size={16} color="#fff" />
         </View>
       )}
     </Animated.View>
@@ -201,8 +212,8 @@ function FlyingClone({
 const styles = StyleSheet.create({
   layer: {
     ...StyleSheet.absoluteFillObject,
-    zIndex: 9999,
-    elevation: 9999,
+    zIndex: 99999,
+    elevation: 99999,
   },
   clone: {
     position: 'absolute',
@@ -214,11 +225,11 @@ const styles = StyleSheet.create({
   img: {
     width: FLY,
     height: FLY,
-    borderRadius: 10,
+    borderRadius: 12,
     overflow: 'hidden',
     backgroundColor: '#1A1A1A',
-    borderWidth: 1.5,
-    borderColor: 'rgba(255,255,255,0.28)',
+    borderWidth: 2,
+    borderColor: 'rgba(0,229,117,0.55)',
   },
   fallback: {
     alignItems: 'center',

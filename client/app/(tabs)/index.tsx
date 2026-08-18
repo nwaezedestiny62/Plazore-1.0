@@ -1,11 +1,10 @@
 import HeroBanner from '@/components/HeroBanner'
-import PlazoreFloatingNav from '@/components/PlazoreFloatingNav'
-import PlazoreNavigationHub from '@/components/PlazoreNavigationHub'
 import PlazoreTitleBar from '@/components/PlazoreTitleBar'
 import { AdaptiveShowroom } from '@/components/showroom'
 import { ShowroomFlyCartProvider } from '@/components/showroom/ShowroomFlyCart'
 import api from '@/constants/api'
 import { Product } from '@/constants/types'
+import { usePlazoreChrome } from '@/context/PlazoreChromeContext'
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import {
   NativeScrollEvent,
@@ -16,10 +15,10 @@ import {
 } from 'react-native'
 
 export default function Home() {
-  const [hubOpen, setHubOpen] = useState(false)
+  const { setScrollProgress, setHomeChrome, openHub } = usePlazoreChrome()
   const [products, setProducts] = useState<Product[]>([])
   const [loading, setLoading] = useState(true)
-  const [scrollProgress, setScrollProgress] = useState(0)
+  const [scrollProgress, setLocalProgress] = useState(0)
 
   const { height: windowH } = useWindowDimensions()
   const heroH = Math.max(windowH, 1)
@@ -28,17 +27,21 @@ export default function Home() {
   const roomYs = useRef<Record<number, number>>({})
   const scrollRef = useRef<ScrollView>(null)
 
+  useEffect(() => {
+    setHomeChrome(true)
+    return () => {
+      setHomeChrome(false)
+      setScrollProgress(0)
+    }
+  }, [setHomeChrome, setScrollProgress])
+
   const fetchProducts = async () => {
     try {
       setLoading(true)
       const res = await api.get('/products?limit=24')
-      if (res.data.success) {
-        setProducts(res.data.data || [])
-      } else {
-        setProducts([])
-      }
-    } catch (error) {
-      console.log('Home products error:', error)
+      if (res.data.success) setProducts(res.data.data || [])
+      else setProducts([])
+    } catch {
       setProducts([])
     } finally {
       setLoading(false)
@@ -52,6 +55,7 @@ export default function Home() {
   const onMainScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
     const y = e.nativeEvent.contentOffset.y
     const p = Math.min(1, Math.max(0, y / (heroH * 0.35)))
+    setLocalProgress(p)
     setScrollProgress(p)
   }
 
@@ -66,25 +70,13 @@ export default function Home() {
     roomYs.current[roomNumber] = y
   }, [])
 
-  const onScrollToRoom = useCallback((roomNumber: number) => {
-    const roomOffset = roomYs.current[roomNumber]
-    if (roomOffset == null) {
-      scrollToShowroom()
-      return
-    }
-    scrollRef.current?.scrollTo({
-      y: Math.max(showroomY.current + roomOffset - 12, 0),
-      animated: true,
-    })
-  }, [])
-
   return (
-    <ShowroomFlyCartProvider visibleProgress={scrollProgress}>
+    <ShowroomFlyCartProvider>
       <View style={{ flex: 1, backgroundColor: '#0E0E0E' }}>
         <PlazoreTitleBar
           scrollProgress={scrollProgress}
           hasUnreadNotifications={false}
-          onMenuPress={() => setHubOpen(true)}
+          onMenuPress={openHub}
           onMusicPress={() => {}}
           onNotificationsPress={() => {}}
         />
@@ -113,17 +105,6 @@ export default function Home() {
             />
           </View>
         </ScrollView>
-
-        <PlazoreFloatingNav
-          visibleProgress={scrollProgress}
-          onMenuPress={() => setHubOpen(true)}
-        />
-
-        <PlazoreNavigationHub
-          visible={hubOpen}
-          onClose={() => setHubOpen(false)}
-          onScrollToRoom={onScrollToRoom}
-        />
       </View>
     </ShowroomFlyCartProvider>
   )

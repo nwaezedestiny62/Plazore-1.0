@@ -1,15 +1,17 @@
 /**
  * Wishlist / Saved Products — Plazore dark
- * No cart button on cards (unlike showroom / search)
+ * Stacked cards match Plazore AI ProductImageStack exactly
+ * 2 per row · no cart button · currency via formatProduct
  */
 
-import ProductCard from '@/components/ProductCard'
 import PlazoreFloatingNav from '@/components/PlazoreFloatingNav'
 import PlazoreNavigationHub from '@/components/PlazoreNavigationHub'
 import { Product } from '@/constants/types'
+import { useMarketplace } from '@/context/MarketplaceContext'
 import { useWishlist } from '@/context/WishlistContext'
 import { Ionicons } from '@expo/vector-icons'
-import { useFocusEffect, useRouter } from 'expo-router'
+import { Image } from 'expo-image'
+import { Link, useFocusEffect, useRouter } from 'expo-router'
 import React, { useCallback, useMemo, useState } from 'react'
 import {
   ActivityIndicator,
@@ -54,6 +56,112 @@ const SORT_OPTIONS: { key: SortKey; label: string; hint: string }[] = [
   { key: 'price_low', label: 'Price · Low to high', hint: 'Lowest price first' },
   { key: 'price_high', label: 'Price · High to low', hint: 'Highest price first' },
 ]
+
+/* ── Exact Plazore AI ProductImageStack math ── */
+function SavedStackCard({ product }: { product: Product }) {
+  const { formatProduct } = useMarketplace()
+
+  const images = useMemo(() => {
+    const list = product.images?.filter(Boolean) ?? []
+    return list.slice(0, 3)
+  }, [product.images])
+
+  const brand = useMemo(() => {
+    if (product.brand) return product.brand
+    if (typeof product.seller === 'object' && product.seller?.storeName) {
+      return product.seller.storeName
+    }
+    return 'plazore'
+  }, [product])
+
+  const price = useMemo(
+    () => formatProduct(product.price, product.region),
+    [product.price, product.region, formatProduct]
+  )
+
+  const location = useMemo(() => {
+    const fl = product.fulfillmentLocation
+    if (fl?.displayLabel) return fl.displayLabel
+    if (fl) {
+      const parts = [fl.city, fl.state, fl.country].filter(Boolean)
+      if (parts.length) return parts.join(', ')
+    }
+    return ''
+  }, [product])
+
+  const hasImages = images.length > 0
+
+  return (
+    <Link href={`/product/${product._id}` as any} asChild>
+      <Pressable style={styles.card} accessibilityRole="button">
+        <View style={styles.stackStage}>
+          {hasImages ? (
+            images.map((uri, i) => {
+              const depth = images.length - 1 - i
+              const rotate = depth === 2 ? -8 : depth === 1 ? 7 : 0
+              const offsetX = depth === 2 ? -14 : depth === 1 ? 14 : 0
+              const offsetY = depth > 0 ? 6 : 0
+              const scale = depth === 0 ? 1 : 0.92
+              const zIndex = 10 - depth
+
+              return (
+                <View
+                  key={`${product._id}-stack-${i}`}
+                  style={[
+                    styles.stackCard,
+                    {
+                      zIndex,
+                      transform: [
+                        { translateX: offsetX },
+                        { translateY: offsetY },
+                        { rotate: `${rotate}deg` },
+                        { scale },
+                      ],
+                    },
+                  ]}
+                >
+                  <Image
+                    source={{ uri }}
+                    style={styles.stackImg}
+                    contentFit="cover"
+                    cachePolicy="memory-disk"
+                    transition={0}
+                  />
+                </View>
+              )
+            })
+          ) : (
+            <View style={[styles.stackCard, styles.stackPlaceholder]}>
+              <Ionicons name="image-outline" size={28} color={DIM} />
+            </View>
+          )}
+        </View>
+
+        <View style={styles.info}>
+          <Text style={styles.name} numberOfLines={2}>
+            {product.name}
+          </Text>
+
+          <View style={styles.metaRow}>
+            <Text style={styles.brand} numberOfLines={1}>
+              {brand.toLowerCase()}
+            </Text>
+            <Text style={styles.dot}>·</Text>
+            <Text style={styles.price} numberOfLines={1}>
+              {price}
+            </Text>
+          </View>
+
+          {!!location && (
+            <Text style={styles.location} numberOfLines={1}>
+              {location}
+            </Text>
+          )}
+        </View>
+      </Pressable>
+    </Link>
+  )
+}
 
 export default function Favorites() {
   const insets = useSafeAreaInsets()
@@ -112,7 +220,7 @@ export default function Favorites() {
       <View style={styles.header}>
         <Text style={styles.title}>Saved Products</Text>
 
-        <View style={styles.metaRow}>
+        <View style={styles.metaRowHeader}>
           <Text style={styles.count}>
             {count === 0
               ? 'Your showroom is waiting'
@@ -153,12 +261,7 @@ export default function Favorites() {
 
           <View style={styles.grid}>
             {sorted.map((product) => (
-              /* ProductCard only — no cart button on image */
-              <ProductCard
-                key={product._id}
-                product={product}
-                cardWidth={CARD_W}
-              />
+              <SavedStackCard key={product._id} product={product} />
             ))}
           </View>
         </ScrollView>
@@ -182,10 +285,6 @@ export default function Favorites() {
         </View>
       )}
 
-      <PlazoreFloatingNav
-        visibleProgress={1}
-        onMenuPress={() => setHubOpen(true)}
-      />
       <PlazoreNavigationHub
         visible={hubOpen}
         onClose={() => setHubOpen(false)}
@@ -270,7 +369,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     textAlign: 'left',
   },
-  metaRow: {
+  metaRowHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -339,6 +438,86 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'space-between',
+    rowGap: 28,
+  },
+
+  /* ── Stack mirrors Plazore AI ProductImageStack ── */
+  card: {
+    width: CARD_W,
+    alignItems: 'center',
+  },
+  stackStage: {
+    width: CARD_W,
+    height: CARD_W * 1.22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 10,
+  },
+  stackCard: {
+    position: 'absolute',
+    width: CARD_W * 0.78,
+    height: CARD_W * 0.95,
+    borderRadius: 14,
+    overflow: 'hidden',
+    backgroundColor: SURFACE,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.12)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.35,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  stackImg: {
+    width: '100%',
+    height: '100%',
+  },
+  stackPlaceholder: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderColor: LINE,
+  },
+
+  info: {
+    width: '100%',
+    paddingHorizontal: 4,
+    alignItems: 'center',
+  },
+  name: {
+    fontSize: 13.5,
+    fontWeight: '600',
+    color: TEXT,
+    letterSpacing: -0.2,
+    lineHeight: 18,
+    marginBottom: 4,
+    textAlign: 'center',
+  },
+  metaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+  },
+  brand: {
+    fontSize: 12,
+    color: MUTED,
+    fontWeight: '500',
+    flexShrink: 1,
+  },
+  dot: {
+    fontSize: 12,
+    color: DIM,
+  },
+  price: {
+    fontSize: 12.5,
+    fontWeight: '600',
+    color: ACCENT,
+  },
+  location: {
+    fontSize: 11,
+    color: DIM,
+    marginTop: 3,
+    textAlign: 'center',
   },
 
   empty: {

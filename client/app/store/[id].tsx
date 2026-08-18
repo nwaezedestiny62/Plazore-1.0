@@ -16,7 +16,7 @@ import {
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { BlurView } from "expo-blur";
 import { useAuth } from "@clerk/clerk-expo";
@@ -30,6 +30,7 @@ const CARD_W = (width - H_PAD * 2 - GAP) / 2;
 const ENTRANCE_H = Math.min(height * 0.34, 280);
 const FEATURED_H = width * 0.78;
 const FEATURED_INTERVAL_MS = 7000;
+const TOAST_MS = 3200;
 
 const BG = "#090B0F";
 const SURFACE = "#11141A";
@@ -93,6 +94,98 @@ function StorePreloader() {
   );
 }
 
+/** Soft top toast — Plazore tone */
+function TopToast({
+  visible,
+  message,
+  onHide,
+}: {
+  visible: boolean;
+  message: string;
+  onHide: () => void;
+}) {
+  const insets = useSafeAreaInsets();
+  const opacity = useRef(new Animated.Value(0)).current;
+  const translateY = useRef(new Animated.Value(-18)).current;
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (!visible) return;
+
+    if (timerRef.current) clearTimeout(timerRef.current);
+
+    opacity.setValue(0);
+    translateY.setValue(-18);
+
+    Animated.parallel([
+      Animated.timing(opacity, {
+        toValue: 1,
+        duration: 380,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.timing(translateY, {
+        toValue: 0,
+        duration: 420,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+    ]).start();
+
+    timerRef.current = setTimeout(() => {
+      Animated.parallel([
+        Animated.timing(opacity, {
+          toValue: 0,
+          duration: 320,
+          easing: Easing.in(Easing.cubic),
+          useNativeDriver: true,
+        }),
+        Animated.timing(translateY, {
+          toValue: -12,
+          duration: 320,
+          easing: Easing.in(Easing.cubic),
+          useNativeDriver: true,
+        }),
+      ]).start(({ finished }) => {
+        if (finished) onHide();
+      });
+    }, TOAST_MS);
+
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, [visible, message]);
+
+  if (!visible) return null;
+
+  return (
+    <Animated.View
+      pointerEvents="none"
+      style={[
+        styles.toastWrap,
+        {
+          paddingTop: Math.max(insets.top, 12) + 6,
+          opacity,
+          transform: [{ translateY }],
+        },
+      ]}
+    >
+      <View style={styles.toastCard}>
+        <LinearGradient
+          colors={["rgba(16,185,129,0.12)", "rgba(59,130,246,0.08)"]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={StyleSheet.absoluteFillObject}
+        />
+        <View style={styles.toastIcon}>
+          <Ionicons name="storefront-outline" size={16} color={AI_GREEN} />
+        </View>
+        <Text style={styles.toastText}>{message}</Text>
+      </View>
+    </Animated.View>
+  );
+}
+
 export default function PublicStorefront() {
   const { id: rawId } = useLocalSearchParams<{ id: string | string[] }>();
   const id = Array.isArray(rawId) ? rawId[0] : rawId;
@@ -108,6 +201,7 @@ export default function PublicStorefront() {
   const [featuredIndex, setFeaturedIndex] = useState(0);
   const [descExpanded, setDescExpanded] = useState(false);
   const [goalExpanded, setGoalExpanded] = useState(false);
+  const [toastMsg, setToastMsg] = useState<string | null>(null);
 
   const door = useRef(new Animated.Value(0)).current;
   const content = useRef(new Animated.Value(0)).current;
@@ -117,10 +211,8 @@ export default function PublicStorefront() {
   const userTouching = useRef(false);
   const saveInFlight = useRef(false);
 
-  // Resolve the store's Mongo id (backend uses User _id)
   const storeId = store?._id || store?.id || id || "";
 
-  // ── Load store + products ──
   useEffect(() => {
     const load = async () => {
       if (!id) {
@@ -146,7 +238,6 @@ export default function PublicStorefront() {
     load();
   }, [id]);
 
-  // ── Check if this store is already saved ──
   useEffect(() => {
     const checkSaved = async () => {
       if (!isSignedIn || !storeId) {
@@ -175,7 +266,6 @@ export default function PublicStorefront() {
     checkSaved();
   }, [isSignedIn, storeId, getToken]);
 
-  // ── Entrance animation ──
   useEffect(() => {
     if (loading || !store) return;
 
@@ -203,7 +293,6 @@ export default function PublicStorefront() {
     ]).start();
   }, [loading, store]);
 
-  // ── Auto-carousel ──
   useEffect(() => {
     if (products.length <= 1) return;
 
@@ -233,7 +322,12 @@ export default function PublicStorefront() {
     [products.length],
   );
 
-  // ── Toggle save store (wired to backend) ──
+  const showOwnStoreToast = () => {
+    setToastMsg(
+      "This is your storefront — there’s nothing to save here. Share your store with shoppers instead.",
+    );
+  };
+
   const handleToggleSave = async () => {
     if (!storeId || saveInFlight.current) return;
 
@@ -243,7 +337,6 @@ export default function PublicStorefront() {
     }
 
     const previous = saved;
-    // Optimistic update
     setSaved(!previous);
     setSaveBusy(true);
     saveInFlight.current = true;
@@ -262,21 +355,39 @@ export default function PublicStorefront() {
       );
 
       if (res.data?.success) {
-        // Prefer server truth when available
         if (typeof res.data.saved === "boolean") {
           setSaved(res.data.saved);
         }
       } else {
         setSaved(previous);
+        const msg = String(res.data?.message || "").toLowerCase();
+        if (
+          msg.includes("own store") ||
+          msg.includes("own storefront") ||
+          msg.includes("cannot save") ||
+          msg.includes("yourself")
+        ) {
+          setSaved(false);
+          showOwnStoreToast();
+        }
       }
     } catch (error: any) {
       console.log("Toggle saved store error:", error?.response?.data || error);
       setSaved(previous);
 
-      // If backend rejects "own store", keep it unsaved
-      const msg = error?.response?.data?.message || "";
-      if (msg.toLowerCase().includes("own store")) {
+      const msg = String(
+        error?.response?.data?.message || error?.message || "",
+      ).toLowerCase();
+
+      if (
+        msg.includes("own store") ||
+        msg.includes("own storefront") ||
+        msg.includes("cannot save") ||
+        msg.includes("yourself") ||
+        error?.response?.status === 403
+      ) {
         setSaved(false);
+        showOwnStoreToast();
       }
     } finally {
       setSaveBusy(false);
@@ -319,13 +430,18 @@ export default function PublicStorefront() {
     <View style={styles.root}>
       <StatusBar barStyle="light-content" />
 
+      <TopToast
+        visible={!!toastMsg}
+        message={toastMsg || ""}
+        onHide={() => setToastMsg(null)}
+      />
+
       <ScrollView
         showsVerticalScrollIndicator={false}
         bounces={false}
         decelerationRate="normal"
         contentContainerStyle={{ paddingBottom: 70 }}
       >
-        {/* ========== ENTRANCE ========== */}
         <Animated.View style={{ opacity: door }}>
           <View style={{ height: ENTRANCE_H, backgroundColor: "#07080C" }}>
             {store.storeBanner ? (
@@ -371,7 +487,6 @@ export default function PublicStorefront() {
           </View>
         </Animated.View>
 
-        {/* ========== STORE IDENTITY ========== */}
         <Animated.View
           style={{
             opacity: content,
@@ -416,7 +531,9 @@ export default function PublicStorefront() {
                   ) : null}
                 </View>
 
-                <Text style={styles.openLabel}>Storefront · Explore the collection</Text>
+                <Text style={styles.openLabel}>
+                  Storefront · Explore the collection
+                </Text>
 
                 {!!locationLabel && (
                   <View style={styles.locationRow}>
@@ -509,7 +626,6 @@ export default function PublicStorefront() {
           </View>
         </Animated.View>
 
-        {/* ========== FEATURED CAROUSEL ========== */}
         {products.length > 0 && (
           <Animated.View style={{ opacity: content, marginTop: 36 }}>
             <View style={{ paddingHorizontal: H_PAD, marginBottom: 16 }}>
@@ -613,7 +729,6 @@ export default function PublicStorefront() {
           </Animated.View>
         )}
 
-        {/* ========== AISLES ========== */}
         <Animated.View
           style={{
             opacity: content,
@@ -689,7 +804,6 @@ export default function PublicStorefront() {
           )}
         </Animated.View>
 
-        {/* Footer */}
         <View style={styles.footer}>
           <View style={styles.footerLine} />
           <Text style={styles.footerText}>Plazore · Digital Mall</Text>
@@ -705,7 +819,53 @@ const styles = StyleSheet.create({
     backgroundColor: BG,
   },
 
-  // Preloader
+  /* Top toast */
+  toastWrap: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 100,
+    elevation: 100,
+    paddingHorizontal: 16,
+    alignItems: "center",
+  },
+  toastCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    maxWidth: 420,
+    width: "100%",
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 18,
+    overflow: "hidden",
+    backgroundColor: "rgba(17,20,26,0.96)",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "rgba(16,185,129,0.28)",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.35,
+    shadowRadius: 20,
+    elevation: 12,
+  },
+  toastIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: "rgba(16,185,129,0.14)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  toastText: {
+    flex: 1,
+    color: TEXT,
+    fontSize: 13.5,
+    fontWeight: "600",
+    lineHeight: 19,
+    letterSpacing: -0.1,
+  },
+
   loaderRoot: {
     flex: 1,
     backgroundColor: BG,
@@ -743,7 +903,6 @@ const styles = StyleSheet.create({
     height: 32,
   },
 
-  // Empty
   emptyRoot: {
     flex: 1,
     backgroundColor: BG,
@@ -787,7 +946,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
 
-  // Top
   topBar: {
     position: "absolute",
     top: 0,
@@ -808,7 +966,6 @@ const styles = StyleSheet.create({
     borderColor: "rgba(255,255,255,0.1)",
   },
 
-  // Identity
   identityCard: {
     borderRadius: 26,
     borderWidth: StyleSheet.hairlineWidth,
@@ -947,7 +1104,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
 
-  // Sections
   sectionEyebrow: {
     color: MUTED,
     fontSize: 11,
@@ -963,7 +1119,6 @@ const styles = StyleSheet.create({
     letterSpacing: -0.3,
   },
 
-  // Featured
   featuredCard: {
     borderRadius: 24,
     overflow: "hidden",
@@ -1004,7 +1159,6 @@ const styles = StyleSheet.create({
     marginTop: 16,
   },
 
-  // Grid
   dividerRow: {
     flexDirection: "row",
     alignItems: "center",

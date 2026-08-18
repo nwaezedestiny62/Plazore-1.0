@@ -16,6 +16,7 @@ import {
 } from '@expo-google-fonts/manrope'
 import { View, ActivityIndicator, StatusBar, Platform } from 'react-native'
 import { StatusBar as ExpoStatusBar } from 'expo-status-bar'
+import { PlazoreChromeProvider } from '@/context/PlazoreChromeContext'
 
 export default function RootLayout() {
   const [fontsLoaded] = useFonts({
@@ -47,7 +48,6 @@ export default function RootLayout() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1, backgroundColor: '#090B0F' }}>
-      {/* Global black status bar */}
       <ExpoStatusBar style="light" backgroundColor="#090B0F" />
       {Platform.OS === 'android' && (
         <StatusBar
@@ -62,7 +62,9 @@ export default function RootLayout() {
           <MarketplaceProvider>
             <CartProvider>
               <WishlistProvider>
-                <Stack screenOptions={{ headerShown: false }} />
+                <PlazoreChromeProvider>
+                  <Stack screenOptions={{ headerShown: false }} />
+                </PlazoreChromeProvider>
               </WishlistProvider>
             </CartProvider>
           </MarketplaceProvider>

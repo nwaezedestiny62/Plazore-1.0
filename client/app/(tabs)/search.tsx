@@ -13,7 +13,8 @@ import { LinearGradient } from 'expo-linear-gradient'
 import { useRouter } from 'expo-router'
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  Dimensions,
+  Animated,
+  Easing,
   Keyboard,
   Modal,
   Pressable,
@@ -34,6 +35,7 @@ const MUTED = '#A7ADB8'
 const DIM = '#737A86'
 const LINE = '#252A33'
 const ACCENT = '#10B981'
+const AI_BLUE = '#3B82F6'
 
 const RECENT_KEY = 'plazore_recent_searches'
 const MAX_RECENT = 8
@@ -45,7 +47,6 @@ const GAP = 4
 /**
  * Floors = human labels.
  * Each floor owns one or more real CATEGORY_LIST keys.
- * Every app category is covered exactly once.
  */
 const FLOORS: {
   id: string
@@ -210,7 +211,6 @@ const FLOORS: {
   },
 ]
 
-/** category name → floor id */
 const CATEGORY_TO_FLOOR = (() => {
   const map: Record<string, string> = {}
   FLOORS.forEach((f) => {
@@ -233,7 +233,6 @@ function getProductCategory(p: any): string {
   return String(p.category?.name || '')
 }
 
-/** Floor tile — no fade transition, backup on error only */
 function FloorImage({ images }: { images: [string, string, string] }) {
   const [idx, setIdx] = useState(0)
   return (
@@ -250,16 +249,87 @@ function FloorImage({ images }: { images: [string, string, string] }) {
   )
 }
 
-/**
- * Static product for card: first image only
- * → ShowroomProductCard skips multi-image rotation (no crossfade flicker)
- */
 function toStaticProduct(p: Product): Product {
   const imgs = Array.isArray(p.images) ? p.images.filter(Boolean) : []
   return {
     ...p,
     images: imgs.length ? [imgs[0]] : [],
   }
+}
+
+/** Same orb preloader as product page entry */
+function StorePreloader() {
+  const rotation = useRef(new Animated.Value(0)).current
+
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.timing(rotation, {
+        toValue: 1,
+        duration: 2600,
+        easing: Easing.linear,
+        useNativeDriver: true,
+      })
+    )
+    loop.start()
+    return () => loop.stop()
+  }, [rotation])
+
+  const rotate = rotation.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0deg', '360deg'],
+  })
+
+  return (
+    <View style={styles.loaderRoot}>
+      <View style={styles.orbWrapper}>
+        <Animated.View style={[styles.orbRing, { transform: [{ rotate }] }]} />
+        <View style={styles.orbLogoWrap}>
+          <Image
+            source={require('@/assets/logo-1.png')}
+            style={styles.orbLogo}
+            contentFit="contain"
+          />
+        </View>
+      </View>
+    </View>
+  )
+}
+
+/** Smooth fade + slight lift when a product list appears */
+function FadeInGrid({
+  children,
+  animKey,
+}: {
+  children: React.ReactNode
+  animKey: string
+}) {
+  const opacity = useRef(new Animated.Value(0)).current
+  const translateY = useRef(new Animated.Value(14)).current
+
+  useEffect(() => {
+    opacity.setValue(0)
+    translateY.setValue(14)
+    Animated.parallel([
+      Animated.timing(opacity, {
+        toValue: 1,
+        duration: 420,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.timing(translateY, {
+        toValue: 0,
+        duration: 460,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+    ]).start()
+  }, [animKey, opacity, translateY])
+
+  return (
+    <Animated.View style={{ opacity, transform: [{ translateY }] }}>
+      {children}
+    </Animated.View>
+  )
 }
 
 export default function BrowseScreen() {
@@ -274,10 +344,11 @@ export default function BrowseScreen() {
   const [trending, setTrending] = useState<Product[]>([])
   const [loading, setLoading] = useState(true)
   const [recent, setRecent] = useState<string[]>([])
-  /** floor id OR exact CATEGORY_LIST name */
   const [activeCategory, setActiveCategory] = useState<string | null>(null)
   const [serverProducts, setServerProducts] = useState<any[]>([])
   const [searchLoading, setSearchLoading] = useState(false)
+  /** Category/floor selection loading (product-page style preloader) */
+  const [categoryLoading, setCategoryLoading] = useState(false)
 
   const [filterOpen, setFilterOpen] = useState(false)
   const [minPrice, setMinPrice] = useState('')
@@ -364,32 +435,25 @@ export default function BrowseScreen() {
     }
   }
 
-  /** Product matches floor or exact category */
-  const matchesActive = useCallback(
-    (p: any, active: string) => {
-      const cat = getProductCategory(p)
-      const catL = cat.toLowerCase()
+  const matchesActive = useCallback((p: any, active: string) => {
+    const cat = getProductCategory(p)
+    const catL = cat.toLowerCase()
 
-      // Exact category (from chips)
-      if (catL === active.toLowerCase()) return true
+    if (catL === active.toLowerCase()) return true
 
-      // Floor group
-      const floor = FLOORS.find((f) => f.id === active)
-      if (floor) {
-        return floor.match.some((m) => m.toLowerCase() === catL)
-      }
+    const floor = FLOORS.find((f) => f.id === active)
+    if (floor) {
+      return floor.match.some((m) => m.toLowerCase() === catL)
+    }
 
-      // CATEGORY_LIST key that maps to a floor
-      const floorId = CATEGORY_TO_FLOOR[active.toLowerCase()]
-      if (floorId) {
-        const f = FLOORS.find((x) => x.id === floorId)
-        return !!f?.match.some((m) => m.toLowerCase() === catL)
-      }
+    const floorId = CATEGORY_TO_FLOOR[active.toLowerCase()]
+    if (floorId) {
+      const f = FLOORS.find((x) => x.id === floorId)
+      return !!f?.match.some((m) => m.toLowerCase() === catL)
+    }
 
-      return false
-    },
-    []
-  )
+    return false
+  }, [])
 
   const live = useMemo(() => {
     const q = debounced.toLowerCase()
@@ -485,6 +549,16 @@ export default function BrowseScreen() {
     return floor ? floor.short : activeCategory
   }, [activeCategory, debounced])
 
+  /** Key so FadeInGrid re-runs when results change */
+  const gridAnimKey = useMemo(
+    () =>
+      `${activeCategory || debounced || 'idle'}-${live.products
+        .map((p: any) => p._id)
+        .join(',')
+        .slice(0, 80)}`,
+    [activeCategory, debounced, live.products]
+  )
+
   const pushRecent = useCallback(async (term: string) => {
     const clean = term.trim()
     if (!clean || clean.length < 2) return
@@ -503,37 +577,41 @@ export default function BrowseScreen() {
     setDebounced('')
     setActiveCategory(null)
     setServerProducts([])
+    setCategoryLoading(false)
     setMinPrice('')
     setMaxPrice('')
     setInStockOnly(false)
     inputRef.current?.focus()
   }
 
+  /** Floor / category tap → same preloader as product page, then results */
   const selectFloor = (floorId: string) => {
     setQuery('')
     setDebounced('')
+    setCategoryLoading(true)
     setActiveCategory(floorId)
     Keyboard.dismiss()
+    // Brief hold so the orb is visible (filter is sync from cache)
+    setTimeout(() => setCategoryLoading(false), 650)
   }
 
   const selectExactCategory = (cat: string) => {
     setQuery('')
     setDebounced('')
+    setCategoryLoading(true)
     setActiveCategory(cat)
     Keyboard.dismiss()
+    setTimeout(() => setCategoryLoading(false), 650)
   }
 
-  /** No entering/layout anims → no grid flicker */
-  const renderProductGrid = (items: Product[]) => (
-    <View style={styles.grid}>
-      {items.map((p) => (
-        <ShowroomProductCard
-          key={p._id}
-          product={toStaticProduct(p)}
-          dark
-        />
-      ))}
-    </View>
+  const renderProductGrid = (items: Product[], key: string) => (
+    <FadeInGrid animKey={key}>
+      <View style={styles.grid}>
+        {items.map((p) => (
+          <ShowroomProductCard key={p._id} product={toStaticProduct(p)} dark />
+        ))}
+      </View>
+    </FadeInGrid>
   )
 
   const renderIdle = () => (
@@ -544,7 +622,7 @@ export default function BrowseScreen() {
       onScrollBeginDrag={Keyboard.dismiss}
     >
       <View style={styles.section}>
-        <Text style={styles.sectionLabel}>FLOORS</Text>
+        <Text style={styles.sectionLabel}>EXPLORE</Text>
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
@@ -573,8 +651,13 @@ export default function BrowseScreen() {
       {recent.length > 0 && (
         <View style={styles.section}>
           <View style={styles.sectionHead}>
-            <Text style={[styles.sectionLabel, { marginBottom: 0, paddingHorizontal: 0 }]}>
-              RECENT
+            <Text
+              style={[
+                styles.sectionLabel,
+                { marginBottom: 0, paddingHorizontal: 0 },
+              ]}
+            >
+              RECENT SEARCHES
             </Text>
             <Pressable
               onPress={() => {
@@ -606,131 +689,164 @@ export default function BrowseScreen() {
       <View style={[styles.section, { marginTop: 28 }]}>
         <Text style={styles.sectionLabel}>MOVING NOW</Text>
         {loading ? (
-          <View style={{ paddingVertical: 48, alignItems: 'center' }}>
-            <Text style={{ color: DIM, fontSize: 13 }}>Loading…</Text>
+          <View style={{ height: 220 }}>
+            <StorePreloader />
           </View>
         ) : (
-          renderProductGrid(trending)
+          renderProductGrid(trending, 'trending')
         )}
       </View>
     </ScrollView>
   )
 
-  const renderLive = () => (
-    <ScrollView
-      showsVerticalScrollIndicator={false}
-      keyboardShouldPersistTaps="handled"
-      contentContainerStyle={{ paddingBottom: 150, paddingTop: 4 }}
-      onScrollBeginDrag={Keyboard.dismiss}
-    >
-      <View style={styles.meta}>
-        <View style={{ flex: 1, minWidth: 0 }}>
-          <Text style={styles.metaText} numberOfLines={1}>
-            {activeLabel}
-          </Text>
-          <Text style={styles.metaCount}>
-            {live.products.length + live.stores.length} results
-          </Text>
+  const renderLive = () => {
+    if (categoryLoading) {
+      return (
+        <View style={{ flex: 1 }}>
+          <StorePreloader />
         </View>
-        <Pressable onPress={clearAll} hitSlop={10}>
-          <Text style={styles.clearTxt}>Clear</Text>
-        </Pressable>
-      </View>
+      )
+    }
 
-      {live.products.length > 0 && (
-        <View>
-          <Text style={styles.groupTitle}>PRODUCTS</Text>
-          {renderProductGrid(live.products as Product[])}
+    if (searchLoading && live.products.length === 0) {
+      return (
+        <View style={{ flex: 1, minHeight: 280 }}>
+          <StorePreloader />
         </View>
-      )}
+      )
+    }
 
-      {live.stores.length > 0 && (
-        <View style={{ marginTop: 28 }}>
-          <Text style={styles.groupTitle}>STOREFRONTS</Text>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={{ paddingHorizontal: PAD, gap: 12 }}
-          >
-            {live.stores.map((s) => (
-              <Pressable
-                key={s._id}
-                onPress={() => router.push(`/store/${s._id}` as any)}
-                style={styles.storeCard}
-              >
-                <View style={styles.storeLogo}>
-                  {s.storeLogo ? (
-                    <Image
-                      source={{ uri: s.storeLogo }}
-                      style={{ width: 56, height: 56 }}
-                      contentFit="cover"
-                      transition={0}
-                    />
-                  ) : (
-                    <Ionicons
-                      name="storefront-outline"
-                      size={22}
-                      color={MUTED}
-                    />
-                  )}
-                </View>
-                <Text style={styles.storeName} numberOfLines={1}>
-                  {s.storeName || s.name || 'Store'}
-                </Text>
-              </Pressable>
-            ))}
-          </ScrollView>
-        </View>
-      )}
-
-      {live.brands.length > 0 && (
-        <View style={{ marginTop: 28 }}>
-          <Text style={styles.groupTitle}>BRANDS</Text>
-          <View style={styles.chipWrap}>
-            {live.brands.map((b) => (
-              <Pressable
-                key={b}
-                onPress={() => {
-                  setQuery(b)
-                  setDebounced(b)
-                  pushRecent(b)
-                }}
-                style={styles.brandChip}
-              >
-                <Text style={styles.brandText}>{b}</Text>
-              </Pressable>
-            ))}
+    return (
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={{ paddingBottom: 150, paddingTop: 4 }}
+        onScrollBeginDrag={Keyboard.dismiss}
+      >
+        <View style={styles.meta}>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={styles.metaText} numberOfLines={1}>
+              {activeLabel}
+            </Text>
+            <Text style={styles.metaCount}>
+  {[
+    live.products.length > 0
+      ? `${live.products.length} ${live.products.length === 1 ? 'product' : 'products'}`
+      : null,
+    live.stores.length > 0
+      ? `${live.stores.length} ${live.stores.length === 1 ? 'storefront' : 'storefronts'}`
+      : null,
+    live.brands.length > 0
+      ? `${live.brands.length} ${live.brands.length === 1 ? 'brand' : 'brands'}`
+      : null,
+    live.categories.length > 0
+      ? `${live.categories.length} ${live.categories.length === 1 ? 'category' : 'categories'}`
+      : null,
+  ]
+    .filter(Boolean)
+    .join(' · ')}
+</Text>
           </View>
+          <Pressable onPress={clearAll} hitSlop={10}>
+            <Text style={styles.clearTxt}>Clear</Text>
+          </Pressable>
         </View>
-      )}
 
-      {live.categories.length > 0 && (
-        <View style={{ marginTop: 28, marginBottom: 8 }}>
-          <Text style={styles.groupTitle}>CATEGORIES</Text>
-          <View style={styles.chipWrap}>
-            {live.categories.map((c) => (
-              <Pressable
-                key={c}
-                onPress={() => selectExactCategory(c)}
-                style={styles.catChip}
-              >
-                <Text style={styles.catText}>{c}</Text>
-              </Pressable>
-            ))}
+        {live.products.length > 0 && (
+          <View>
+            <Text style={styles.groupTitle}>PRODUCTS</Text>
+            {renderProductGrid(live.products as Product[], gridAnimKey)}
           </View>
-        </View>
-      )}
+        )}
 
-      {!hasResults && !searchLoading && (
-        <View style={styles.empty}>
-          <Text style={styles.emptyTitle}>Nothing found</Text>
-          <Text style={styles.emptyBody}>
-            Try another term or explore the floors
-          </Text>
-        </View>
-      )}
-    </ScrollView>
-  )
+        {live.stores.length > 0 && (
+          <View style={{ marginTop: 28 }}>
+            <Text style={styles.groupTitle}>STOREFRONTS</Text>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ paddingHorizontal: PAD, gap: 12 }}
+            >
+              {live.stores.map((s) => (
+                <Pressable
+                  key={s._id}
+                  onPress={() => router.push(`/store/${s._id}` as any)}
+                  style={styles.storeCard}
+                >
+                  <View style={styles.storeLogo}>
+                    {s.storeLogo ? (
+                      <Image
+                        source={{ uri: s.storeLogo }}
+                        style={{ width: 56, height: 56 }}
+                        contentFit="cover"
+                        transition={0}
+                      />
+                    ) : (
+                      <Ionicons
+                        name="storefront-outline"
+                        size={22}
+                        color={MUTED}
+                      />
+                    )}
+                  </View>
+                  <Text style={styles.storeName} numberOfLines={1}>
+                    {s.storeName || s.name || 'Store'}
+                  </Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+          </View>
+        )}
+
+        {live.brands.length > 0 && (
+          <View style={{ marginTop: 28 }}>
+            <Text style={styles.groupTitle}>BRANDS</Text>
+            <View style={styles.chipWrap}>
+              {live.brands.map((b) => (
+                <Pressable
+                  key={b}
+                  onPress={() => {
+                    setQuery(b)
+                    setDebounced(b)
+                    pushRecent(b)
+                  }}
+                  style={styles.brandChip}
+                >
+                  <Text style={styles.brandText}>{b}</Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+        )}
+
+        {live.categories.length > 0 && (
+          <View style={{ marginTop: 28, marginBottom: 8 }}>
+            <Text style={styles.groupTitle}>CATEGORIES</Text>
+            <View style={styles.chipWrap}>
+              {live.categories.map((c) => (
+                <Pressable
+                  key={c}
+                  onPress={() => selectExactCategory(c)}
+                  style={styles.catChip}
+                >
+                  <Text style={styles.catText}>{c}</Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+        )}
+
+        {!hasResults && !searchLoading && (
+          <View style={styles.empty}>
+            <Text style={styles.emptyTitle}>Nothing found</Text>
+            <Text style={styles.emptyBody}>
+              Try another search or browse by category.
+            </Text>
+          </View>
+        )}
+      </ScrollView>
+    )
+  }
 
   return (
     <ShowroomFlyCartProvider>
@@ -747,6 +863,7 @@ export default function BrowseScreen() {
                 onChangeText={(t) => {
                   setQuery(t)
                   if (activeCategory) setActiveCategory(null)
+                  setCategoryLoading(false)
                 }}
                 onSubmitEditing={() => {
                   if (query.trim()) pushRecent(query)
@@ -782,10 +899,6 @@ export default function BrowseScreen() {
           {isSearching ? renderLive() : renderIdle()}
         </View>
 
-        <PlazoreFloatingNav
-          visibleProgress={1}
-          onMenuPress={() => setHubOpen(true)}
-        />
         <PlazoreNavigationHub
           visible={hubOpen}
           onClose={() => setHubOpen(false)}
@@ -826,10 +939,7 @@ export default function BrowseScreen() {
               style={styles.checkRow}
             >
               <View
-                style={[
-                  styles.checkBox,
-                  inStockOnly && styles.checkBoxOn,
-                ]}
+                style={[styles.checkBox, inStockOnly && styles.checkBoxOn]}
               >
                 {inStockOnly && (
                   <Ionicons name="checkmark" size={14} color={BG} />
@@ -866,6 +976,41 @@ export default function BrowseScreen() {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: BG },
+
+  /* Product-page orb preloader */
+  loaderRoot: {
+    flex: 1,
+    backgroundColor: BG,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  orbWrapper: {
+    width: 110,
+    height: 110,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  orbRing: {
+    position: 'absolute',
+    width: 110,
+    height: 110,
+    borderRadius: 55,
+    borderWidth: 2.4,
+    borderColor: 'transparent',
+    borderTopColor: ACCENT,
+    borderRightColor: AI_BLUE,
+    borderBottomColor: 'transparent',
+    borderLeftColor: ACCENT,
+  },
+  orbLogoWrap: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: 'rgba(16,185,129,0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  orbLogo: { width: 32, height: 32 },
 
   header: {
     paddingHorizontal: PAD,

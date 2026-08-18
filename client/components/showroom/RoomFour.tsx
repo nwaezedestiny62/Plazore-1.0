@@ -72,7 +72,7 @@ export default function RoomFour({
 
       <ScrollFadeUp delay={320} duration={500} distance={12}>
         <Text style={styles.note}>
-          Prioritising products from your marketplace region
+          A closer look at what's moving around you.
         </Text>
       </ScrollFadeUp>
     </View>
