@@ -3,7 +3,6 @@
  * Regional marketplace room.
  * Bright, open, grounded — “The Walk”
  */
-
 import { Product } from '@/constants/types'
 import React from 'react'
 import {
@@ -83,7 +82,7 @@ const styles = StyleSheet.create({
   room: {
     backgroundColor: '#F7F1E9',
     paddingTop: 52,
-    paddingBottom: 60,
+    paddingBottom: 100, // ← increased for more space after the final text
     width: SCREEN_W,
   },
   header: {
@@ -121,6 +120,7 @@ const styles = StyleSheet.create({
     color: '#A89888',
     textAlign: 'center',
     marginTop: 28,
+    marginBottom: 24, // ← extra breathing room after the note
     paddingHorizontal: 24,
   },
 })

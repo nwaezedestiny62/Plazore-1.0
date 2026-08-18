@@ -2,6 +2,7 @@ import api from "@/constants/api";
 import PlazoreNavigationHub from "@/components/PlazoreNavigationHub";
 import { useAuth, useClerk, useUser } from "@clerk/clerk-expo";
 import { Ionicons } from "@expo/vector-icons";
+import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -21,12 +22,12 @@ import { SafeAreaView } from "react-native-safe-area-context";
 const BG = "#090B0F";
 const SURFACE = "#11141A";
 const SURFACE_2 = "#171B22";
-const LINE = "#252A33";
+const LINE = "rgba(255,255,255,0.07)";
 const TEXT = "#F5F7FA";
 const SECONDARY = "#A7ADB8";
-const MUTED = "#737A86";
-const AI_GREEN = "#10B981";
-const AI_BLUE = "#3B82F6";
+const MUTED = "#6B7280";
+const GREEN = "#00E575";
+const BLUE = "#3B82F6";
 const DANGER = "#F97066";
 
 const MENU = [
@@ -50,6 +51,13 @@ const MENU = [
     subtitle: "Shipping locations",
     icon: "location-outline" as const,
     route: "/addresses",
+  },
+  {
+    id: "payment-methods",
+    title: "Payment Methods",
+    subtitle: "Cards & billing",
+    icon: "card-outline" as const,
+    route: "/payment-methods",
   },
   {
     id: "notifications",
@@ -111,7 +119,7 @@ function StorePreloader() {
         duration: 2600,
         easing: Easing.linear,
         useNativeDriver: true,
-      }),
+      })
     );
     loop.start();
     return () => loop.stop();
@@ -226,10 +234,9 @@ export default function Profile() {
   useFocusEffect(
     useCallback(() => {
       fetchUnread();
-    }, [fetchUnread]),
+    }, [fetchUnread])
   );
 
-  // Store logo for seller CTA — MUST be above any early return
   useEffect(() => {
     if (role !== "seller" || !isSignedIn) {
       setStoreLogo(null);
@@ -286,7 +293,6 @@ export default function Profile() {
     router.replace("/sign-in");
   };
 
-  // Early return ONLY after all hooks
   if (booting && isSignedIn) {
     return <StorePreloader />;
   }
@@ -295,6 +301,7 @@ export default function Profile() {
     <View style={styles.root}>
       <StatusBar barStyle="light-content" />
       <SafeAreaView edges={["top"]} style={{ flex: 1 }}>
+        {/* Header */}
         <View style={styles.header}>
           <View style={styles.headerLeft}>
             <MenuToggle onPress={() => setHubOpen(true)} />
@@ -345,13 +352,20 @@ export default function Profile() {
               <TouchableOpacity
                 onPress={() => router.push("/sign-in")}
                 activeOpacity={0.9}
-                style={styles.guestCta}
               >
-                <Text style={styles.guestCtaText}>Sign in</Text>
+                <LinearGradient
+                  colors={[GREEN, BLUE]}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                  style={styles.guestCta}
+                >
+                  <Text style={styles.guestCtaText}>Sign in</Text>
+                </LinearGradient>
               </TouchableOpacity>
             </View>
           ) : (
             <>
+              {/* Identity */}
               <View style={styles.identity}>
                 <View style={styles.avatarWrap}>
                   <Image
@@ -363,18 +377,18 @@ export default function Profile() {
                       <Ionicons
                         name="shield-checkmark"
                         size={12}
-                        color={AI_GREEN}
+                        color={GREEN}
                       />
                     </View>
                   )}
                 </View>
-                <View style={{ flex: 1 }}>
+                <View style={{ flex: 1, minWidth: 0 }}>
                   <View style={styles.rolePill}>
                     <Text style={styles.roleText}>
                       {role === "seller" ? "Seller" : "Member"}
                     </Text>
                   </View>
-                  <Text style={styles.name}>
+                  <Text style={styles.name} numberOfLines={1}>
                     {user.firstName || "Member"}
                   </Text>
                   <Text style={styles.email} numberOfLines={1}>
@@ -383,6 +397,7 @@ export default function Profile() {
                 </View>
               </View>
 
+              {/* Seller / Buyer CTA */}
               {role === "buyer" ? (
                 <TouchableOpacity
                   activeOpacity={0.9}
@@ -408,36 +423,40 @@ export default function Profile() {
                 <TouchableOpacity
                   activeOpacity={0.9}
                   onPress={() => router.push("/seller" as any)}
-                  style={styles.ctaCardActive}
                 >
-                  <View style={styles.ctaIconActive}>
-                    {storeLogo ? (
-                      <Image
-                        source={{ uri: storeLogo }}
-                        style={styles.ctaStoreLogo}
-                        resizeMode="cover"
-                      />
-                    ) : (
-                      <Ionicons name="chevron-forward" size={20} color={BG} />
-                    )}
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={[styles.ctaTitle, { color: BG }]}>
-                      Storefront
-                    </Text>
-                    <Text
-                      style={[
-                        styles.ctaSub,
-                        { color: "rgba(9,11,15,0.65)" },
-                      ]}
-                    >
-                      Products, orders & chats
-                    </Text>
-                  </View>
-                  <Ionicons name="arrow-forward" size={18} color={BG} />
+                  <LinearGradient
+                    colors={[GREEN, BLUE]}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 0 }}
+                    style={styles.ctaCardActive}
+                  >
+                    <View style={styles.ctaIconActive}>
+                      {storeLogo ? (
+                        <Image
+                          source={{ uri: storeLogo }}
+                          style={styles.ctaStoreLogo}
+                          resizeMode="cover"
+                        />
+                      ) : (
+                        <Ionicons
+                          name="storefront"
+                          size={20}
+                          color={BG}
+                        />
+                      )}
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.ctaTitleActive}>Storefront</Text>
+                      <Text style={styles.ctaSubActive}>
+                        Products, orders & chats
+                      </Text>
+                    </View>
+                    <Ionicons name="arrow-forward" size={18} color={BG} />
+                  </LinearGradient>
                 </TouchableOpacity>
               )}
 
+              {/* Quick Access */}
               <Text style={styles.sectionLabel}>QUICK ACCESS</Text>
               <View style={styles.quickRow}>
                 <TouchableOpacity
@@ -470,6 +489,7 @@ export default function Profile() {
                 </TouchableOpacity>
               </View>
 
+              {/* Account menu */}
               <Text style={styles.sectionLabel}>ACCOUNT</Text>
               <View style={styles.menuCard}>
                 {MENU.map((item, index) => (
@@ -507,11 +527,13 @@ export default function Profile() {
                 ))}
               </View>
 
+              {/* Sign out */}
               <TouchableOpacity
                 onPress={handleLogout}
                 activeOpacity={0.85}
                 style={styles.logoutBtn}
               >
+                <Ionicons name="log-out-outline" size={18} color={DANGER} />
                 <Text style={styles.logoutText}>Sign out</Text>
               </TouchableOpacity>
             </>
@@ -547,9 +569,10 @@ const styles = StyleSheet.create({
   menuLine: {
     height: 2.6,
     backgroundColor: TEXT,
+    borderRadius: 1,
   },
 
-   loaderRoot: {
+  loaderRoot: {
     flex: 1,
     backgroundColor: BG,
     alignItems: "center",
@@ -568,16 +591,16 @@ const styles = StyleSheet.create({
     borderRadius: 55,
     borderWidth: 2.4,
     borderColor: "transparent",
-    borderTopColor: AI_GREEN,
-    borderRightColor: AI_BLUE,
+    borderTopColor: GREEN,
+    borderRightColor: BLUE,
     borderBottomColor: "transparent",
-    borderLeftColor: AI_GREEN,
+    borderLeftColor: GREEN,
   },
   orbLogoWrap: {
     width: 56,
     height: 56,
     borderRadius: 28,
-    backgroundColor: "rgba(16,185,129,0.1)",
+    backgroundColor: "rgba(0,229,117,0.1)",
     alignItems: "center",
     justifyContent: "center",
   },
@@ -615,6 +638,7 @@ const styles = StyleSheet.create({
   iconBtn: {
     width: 42,
     height: 42,
+    borderRadius: 12,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: SURFACE,
@@ -627,6 +651,7 @@ const styles = StyleSheet.create({
     right: 4,
     minWidth: 16,
     height: 16,
+    borderRadius: 8,
     paddingHorizontal: 3,
     backgroundColor: DANGER,
     alignItems: "center",
@@ -647,6 +672,7 @@ const styles = StyleSheet.create({
   guestCard: {
     marginTop: 24,
     backgroundColor: SURFACE,
+    borderRadius: 18,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: LINE,
     padding: 28,
@@ -655,6 +681,7 @@ const styles = StyleSheet.create({
   guestAvatar: {
     width: 72,
     height: 72,
+    borderRadius: 36,
     backgroundColor: SURFACE_2,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: LINE,
@@ -677,14 +704,14 @@ const styles = StyleSheet.create({
   },
   guestCta: {
     marginTop: 22,
-    backgroundColor: TEXT,
     paddingVertical: 14,
     paddingHorizontal: 28,
+    borderRadius: 14,
     alignSelf: "stretch",
     alignItems: "center",
   },
   guestCtaText: {
-    color: BG,
+    color: "#fff",
     fontWeight: "800",
     fontSize: 14,
   },
@@ -693,6 +720,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: SURFACE,
+    borderRadius: 18,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: LINE,
     padding: 16,
@@ -705,6 +733,7 @@ const styles = StyleSheet.create({
   avatar: {
     width: 72,
     height: 72,
+    borderRadius: 36,
     backgroundColor: SURFACE_2,
   },
   sellerMark: {
@@ -713,15 +742,17 @@ const styles = StyleSheet.create({
     right: -2,
     width: 22,
     height: 22,
+    borderRadius: 11,
     backgroundColor: SURFACE,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: "rgba(16,185,129,0.4)",
+    borderColor: "rgba(0,229,117,0.4)",
     alignItems: "center",
     justifyContent: "center",
   },
   rolePill: {
     alignSelf: "flex-start",
     backgroundColor: SURFACE_2,
+    borderRadius: 6,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: LINE,
     paddingHorizontal: 8,
@@ -751,6 +782,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: SURFACE,
+    borderRadius: 16,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: LINE,
     padding: 14,
@@ -760,7 +792,7 @@ const styles = StyleSheet.create({
   ctaCardActive: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: TEXT,
+    borderRadius: 16,
     padding: 14,
     gap: 12,
     marginBottom: 22,
@@ -768,6 +800,7 @@ const styles = StyleSheet.create({
   ctaIcon: {
     width: 44,
     height: 44,
+    borderRadius: 12,
     backgroundColor: SURFACE_2,
     alignItems: "center",
     justifyContent: "center",
@@ -775,9 +808,8 @@ const styles = StyleSheet.create({
   ctaIconActive: {
     width: 44,
     height: 44,
-    backgroundColor: "rgba(9,11,15,0.08)",
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: "rgba(9,11,15,0.12)",
+    borderRadius: 12,
+    backgroundColor: "rgba(9,11,15,0.12)",
     alignItems: "center",
     justifyContent: "center",
     overflow: "hidden",
@@ -793,6 +825,16 @@ const styles = StyleSheet.create({
   },
   ctaSub: {
     color: MUTED,
+    fontSize: 12,
+    marginTop: 2,
+  },
+  ctaTitleActive: {
+    color: BG,
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  ctaSubActive: {
+    color: "rgba(9,11,15,0.65)",
     fontSize: 12,
     marginTop: 2,
   },
@@ -813,6 +855,7 @@ const styles = StyleSheet.create({
   quickTile: {
     flex: 1,
     backgroundColor: SURFACE,
+    borderRadius: 16,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: LINE,
     padding: 14,
@@ -820,6 +863,7 @@ const styles = StyleSheet.create({
   quickIconWrap: {
     width: 40,
     height: 40,
+    borderRadius: 12,
     backgroundColor: SURFACE_2,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: LINE,
@@ -841,9 +885,11 @@ const styles = StyleSheet.create({
 
   menuCard: {
     backgroundColor: SURFACE,
+    borderRadius: 16,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: LINE,
     marginBottom: 22,
+    overflow: "hidden",
   },
   menuRow: {
     flexDirection: "row",
@@ -858,6 +904,7 @@ const styles = StyleSheet.create({
   menuIcon: {
     width: 40,
     height: 40,
+    borderRadius: 12,
     backgroundColor: SURFACE_2,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: LINE,
@@ -879,6 +926,7 @@ const styles = StyleSheet.create({
   badge: {
     minWidth: 20,
     height: 20,
+    borderRadius: 10,
     paddingHorizontal: 5,
     backgroundColor: DANGER,
     alignItems: "center",
@@ -892,11 +940,15 @@ const styles = StyleSheet.create({
   },
 
   logoutBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    borderRadius: 14,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: "rgba(249,112,102,0.35)",
     backgroundColor: "rgba(249,112,102,0.08)",
     paddingVertical: 14,
-    alignItems: "center",
   },
   logoutText: {
     color: DANGER,

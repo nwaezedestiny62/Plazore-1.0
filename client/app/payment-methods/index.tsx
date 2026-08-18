@@ -31,40 +31,57 @@ const GREEN = '#00E575'
 const BLUE = '#3B82F6'
 const DANGER = '#EF4444'
 
-const ADDRESS_TYPES = [
-  { key: 'Home', icon: 'home-outline' as const },
-  { key: 'Office', icon: 'briefcase-outline' as const },
-  { key: 'Other', icon: 'location-outline' as const },
+/** Broader brands — arranged by popularity / region relevance */
+const CARD_BRANDS = [
+  { key: 'Visa', color: '#1A1F71', short: 'VISA' },
+  { key: 'Mastercard', color: '#EB001B', short: 'MC' },
+  { key: 'Verve', color: '#004C3F', short: 'VERVE' },
+  { key: 'Amex', color: '#2E77BC', short: 'AMEX' },
+  { key: 'Discover', color: '#FF6000', short: 'DISC' },
+  { key: 'Other', color: '#4B5563', short: 'CARD' },
 ] as const
 
-type AddressType = 'Home' | 'Office' | 'Other'
+type Brand = (typeof CARD_BRANDS)[number]['key']
 
-export default function Addresses() {
+function maskCard(last4?: string) {
+  if (!last4) return '•••• ••••'
+  return `•••• ${last4}`
+}
+
+function getBrandMeta(brand?: string) {
+  return (
+    CARD_BRANDS.find((b) => b.key === brand) ||
+    CARD_BRANDS[CARD_BRANDS.length - 1]
+  )
+}
+
+export default function PaymentMethods() {
   const { getToken } = useAuth()
   const router = useRouter()
 
-  const [addresses, setAddresses] = useState<any[]>([])
+  const [cards, setCards] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [modalVisible, setModalVisible] = useState(false)
   const [saving, setSaving] = useState(false)
 
-  const [type, setType] = useState<AddressType>('Home')
-  const [street, setStreet] = useState('')
-  const [city, setCity] = useState('')
-  const [state, setState] = useState('')
-  const [zipCode, setZipCode] = useState('')
-  const [country, setCountry] = useState('')
+  const [brand, setBrand] = useState<Brand>('Visa')
+  const [name, setName] = useState('')
+  const [number, setNumber] = useState('')
+  const [expiry, setExpiry] = useState('')
+  const [cvc, setCvc] = useState('')
   const [isDefault, setIsDefault] = useState(false)
 
-  const fetchAddresses = async () => {
+  const fetchCards = async () => {
     try {
       const token = await getToken()
-      const res = await api.get('/addresses', {
+      if (!token) return
+
+      const res = await api.get('/payment-methods', {
         headers: { Authorization: `Bearer ${token}` },
       })
       if (res.data.success) {
-        setAddresses(res.data.data || [])
+        setCards(res.data.data || [])
       }
     } catch (error) {
       console.log(error)
@@ -76,29 +93,27 @@ export default function Addresses() {
 
   useFocusEffect(
     useCallback(() => {
-      fetchAddresses()
+      fetchCards()
     }, [])
   )
 
   const resetForm = () => {
-    setType('Home')
-    setStreet('')
-    setCity('')
-    setState('')
-    setZipCode('')
-    setCountry('')
+    setBrand('Visa')
+    setName('')
+    setNumber('')
+    setExpiry('')
+    setCvc('')
     setIsDefault(false)
   }
 
   const handleSave = async () => {
-    if (
-      !street.trim() ||
-      !city.trim() ||
-      !state.trim() ||
-      !zipCode.trim() ||
-      !country.trim()
-    ) {
-      Alert.alert('Missing fields', 'Please fill all address fields')
+    const cleanNumber = number.replace(/\s/g, '')
+    if (!name.trim() || cleanNumber.length < 12 || !expiry.trim() || !cvc.trim()) {
+      Alert.alert('Missing fields', 'Please fill all card details correctly')
+      return
+    }
+    if (!/^\d{2}\/\d{2}$/.test(expiry.trim())) {
+      Alert.alert('Invalid expiry', 'Use format MM/YY')
       return
     }
 
@@ -107,14 +122,13 @@ export default function Addresses() {
       const token = await getToken()
 
       await api.post(
-        '/addresses',
+        '/payment-methods',
         {
-          type,
-          street: street.trim(),
-          city: city.trim(),
-          state: state.trim(),
-          zipCode: zipCode.trim(),
-          country: country.trim(),
+          brand,
+          name: name.trim(),
+          last4: cleanNumber.slice(-4),
+          expMonth: expiry.split('/')[0],
+          expYear: expiry.split('/')[1],
           isDefault,
         },
         { headers: { Authorization: `Bearer ${token}` } }
@@ -122,11 +136,11 @@ export default function Addresses() {
 
       setModalVisible(false)
       resetForm()
-      fetchAddresses()
+      fetchCards()
     } catch (error: any) {
       Alert.alert(
         'Error',
-        error.response?.data?.message || 'Failed to save address'
+        error.response?.data?.message || 'Failed to save card'
       )
     } finally {
       setSaving(false)
@@ -136,24 +150,22 @@ export default function Addresses() {
   const handleSetDefault = async (id: string) => {
     try {
       const token = await getToken()
-      const res = await api.put(
-        `/addresses/${id}/default`,
+      await api.put(
+        `/payment-methods/${id}/default`,
         {},
         { headers: { Authorization: `Bearer ${token}` } }
       )
-      if (res.data.success) {
-        fetchAddresses()
-      }
+      fetchCards()
     } catch (error: any) {
       Alert.alert(
         'Error',
-        error.response?.data?.message || 'Could not set default address'
+        error.response?.data?.message || 'Could not set default card'
       )
     }
   }
 
   const handleDelete = (id: string) => {
-    Alert.alert('Delete Address', 'Remove this address?', [
+    Alert.alert('Delete Card', 'Remove this card?', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Delete',
@@ -161,22 +173,30 @@ export default function Addresses() {
         onPress: async () => {
           try {
             const token = await getToken()
-            await api.delete(`/addresses/${id}`, {
+            await api.delete(`/payment-methods/${id}`, {
               headers: { Authorization: `Bearer ${token}` },
             })
-            fetchAddresses()
+            fetchCards()
           } catch {
-            Alert.alert('Error', 'Could not delete address')
+            Alert.alert('Error', 'Could not delete card')
           }
         },
       },
     ])
   }
 
-  const getTypeIcon = (t: string) => {
-    if (t === 'Home') return 'home'
-    if (t === 'Office') return 'briefcase'
-    return 'location'
+  const formatCardNumber = (text: string) => {
+    const cleaned = text.replace(/\D/g, '').slice(0, 16)
+    const parts = cleaned.match(/.{1,4}/g)
+    return parts ? parts.join(' ') : cleaned
+  }
+
+  const formatExpiry = (text: string) => {
+    const cleaned = text.replace(/\D/g, '').slice(0, 4)
+    if (cleaned.length >= 3) {
+      return `${cleaned.slice(0, 2)}/${cleaned.slice(2)}`
+    }
+    return cleaned
   }
 
   if (loading && !refreshing) {
@@ -198,8 +218,8 @@ export default function Addresses() {
             <Ionicons name="chevron-back" size={22} color={TEXT} />
           </TouchableOpacity>
           <View>
-            <Text style={styles.headerTitle}>Addresses</Text>
-            <Text style={styles.headerSub}>Manage delivery locations</Text>
+            <Text style={styles.headerTitle}>Payment Methods</Text>
+            <Text style={styles.headerSub}>Manage your cards</Text>
           </View>
         </View>
 
@@ -219,7 +239,7 @@ export default function Addresses() {
       </View>
 
       <FlatList
-        data={addresses}
+        data={cards}
         keyExtractor={(item) => item._id}
         contentContainerStyle={styles.listContent}
         refreshControl={
@@ -227,7 +247,7 @@ export default function Addresses() {
             refreshing={refreshing}
             onRefresh={() => {
               setRefreshing(true)
-              fetchAddresses()
+              fetchCards()
             }}
             tintColor={GREEN}
           />
@@ -235,11 +255,11 @@ export default function Addresses() {
         ListEmptyComponent={
           <View style={styles.emptyWrap}>
             <View style={styles.emptyIcon}>
-              <Ionicons name="location-outline" size={34} color={MUTED} />
+              <Ionicons name="card-outline" size={34} color={MUTED} />
             </View>
-            <Text style={styles.emptyTitle}>No addresses yet</Text>
+            <Text style={styles.emptyTitle}>No cards yet</Text>
             <Text style={styles.emptySub}>
-              Add a Home, Office or other location so checkout is faster.
+              Add a card so checkout is faster and more secure.
             </Text>
             <TouchableOpacity
               onPress={() => setModalVisible(true)}
@@ -252,75 +272,76 @@ export default function Addresses() {
                 style={styles.emptyCta}
               >
                 <Ionicons name="add" size={18} color="#fff" />
-                <Text style={styles.emptyCtaText}>Add Address</Text>
+                <Text style={styles.emptyCtaText}>Add Card</Text>
               </LinearGradient>
             </TouchableOpacity>
           </View>
         }
-        renderItem={({ item }) => (
-          <TouchableOpacity
-            activeOpacity={0.85}
-            onPress={() => handleSetDefault(item._id)}
-            style={[
-              styles.cardItem,
-              item.isDefault && styles.cardItemDefault,
-            ]}
-          >
-            <View style={styles.cardRow}>
-              <View
-                style={[
-                  styles.typeIcon,
-                  item.isDefault && styles.typeIconDefault,
-                ]}
-              >
-                <Ionicons
-                  name={getTypeIcon(item.type) as any}
-                  size={18}
-                  color={item.isDefault ? BG : SECONDARY}
-                />
-              </View>
+        renderItem={({ item }) => {
+          const meta = getBrandMeta(item.brand)
+          return (
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={() => handleSetDefault(item._id)}
+              style={[
+                styles.cardItem,
+                item.isDefault && styles.cardItemDefault,
+              ]}
+            >
+              <View style={styles.cardRow}>
+                {/* Brand mark */}
+                <View
+                  style={[
+                    styles.brandMark,
+                    { backgroundColor: meta.color + '22' },
+                  ]}
+                >
+                  <Text style={[styles.brandMarkText, { color: meta.color }]}>
+                    {meta.short}
+                  </Text>
+                </View>
 
-              <View style={styles.cardInfo}>
-                <View style={styles.cardTop}>
-                  <Text style={styles.cardType}>{item.type}</Text>
-                  {item.isDefault && (
-                    <View style={styles.defaultBadge}>
-                      <Ionicons
-                        name="checkmark-circle"
-                        size={11}
-                        color={GREEN}
-                      />
-                      <Text style={styles.defaultText}>DEFAULT</Text>
-                    </View>
+                <View style={styles.cardInfo}>
+                  <View style={styles.cardTop}>
+                    <Text style={styles.cardBrand} numberOfLines={1}>
+                      {item.brand || 'Card'} {maskCard(item.last4)}
+                    </Text>
+                    {item.isDefault && (
+                      <View style={styles.defaultBadge}>
+                        <Ionicons
+                          name="checkmark-circle"
+                          size={11}
+                          color={GREEN}
+                        />
+                        <Text style={styles.defaultText}>DEFAULT</Text>
+                      </View>
+                    )}
+                  </View>
+
+                  <Text style={styles.cardMeta} numberOfLines={1}>
+                    Expires {item.expMonth}/{item.expYear}
+                    {item.name ? ` · ${item.name}` : ''}
+                  </Text>
+
+                  {!item.isDefault && (
+                    <Text style={styles.tapHint}>Tap to set as default</Text>
                   )}
                 </View>
 
-                <Text style={styles.cardAddress}>
-                  {item.street}
-                  {'\n'}
-                  {item.city}, {item.state} {item.zipCode}
-                  {'\n'}
-                  {item.country}
-                </Text>
-
-                {!item.isDefault && (
-                  <Text style={styles.tapHint}>Tap to set as default</Text>
-                )}
+                <TouchableOpacity
+                  onPress={() => handleDelete(item._id)}
+                  style={styles.deleteBtn}
+                  hitSlop={10}
+                >
+                  <Ionicons name="trash-outline" size={18} color={DANGER} />
+                </TouchableOpacity>
               </View>
-
-              <TouchableOpacity
-                onPress={() => handleDelete(item._id)}
-                style={styles.deleteBtn}
-                hitSlop={10}
-              >
-                <Ionicons name="trash-outline" size={18} color={DANGER} />
-              </TouchableOpacity>
-            </View>
-          </TouchableOpacity>
-        )}
+            </TouchableOpacity>
+          )
+        }}
       />
 
-      {/* Add Address Modal */}
+      {/* Add Card Modal */}
       <Modal visible={modalVisible} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
           <View style={styles.modalSheet}>
@@ -330,7 +351,7 @@ export default function Addresses() {
               showsVerticalScrollIndicator={false}
             >
               <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>New Address</Text>
+                <Text style={styles.modalTitle}>New Card</Text>
                 <TouchableOpacity
                   onPress={() => {
                     setModalVisible(false)
@@ -342,89 +363,88 @@ export default function Addresses() {
                 </TouchableOpacity>
               </View>
 
-              <Text style={styles.label}>Address Type</Text>
-              <View style={styles.typeRow}>
-                {ADDRESS_TYPES.map((t) => {
-                  const active = type === t.key
+              {/* Brand grid — 3 per row, disciplined */}
+              <Text style={styles.label}>Card Brand</Text>
+              <View style={styles.brandGrid}>
+                {CARD_BRANDS.map((b) => {
+                  const active = brand === b.key
                   return (
                     <TouchableOpacity
-                      key={t.key}
-                      onPress={() => setType(t.key)}
+                      key={b.key}
+                      onPress={() => setBrand(b.key)}
                       activeOpacity={0.85}
                       style={[
-                        styles.typeChip,
-                        active && styles.typeChipActive,
+                        styles.brandChip,
+                        active && styles.brandChipActive,
                       ]}
                     >
-                      <Ionicons
-                        name={t.icon}
-                        size={16}
-                        color={active ? BG : SECONDARY}
+                      <View
+                        style={[
+                          styles.brandDot,
+                          { backgroundColor: b.color },
+                        ]}
                       />
                       <Text
                         style={[
-                          styles.typeChipText,
-                          active && styles.typeChipTextActive,
+                          styles.brandChipText,
+                          active && styles.brandChipTextActive,
                         ]}
+                        numberOfLines={1}
                       >
-                        {t.key}
+                        {b.key}
                       </Text>
                     </TouchableOpacity>
                   )
                 })}
               </View>
 
-              <Text style={styles.label}>Street *</Text>
+              <Text style={styles.label}>Name on card *</Text>
               <TextInput
-                value={street}
-                onChangeText={setStreet}
-                placeholder="Street address"
+                value={name}
+                onChangeText={setName}
+                placeholder="Full name"
                 placeholderTextColor={MUTED}
                 style={styles.input}
+                autoCapitalize="words"
+              />
+
+              <Text style={styles.label}>Card number *</Text>
+              <TextInput
+                value={number}
+                onChangeText={(t) => setNumber(formatCardNumber(t))}
+                placeholder="ACCT-000003"
+                placeholderTextColor={MUTED}
+                style={styles.input}
+                keyboardType="number-pad"
+                maxLength={19}
               />
 
               <View style={styles.row}>
                 <View style={styles.half}>
-                  <Text style={styles.label}>City *</Text>
+                  <Text style={styles.label}>Expiry *</Text>
                   <TextInput
-                    value={city}
-                    onChangeText={setCity}
-                    placeholder="City"
+                    value={expiry}
+                    onChangeText={(t) => setExpiry(formatExpiry(t))}
+                    placeholder="MM/YY"
                     placeholderTextColor={MUTED}
                     style={styles.input}
+                    keyboardType="number-pad"
+                    maxLength={5}
                   />
                 </View>
                 <View style={styles.half}>
-                  <Text style={styles.label}>State *</Text>
+                  <Text style={styles.label}>CVC *</Text>
                   <TextInput
-                    value={state}
-                    onChangeText={setState}
-                    placeholder="State"
+                    value={cvc}
+                    onChangeText={(t) =>
+                      setCvc(t.replace(/\D/g, '').slice(0, 4))
+                    }
+                    placeholder="123"
                     placeholderTextColor={MUTED}
                     style={styles.input}
-                  />
-                </View>
-              </View>
-
-              <View style={styles.row}>
-                <View style={styles.half}>
-                  <Text style={styles.label}>Zip Code *</Text>
-                  <TextInput
-                    value={zipCode}
-                    onChangeText={setZipCode}
-                    placeholder="Zip"
-                    placeholderTextColor={MUTED}
-                    style={styles.input}
-                  />
-                </View>
-                <View style={styles.half}>
-                  <Text style={styles.label}>Country *</Text>
-                  <TextInput
-                    value={country}
-                    onChangeText={setCountry}
-                    placeholder="Country"
-                    placeholderTextColor={MUTED}
-                    style={styles.input}
+                    keyboardType="number-pad"
+                    maxLength={4}
+                    secureTextEntry
                   />
                 </View>
               </View>
@@ -441,14 +461,9 @@ export default function Addresses() {
                     <Ionicons name="checkmark" size={14} color={BG} />
                   )}
                 </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.defaultToggleTitle}>
-                    Set as default address
-                  </Text>
-                  <Text style={styles.defaultToggleSub}>
-                    Used automatically at checkout
-                  </Text>
-                </View>
+                <Text style={styles.defaultToggleText}>
+                  Set as default payment method
+                </Text>
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -466,10 +481,15 @@ export default function Addresses() {
                   {saving ? (
                     <ActivityIndicator color="#fff" />
                   ) : (
-                    <Text style={styles.saveBtnText}>Save Address</Text>
+                    <Text style={styles.saveBtnText}>Save Card</Text>
                   )}
                 </LinearGradient>
               </TouchableOpacity>
+
+              <Text style={styles.secureNote}>
+                Only the last 4 digits are stored. Full payment processing comes
+                with Stripe later.
+              </Text>
             </ScrollView>
           </View>
         </View>
@@ -581,17 +601,18 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-start',
   },
-  typeIcon: {
-    width: 42,
-    height: 42,
-    borderRadius: 12,
-    backgroundColor: SURFACE_2,
+  brandMark: {
+    width: 48,
+    height: 34,
+    borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 12,
   },
-  typeIconDefault: {
-    backgroundColor: GREEN,
+  brandMarkText: {
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.4,
   },
   cardInfo: { flex: 1, minWidth: 0 },
   cardTop: {
@@ -601,10 +622,11 @@ const styles = StyleSheet.create({
     gap: 8,
     marginBottom: 4,
   },
-  cardType: {
+  cardBrand: {
     fontSize: 15,
     fontWeight: '700',
     color: TEXT,
+    maxWidth: '70%',
   },
   defaultBadge: {
     flexDirection: 'row',
@@ -620,10 +642,10 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: GREEN,
   },
-  cardAddress: {
+  cardMeta: {
     fontSize: 13,
     color: SECONDARY,
-    lineHeight: 19,
+    lineHeight: 18,
   },
   tapHint: {
     fontSize: 11,
@@ -678,7 +700,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: SECONDARY,
     marginBottom: 8,
-    marginTop: 12,
+    marginTop: 14,
   },
   input: {
     backgroundColor: SURFACE_2,
@@ -696,45 +718,48 @@ const styles = StyleSheet.create({
   },
   half: { flex: 1 },
 
-  typeRow: {
+  /* Brand grid — 3 columns, clean */
+  brandGrid: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 8,
   },
-  typeChip: {
-    flex: 1,
+  brandChip: {
+    width: '31%',
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    paddingVertical: 12,
+    gap: 7,
+    paddingVertical: 11,
+    paddingHorizontal: 10,
     borderRadius: 12,
     backgroundColor: SURFACE_2,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: LINE,
   },
-  typeChipActive: {
-    backgroundColor: GREEN,
+  brandChipActive: {
     borderColor: GREEN,
+    backgroundColor: 'rgba(0,229,117,0.08)',
   },
-  typeChipText: {
+  brandDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  brandChipText: {
     fontSize: 12,
     fontWeight: '600',
     color: SECONDARY,
+    flex: 1,
   },
-  typeChipTextActive: {
-    color: BG,
+  brandChipTextActive: {
+    color: TEXT,
   },
 
   defaultToggle: {
     flexDirection: 'row',
     alignItems: 'center',
     marginTop: 18,
-    gap: 12,
-    backgroundColor: SURFACE_2,
-    borderRadius: 12,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: LINE,
-    padding: 14,
+    gap: 10,
   },
   checkbox: {
     width: 22,
@@ -749,15 +774,10 @@ const styles = StyleSheet.create({
     backgroundColor: GREEN,
     borderColor: GREEN,
   },
-  defaultToggleTitle: {
+  defaultToggleText: {
     fontSize: 14,
-    fontWeight: '600',
     color: TEXT,
-  },
-  defaultToggleSub: {
-    fontSize: 11,
-    color: MUTED,
-    marginTop: 2,
+    fontWeight: '500',
   },
 
   saveWrap: {
@@ -774,5 +794,12 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: '700',
     fontSize: 16,
+  },
+  secureNote: {
+    fontSize: 11,
+    color: MUTED,
+    textAlign: 'center',
+    marginTop: 14,
+    lineHeight: 16,
   },
 })

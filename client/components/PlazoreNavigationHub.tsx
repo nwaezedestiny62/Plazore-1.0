@@ -7,9 +7,9 @@ import { CATEGORY_LIST } from '@/constants/productCatalog'
 import { Product } from '@/constants/types'
 import { useMarketplace } from '@/context/MarketplaceContext'
 import { Ionicons } from '@expo/vector-icons'
+import { LinearGradient } from 'expo-linear-gradient'
 import { useAuth, useClerk, useUser } from '@clerk/clerk-expo'
 import { Image as ExpoImage } from 'expo-image'
-import { LinearGradient } from 'expo-linear-gradient'
 import { usePathname, useRouter } from 'expo-router'
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import {
@@ -29,46 +29,41 @@ import {
 } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
-/* ── 2070 Luxury Lounge Palette ── */
+/* ── Plazore Lounge Palette ── */
 const BG = '#050508'
 const SURFACE = '#0B0C12'
 const SURFACE_2 = '#11131C'
-const SURFACE_CARD = '#161826'
 const TEXT = '#F5F7FA'
 const TEXT_DIM = 'rgba(245,247,250,0.65)'
 const TEXT_MUTED = 'rgba(245,247,250,0.35)'
 const GREEN = '#00E575'
 const BLUE = '#3B82F6'
-const PURPLE = '#A78BFA'
-const CYAN = '#22D3EE'
 const LINE = 'rgba(255,255,255,0.08)'
 
-/* ── Animation Speeds (slow & calm) ── */
 const OPEN_MS = 900
 const CLOSE_MS = 480
 const EASE_LUXURY = Easing.bezier(0.22, 1, 0.36, 1)
 const DEBOUNCE = 280
 
 const TILE_COLORS: Record<string, { bg: string; accent: string; glow: string }> = {
-  home:             { bg: '#0A1C14', accent: '#00E575', glow: 'rgba(0,229,117,0.25)' },
-  cart:             { bg: '#0D172A', accent: '#3B82F6', glow: 'rgba(59,130,246,0.25)' },
-  saved_stores:     { bg: '#1A160E', accent: '#D4A853', glow: 'rgba(212,168,83,0.25)' },
-  profile:          { bg: '#1A0E2A', accent: '#A78BFA', glow: 'rgba(167,139,250,0.25)' },
-  showroom_horizon: { bg: '#091520', accent: '#38BDF8', glow: 'rgba(56,189,248,0.25)' },
-  showroom_chamber: { bg: '#0A1818', accent: '#2DD4BF', glow: 'rgba(45,212,191,0.25)' },
-  showroom_signal:  { bg: '#1E0E28', accent: '#C084FC', glow: 'rgba(192,132,252,0.25)' },
-  showroom_locale:  { bg: '#1E1710', accent: '#FB923C', glow: 'rgba(251,146,60,0.25)' },
-  showroom_atelier: { bg: '#1A0F14', accent: '#F472B6', glow: 'rgba(244,114,182,0.25)' },
-  categories:       { bg: '#0B1E28', accent: '#22D3EE', glow: 'rgba(34,211,238,0.25)' },
-  new:              { bg: '#251A0A', accent: '#FBBF24', glow: 'rgba(251,191,36,0.25)' },
-  trending:         { bg: '#28120A', accent: '#FB923C', glow: 'rgba(251,146,60,0.25)' },
-  stores:           { bg: '#121430', accent: '#6366F1', glow: 'rgba(99,102,241,0.25)' },
-  help:             { bg: '#0D2623', accent: '#2DD4BF', glow: 'rgba(45,212,191,0.25)' },
-  contact:          { bg: '#181230', accent: '#818CF8', glow: 'rgba(129,140,248,0.25)' },
-  about:            { bg: '#0C1C18', accent: '#34D399', glow: 'rgba(52,211,153,0.25)' },
+  home:             { bg: '#0A1C14', accent: '#00E575', glow: 'rgba(0,229,117,0.22)' },
+  cart:             { bg: '#0D172A', accent: '#3B82F6', glow: 'rgba(59,130,246,0.22)' },
+  saved_stores:     { bg: '#1A160E', accent: '#D4A853', glow: 'rgba(212,168,83,0.22)' },
+  profile:          { bg: '#1A0E2A', accent: '#A78BFA', glow: 'rgba(167,139,250,0.22)' },
+  showroom_horizon: { bg: '#091520', accent: '#38BDF8', glow: 'rgba(56,189,248,0.22)' },
+  showroom_chamber: { bg: '#0A1818', accent: '#2DD4BF', glow: 'rgba(45,212,191,0.22)' },
+  showroom_signal:  { bg: '#1E0E28', accent: '#C084FC', glow: 'rgba(192,132,252,0.22)' },
+  showroom_locale:  { bg: '#1E1710', accent: '#FB923C', glow: 'rgba(251,146,60,0.22)' },
+  showroom_atelier: { bg: '#1A0F14', accent: '#F472B6', glow: 'rgba(244,114,182,0.22)' },
+  categories:       { bg: '#0B1E28', accent: '#22D3EE', glow: 'rgba(34,211,238,0.22)' },
+  new:              { bg: '#251A0A', accent: '#FBBF24', glow: 'rgba(251,191,36,0.22)' },
+  trending:         { bg: '#28120A', accent: '#FB923C', glow: 'rgba(251,146,60,0.22)' },
+  stores:           { bg: '#121430', accent: '#6366F1', glow: 'rgba(99,102,241,0.22)' },
+  help:             { bg: '#0D2623', accent: '#2DD4BF', glow: 'rgba(45,212,191,0.22)' },
+  contact:          { bg: '#181230', accent: '#818CF8', glow: 'rgba(129,140,248,0.22)' },
+  about:            { bg: '#0C1C18', accent: '#34D399', glow: 'rgba(52,211,153,0.22)' },
 }
 
-/* ── Showroom tile ID → room number mapping ── */
 const SHOWROOM_ID_TO_ROOM: Record<string, number> = {
   showroom_horizon: 1,
   showroom_chamber: 2,
@@ -176,7 +171,6 @@ const SECTIONS: NavSection[] = [
   },
 ]
 
-/* ── Calm Fade + Slide ── */
 function FadeSlideIn({
   index,
   children,
@@ -248,15 +242,15 @@ function MallTile({
         onPress={onPress}
         onPressIn={() =>
           Animated.timing(scale, {
-            toValue: 0.96,
-            duration: 120,
+            toValue: 0.97,
+            duration: 100,
             useNativeDriver: true,
           }).start()
         }
         onPressOut={() =>
           Animated.timing(scale, {
             toValue: 1,
-            duration: 220,
+            duration: 200,
             easing: EASE_LUXURY,
             useNativeDriver: true,
           }).start()
@@ -267,7 +261,6 @@ function MallTile({
             width,
             height,
             backgroundColor: palette.bg,
-            borderRadius: 0,
             borderWidth: 1,
             borderColor: active ? palette.accent : LINE,
             padding: 14,
@@ -276,20 +269,21 @@ function MallTile({
             transform: [{ scale }],
           }}
         >
+          {/* Soft glow orb */}
           <View
             pointerEvents="none"
             style={{
               position: 'absolute',
-              top: -24,
-              right: -24,
-              width: 80,
-              height: 80,
-              borderRadius: 40,
+              top: -30,
+              right: -30,
+              width: 90,
+              height: 90,
               backgroundColor: palette.glow,
-              opacity: active ? 0.55 : 0.22,
+              opacity: active ? 0.5 : 0.18,
             }}
           />
 
+          {/* Active edge bar */}
           {active && (
             <View
               style={{
@@ -297,7 +291,7 @@ function MallTile({
                 left: 0,
                 top: 0,
                 bottom: 0,
-                width: 3.5,
+                width: 3,
                 backgroundColor: palette.accent,
               }}
             />
@@ -305,19 +299,18 @@ function MallTile({
 
           <View
             style={{
-              width: 42,
-              height: 42,
-              borderRadius: 0,
+              width: 40,
+              height: 40,
               alignItems: 'center',
               justifyContent: 'center',
-              backgroundColor: `${palette.accent}16`,
+              backgroundColor: `${palette.accent}14`,
               borderWidth: 1,
-              borderColor: `${palette.accent}35`,
+              borderColor: `${palette.accent}30`,
             }}
           >
             <Ionicons
               name={item.icon}
-              size={22}
+              size={20}
               color={active ? palette.accent : TEXT}
             />
           </View>
@@ -326,15 +319,19 @@ function MallTile({
             <Text
               style={{
                 color: active ? palette.accent : TEXT,
-                fontSize: 14,
+                fontSize: 13,
                 fontWeight: '700',
+                letterSpacing: -0.2,
               }}
               numberOfLines={1}
             >
               {item.label}
             </Text>
             {!!item.subtitle && (
-              <Text style={{ color: TEXT_MUTED, fontSize: 11, marginTop: 2 }} numberOfLines={1}>
+              <Text
+                style={{ color: TEXT_MUTED, fontSize: 11, marginTop: 3 }}
+                numberOfLines={1}
+              >
                 {item.subtitle}
               </Text>
             )}
@@ -385,15 +382,14 @@ export default function PlazoreNavigationHub({
   const [allProducts, setAllProducts] = useState<Product[]>([])
 
   const pad = 16
-  const gap = 12
+  const gap = 10
   const tileW = Math.floor((windowW - pad * 2 - gap) / 2)
-  const tileH = Math.round(tileW * 0.92)
+  const tileH = Math.round(tileW * 0.9)
 
   const topInset = Math.max(insets.top, StatusBar.currentHeight ?? 0, 12)
   const bottomInset = Math.max(insets.bottom, 12)
   const isSearching = query.trim().length >= 1
 
-  // Smooth logo ↔ LOUNGE crossfade
   useEffect(() => {
     if (logoLoaded) {
       Animated.parallel([
@@ -416,7 +412,6 @@ export default function PlazoreNavigationHub({
     }
   }, [logoLoaded])
 
-  // Fetch store logo for seller CTA (same pattern as profile)
   useEffect(() => {
     if (!visible || !isSeller || !isSignedIn) {
       setStoreLogo(null)
@@ -460,7 +455,6 @@ export default function PlazoreNavigationHub({
     }
   }, [visible, isSeller, isSignedIn])
 
-  // Prefetch products for store matching
   useEffect(() => {
     if (!visible) return
     let alive = true
@@ -476,13 +470,11 @@ export default function PlazoreNavigationHub({
     }
   }, [visible])
 
-  // Debounce
   useEffect(() => {
     const t = setTimeout(() => setDebounced(query.trim()), DEBOUNCE)
     return () => clearTimeout(t)
   }, [query])
 
-  // Server search-suggest
   useEffect(() => {
     if (debounced.length < 1) {
       setServerProducts([])
@@ -628,21 +620,6 @@ export default function PlazoreNavigationHub({
     })
   }
 
-  const submitSearch = () => {
-    const term = query.trim()
-    if (!term) return
-    Keyboard.dismiss()
-    resetSearch()
-    onClose()
-    requestAnimationFrame(() => {
-      router.push({
-        pathname: '/(tabs)/search',
-        params: { q: term },
-      } as any)
-    })
-  }
-
-  // Smooth open / close
   useEffect(() => {
     if (visible) {
       setMounted(true)
@@ -805,7 +782,7 @@ export default function PlazoreNavigationHub({
       onRequestClose={onClose}
     >
       <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
-      <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }}>
+      <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)' }}>
         <Animated.View
           style={{
             ...StyleSheet.absoluteFillObject,
@@ -815,71 +792,27 @@ export default function PlazoreNavigationHub({
             paddingBottom: bottomInset,
           }}
         >
-          {/* Close */}
-          <View
-            style={{
-              flexDirection: 'row',
-              justifyContent: 'flex-end',
-              paddingHorizontal: 16,
-              minHeight: 44,
-            }}
-          >
-            <Pressable
-              onPress={onClose}
-              style={{
-                width: 38,
-                height: 38,
-                borderRadius: 0,
-                alignItems: 'center',
-                justifyContent: 'center',
-                backgroundColor: SURFACE_2,
-                borderWidth: 1,
-                borderColor: LINE,
-              }}
-              hitSlop={12}
-            >
-              <Ionicons name="close" size={20} color={TEXT} />
+          {/* Top bar */}
+          <View style={styles.topBar}>
+            <Text style={styles.topLabel}>NAVIGATION</Text>
+            <Pressable onPress={onClose} style={styles.closeBtn} hitSlop={12}>
+              <Ionicons name="close" size={18} color={TEXT} />
             </Pressable>
           </View>
 
-          {/* Logo + LOUNGE fallback (smooth crossfade) */}
-          <Animated.View
-            style={{
-              paddingHorizontal: 20,
-              alignItems: 'center',
-              justifyContent: 'center',
-              minHeight: 72,
-              marginBottom: 4,
-              opacity: contentFade,
-            }}
-          >
-            {/* Fallback text — visible until logo loads */}
+          {/* Logo / LOUNGE */}
+          <Animated.View style={[styles.logoWrap, { opacity: contentFade }]}>
             <Animated.View
               pointerEvents="none"
-              style={{
-                position: 'absolute',
-                alignItems: 'center',
-                justifyContent: 'center',
-                opacity: loungeOpacity,
-              }}
+              style={[styles.loungeFallback, { opacity: loungeOpacity }]}
             >
-              <Text
-                style={{
-                  color: TEXT,
-                  fontSize: 22,
-                  fontWeight: '800',
-                  letterSpacing: 6,
-                }}
-              >
-                LOUNGE
-              </Text>
+              <Text style={styles.loungeText}>LOUNGE</Text>
             </Animated.View>
 
-            {/* Logo — smaller, fades in when ready */}
             <Animated.View style={{ opacity: logoOpacity }}>
               <Image
                 source={require('../assets/logo-2.png')}
-                style={{ width: 140, height: 88 }}
+                style={{ width: 132, height: 80 }}
                 resizeMode="contain"
                 onLoad={() => setLogoLoaded(true)}
                 onError={() => setLogoLoaded(false)}
@@ -887,41 +820,29 @@ export default function PlazoreNavigationHub({
             </Animated.View>
           </Animated.View>
 
-          {/* Search Bar */}
+          {/* Search */}
           <Animated.View
-            style={{
-              marginHorizontal: 16,
-              marginBottom: 16,
-              marginTop: 6,
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 10,
-              backgroundColor: SURFACE,
-              borderRadius: 0,
-              borderWidth: 1,
-              borderColor: query.length > 0 ? GREEN : LINE,
-              paddingHorizontal: 14,
-              height: 50,
-              opacity: contentFade,
-            }}
+            style={[
+              styles.searchBar,
+              {
+                borderColor: query.length > 0 ? GREEN : LINE,
+                opacity: contentFade,
+              },
+            ]}
           >
-            <Ionicons name="search" size={18} color={query.length > 0 ? GREEN : TEXT_MUTED} />
+            <Ionicons
+              name="search"
+              size={17}
+              color={query.length > 0 ? GREEN : TEXT_MUTED}
+            />
             <TextInput
               ref={inputRef}
               value={query}
               onChangeText={setQuery}
-              onSubmitEditing={() => {
-                Keyboard.dismiss()
-              }}
+              onSubmitEditing={() => Keyboard.dismiss()}
               placeholder="Search products, stores, categories…"
               placeholderTextColor={TEXT_MUTED}
-              style={{
-                flex: 1,
-                color: TEXT,
-                fontSize: 15,
-                fontWeight: '500',
-                paddingVertical: 0,
-              }}
+              style={styles.searchInput}
               returnKeyType="search"
               autoCorrect={false}
               autoCapitalize="none"
@@ -934,7 +855,7 @@ export default function PlazoreNavigationHub({
                 }}
                 hitSlop={10}
               >
-                <Ionicons name="close-circle" size={18} color={TEXT_MUTED} />
+                <Ionicons name="close-circle" size={17} color={TEXT_MUTED} />
               </Pressable>
             )}
           </Animated.View>
@@ -949,32 +870,25 @@ export default function PlazoreNavigationHub({
             {isSearching ? (
               <View style={{ paddingHorizontal: 16, paddingTop: 8 }}>
                 {searchLoading && totalHitsCount === 0 ? (
-                  <View style={{ paddingVertical: 40, alignItems: 'center' }}>
-                    <Text style={{ color: TEXT_DIM, fontSize: 14 }}>Searching Plazore…</Text>
+                  <View style={styles.emptySearch}>
+                    <Text style={{ color: TEXT_DIM, fontSize: 14 }}>
+                      Searching Plazore…
+                    </Text>
                   </View>
                 ) : totalHitsCount === 0 ? (
-                  <View style={{ paddingVertical: 40, alignItems: 'center' }}>
-                    <Ionicons name="search-outline" size={30} color={TEXT_MUTED} />
-                    <Text style={{ color: TEXT_DIM, fontSize: 14, marginTop: 10 }}>
-                      No results for "{query.trim()}"
+                  <View style={styles.emptySearch}>
+                    <Ionicons name="search-outline" size={28} color={TEXT_MUTED} />
+                    <Text style={styles.emptySearchText}>
+                      No results for “{query.trim()}”
                     </Text>
                   </View>
                 ) : (
                   <>
-                    {/* PRODUCTS */}
                     {groupedHits.products.length > 0 && (
-                      <View style={{ marginBottom: 24 }}>
-                        <View
-                          style={{
-                            flexDirection: 'row',
-                            justifyContent: 'space-between',
-                            marginBottom: 14,
-                          }}
-                        >
-                          <Text style={[styles.sectionHeader, { paddingHorizontal: 0 }]}>
-                            PRODUCTS
-                          </Text>
-                          <Text style={{ color: TEXT_MUTED, fontSize: 12 }}>
+                      <View style={{ marginBottom: 22 }}>
+                        <View style={styles.resultHeader}>
+                          <Text style={styles.sectionHeaderInline}>PRODUCTS</Text>
+                          <Text style={styles.resultCount}>
                             {groupedHits.products.length}
                           </Text>
                         </View>
@@ -987,62 +901,28 @@ export default function PlazoreNavigationHub({
                             <FadeSlideIn key={h.id} index={i} delayBase={80} duration={650}>
                               <Pressable
                                 onPress={() => onHitPress(h)}
-                                style={{
-                                  flexDirection: 'row',
-                                  alignItems: 'center',
-                                  marginBottom: 16,
-                                }}
+                                style={styles.resultRow}
                               >
-                                <View
-                                  style={{
-                                    width: 70,
-                                    height: 70,
-                                    borderRadius: 0,
-                                    backgroundColor: SURFACE_2,
-                                    overflow: 'hidden',
-                                    marginRight: 14,
-                                  }}
-                                >
+                                <View style={styles.resultThumb}>
                                   {h.image ? (
                                     <ExpoImage
                                       source={{ uri: h.image }}
-                                      style={{ width: 70, height: 70 }}
+                                      style={{ width: 64, height: 64 }}
                                       contentFit="cover"
                                     />
                                   ) : (
-                                    <View
-                                      style={{
-                                        flex: 1,
-                                        alignItems: 'center',
-                                        justifyContent: 'center',
-                                      }}
-                                    >
-                                      <Ionicons
-                                        name="image-outline"
-                                        size={22}
-                                        color={TEXT_MUTED}
-                                      />
-                                    </View>
+                                    <Ionicons
+                                      name="image-outline"
+                                      size={20}
+                                      color={TEXT_MUTED}
+                                    />
                                   )}
                                 </View>
-
-                                <View style={{ flex: 1 }}>
-                                  <Text
-                                    style={{ color: TEXT, fontSize: 15, fontWeight: '500' }}
-                                    numberOfLines={2}
-                                  >
+                                <View style={{ flex: 1, minWidth: 0 }}>
+                                  <Text style={styles.resultTitle} numberOfLines={2}>
                                     {h.label}
                                   </Text>
-                                  <Text
-                                    style={{
-                                      color: GREEN,
-                                      fontSize: 14,
-                                      fontWeight: '600',
-                                      marginTop: 4,
-                                    }}
-                                  >
-                                    {priceText}
-                                  </Text>
+                                  <Text style={styles.resultPrice}>{priceText}</Text>
                                 </View>
                               </Pressable>
                             </FadeSlideIn>
@@ -1051,20 +931,11 @@ export default function PlazoreNavigationHub({
                       </View>
                     )}
 
-                    {/* STORES */}
                     {groupedHits.stores.length > 0 && (
                       <View style={{ marginBottom: 16 }}>
-                        <View
-                          style={{
-                            flexDirection: 'row',
-                            justifyContent: 'space-between',
-                            marginBottom: 14,
-                          }}
-                        >
-                          <Text style={[styles.sectionHeader, { paddingHorizontal: 0 }]}>
-                            STORES
-                          </Text>
-                          <Text style={{ color: TEXT_MUTED, fontSize: 12 }}>
+                        <View style={styles.resultHeader}>
+                          <Text style={styles.sectionHeaderInline}>STORES</Text>
+                          <Text style={styles.resultCount}>
                             {groupedHits.stores.length}
                           </Text>
                         </View>
@@ -1075,50 +946,24 @@ export default function PlazoreNavigationHub({
                             <FadeSlideIn key={h.id} index={i} delayBase={60} duration={600}>
                               <Pressable
                                 onPress={() => onHitPress(h)}
-                                style={{
-                                  flexDirection: 'row',
-                                  alignItems: 'center',
-                                  marginBottom: 14,
-                                }}
+                                style={styles.resultRow}
                               >
-                                <View
-                                  style={{
-                                    width: 56,
-                                    height: 56,
-                                    borderRadius: 0,
-                                    backgroundColor: SURFACE_2,
-                                    overflow: 'hidden',
-                                    marginRight: 14,
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                  }}
-                                >
+                                <View style={styles.resultThumb}>
                                   {h.logo ? (
                                     <ExpoImage
                                       source={{ uri: h.logo }}
-                                      style={{ width: 56, height: 56 }}
+                                      style={{ width: 64, height: 64 }}
                                       contentFit="cover"
                                     />
                                   ) : (
                                     <Ionicons name="storefront" size={20} color={BLUE} />
                                   )}
                                 </View>
-
-                                <View style={{ flex: 1 }}>
-                                  <Text
-                                    style={{ color: TEXT, fontSize: 15, fontWeight: '500' }}
-                                    numberOfLines={1}
-                                  >
+                                <View style={{ flex: 1, minWidth: 0 }}>
+                                  <Text style={styles.resultTitle} numberOfLines={1}>
                                     {h.label}
                                   </Text>
-                                  <Text
-                                    style={{
-                                      color: BLUE,
-                                      fontSize: 12,
-                                      marginTop: 3,
-                                      fontWeight: '600',
-                                    }}
-                                  >
+                                  <Text style={styles.resultStoreMeta}>
                                     Official Storefront
                                   </Text>
                                 </View>
@@ -1133,133 +978,69 @@ export default function PlazoreNavigationHub({
               </View>
             ) : (
               <>
-                {/* Seller CTA — matched to profile style, no border radius */}
-                <FadeSlideIn index={0} delayBase={100}>
-                  <Pressable
-                    onPress={handleSellerCta}
-                    style={
-                      isSeller
-                        ? {
-                            marginHorizontal: 16,
-                            marginBottom: 22,
-                            flexDirection: 'row',
-                            alignItems: 'center',
-                            backgroundColor: TEXT,
-                            borderRadius: 0,
-                            paddingVertical: 14,
-                            paddingHorizontal: 14,
-                            gap: 12,
-                            overflow: 'hidden',
-                          }
-                        : {
-                            marginHorizontal: 16,
-                            marginBottom: 22,
-                            flexDirection: 'row',
-                            alignItems: 'center',
-                            backgroundColor: SURFACE,
-                            borderRadius: 0,
-                            borderWidth: StyleSheet.hairlineWidth,
-                            borderColor: LINE,
-                            paddingVertical: 14,
-                            paddingHorizontal: 14,
-                            gap: 12,
-                            overflow: 'hidden',
-                          }
-                    }
-                  >
-                    {isSeller ? (
-                      <>
-                        <View
-                          style={{
-                            width: 44,
-                            height: 44,
-                            borderRadius: 0,
-                            backgroundColor: 'rgba(9,11,15,0.08)',
-                            borderWidth: StyleSheet.hairlineWidth,
-                            borderColor: 'rgba(9,11,15,0.12)',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            overflow: 'hidden',
-                          }}
-                        >
-                          {storeLogo ? (
-                            <Image
-                              source={{ uri: storeLogo }}
-                              style={{ width: 44, height: 44 }}
-                              resizeMode="cover"
-                            />
-                          ) : (
-                            <Ionicons name="storefront" size={20} color={BG} />
-                          )}
-                        </View>
-                        <View style={{ flex: 1 }}>
-                          <Text style={{ color: BG, fontSize: 15, fontWeight: '700' }}>
-                            Storefront
-                          </Text>
-                          <Text style={{ color: 'rgba(9,11,15,0.65)', fontSize: 12, marginTop: 2 }}>
-                            Products, orders & chats
-                          </Text>
-                        </View>
-                        <Ionicons name="arrow-forward" size={18} color={BG} />
-                      </>
-                    ) : (
-                      <>
-                        <View
-                          style={{
-                            width: 44,
-                            height: 44,
-                            borderRadius: 0,
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            backgroundColor: SURFACE_2,
-                          }}
-                        >
-                          <Ionicons name="storefront-outline" size={22} color={TEXT} />
-                        </View>
-                        <View style={{ flex: 1 }}>
-                          <Text style={{ color: TEXT, fontSize: 15, fontWeight: '700' }}>
-                            Open a Store
-                          </Text>
-                          <Text style={{ color: TEXT_DIM, fontSize: 12, marginTop: 2 }}>
-                            Become an official seller on Plazore
-                          </Text>
-                        </View>
-                        <Ionicons name="chevron-forward" size={16} color={TEXT_MUTED} />
-                      </>
-                    )}
-                  </Pressable>
-                </FadeSlideIn>
+                {/* Seller CTA */}
+<FadeSlideIn index={0} delayBase={100}>
+  <Pressable onPress={handleSellerCta}>
+    {isSeller ? (
+      <LinearGradient
+        colors={[GREEN, BLUE]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 0 }}
+        style={styles.sellerCtaActive}
+      >
+        <View style={styles.sellerIconActive}>
+          {storeLogo ? (
+            <Image
+              source={{ uri: storeLogo }}
+              style={{ width: 42, height: 42 }}
+              resizeMode="cover"
+            />
+          ) : (
+            <Ionicons name="storefront" size={18} color={BG} />
+          )}
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.sellerTitleActive}>Storefront</Text>
+          <Text style={styles.sellerSubActive}>
+            Products, orders & chats
+          </Text>
+        </View>
+        <Ionicons name="arrow-forward" size={16} color={BG} />
+      </LinearGradient>
+    ) : (
+      <View style={styles.sellerCta}>
+        <View style={styles.sellerIcon}>
+          <Ionicons name="storefront-outline" size={20} color={TEXT} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.sellerTitle}>Open a Store</Text>
+          <Text style={styles.sellerSub}>
+            Become an official seller on Plazore
+          </Text>
+        </View>
+        <Ionicons name="chevron-forward" size={16} color={TEXT_MUTED} />
+      </View>
+    )}
+  </Pressable>
+</FadeSlideIn>
 
                 {slots?.profile && (
-                  <View style={{ marginBottom: 12, paddingHorizontal: 16 }}>{slots.profile}</View>
+                  <View style={styles.slotWrap}>{slots.profile}</View>
                 )}
                 {slots?.recommendations && (
-                  <View style={{ marginBottom: 12, paddingHorizontal: 16 }}>
-                    {slots.recommendations}
-                  </View>
+                  <View style={styles.slotWrap}>{slots.recommendations}</View>
                 )}
                 {slots?.recentlyViewed && (
-                  <View style={{ marginBottom: 12, paddingHorizontal: 16 }}>
-                    {slots.recentlyViewed}
-                  </View>
+                  <View style={styles.slotWrap}>{slots.recentlyViewed}</View>
                 )}
                 {slots?.sellerShortcuts && (
-                  <View style={{ marginBottom: 12, paddingHorizontal: 16 }}>
-                    {slots.sellerShortcuts}
-                  </View>
+                  <View style={styles.slotWrap}>{slots.sellerShortcuts}</View>
                 )}
 
                 {SECTIONS.map((section) => (
-                  <View key={section.id} style={{ marginBottom: 24 }}>
+                  <View key={section.id} style={{ marginBottom: 22 }}>
                     <Text style={styles.sectionHeader}>{section.title}</Text>
-                    <View
-                      style={{
-                        paddingHorizontal: 16,
-                        flexDirection: 'row',
-                        flexWrap: 'wrap',
-                        gap: 12,
-                      }}
-                    >
+                    <View style={styles.tileGrid}>
                       {section.items.map((item) => {
                         const idx = tileIndex++
                         return (
@@ -1279,93 +1060,53 @@ export default function PlazoreNavigationHub({
                 ))}
 
                 {slots?.musicSettings && (
-                  <View style={{ marginTop: 4, marginBottom: 12, paddingHorizontal: 16 }}>
+                  <View style={[styles.slotWrap, { marginTop: 4 }]}>
                     {slots.musicSettings}
                   </View>
                 )}
 
                 {/* Profile footer */}
                 <FadeSlideIn index={12} delayBase={160}>
-                  <View
-                    style={{
-                      marginHorizontal: 16,
-                      marginBottom: 8,
-                      backgroundColor: SURFACE,
-                      borderRadius: 0,
-                      borderWidth: 1,
-                      borderColor: LINE,
-                      padding: 14,
-                      gap: 12,
-                    }}
-                  >
+                  <View style={styles.footerCard}>
                     <Pressable
                       onPress={() => navigate('/(tabs)/profile')}
-                      style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}
+                      style={styles.footerProfile}
                     >
                       {user?.imageUrl ? (
                         <Image
                           source={{ uri: user.imageUrl }}
-                          style={{
-                            width: 42,
-                            height: 42,
-                            borderRadius: 0,
-                            borderWidth: 1.5,
-                            borderColor: GREEN,
-                          }}
+                          style={styles.footerAvatar}
                         />
                       ) : (
-                        <View
-                          style={{
-                            width: 42,
-                            height: 42,
-                            borderRadius: 0,
-                            backgroundColor: SURFACE_2,
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            borderWidth: 1.5,
-                            borderColor: 'rgba(0,229,117,0.3)',
-                          }}
-                        >
-                          <Ionicons name="person" size={18} color={TEXT_DIM} />
+                        <View style={styles.footerAvatarFallback}>
+                          <Ionicons name="person" size={16} color={TEXT_DIM} />
                         </View>
                       )}
-                      <View style={{ flex: 1 }}>
-                        <Text
-                          style={{ color: TEXT, fontSize: 14, fontWeight: '700' }}
-                          numberOfLines={1}
-                        >
+                      <View style={{ flex: 1, minWidth: 0 }}>
+                        <Text style={styles.footerName} numberOfLines={1}>
                           {user?.firstName || user?.username || 'Guest'}
                         </Text>
-                        <Text
-                          style={{ color: TEXT_MUTED, fontSize: 11, marginTop: 1 }}
-                          numberOfLines={1}
-                        >
-                          {isSignedIn ? 'View profile details' : 'Sign in to sync saved items'}
+                        <Text style={styles.footerMeta} numberOfLines={1}>
+                          {isSignedIn
+                            ? 'View profile details'
+                            : 'Sign in to sync saved items'}
                         </Text>
                       </View>
-                      <Ionicons name="chevron-forward" size={15} color={TEXT_MUTED} />
+                      <Ionicons
+                        name="chevron-forward"
+                        size={14}
+                        color={TEXT_MUTED}
+                      />
                     </Pressable>
 
                     {isSignedIn && (
-                      <Pressable
-                        onPress={handleLogout}
-                        style={{
-                          flexDirection: 'row',
-                          alignItems: 'center',
-                          gap: 8,
-                          alignSelf: 'flex-start',
-                          paddingVertical: 7,
-                          paddingHorizontal: 12,
-                          borderRadius: 0,
-                          borderWidth: 1,
-                          borderColor: LINE,
-                          backgroundColor: 'rgba(255,255,255,0.03)',
-                        }}
-                      >
-                        <Ionicons name="log-out-outline" size={16} color={TEXT_DIM} />
-                        <Text style={{ color: TEXT_DIM, fontSize: 12, fontWeight: '600' }}>
-                          Log out
-                        </Text>
+                      <Pressable onPress={handleLogout} style={styles.logoutBtn}>
+                        <Ionicons
+                          name="log-out-outline"
+                          size={15}
+                          color={TEXT_DIM}
+                        />
+                        <Text style={styles.logoutText}>Log out</Text>
                       </Pressable>
                     )}
                   </View>
@@ -1380,6 +1121,69 @@ export default function PlazoreNavigationHub({
 }
 
 const styles = StyleSheet.create({
+  topBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    minHeight: 44,
+    marginBottom: 2,
+  },
+  topLabel: {
+    color: TEXT_MUTED,
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 2,
+  },
+  closeBtn: {
+    width: 36,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: SURFACE_2,
+    borderWidth: 1,
+    borderColor: LINE,
+  },
+
+  logoWrap: {
+    paddingHorizontal: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 68,
+    marginBottom: 6,
+  },
+  loungeFallback: {
+    position: 'absolute',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  loungeText: {
+    color: TEXT,
+    fontSize: 20,
+    fontWeight: '800',
+    letterSpacing: 7,
+  },
+
+  searchBar: {
+    marginHorizontal: 16,
+    marginBottom: 14,
+    marginTop: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: SURFACE,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    height: 48,
+  },
+  searchInput: {
+    flex: 1,
+    color: TEXT,
+    fontSize: 14,
+    fontWeight: '500',
+    paddingVertical: 0,
+  },
+
   sectionHeader: {
     color: TEXT_MUTED,
     fontSize: 10,
@@ -1388,5 +1192,188 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     marginBottom: 10,
     paddingHorizontal: 16,
+  },
+  sectionHeaderInline: {
+    color: TEXT_MUTED,
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 1.6,
+    textTransform: 'uppercase',
+  },
+
+  tileGrid: {
+    paddingHorizontal: 16,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+
+  sellerCta: {
+  marginHorizontal: 16,
+  marginBottom: 20,
+  flexDirection: 'row',
+  alignItems: 'center',
+  backgroundColor: SURFACE,
+  borderWidth: 1,
+  borderColor: LINE,
+  paddingVertical: 13,
+  paddingHorizontal: 13,
+  gap: 12,
+},
+sellerCtaActive: {
+  marginHorizontal: 16,
+  marginBottom: 20,
+  flexDirection: 'row',
+  alignItems: 'center',
+  paddingVertical: 13,
+  paddingHorizontal: 13,
+  gap: 12,
+},
+sellerIcon: {
+  width: 42,
+  height: 42,
+  alignItems: 'center',
+  justifyContent: 'center',
+  backgroundColor: SURFACE_2,
+},
+sellerIconActive: {
+  width: 42,
+  height: 42,
+  alignItems: 'center',
+  justifyContent: 'center',
+  backgroundColor: 'rgba(9,11,15,0.12)',
+  overflow: 'hidden',
+},
+sellerTitle: {
+  color: TEXT,
+  fontSize: 14,
+  fontWeight: '700',
+},
+sellerSub: {
+  color: TEXT_DIM,
+  fontSize: 12,
+  marginTop: 2,
+},
+sellerTitleActive: {
+  color: BG,
+  fontSize: 14,
+  fontWeight: '700',
+},
+sellerSubActive: {
+  color: 'rgba(9,11,15,0.65)',
+  fontSize: 12,
+  marginTop: 2,
+},
+
+  slotWrap: {
+    marginBottom: 12,
+    paddingHorizontal: 16,
+  },
+
+  emptySearch: {
+    paddingVertical: 40,
+    alignItems: 'center',
+  },
+  emptySearchText: {
+    color: TEXT_DIM,
+    fontSize: 14,
+    marginTop: 10,
+  },
+  resultHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  resultCount: {
+    color: TEXT_MUTED,
+    fontSize: 12,
+  },
+  resultRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 14,
+    gap: 12,
+  },
+  resultThumb: {
+    width: 64,
+    height: 64,
+    backgroundColor: SURFACE_2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  resultTitle: {
+    color: TEXT,
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  resultPrice: {
+    color: GREEN,
+    fontSize: 13,
+    fontWeight: '600',
+    marginTop: 4,
+  },
+  resultStoreMeta: {
+    color: BLUE,
+    fontSize: 12,
+    marginTop: 3,
+    fontWeight: '600',
+  },
+
+  footerCard: {
+    marginHorizontal: 16,
+    marginBottom: 8,
+    backgroundColor: SURFACE,
+    borderWidth: 1,
+    borderColor: LINE,
+    padding: 14,
+    gap: 12,
+  },
+  footerProfile: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  footerAvatar: {
+    width: 40,
+    height: 40,
+    borderWidth: 1.5,
+    borderColor: GREEN,
+  },
+  footerAvatarFallback: {
+    width: 40,
+    height: 40,
+    backgroundColor: SURFACE_2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1.5,
+    borderColor: 'rgba(0,229,117,0.3)',
+  },
+  footerName: {
+    color: TEXT,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  footerMeta: {
+    color: TEXT_MUTED,
+    fontSize: 11,
+    marginTop: 1,
+  },
+  logoutBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    alignSelf: 'flex-start',
+    paddingVertical: 7,
+    paddingHorizontal: 11,
+    borderWidth: 1,
+    borderColor: LINE,
+    backgroundColor: 'rgba(255,255,255,0.03)',
+  },
+  logoutText: {
+    color: TEXT_DIM,
+    fontSize: 12,
+    fontWeight: '600',
   },
 })

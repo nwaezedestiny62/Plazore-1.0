@@ -1,5 +1,3 @@
-import Header from '@/components/Header'
-import { COLORS } from '@/constants'
 import {
   convertPrice,
   DEFAULT_REGION,
@@ -9,6 +7,7 @@ import {
 import { useCart } from '@/context/CartContext'
 import { useMarketplace } from '@/context/MarketplaceContext'
 import { Ionicons } from '@expo/vector-icons'
+import { LinearGradient } from 'expo-linear-gradient'
 import { useFocusEffect, useRouter } from 'expo-router'
 import React, { useCallback, useEffect, useMemo, useRef } from 'react'
 import {
@@ -16,6 +15,7 @@ import {
   Image,
   LayoutAnimation,
   Platform,
+  StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
@@ -31,6 +31,18 @@ if (
 ) {
   UIManager.setLayoutAnimationEnabledExperimental(true)
 }
+
+/* ── Plazore tokens ── */
+const BG = '#090B0F'
+const SURFACE = '#11141A'
+const SURFACE_2 = '#171B22'
+const LINE = 'rgba(255,255,255,0.07)'
+const TEXT = '#F5F7FA'
+const SECONDARY = '#A7ADB8'
+const MUTED = '#6B7280'
+const GREEN = '#00E575'
+const BLUE = '#3B82F6'
+const DANGER = '#EF4444'
 
 function resolveProductRegion(product: any): string {
   if (!product) return DEFAULT_REGION
@@ -58,7 +70,6 @@ export default function Cart() {
   } = useMarketplace()
   const router = useRouter()
 
-  // Always re-sync region when opening bag
   useFocusEffect(
     useCallback(() => {
       refreshRegion()
@@ -67,7 +78,6 @@ export default function Cart() {
 
   const displayRegion = buyerRegion || DEFAULT_REGION
 
-  // Bulletproof formatters (never rely on stale closures alone)
   const fmt = useCallback(
     (amount: number) => {
       try {
@@ -164,34 +174,60 @@ export default function Cart() {
   }
 
   return (
-    <SafeAreaView className="flex-1 bg-[#F4F5F7]" edges={['top']}>
-      <Header title="Shopping Bag" showBack />
+    <SafeAreaView style={styles.safe} edges={['top']}>
+      {/* Header */}
+      <View style={styles.header}>
+        <TouchableOpacity
+          onPress={() => router.back()}
+          style={styles.backBtn}
+          hitSlop={12}
+        >
+          <Ionicons name="chevron-back" size={22} color={TEXT} />
+        </TouchableOpacity>
+
+        <View style={styles.headerCenter}>
+          <Text style={styles.headerTitle} numberOfLines={1}>
+            Shopping Bag
+          </Text>
+          {itemCount > 0 && (
+            <Text style={styles.headerSub}>
+              {itemCount} item{itemCount !== 1 ? 's' : ''}
+            </Text>
+          )}
+        </View>
+
+        <View style={styles.headerRight} />
+      </View>
 
       {cartItems.length === 0 ? (
-        <View className="flex-1 items-center justify-center px-8">
-          <View className="w-24 h-24 rounded-full bg-white border border-gray-200 items-center justify-center mb-5">
-            <Ionicons name="bag-handle-outline" size={40} color="#9CA3AF" />
+        <View style={styles.emptyWrap}>
+          <View style={styles.emptyIcon}>
+            <Ionicons name="bag-handle-outline" size={34} color={MUTED} />
           </View>
-          <Text className="text-primary font-bold text-xl text-center">
-            Your bag is empty
-          </Text>
-          <Text className="text-secondary text-center mt-2 leading-5">
-            Items you pick from Plazore will show up here — like a real shopping
-            bag.
+          <Text style={styles.emptyTitle}>Your bag is empty</Text>
+          <Text style={styles.emptySub}>
+            Items you pick from Plazore will appear here — ready for checkout.
           </Text>
           <TouchableOpacity
             onPress={() => router.push('/')}
-            className="mt-7 bg-primary px-8 py-3.5 rounded-xl"
-            activeOpacity={0.9}
+            activeOpacity={0.88}
+            style={styles.emptyBtnWrap}
           >
-            <Text className="text-white font-bold">Continue shopping</Text>
+            <LinearGradient
+              colors={[GREEN, BLUE]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={styles.emptyBtn}
+            >
+              <Text style={styles.emptyBtnText}>Continue shopping</Text>
+            </LinearGradient>
           </TouchableOpacity>
         </View>
       ) : (
         <>
           <ScrollView
-            className="flex-1"
-            contentContainerStyle={{ padding: 16, paddingBottom: 20 }}
+            style={styles.scroll}
+            contentContainerStyle={styles.scrollContent}
             showsVerticalScrollIndicator={false}
           >
             <Animated.View
@@ -201,24 +237,12 @@ export default function Cart() {
                   {
                     translateY: bagAnim.interpolate({
                       inputRange: [0, 1],
-                      outputRange: [12, 0],
+                      outputRange: [10, 0],
                     }),
                   },
                 ],
               }}
             >
-              <View className="flex-row items-center justify-between mb-3 px-1">
-                <View className="flex-row items-center">
-                  <Ionicons name="bag-handle" size={20} color={COLORS.primary} />
-                  <Text className="text-primary font-bold text-base ml-2">
-                    Your Bag
-                  </Text>
-                </View>
-                <Text className="text-secondary text-sm">
-                  {itemCount} item{itemCount !== 1 ? 's' : ''}
-                </Text>
-              </View>
-
               {cartItems.map((item) => {
                 const productRegion = resolveProductRegion(item.product)
                 const unit = Number(item.price ?? item.product?.price) || 0
@@ -229,159 +253,478 @@ export default function Cart() {
                 const note = item.note || ''
 
                 return (
-                  <View
-                    key={item.id}
-                    className="bg-white rounded-2xl border border-gray-200 mb-3 overflow-hidden"
-                  >
-                    <View className="p-3.5 flex-row">
+                  <View key={item.id} style={styles.card}>
+                    <View style={styles.cardTop}>
                       {item.product?.images?.[0] ? (
                         <Image
                           source={{ uri: item.product.images[0] }}
-                          className="w-[72px] h-[72px] rounded-xl bg-gray-100"
+                          style={styles.thumb}
                         />
                       ) : (
-                        <View className="w-[72px] h-[72px] rounded-xl bg-gray-100 items-center justify-center">
-                          <Ionicons name="image-outline" size={22} color="#CCC" />
+                        <View style={[styles.thumb, styles.thumbPlaceholder]}>
+                          <Ionicons
+                            name="image-outline"
+                            size={20}
+                            color={MUTED}
+                          />
                         </View>
                       )}
 
-                      <View className="flex-1 ml-3">
-                        <Text
-                          className="text-primary font-semibold text-[14px] leading-5"
-                          numberOfLines={2}
-                        >
+                      <View style={styles.infoCol}>
+                        <Text style={styles.productName} numberOfLines={2}>
                           {item.product?.name || 'Product'}
                         </Text>
-                        <Text className="text-primary font-bold text-[15px] mt-1">
+
+                        <Text style={styles.unitPrice} numberOfLines={1}>
                           {fmtProduct(unit, productRegion)}
                         </Text>
+
                         {lineFee > 0 && (
-                          <Text className="text-secondary text-[11px] mt-0.5">
-                            Delivery Fee {fmtProduct(lineFee, productRegion)}
+                          <Text style={styles.feeText} numberOfLines={1}>
+                            Delivery {fmtProduct(lineFee, productRegion)}
                           </Text>
                         )}
 
-                        <View className="flex-row items-center mt-2.5">
-                          <View className="flex-row items-center bg-gray-50 rounded-full border border-gray-200">
+                        <View style={styles.actionRow}>
+                          <View style={styles.qtyControl}>
                             <TouchableOpacity
                               onPress={() => onQty(item.id, item.quantity - 1)}
-                              className="w-8 h-8 items-center justify-center"
+                              style={styles.qtyBtn}
+                              hitSlop={8}
                             >
-                              <Ionicons name="remove" size={16} color="#111" />
+                              <Ionicons name="remove" size={14} color={TEXT} />
                             </TouchableOpacity>
-                            <Text className="w-8 text-center font-semibold text-[13px]">
-                              {item.quantity}
-                            </Text>
+                            <Text style={styles.qtyValue}>{item.quantity}</Text>
                             <TouchableOpacity
                               onPress={() => onQty(item.id, item.quantity + 1)}
-                              className="w-8 h-8 items-center justify-center"
+                              style={styles.qtyBtn}
+                              hitSlop={8}
                             >
-                              <Ionicons name="add" size={16} color="#111" />
+                              <Ionicons name="add" size={14} color={TEXT} />
                             </TouchableOpacity>
                           </View>
 
-                          <Text className="text-primary font-bold text-[14px] ml-auto mr-3">
-                            {fmtProduct(lineTotal, productRegion)}
-                          </Text>
+                          <View style={styles.priceBlock}>
+                            <Text
+                              style={styles.lineTotal}
+                              numberOfLines={1}
+                              adjustsFontSizeToFit
+                              minimumFontScale={0.75}
+                            >
+                              {fmtProduct(lineTotal, productRegion)}
+                            </Text>
+                          </View>
 
                           <TouchableOpacity
                             onPress={() => onRemove(item.id)}
-                            className="w-9 h-9 items-center justify-center"
+                            style={styles.removeBtn}
+                            hitSlop={10}
                           >
                             <Ionicons
                               name="trash-outline"
-                              size={18}
-                              color="#EF4444"
+                              size={16}
+                              color={DANGER}
                             />
                           </TouchableOpacity>
                         </View>
                       </View>
                     </View>
 
-                    <View className="px-3.5 pb-3.5 pt-1 border-t border-gray-50">
+                    <View style={styles.noteWrap}>
+                      <Text style={styles.noteLabel}>Note for seller</Text>
                       <TextInput
                         value={note}
                         onChangeText={(t) => updateItemNote(item.id, t)}
-                        placeholder="Note for seller (optional)…"
-                        placeholderTextColor="#9CA3AF"
+                        placeholder="e.g. Please pack carefully / Gift wrap / Leave at door…"
+                        placeholderTextColor={MUTED}
                         multiline
                         maxLength={120}
-                        className="bg-[#F9FAFB] rounded-xl px-3 py-2.5 text-primary text-[13px] min-h-[52]"
-                        style={{ textAlignVertical: 'top' }}
+                        style={styles.noteInput}
+                        textAlignVertical="top"
                       />
-                      <Text className="text-[10px] text-gray-400 text-right mt-1">
-                        {note.length}/120
-                      </Text>
+                      <Text style={styles.noteCount}>{note.length}/120</Text>
                     </View>
                   </View>
                 )
               })}
 
-              <View className="bg-white rounded-2xl border border-gray-200 mt-1 overflow-hidden">
-                <View className="px-4 py-3 border-b border-dashed border-gray-200">
-                  <Text className="text-primary font-bold text-[14px]">
-                    Bag summary
+              {/* Summary */}
+              <View style={styles.summaryCard}>
+                <Text style={styles.summaryTitle}>Bag summary</Text>
+
+                <View style={styles.summaryRow}>
+                  <Text style={styles.summaryLabel}>Product Price</Text>
+                  <Text style={styles.summaryValue} numberOfLines={1}>
+                    {fmt(productPrice)}
                   </Text>
                 </View>
-                <View className="px-4 py-3.5">
-                  <View className="flex-row justify-between mb-2.5">
-                    <Text className="text-secondary text-[14px]">
-                      Product Price
-                    </Text>
-                    <Text className="text-primary font-semibold text-[14px]">
-                      {fmt(productPrice)}
-                    </Text>
-                  </View>
-                  <View className="flex-row justify-between mb-2.5">
-                    <Text className="text-secondary text-[14px]">
-                      Delivery Fee
-                    </Text>
-                    <Text className="text-primary font-semibold text-[14px]">
-                      {fmt(deliveryFee)}
-                    </Text>
-                  </View>
-                  <View className="border-t border-dashed border-gray-200 my-2" />
-                  <View className="flex-row justify-between items-center">
-                    <Text className="text-primary font-bold text-[15px]">
-                      Total Amount
-                    </Text>
-                    <Text className="text-primary font-extrabold text-lg">
-                      {fmt(totalAmount)}
-                    </Text>
-                  </View>
+
+                <View style={styles.summaryRow}>
+                  <Text style={styles.summaryLabel}>Delivery Fee</Text>
+                  <Text style={styles.summaryValue} numberOfLines={1}>
+                    {fmt(deliveryFee)}
+                  </Text>
+                </View>
+
+                <View style={styles.summaryDivider} />
+
+                <View style={styles.summaryRow}>
+                  <Text style={styles.totalLabel}>Total Amount</Text>
+                  <Text style={styles.totalValue} numberOfLines={1}>
+                    {fmt(totalAmount)}
+                  </Text>
                 </View>
               </View>
             </Animated.View>
           </ScrollView>
 
-          <View
-            className="bg-white border-t border-gray-200 px-4 pt-3 pb-4"
-            style={{ marginBottom: Platform.OS === 'ios' ? 0 : 4 }}
-          >
-            <View className="flex-row items-center justify-between mb-3">
-              <View>
-                <Text className="text-secondary text-[12px]">Amount due</Text>
-                <Text className="text-primary font-extrabold text-xl">
-                  {fmt(totalAmount)}
-                </Text>
-              </View>
-              <TouchableOpacity
-                onPress={() => router.push('/(tabs)/checkout' as any)}
-                className="bg-primary px-8 py-3.5 rounded-xl flex-row items-center"
-                activeOpacity={0.9}
+          {/* Bottom bar */}
+          <View style={styles.bottomBar}>
+            <View style={styles.bottomLeft}>
+              <Text style={styles.amountDueLabel}>Amount due</Text>
+              <Text
+                style={styles.amountDueValue}
+                numberOfLines={1}
+                adjustsFontSizeToFit
+                minimumFontScale={0.7}
               >
-                <Text className="text-white font-bold text-[15px] mr-2">
-                  Checkout
-                </Text>
-                <Ionicons name="arrow-forward" size={16} color="#fff" />
-              </TouchableOpacity>
+                {fmt(totalAmount)}
+              </Text>
             </View>
-            <Text className="text-secondary text-[11px] text-center">
-              Prices shown in your marketplace currency
-            </Text>
+
+            <TouchableOpacity
+              onPress={() => router.push('/(tabs)/checkout' as any)}
+              activeOpacity={0.88}
+              style={styles.checkoutWrap}
+            >
+              <LinearGradient
+                colors={[GREEN, BLUE]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={styles.checkoutBtn}
+              >
+                <Text style={styles.checkoutText}>Checkout</Text>
+                <Ionicons name="arrow-forward" size={15} color="#fff" />
+              </LinearGradient>
+            </TouchableOpacity>
           </View>
         </>
       )}
     </SafeAreaView>
   )
 }
+
+const styles = StyleSheet.create({
+  safe: {
+    flex: 1,
+    backgroundColor: BG,
+  },
+
+  /* Header */
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: LINE,
+  },
+  backBtn: {
+    width: 42,
+    height: 42,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerCenter: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  headerTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: TEXT,
+    letterSpacing: -0.3,
+  },
+  headerSub: {
+    fontSize: 11,
+    color: MUTED,
+    marginTop: 1,
+  },
+  headerRight: {
+    width: 42,
+  },
+
+  /* Empty */
+  emptyWrap: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 36,
+  },
+  emptyIcon: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: SURFACE,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: LINE,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 20,
+  },
+  emptyTitle: {
+    fontSize: 19,
+    fontWeight: '700',
+    color: TEXT,
+    letterSpacing: -0.3,
+  },
+  emptySub: {
+    fontSize: 14,
+    color: SECONDARY,
+    textAlign: 'center',
+    marginTop: 10,
+    lineHeight: 21,
+  },
+  emptyBtnWrap: {
+    marginTop: 28,
+    borderRadius: 14,
+    overflow: 'hidden',
+  },
+  emptyBtn: {
+    paddingHorizontal: 28,
+    paddingVertical: 14,
+  },
+  emptyBtnText: {
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: 15,
+  },
+
+  /* Scroll */
+  scroll: {
+    flex: 1,
+  },
+  scrollContent: {
+    padding: 14,
+    paddingBottom: 24,
+  },
+
+  /* Card */
+  card: {
+    backgroundColor: SURFACE,
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: LINE,
+    marginBottom: 12,
+    overflow: 'hidden',
+  },
+  cardTop: {
+    flexDirection: 'row',
+    padding: 13,
+  },
+  thumb: {
+    width: 70,
+    height: 70,
+    borderRadius: 12,
+    backgroundColor: SURFACE_2,
+  },
+  thumbPlaceholder: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  infoCol: {
+    flex: 1,
+    marginLeft: 12,
+    minWidth: 0,
+  },
+  productName: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: TEXT,
+    lineHeight: 19,
+    letterSpacing: -0.2,
+  },
+  unitPrice: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: GREEN,
+    marginTop: 4,
+  },
+  feeText: {
+    fontSize: 11,
+    color: MUTED,
+    marginTop: 2,
+  },
+  actionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 11,
+  },
+  qtyControl: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: SURFACE_2,
+    borderRadius: 999,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: LINE,
+  },
+  qtyBtn: {
+    width: 30,
+    height: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  qtyValue: {
+    width: 26,
+    textAlign: 'center',
+    fontSize: 13,
+    fontWeight: '600',
+    color: TEXT,
+  },
+  priceBlock: {
+    flex: 1,
+    marginHorizontal: 10,
+    minWidth: 0,
+  },
+  lineTotal: {
+    textAlign: 'right',
+    fontSize: 14,
+    fontWeight: '700',
+    color: TEXT,
+  },
+  removeBtn: {
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  /* Note */
+  noteWrap: {
+    paddingHorizontal: 13,
+    paddingBottom: 13,
+    paddingTop: 2,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: LINE,
+  },
+  noteLabel: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: MUTED,
+    letterSpacing: 0.4,
+    textTransform: 'uppercase',
+    marginBottom: 6,
+  },
+  noteInput: {
+    backgroundColor: SURFACE_2,
+    borderRadius: 11,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: LINE,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 13,
+    color: TEXT,
+    minHeight: 52,
+    lineHeight: 18,
+  },
+  noteCount: {
+    fontSize: 10,
+    color: MUTED,
+    textAlign: 'right',
+    marginTop: 4,
+  },
+
+  /* Summary */
+  summaryCard: {
+    backgroundColor: SURFACE,
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: LINE,
+    padding: 16,
+    marginTop: 4,
+  },
+  summaryTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: TEXT,
+    marginBottom: 14,
+  },
+  summaryRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  summaryLabel: {
+    fontSize: 13,
+    color: SECONDARY,
+  },
+  summaryValue: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: TEXT,
+    maxWidth: '52%',
+    textAlign: 'right',
+  },
+  summaryDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: LINE,
+    marginVertical: 8,
+  },
+  totalLabel: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: TEXT,
+  },
+  totalValue: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: GREEN,
+    maxWidth: '52%',
+    textAlign: 'right',
+  },
+
+  /* Bottom */
+  bottomBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: SURFACE,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: LINE,
+    paddingHorizontal: 14,
+    paddingTop: 12,
+    paddingBottom: Platform.OS === 'ios' ? 12 : 14,
+  },
+  bottomLeft: {
+    flex: 1,
+    marginRight: 12,
+    minWidth: 0,
+  },
+  amountDueLabel: {
+    fontSize: 11,
+    color: SECONDARY,
+    marginBottom: 2,
+  },
+  amountDueValue: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: TEXT,
+    letterSpacing: -0.3,
+  },
+  checkoutWrap: {
+    borderRadius: 13,
+    overflow: 'hidden',
+  },
+  checkoutBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 13,
+    gap: 7,
+  },
+  checkoutText: {
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: 15,
+  },
+})

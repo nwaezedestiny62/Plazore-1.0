@@ -18,6 +18,7 @@ import AnalyticsRouter from "./routes/analyticsRoutes.js";
 import AIRouter from "./routes/aiRoutes.js";
 import ChatRouter from "./routes/chatRoutes.js";
 import SavedStoreRouter from "./routes/savedStoreRoutes.js";
+import PaymentMethodRouter from "./routes/paymentMethodRoutes.js";
 
 const app = express();
 
@@ -64,6 +65,7 @@ app.use("/api/analytics", AnalyticsRouter);
 app.use("/api/ai", AIRouter);
 app.use("/api/chat", ChatRouter);
 app.use("/api/saved-stores", SavedStoreRouter);
+app.use("/api/payment-methods", PaymentMethodRouter);
 
 await makeAdmin();
 
