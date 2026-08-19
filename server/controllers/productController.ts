@@ -614,6 +614,16 @@ export const updateProduct = async (req: Request, res: Response) => {
       updates.brand = String(req.body.brand).trim();
     }
 
+    // ── Visibility (hide / show in mall) — MUST be before findByIdAndUpdate ──
+    if (req.body.isActive !== undefined) {
+      const raw = req.body.isActive;
+      updates.isActive =
+        raw === true ||
+        raw === "true" ||
+        raw === 1 ||
+        raw === "1";
+    }
+
     if (
       req.body.shippingMethod !== undefined ||
       req.body.courierCompany !== undefined ||
@@ -671,23 +681,33 @@ export const updateProduct = async (req: Request, res: Response) => {
     }
 
     // ── Verification documents: keep selected existing + new uploads ──
-    const existingDocs = parseExistingDocuments(
-      req.body,
-      product.verificationDocuments || []
-    );
+    // Only touch docs when the client is actually editing them (multipart edit),
+    // so a plain JSON hide/show { isActive } does not wipe documents.
+    const isDocEdit =
+      req.body.existingDocuments !== undefined ||
+      req.body.specifications !== undefined ||
+      getDocumentFiles(req).length > 0 ||
+      req.body.name !== undefined;
 
-    try {
-      const newDocs = await uploadVerificationDocs(
-        getDocumentFiles(req),
-        req.body
+    if (isDocEdit) {
+      const existingDocs = parseExistingDocuments(
+        req.body,
+        product.verificationDocuments || []
       );
-      updates.verificationDocuments = [...existingDocs, ...newDocs];
-    } catch (docErr: any) {
-      console.error("Document upload error:", docErr);
-      return res.status(502).json({
-        success: false,
-        message: "Document upload failed. Please try again.",
-      });
+
+      try {
+        const newDocs = await uploadVerificationDocs(
+          getDocumentFiles(req),
+          req.body
+        );
+        updates.verificationDocuments = [...existingDocs, ...newDocs];
+      } catch (docErr: any) {
+        console.error("Document upload error:", docErr);
+        return res.status(502).json({
+          success: false,
+          message: "Document upload failed. Please try again.",
+        });
+      }
     }
 
     const updated = await Product.findByIdAndUpdate(req.params.id, updates, {
@@ -697,11 +717,16 @@ export const updateProduct = async (req: Request, res: Response) => {
 
     // ── Plazore AI: only regenerate if meaningful fields changed ──
     if (updated) {
-      const newFingerprint = generateProductFingerprint(updated);
-      const existingAI = await ProductAI.findOne({ productId: updated._id });
+      const onlyVisibility =
+        Object.keys(updates).length === 1 && updates.isActive !== undefined;
 
-      if (!existingAI || existingAI.fingerprint !== newFingerprint) {
-        enqueueProductAI(String(updated._id));
+      if (!onlyVisibility) {
+        const newFingerprint = generateProductFingerprint(updated);
+        const existingAI = await ProductAI.findOne({ productId: updated._id });
+
+        if (!existingAI || existingAI.fingerprint !== newFingerprint) {
+          enqueueProductAI(String(updated._id));
+        }
       }
     }
 
@@ -798,6 +823,58 @@ export const deleteProduct = async (req: Request, res: Response) => {
     res.status(500).json({
       success: false,
       message: error.message || "Failed to delete product",
+    });
+  }
+};
+
+export const setProductVisibility = async (req: Request, res: Response) => {
+  try {
+    const user = getUser(req);
+    if (!user?._id) {
+      return res.status(401).json({ success: false, message: "Not authorized" });
+    }
+
+    const product = await Product.findById(req.params.id);
+    if (!product) {
+      return res.status(404).json({ success: false, message: "Product not found" });
+    }
+
+    if (
+      product.seller.toString() !== user._id.toString() &&
+      user.role !== "admin"
+    ) {
+      return res.status(403).json({
+        success: false,
+        message: "Not authorized to update this product",
+      });
+    }
+
+    if (req.body.isActive === undefined) {
+      return res.status(400).json({
+        success: false,
+        message: "isActive is required",
+      });
+    }
+
+    const raw = req.body.isActive;
+    const next =
+      raw === true || raw === "true" || raw === 1 || raw === "1";
+
+    product.isActive = next;
+    await product.save();
+
+    return res.json({
+      success: true,
+      data: {
+        _id: product._id,
+        isActive: product.isActive,
+      },
+    });
+  } catch (error: any) {
+    console.error("setProductVisibility error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to update visibility",
     });
   }
 };

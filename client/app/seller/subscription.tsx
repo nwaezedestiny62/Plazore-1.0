@@ -9,19 +9,28 @@ import { useAuth } from '@clerk/clerk-expo'
 import { Ionicons } from '@expo/vector-icons'
 import { LinearGradient } from 'expo-linear-gradient'
 import { useFocusEffect } from 'expo-router'
-import React, { useCallback, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  ActivityIndicator,
+  Animated,
+  Easing,
+  Image,
   ScrollView,
+  StyleSheet,
   Text,
   View,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 
-/**
- * Base prices in USD. Converted to the seller's marketplace currency.
- * Nigeria uses the local tier amounts you specified.
- */
+const BG = '#090B0F'
+const SURFACE = '#11141A'
+const SURFACE_2 = '#171B22'
+const LINE = 'rgba(255,255,255,0.07)'
+const TEXT = '#F5F7FA'
+const SECONDARY = '#A7ADB8'
+const MUTED = '#737A86'
+const GREEN = '#00E575'
+const BLUE = '#3B82F6'
+
 const PLAN_PRICE_USD: Record<string, number | null> = {
   free: null,
   global: 12,
@@ -29,7 +38,6 @@ const PLAN_PRICE_USD: Record<string, number | null> = {
   dominant: 75,
 }
 
-/** Explicit NGN monthly prices (prefer over FX for NG sellers) */
 const PLAN_PRICE_NGN: Record<string, number | null> = {
   free: null,
   global: 12000,
@@ -41,60 +49,58 @@ type PlanId = 'free' | 'global' | 'business' | 'dominant'
 
 type PlanDef = {
   id: PlanId
-  emoji: string
   name: string
   feePct: number
   features: string[]
   limited?: boolean
+  icon: keyof typeof Ionicons.glyphMap
 }
 
 const PLANS: PlanDef[] = [
   {
     id: 'free',
-    emoji: '🌱',
     name: 'Free Seller',
     feePct: 8,
+    icon: 'leaf-outline',
     features: [
-      'Upload up to 6 images per product',
+      'Up to 6 images per product',
       'Standard showroom visibility',
-      'Seller Dashboard',
-      'Product Management',
-      'Order Management',
-      'Personal Storefront',
+      'Seller dashboard & orders',
+      'Personal storefront',
     ],
   },
   {
     id: 'global',
-    emoji: '🌍',
     name: 'Global Reach',
     feePct: 5,
+    icon: 'globe-outline',
     features: [
-      'Upload up to 12 images',
+      'Up to 12 images per product',
       'Increased showroom visibility',
     ],
   },
   {
     id: 'business',
-    emoji: '🚀',
     name: 'Business Plus',
     feePct: 3.5,
+    icon: 'rocket-outline',
     features: [
-      'Upload up to 20 images',
+      'Up to 20 images per product',
       'High showroom visibility',
       'Priority product discovery',
     ],
   },
   {
     id: 'dominant',
-    emoji: '👑',
     name: 'Dominant Visibility',
     feePct: 2,
     limited: true,
+    icon: 'diamond-outline',
     features: [
-      'Upload up to 20 images',
+      'Up to 20 images per product',
       'Maximum showroom visibility',
-      'Eligible for Plazore General Banner',
-      'Highest product discovery priority',
+      'Eligible for Plazore banner',
+      'Highest discovery priority',
     ],
   },
 ]
@@ -119,15 +125,73 @@ function resolvePlanPrice(planId: PlanId, regionCode: string): string {
   const usd = PLAN_PRICE_USD[planId]
   if (usd == null) return 'Free'
 
-  // Store USD amount in US region, convert to seller marketplace
   const { convertPrice } = require('@/constants/regions') as typeof import('@/constants/regions')
   const local = convertPrice(usd, 'US', regionCode)
-  // Whole numbers for subscriptions look cleaner
-  const rounded =
-    region.currency.code === 'USD' || region.currency.code === 'GBP'
-      ? Math.round(local)
-      : Math.round(local)
+  const rounded = Math.round(local)
   return formatMoney(rounded, regionCode)
+}
+
+function PlazoreOrb({ size = 110 }: { size?: number }) {
+  const rotation = useRef(new Animated.Value(0)).current
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.timing(rotation, {
+        toValue: 1,
+        duration: 2600,
+        easing: Easing.linear,
+        useNativeDriver: true,
+      })
+    )
+    loop.start()
+    return () => loop.stop()
+  }, [])
+  const rotate = rotation.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0deg', '360deg'],
+  })
+  const logoBox = size * 0.51
+  const logoImg = size * 0.29
+  return (
+    <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
+      <Animated.View
+        style={{
+          position: 'absolute',
+          width: size,
+          height: size,
+          borderRadius: size / 2,
+          borderWidth: 2.4,
+          borderColor: 'transparent',
+          borderTopColor: GREEN,
+          borderRightColor: BLUE,
+          borderBottomColor: 'transparent',
+          borderLeftColor: GREEN,
+          transform: [{ rotate }],
+        }}
+      />
+      <View
+        style={{
+          width: logoBox,
+          height: logoBox,
+          borderRadius: logoBox / 2,
+          backgroundColor: 'rgba(0,229,117,0.1)',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <Image
+          source={require('@/assets/logo-1.png')}
+          style={{ width: logoImg, height: logoImg }}
+          resizeMode="contain"
+        />
+      </View>
+    </View>
+  )
+}
+
+function normalizePlan(raw: string): PlanId | string {
+  const p = String(raw || 'free').toLowerCase()
+  if (p === 'pro') return 'global'
+  return p
 }
 
 export default function SellerSubscription() {
@@ -149,7 +213,9 @@ export default function SellerSubscription() {
         const u = res.data.data
         setSellerRegion(u.marketplaceRegion || appRegion || DEFAULT_REGION)
         setCurrentPlan(
-          String(u.sellerPlan || u.subscriptionPlan || u.plan || 'free').toLowerCase()
+          normalizePlan(
+            String(u.sellerPlan || u.subscriptionPlan || u.plan || 'free')
+          )
         )
       }
     } catch {
@@ -166,73 +232,57 @@ export default function SellerSubscription() {
   )
 
   const regionMeta = useMemo(() => getRegion(sellerRegion), [sellerRegion])
-  const currentLabel =
-    PLAN_LABEL[currentPlan] || PLAN_LABEL.free
+  const currentLabel = PLAN_LABEL[currentPlan] || PLAN_LABEL.free
   const currentFee =
-    PLANS.find((p) => p.id === currentPlan || (currentPlan === 'pro' && p.id === 'global'))
-      ?.feePct ?? 8
+    PLANS.find(
+      (p) => p.id === currentPlan || (currentPlan === 'pro' && p.id === 'global')
+    )?.feePct ?? 8
 
   if (loading) {
     return (
-      <View className="flex-1 bg-[#060B14] items-center justify-center">
-        <ActivityIndicator color="#9EC5FF" />
+      <View style={styles.loaderRoot}>
+        <PlazoreOrb size={110} />
+        <Text style={styles.loaderHint}>Loading plans…</Text>
       </View>
     )
   }
 
   return (
-    <SafeAreaView className="flex-1 bg-[#060B14]" edges={['top']}>
+    <SafeAreaView style={styles.safe} edges={['top']}>
       <ScrollView
-        className="flex-1"
-        contentContainerStyle={{ padding: 20, paddingBottom: 48 }}
+        contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}
       >
-        {/* Header */}
-        <Text className="text-[#5A7088] text-[11px] font-semibold tracking-[3px] uppercase">
-          Growth
-        </Text>
-        <Text className="text-white text-[26px] font-extrabold mt-1 mb-6">
-          Seller Subscription
+        <Text style={styles.eyebrow}>Growth</Text>
+        <Text style={styles.title}>Seller plans</Text>
+        <Text style={styles.intro}>
+          Lower fees and stronger visibility as your store grows. Fees apply to
+          product price only — never delivery.
         </Text>
 
-        {/* Current plan */}
-        <View className="rounded-[28px] overflow-hidden border border-[#2A4560] mb-5">
-          <LinearGradient
-            colors={['#12243A', '#0C1520']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            className="p-6"
-          >
-            <Text className="text-[#7A93A8] text-[11px] font-semibold tracking-[2px] uppercase mb-2">
-              Current Plan
-            </Text>
-            <Text className="text-white text-[22px] font-extrabold">
-              {PLANS.find((p) => p.id === currentPlan)?.emoji || '🌱'}{' '}
-              {currentLabel}
-            </Text>
-            <View className="flex-row items-end mt-4">
-              <View className="flex-1">
-                <Text className="text-[#6B8299] text-[12px]">
-                  Current Transaction Fee
-                </Text>
-                <Text className="text-[#9EC5FF] text-[28px] font-extrabold mt-0.5">
-                  {currentFee}%
-                </Text>
-              </View>
-              <View className="bg-[#1A2F45] px-3 py-1.5 rounded-full border border-[#2A4560]">
-                <Text className="text-[#AFC3D6] text-[11px] font-medium">
-                  {regionMeta.flag} {regionMeta.name}
-                </Text>
-              </View>
+        {/* Current plan hero */}
+        <LinearGradient
+          colors={['rgba(0,229,117,0.12)', 'rgba(59,130,246,0.08)']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.currentCard}
+        >
+          <Text style={styles.currentEyebrow}>Your plan</Text>
+          <Text style={styles.currentName}>{currentLabel}</Text>
+          <View style={styles.currentRow}>
+            <View>
+              <Text style={styles.currentFeeLabel}>Transaction fee</Text>
+              <Text style={styles.currentFee}>{currentFee}%</Text>
             </View>
-          </LinearGradient>
-        </View>
+            <View style={styles.regionPill}>
+              <Text style={styles.regionText}>
+                {regionMeta.flag} {regionMeta.name}
+              </Text>
+            </View>
+          </View>
+        </LinearGradient>
 
-        <Text className="text-[#7A93A8] text-[14px] leading-6 mb-8 px-1">
-          Choose a plan that supports your business growth. Unlock higher image upload limits, stronger showroom visibility, and lower transaction fees as your store grows.
-        </Text>
-
-        <Text className="text-[#5A7088] text-[11px] font-semibold tracking-[2.5px] uppercase mb-3">
+        <Text style={styles.section}>
           Plans · {regionMeta.currency.code}
         </Text>
 
@@ -245,91 +295,259 @@ export default function SellerSubscription() {
           return (
             <View
               key={plan.id}
-              className={`rounded-[26px] border p-5 mb-4 ${
-                isCurrent
-                  ? 'bg-[#0F1C2E] border-[#3A5A7A]'
-                  : 'bg-[#0C1520] border-[#1A2A3A]'
-              }`}
+              style={[styles.planCard, isCurrent && styles.planCardCurrent]}
             >
-              <View className="flex-row items-start justify-between mb-3">
-                <View className="flex-1 pr-3">
-                  <View className="flex-row items-center flex-wrap gap-2">
-                    <Text className="text-white text-[18px] font-extrabold">
-                      {plan.emoji} {plan.name}
-                    </Text>
-                    {plan.limited ? (
-                      <View className="bg-[#1A1A28] border border-[#3A3A50] px-2 py-0.5 rounded-full">
-                        <Text className="text-[#A8A8C0] text-[10px] font-semibold">
-                          Limited Availability
-                        </Text>
-                      </View>
-                    ) : null}
-                    {isCurrent ? (
-                      <View className="bg-[#1A2F28] px-2 py-0.5 rounded-full">
-                        <Text className="text-[#8FE3B0] text-[10px] font-bold">
-                          Current
-                        </Text>
-                      </View>
-                    ) : null}
-                  </View>
-                  <Text className="text-[#9EC5FF] text-[22px] font-extrabold mt-2">
-                    {priceLabel}
-                  </Text>
-                  {plan.id !== 'free' ? (
-                    <Text className="text-[#5A7088] text-[11px] mt-0.5">
-                      per month · {regionMeta.name} marketplace
-                    </Text>
-                  ) : (
-                    <Text className="text-[#5A7088] text-[11px] mt-0.5">
-                      No monthly charge
-                    </Text>
-                  )}
+              {isCurrent && <View style={styles.currentBar} />}
+
+              <View style={styles.planTop}>
+                <View style={styles.planIcon}>
+                  <Ionicons name={plan.icon} size={18} color={GREEN} />
                 </View>
-                <View className="w-11 h-11 rounded-2xl bg-[#13263B] items-center justify-center">
-                  <Ionicons
-                    name={
-                      plan.id === 'free'
-                        ? 'leaf-outline'
-                        : plan.id === 'global'
-                          ? 'globe-outline'
-                          : plan.id === 'business'
-                            ? 'rocket-outline'
-                            : 'diamond-outline'
-                    }
-                    size={20}
-                    color="#DCEBFF"
-                  />
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <View style={styles.planNameRow}>
+                    <Text style={styles.planName}>{plan.name}</Text>
+                    {isCurrent && (
+                      <View style={styles.badgeCurrent}>
+                        <Text style={styles.badgeCurrentText}>Current</Text>
+                      </View>
+                    )}
+                    {plan.limited && (
+                      <View style={styles.badgeLimited}>
+                        <Text style={styles.badgeLimitedText}>Limited</Text>
+                      </View>
+                    )}
+                  </View>
+                  <Text style={styles.planPrice}>{priceLabel}</Text>
+                  <Text style={styles.planPriceHint}>
+                    {plan.id === 'free'
+                      ? 'No monthly charge'
+                      : `per month · ${regionMeta.name}`}
+                  </Text>
                 </View>
               </View>
 
-              <View className="h-px bg-[#1A2A3A] my-3" />
+              <View style={styles.planDivider} />
 
               {plan.features.map((f) => (
-                <View key={f} className="flex-row items-start mb-2">
-                  <Text className="text-[#5A7088] mr-2 mt-0.5">•</Text>
-                  <Text className="text-[#C5D4E3] text-[13px] leading-5 flex-1">
-                    {f}
-                  </Text>
+                <View key={f} style={styles.featureRow}>
+                  <Ionicons name="checkmark" size={14} color={GREEN} />
+                  <Text style={styles.featureText}>{f}</Text>
                 </View>
               ))}
 
-              <View className="mt-3 flex-row items-center justify-between bg-[#0A121C] rounded-2xl px-4 py-3 border border-[#152030]">
-                <Text className="text-[#6B8299] text-[12px]">
-                  Transaction fee
-                </Text>
-                <Text className="text-white font-bold text-[15px]">
-                  {plan.feePct}%
-                </Text>
+              <View style={styles.feeBox}>
+                <Text style={styles.feeBoxLabel}>Transaction fee</Text>
+                <Text style={styles.feeBoxValue}>{plan.feePct}%</Text>
               </View>
             </View>
           )
         })}
 
-        <Text className="text-[#4A6078] text-[12px] leading-5 text-center mt-2 px-4">
-          Payments and plan changes will be available in a later update. Fees
-          apply to product price only — never to delivery.
+        <Text style={styles.footnote}>
+          Payments and plan changes will open in a later update. Until then,
+          this screen shows your current tier and what each plan unlocks.
         </Text>
       </ScrollView>
     </SafeAreaView>
   )
 }
+
+const styles = StyleSheet.create({
+  safe: { flex: 1, backgroundColor: BG },
+  loaderRoot: {
+    flex: 1,
+    backgroundColor: BG,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  loaderHint: { marginTop: 16, fontSize: 13, color: MUTED },
+
+  scroll: { padding: 18, paddingBottom: 48 },
+
+  eyebrow: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 1.8,
+    color: MUTED,
+    textTransform: 'uppercase',
+  },
+  title: {
+    marginTop: 4,
+    fontSize: 26,
+    fontWeight: '800',
+    color: TEXT,
+    letterSpacing: -0.5,
+  },
+  intro: {
+    marginTop: 10,
+    marginBottom: 20,
+    fontSize: 14,
+    lineHeight: 21,
+    color: SECONDARY,
+  },
+
+  currentCard: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(0,229,117,0.22)',
+    padding: 18,
+    marginBottom: 24,
+  },
+  currentEyebrow: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1.4,
+    color: MUTED,
+    textTransform: 'uppercase',
+  },
+  currentName: {
+    marginTop: 6,
+    fontSize: 22,
+    fontWeight: '800',
+    color: TEXT,
+  },
+  currentRow: {
+    marginTop: 16,
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+  },
+  currentFeeLabel: { fontSize: 12, color: MUTED },
+  currentFee: {
+    marginTop: 2,
+    fontSize: 28,
+    fontWeight: '800',
+    color: GREEN,
+  },
+  regionPill: {
+    backgroundColor: SURFACE_2,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: LINE,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  regionText: { fontSize: 12, color: SECONDARY, fontWeight: '600' },
+
+  section: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 1.4,
+    color: MUTED,
+    textTransform: 'uppercase',
+    marginBottom: 12,
+  },
+
+  planCard: {
+    backgroundColor: SURFACE,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: LINE,
+    padding: 16,
+    marginBottom: 12,
+    overflow: 'hidden',
+  },
+  planCardCurrent: {
+    borderColor: 'rgba(0,229,117,0.35)',
+  },
+  currentBar: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    width: 3,
+    backgroundColor: GREEN,
+  },
+
+  planTop: { flexDirection: 'row', gap: 12 },
+  planIcon: {
+    width: 40,
+    height: 40,
+    backgroundColor: 'rgba(0,229,117,0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  planNameRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 6,
+  },
+  planName: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: TEXT,
+  },
+  badgeCurrent: {
+    backgroundColor: 'rgba(0,229,117,0.14)',
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+  },
+  badgeCurrentText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: GREEN,
+  },
+  badgeLimited: {
+    backgroundColor: SURFACE_2,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: LINE,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+  },
+  badgeLimitedText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: MUTED,
+  },
+  planPrice: {
+    marginTop: 6,
+    fontSize: 20,
+    fontWeight: '800',
+    color: TEXT,
+  },
+  planPriceHint: {
+    marginTop: 2,
+    fontSize: 11,
+    color: MUTED,
+  },
+
+  planDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: LINE,
+    marginVertical: 14,
+  },
+
+  featureRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    marginBottom: 8,
+  },
+  featureText: {
+    flex: 1,
+    fontSize: 13,
+    lineHeight: 19,
+    color: SECONDARY,
+  },
+
+  feeBox: {
+    marginTop: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: SURFACE_2,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: LINE,
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+  },
+  feeBoxLabel: { fontSize: 12, color: MUTED },
+  feeBoxValue: { fontSize: 15, fontWeight: '800', color: TEXT },
+
+  footnote: {
+    marginTop: 10,
+    textAlign: 'center',
+    fontSize: 12,
+    lineHeight: 18,
+    color: MUTED,
+    paddingHorizontal: 8,
+  },
+})

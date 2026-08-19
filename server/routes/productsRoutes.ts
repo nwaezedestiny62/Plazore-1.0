@@ -5,9 +5,11 @@ import {
   getProducts,
   updateProduct,
   deleteProduct,
+  setProductVisibility,
 } from "../controllers/productController.js";
 import upload from "../middleware/upload.js";
 import { authorize, protect } from "../middleware/auth.js";
+import SellerRouter from "./sellerRoutes.js";
 
 const ProductRouter = express.Router();
 
@@ -36,6 +38,13 @@ ProductRouter.put(
     { name: "documents", maxCount: 5 },
   ]),
   updateProduct
+);
+
+SellerRouter.patch(
+  "/products/:id/visibility",
+  protect,
+  authorize("seller", "admin"),
+  setProductVisibility
 );
 
 ProductRouter.delete("/:id", protect, authorize("admin"), deleteProduct);

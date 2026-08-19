@@ -1,9 +1,29 @@
 import { Tabs, useRouter } from 'expo-router'
-import { useEffect } from 'react'
-import { View, ActivityIndicator, TouchableOpacity, Text } from 'react-native'
+import { useCallback, useEffect, useState } from 'react'
+import {
+  View,
+  ActivityIndicator,
+  TouchableOpacity,
+  Text,
+  AppState,
+  AppStateStatus,
+  StyleSheet,
+} from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
-import { useUser } from '@clerk/clerk-expo'
+import { useAuth, useUser } from '@clerk/clerk-expo'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import api from '@/constants/api'
+
+const BG = '#090B0F'
+const SURFACE = '#11141A'
+const LINE = 'rgba(255,255,255,0.08)'
+const TEXT = '#F5F7FA'
+const MUTED = '#5A6F88'
+const ACTIVE = '#B8F0D0'
+const GREEN = '#00E575'
+const BLUE = '#3B82F6'
+
+const PENDING_STATUSES = new Set(['Preparing'])
 
 function HeaderBack() {
   const router = useRouter()
@@ -17,7 +37,7 @@ function HeaderBack() {
       hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
       activeOpacity={0.8}
     >
-      <Ionicons name="arrow-back" size={24} color="#DCEBFF" />
+      <Ionicons name="arrow-back" size={24} color={TEXT} />
     </TouchableOpacity>
   )
 }
@@ -31,15 +51,110 @@ function HeaderBackToSettings() {
       hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
       activeOpacity={0.8}
     >
-      <Ionicons name="arrow-back" size={24} color="#DCEBFF" />
+      <Ionicons name="arrow-back" size={24} color={TEXT} />
     </TouchableOpacity>
+  )
+}
+
+/** Single clean badge on the icon — no tabBarBadge (avoids double badge) */
+function TabIconWithBadge({
+  name,
+  color,
+  size,
+  count,
+}: {
+  name: keyof typeof Ionicons.glyphMap
+  color: string
+  size: number
+  count: number
+}) {
+  const label = count > 99 ? '99+' : String(count)
+  const wide = count > 9
+
+  return (
+    <View style={styles.iconWrap}>
+      <Ionicons name={name} size={size - 1} color={color} />
+      {count > 0 && (
+        <View style={[styles.badge, wide && styles.badgeWide]}>
+          <Text style={styles.badgeText} numberOfLines={1}>
+            {label}
+          </Text>
+        </View>
+      )}
+    </View>
   )
 }
 
 export default function SellerLayout() {
   const { user, isLoaded } = useUser()
+  const { getToken } = useAuth()
   const router = useRouter()
   const insets = useSafeAreaInsets()
+
+  const [pendingOrders, setPendingOrders] = useState(0)
+  const [unreadChats, setUnreadChats] = useState(0)
+
+  const refreshBadges = useCallback(async () => {
+    try {
+      const token = await getToken()
+      if (!token) return
+      const headers = { Authorization: `Bearer ${token}` }
+
+      const [ordersRes, chatsRes] = await Promise.all([
+        api.get('/orders/seller/my', { headers }).catch(() => null),
+        api.get('/chat/conversations', { headers }).catch(() => null),
+      ])
+
+      // Orders: Preparing = needs attention
+      if (ordersRes?.data?.success) {
+        const list: any[] = Array.isArray(ordersRes.data.data)
+          ? ordersRes.data.data
+          : []
+        setPendingOrders(
+          list.filter((o) =>
+            PENDING_STATUSES.has(String(o?.orderStatus || ''))
+          ).length
+        )
+      }
+
+      // Chat: sum unread for seller
+      if (chatsRes?.data?.success) {
+        const convos: any[] = Array.isArray(chatsRes.data.data)
+          ? chatsRes.data.data
+          : []
+        const total = convos.reduce((sum, c) => {
+          const n =
+            typeof c.unreadCount === 'number'
+              ? c.unreadCount
+              : typeof c.unreadBySeller === 'number'
+                ? c.unreadBySeller
+                : 0
+          return sum + (n > 0 ? n : 0)
+        }, 0)
+        setUnreadChats(total)
+      }
+    } catch {
+      // keep last counts
+    }
+  }, [getToken])
+
+  useEffect(() => {
+    if (!isLoaded) return
+    const role = user?.publicMetadata?.role
+    if (!user || (role !== 'seller' && role !== 'admin')) return
+
+    refreshBadges()
+    const id = setInterval(refreshBadges, 25000)
+    return () => clearInterval(id)
+  }, [isLoaded, user, refreshBadges])
+
+  useEffect(() => {
+    const onChange = (state: AppStateStatus) => {
+      if (state === 'active') refreshBadges()
+    }
+    const sub = AppState.addEventListener('change', onChange)
+    return () => sub.remove()
+  }, [refreshBadges])
 
   useEffect(() => {
     if (!isLoaded) return
@@ -51,15 +166,8 @@ export default function SellerLayout() {
 
   if (!isLoaded) {
     return (
-      <View
-        style={{
-          flex: 1,
-          justifyContent: 'center',
-          alignItems: 'center',
-          backgroundColor: '#060D18',
-        }}
-      >
-        <ActivityIndicator size="large" color="#9EC5FF" />
+      <View style={styles.boot}>
+        <ActivityIndicator size="large" color={GREEN} />
       </View>
     )
   }
@@ -73,13 +181,13 @@ export default function SellerLayout() {
     <Tabs
       screenOptions={{
         headerStyle: {
-          backgroundColor: '#060D18',
+          backgroundColor: BG,
           elevation: 0,
           shadowOpacity: 0,
           borderBottomWidth: 1,
-          borderBottomColor: '#152536',
+          borderBottomColor: LINE,
         },
-        headerTintColor: '#E8F1FF',
+        headerTintColor: TEXT,
         headerTitleStyle: {
           fontWeight: '700',
           fontSize: 17,
@@ -87,15 +195,15 @@ export default function SellerLayout() {
         },
         headerShadowVisible: false,
         tabBarStyle: {
-          backgroundColor: '#080F1A',
-          borderTopColor: '#152536',
+          backgroundColor: SURFACE,
+          borderTopColor: LINE,
           borderTopWidth: 1,
           height: tabHeight,
           paddingBottom: Math.max(insets.bottom, 8),
           paddingTop: 8,
         },
-        tabBarActiveTintColor: '#B8D4FF',
-        tabBarInactiveTintColor: '#5A6F88',
+        tabBarActiveTintColor: ACTIVE,
+        tabBarInactiveTintColor: MUTED,
         tabBarLabelStyle: {
           fontSize: 10,
           fontWeight: '600',
@@ -105,72 +213,79 @@ export default function SellerLayout() {
         headerRight: () => (
           <TouchableOpacity
             onPress={() => router.replace('/(tabs)')}
-            style={{
-              marginRight: 16,
-              flexDirection: 'row',
-              alignItems: 'center',
-              backgroundColor: '#121C2B',
-              borderWidth: 1,
-              borderColor: '#1E334A',
-              paddingHorizontal: 12,
-              paddingVertical: 6,
-              borderRadius: 999,
-            }}
+            style={styles.exitBtn}
             activeOpacity={0.8}
           >
-            <Ionicons name="exit-outline" size={16} color="#9EC5FF" />
-            <Text
-              style={{
-                marginLeft: 6,
-                color: '#9EC5FF',
-                fontWeight: '600',
-                fontSize: 12,
-              }}
-            >
-              Exit
-            </Text>
+            <Ionicons name="exit-outline" size={16} color={BLUE} />
+            <Text style={styles.exitText}>Exit</Text>
           </TouchableOpacity>
         ),
       }}
     >
-      {/* ===== VISIBLE TABS ===== */}
       <Tabs.Screen
-        name="index"
-        options={{
-          title: 'Dashboard',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="grid-outline" size={size - 1} color={color} />
-          ),
-        }}
-      />
+  name="index"
+  options={{
+    title: 'Dashboard',
+    headerShown: false, // ← add this
+    tabBarIcon: ({ color, size }) => (
+      <Ionicons name="grid-outline" size={size - 1} color={color} />
+    ),
+  }}
+/>
       <Tabs.Screen
         name="products"
         options={{
           title: 'Products',
+          headerShown: false,
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="cube-outline" size={size - 1} color={color} />
           ),
         }}
       />
+
+      {/* listeners is a SIBLING of options — not inside options */}
       <Tabs.Screen
         name="orders"
         options={{
           title: 'Orders',
+          headerShown: false,
           tabBarIcon: ({ color, size }) => (
-            <Ionicons name="receipt-outline" size={size - 1} color={color} />
+            <TabIconWithBadge
+              name="receipt-outline"
+              color={color}
+              size={size}
+              count={pendingOrders}
+            />
           ),
         }}
+        listeners={{
+          focus: () => {
+            refreshBadges()
+          },
+        }}
       />
+
       <Tabs.Screen
-  name="chat"
-  options={{
-    title: 'Chat',
-    headerShown: false,
-    tabBarIcon: ({ color, size }) => (
-      <Ionicons name="chatbubbles-outline" size={size - 1} color={color} />
-    ),
-  }}
-/>
+        name="chat"
+        options={{
+          title: 'Chat',
+          headerShown: false,
+          tabBarIcon: ({ color, size }) => (
+            <TabIconWithBadge
+              name="chatbubbles-outline"
+              color={color}
+              size={size}
+              count={unreadChats}
+            />
+          ),
+        }}
+        listeners={{
+          focus: () => {
+            refreshBadges()
+          },
+        }}
+      />
+
       <Tabs.Screen
         name="subscription"
         options={{
@@ -187,13 +302,9 @@ export default function SellerLayout() {
           href: null,
           title: 'Plazore AI',
           headerShown: false,
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="sparkles-outline" size={size - 1} color={color} />
-          ),
         }}
       />
 
-      {/* ===== HIDDEN (href: null) ===== */}
       <Tabs.Screen
         name="store"
         options={{
@@ -206,6 +317,7 @@ export default function SellerLayout() {
         name="settings"
         options={{
           href: null,
+          headerShown: false,
           title: 'Seller Settings',
           headerLeft: () => <HeaderBack />,
         }}
@@ -273,7 +385,69 @@ export default function SellerLayout() {
           title: 'Order Details',
           headerLeft: () => <HeaderBack />,
         }}
+        listeners={{
+          blur: () => {
+            refreshBadges()
+          },
+        }}
       />
     </Tabs>
   )
 }
+
+const styles = StyleSheet.create({
+  boot: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: BG,
+  },
+  exitBtn: {
+    marginRight: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: SURFACE,
+    borderWidth: 1,
+    borderColor: LINE,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+  },
+  exitText: {
+    marginLeft: 6,
+    color: BLUE,
+    fontWeight: '600',
+    fontSize: 12,
+  },
+  iconWrap: {
+    width: 28,
+    height: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  badge: {
+    position: 'absolute',
+    top: -3,
+    right: -8,
+    minWidth: 15,
+    height: 15,
+    paddingHorizontal: 3,
+    borderRadius: 8,
+    backgroundColor: GREEN,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1.5,
+    borderColor: SURFACE,
+  },
+  badgeWide: {
+    right: -12,
+    minWidth: 20,
+    paddingHorizontal: 4,
+  },
+  badgeText: {
+    color: '#041412',
+    fontSize: 9,
+    fontWeight: '800',
+    lineHeight: 11,
+  },
+})
