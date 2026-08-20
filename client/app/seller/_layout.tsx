@@ -1,4 +1,5 @@
-import { Tabs, useRouter } from 'expo-router'
+import { Tabs, useRouter, usePathname } from 'expo-router'
+import { useNavigation } from '@react-navigation/native'
 import { useCallback, useEffect, useState } from 'react'
 import {
   View,
@@ -21,17 +22,74 @@ const TEXT = '#F5F7FA'
 const MUTED = '#5A6F88'
 const ACTIVE = '#B8F0D0'
 const GREEN = '#00E575'
-const BLUE = '#3B82F6'
 
 const PENDING_STATUSES = new Set(['Preparing'])
 
+/**
+ * Prefer real history. If Tabs wiped it, go to the parent screen for this route.
+ */
 function HeaderBack() {
   const router = useRouter()
+  const navigation = useNavigation()
+  const pathname = usePathname() || ''
+
+  const fallbackParent = () => {
+    // Payout / shipping (opened from settings)
+    if (pathname.includes('/store/payout')) {
+      router.push('/seller/settings' as any)
+      return
+    }
+    // Settings sub-pages
+    if (
+      pathname.includes('/settings/region') ||
+      pathname.includes('/settings/notifications') ||
+      pathname.includes('/settings/about')
+    ) {
+      router.push('/seller/settings' as any)
+      return
+    }
+    // Store setup (usually from settings)
+    if (pathname.includes('/store')) {
+      router.push('/seller/settings' as any)
+      return
+    }
+    // Product nested screens
+    if (
+      pathname.includes('/products/add') ||
+      pathname.includes('/products/edit') ||
+      pathname.includes('/products/performance') ||
+      /\/products\/[^/]+$/.test(pathname)
+    ) {
+      router.push('/seller/products' as any)
+      return
+    }
+    // Order detail
+    if (pathname.includes('/orders/')) {
+      router.push('/seller/orders' as any)
+      return
+    }
+    // Last resort
+    router.push('/seller' as any)
+  }
+
   return (
     <TouchableOpacity
       onPress={() => {
-        if (router.canGoBack()) router.back()
-        else router.replace('/seller' as any)
+        if (navigation.canGoBack()) {
+          navigation.goBack()
+          return
+        }
+        if (router.canGoBack()) {
+          router.back()
+          return
+        }
+        const parent = navigation.getParent?.()
+        if (parent && typeof parent.canGoBack === 'function' && parent.canGoBack()) {
+          parent.goBack()
+          return
+        }
+        // Tabs has no stack history → parent by route
+        fallbackParent()
       }}
       style={{ marginLeft: 8, padding: 6 }}
       hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
@@ -42,21 +100,6 @@ function HeaderBack() {
   )
 }
 
-function HeaderBackToSettings() {
-  const router = useRouter()
-  return (
-    <TouchableOpacity
-      onPress={() => router.push('/seller/settings' as any)}
-      style={{ marginLeft: 8, padding: 6 }}
-      hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-      activeOpacity={0.8}
-    >
-      <Ionicons name="arrow-back" size={24} color={TEXT} />
-    </TouchableOpacity>
-  )
-}
-
-/** Single clean badge on the icon — no tabBarBadge (avoids double badge) */
 function TabIconWithBadge({
   name,
   color,
@@ -105,7 +148,6 @@ export default function SellerLayout() {
         api.get('/chat/conversations', { headers }).catch(() => null),
       ])
 
-      // Orders: Preparing = needs attention
       if (ordersRes?.data?.success) {
         const list: any[] = Array.isArray(ordersRes.data.data)
           ? ordersRes.data.data
@@ -117,7 +159,6 @@ export default function SellerLayout() {
         )
       }
 
-      // Chat: sum unread for seller
       if (chatsRes?.data?.success) {
         const convos: any[] = Array.isArray(chatsRes.data.data)
           ? chatsRes.data.data
@@ -210,28 +251,19 @@ export default function SellerLayout() {
           letterSpacing: 0.2,
           marginTop: 2,
         },
-        headerRight: () => (
-          <TouchableOpacity
-            onPress={() => router.replace('/(tabs)')}
-            style={styles.exitBtn}
-            activeOpacity={0.8}
-          >
-            <Ionicons name="exit-outline" size={16} color={BLUE} />
-            <Text style={styles.exitText}>Exit</Text>
-          </TouchableOpacity>
-        ),
+        headerRight: undefined,
       }}
     >
       <Tabs.Screen
-  name="index"
-  options={{
-    title: 'Dashboard',
-    headerShown: false, // ← add this
-    tabBarIcon: ({ color, size }) => (
-      <Ionicons name="grid-outline" size={size - 1} color={color} />
-    ),
-  }}
-/>
+        name="index"
+        options={{
+          title: 'Dashboard',
+          headerShown: false,
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="grid-outline" size={size - 1} color={color} />
+          ),
+        }}
+      />
       <Tabs.Screen
         name="products"
         options={{
@@ -242,8 +274,6 @@ export default function SellerLayout() {
           ),
         }}
       />
-
-      {/* listeners is a SIBLING of options — not inside options */}
       <Tabs.Screen
         name="orders"
         options={{
@@ -264,7 +294,6 @@ export default function SellerLayout() {
           },
         }}
       />
-
       <Tabs.Screen
         name="chat"
         options={{
@@ -285,7 +314,6 @@ export default function SellerLayout() {
           },
         }}
       />
-
       <Tabs.Screen
         name="subscription"
         options={{
@@ -310,7 +338,7 @@ export default function SellerLayout() {
         options={{
           href: null,
           title: 'My Store',
-          headerLeft: () => <HeaderBackToSettings />,
+          headerLeft: () => <HeaderBack />,
         }}
       />
       <Tabs.Screen
@@ -327,7 +355,7 @@ export default function SellerLayout() {
         options={{
           href: null,
           title: 'Marketplace Region',
-          headerLeft: () => <HeaderBackToSettings />,
+          headerLeft: () => <HeaderBack />,
         }}
       />
       <Tabs.Screen
@@ -335,7 +363,7 @@ export default function SellerLayout() {
         options={{
           href: null,
           title: 'Notifications',
-          headerLeft: () => <HeaderBackToSettings />,
+          headerLeft: () => <HeaderBack />,
         }}
       />
       <Tabs.Screen
@@ -343,7 +371,7 @@ export default function SellerLayout() {
         options={{
           href: null,
           title: 'About',
-          headerLeft: () => <HeaderBackToSettings />,
+          headerLeft: () => <HeaderBack />,
         }}
       />
       <Tabs.Screen
@@ -379,6 +407,14 @@ export default function SellerLayout() {
         }}
       />
       <Tabs.Screen
+        name="store/payout"
+        options={{
+          href: null,
+          title: 'Payout',
+          headerLeft: () => <HeaderBack />,
+        }}
+      />
+      <Tabs.Screen
         name="orders/[id]"
         options={{
           href: null,
@@ -401,23 +437,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: BG,
-  },
-  exitBtn: {
-    marginRight: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: SURFACE,
-    borderWidth: 1,
-    borderColor: LINE,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 999,
-  },
-  exitText: {
-    marginLeft: 6,
-    color: BLUE,
-    fontWeight: '600',
-    fontSize: 12,
   },
   iconWrap: {
     width: 28,

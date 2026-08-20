@@ -1,10 +1,9 @@
 /**
  * Wishlist / Saved Products — Plazore dark
- * Stacked cards match Plazore AI ProductImageStack exactly
- * 2 per row · no cart button · currency via formatProduct
+ * Stacked cards · 2 per row · no cart · top overlay sort
+ * No floating nav on this screen
  */
 
-import PlazoreFloatingNav from '@/components/PlazoreFloatingNav'
 import PlazoreNavigationHub from '@/components/PlazoreNavigationHub'
 import { Product } from '@/constants/types'
 import { useMarketplace } from '@/context/MarketplaceContext'
@@ -12,11 +11,11 @@ import { useWishlist } from '@/context/WishlistContext'
 import { Ionicons } from '@expo/vector-icons'
 import { Image } from 'expo-image'
 import { Link, useFocusEffect, useRouter } from 'expo-router'
-import React, { useCallback, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
+  Animated,
   Dimensions,
-  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -34,6 +33,8 @@ const DIM = '#737A86'
 const LINE = '#252A33'
 const ACCENT = '#10B981'
 const PINK = '#F472B6'
+const GREEN = '#00E575'
+const BLUE = '#3B82F6'
 
 const W = Dimensions.get('window').width
 const PAD = 16
@@ -57,7 +58,174 @@ const SORT_OPTIONS: { key: SortKey; label: string; hint: string }[] = [
   { key: 'price_high', label: 'Price · High to low', hint: 'Highest price first' },
 ]
 
-/* ── Exact Plazore AI ProductImageStack math ── */
+type OverlayAction = {
+  label: string
+  onPress: () => void
+  destructive?: boolean
+  primary?: boolean
+  selected?: boolean
+}
+
+type OverlayState = {
+  title: string
+  message?: string
+  tone?: 'info' | 'success' | 'danger'
+  actions?: OverlayAction[]
+  durationMs?: number
+} | null
+
+function TopOverlay({
+  state,
+  onDismiss,
+}: {
+  state: OverlayState
+  onDismiss: () => void
+}) {
+  const insets = useSafeAreaInsets()
+  const translateY = useRef(new Animated.Value(-140)).current
+  const opacity = useRef(new Animated.Value(0)).current
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    if (timer.current) clearTimeout(timer.current)
+    if (!state) {
+      Animated.parallel([
+        Animated.timing(translateY, {
+          toValue: -140,
+          duration: 220,
+          useNativeDriver: true,
+        }),
+        Animated.timing(opacity, {
+          toValue: 0,
+          duration: 180,
+          useNativeDriver: true,
+        }),
+      ]).start()
+      return
+    }
+
+    Animated.parallel([
+      Animated.spring(translateY, {
+        toValue: 0,
+        friction: 9,
+        tension: 80,
+        useNativeDriver: true,
+      }),
+      Animated.timing(opacity, {
+        toValue: 1,
+        duration: 200,
+        useNativeDriver: true,
+      }),
+    ]).start()
+
+    if (!state.actions?.length) {
+      timer.current = setTimeout(
+        () => onDismiss(),
+        state.durationMs ?? 3800
+      )
+    }
+
+    return () => {
+      if (timer.current) clearTimeout(timer.current)
+    }
+  }, [state])
+
+  if (!state) return null
+
+  const accent =
+    state.tone === 'danger'
+      ? '#EF4444'
+      : state.tone === 'success'
+        ? GREEN
+        : BLUE
+
+  return (
+    <Animated.View
+      pointerEvents="box-none"
+      style={[
+        styles.overlayWrap,
+        {
+          paddingTop: Math.max(insets.top, 10) + 6,
+          opacity,
+          transform: [{ translateY }],
+        },
+      ]}
+    >
+      <View style={styles.overlayCard}>
+        <View style={[styles.overlayAccent, { backgroundColor: accent }]} />
+        <View style={styles.overlayBody}>
+          <View style={styles.overlayTop}>
+            <View
+              style={[
+                styles.overlayIcon,
+                { backgroundColor: `${accent}22` },
+              ]}
+            >
+              <Ionicons
+                name={
+                  state.tone === 'danger'
+                    ? 'warning-outline'
+                    : state.tone === 'success'
+                      ? 'checkmark-circle-outline'
+                      : 'swap-vertical-outline'
+                }
+                size={18}
+                color={accent}
+              />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.overlayTitle}>{state.title}</Text>
+              {!!state.message && (
+                <Text style={styles.overlayMsg}>{state.message}</Text>
+              )}
+            </View>
+            <Pressable onPress={onDismiss} hitSlop={12}>
+              <Ionicons name="close" size={18} color={DIM} />
+            </Pressable>
+          </View>
+
+          {!!state.actions?.length && (
+            <View style={styles.overlayActions}>
+              {state.actions.map((a, i) => (
+                <Pressable
+                  key={`${a.label}-${i}`}
+                  onPress={() => {
+                    a.onPress()
+                    onDismiss()
+                  }}
+                  style={[
+                    styles.overlayActionRow,
+                    a.selected && styles.overlayActionSelected,
+                  ]}
+                >
+                  <View style={{ flex: 1 }}>
+                    <Text
+                      style={[
+                        styles.overlayActionLabel,
+                        a.destructive && { color: '#EF4444' },
+                        a.selected && { color: ACCENT },
+                      ]}
+                    >
+                      {a.label}
+                    </Text>
+                  </View>
+                  {a.selected ? (
+                    <View style={styles.check}>
+                      <Ionicons name="checkmark" size={13} color={BG} />
+                    </View>
+                  ) : a.primary ? (
+                    <Ionicons name="chevron-forward" size={16} color={MUTED} />
+                  ) : null}
+                </Pressable>
+              ))}
+            </View>
+          )}
+        </View>
+      </View>
+    </Animated.View>
+  )
+}
+
 function SavedStackCard({ product }: { product: Product }) {
   const { formatProduct } = useMarketplace()
 
@@ -174,7 +342,7 @@ export default function Favorites() {
 
   const [hubOpen, setHubOpen] = useState(false)
   const [sortKey, setSortKey] = useState<SortKey>('newest')
-  const [sortOpen, setSortOpen] = useState(false)
+  const [overlay, setOverlay] = useState<OverlayState>(null)
 
   useFocusEffect(
     useCallback(() => {
@@ -215,8 +383,33 @@ export default function Favorites() {
 
   const count = wishlist?.length ?? 0
 
+  const openSortOverlay = () => {
+    setOverlay({
+      title: 'Sort your picks',
+      message: 'Organize your saved products',
+      tone: 'info',
+      actions: SORT_OPTIONS.map((opt) => ({
+        label: opt.label,
+        selected: opt.key === sortKey,
+        onPress: () => {
+          setSortKey(opt.key)
+          setTimeout(() => {
+            setOverlay({
+              title: opt.label,
+              message: opt.hint,
+              tone: 'success',
+              durationMs: 2200,
+            })
+          }, 80)
+        },
+      })),
+    })
+  }
+
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
+      <TopOverlay state={overlay} onDismiss={() => setOverlay(null)} />
+
       <View style={styles.header}>
         <Text style={styles.title}>Saved Products</Text>
 
@@ -229,7 +422,7 @@ export default function Favorites() {
 
           {count > 0 && (
             <Pressable
-              onPress={() => setSortOpen(true)}
+              onPress={openSortOverlay}
               style={styles.sortChip}
               hitSlop={8}
             >
@@ -289,61 +482,6 @@ export default function Favorites() {
         visible={hubOpen}
         onClose={() => setHubOpen(false)}
       />
-
-      <Modal
-        visible={sortOpen}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setSortOpen(false)}
-      >
-        <Pressable
-          style={styles.sheetScrim}
-          onPress={() => setSortOpen(false)}
-        />
-        <View
-          style={[
-            styles.sheet,
-            { paddingBottom: Math.max(insets.bottom, 20) },
-          ]}
-        >
-          <View style={styles.sheetHandle} />
-          <Text style={styles.sheetTitle}>Sort your picks</Text>
-          <Text style={styles.sheetSub}>Organize your saved products</Text>
-
-          {SORT_OPTIONS.map((opt) => {
-            const active = opt.key === sortKey
-            return (
-              <Pressable
-                key={opt.key}
-                onPress={() => {
-                  setSortKey(opt.key)
-                  setSortOpen(false)
-                }}
-                style={[styles.sortRow, active && styles.sortRowActive]}
-              >
-                <View style={{ flex: 1 }}>
-                  <Text
-                    style={[
-                      styles.sortLabel,
-                      active && styles.sortLabelActive,
-                    ]}
-                  >
-                    {opt.label}
-                  </Text>
-                  <Text style={styles.sortHint}>{opt.hint}</Text>
-                </View>
-                {active ? (
-                  <View style={styles.check}>
-                    <Ionicons name="checkmark" size={14} color={BG} />
-                  </View>
-                ) : (
-                  <View style={styles.checkEmpty} />
-                )}
-              </Pressable>
-            )
-          })}
-        </View>
-      </Modal>
     </View>
   )
 }
@@ -352,6 +490,88 @@ const styles = StyleSheet.create({
   root: {
     flex: 1,
     backgroundColor: BG,
+  },
+
+  overlayWrap: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 200,
+    elevation: 200,
+    paddingHorizontal: 14,
+  },
+  overlayCard: {
+    flexDirection: 'row',
+    backgroundColor: SURFACE,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.1)',
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.35,
+    shadowRadius: 18,
+    elevation: 12,
+  },
+  overlayAccent: {
+    width: 3,
+  },
+  overlayBody: {
+    flex: 1,
+    padding: 12,
+  },
+  overlayTop: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+  },
+  overlayIcon: {
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  overlayTitle: {
+    color: TEXT,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  overlayMsg: {
+    color: MUTED,
+    fontSize: 12.5,
+    lineHeight: 18,
+    marginTop: 3,
+  },
+  overlayActions: {
+    marginTop: 12,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: LINE,
+    paddingTop: 4,
+  },
+  overlayActionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 11,
+    paddingHorizontal: 4,
+    gap: 10,
+  },
+  overlayActionSelected: {
+    backgroundColor: 'rgba(16,185,129,0.08)',
+    marginHorizontal: -4,
+    paddingHorizontal: 8,
+  },
+  overlayActionLabel: {
+    color: TEXT,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  check: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: ACCENT,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 
   header: {
@@ -412,7 +632,7 @@ const styles = StyleSheet.create({
 
   scrollContent: {
     paddingHorizontal: PAD,
-    paddingBottom: 140,
+    paddingBottom: 48,
     paddingTop: 12,
   },
 
@@ -441,7 +661,6 @@ const styles = StyleSheet.create({
     rowGap: 28,
   },
 
-  /* ── Stack mirrors Plazore AI ProductImageStack ── */
   card: {
     width: CARD_W,
     alignItems: 'center',
@@ -525,7 +744,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 36,
-    paddingBottom: 80,
+    paddingBottom: 40,
   },
   emptyIconWrap: {
     width: 64,
@@ -564,78 +783,5 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
     letterSpacing: 0.2,
-  },
-
-  sheetScrim: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.65)',
-  },
-  sheet: {
-    backgroundColor: SURFACE,
-    paddingHorizontal: 20,
-    paddingTop: 10,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: LINE,
-  },
-  sheetHandle: {
-    alignSelf: 'center',
-    width: 36,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: LINE,
-    marginBottom: 16,
-  },
-  sheetTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: TEXT,
-    letterSpacing: -0.3,
-  },
-  sheetSub: {
-    fontSize: 13,
-    color: MUTED,
-    marginTop: 4,
-    marginBottom: 18,
-  },
-  sortRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 14,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: LINE,
-    gap: 12,
-  },
-  sortRowActive: {
-    backgroundColor: SURFACE_2,
-    marginHorizontal: -8,
-    paddingHorizontal: 8,
-  },
-  sortLabel: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: TEXT,
-  },
-  sortLabelActive: {
-    color: ACCENT,
-  },
-  sortHint: {
-    fontSize: 12,
-    color: DIM,
-    marginTop: 2,
-  },
-  check: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: ACCENT,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  checkEmpty: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    borderWidth: 1.5,
-    borderColor: LINE,
   },
 })

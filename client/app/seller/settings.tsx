@@ -166,6 +166,16 @@ export default function SellerSettings() {
             />
           </View>
 
+           <Text style={styles.sectionLabel}>Store</Text>
+          <View style={styles.group}>
+            <SettingsRow
+  icon="card-outline"
+  title="Payout & shipping"
+  subtitle="Bank account and shipping defaults — protected"
+  onPress={() => router.push('/seller/store/payout' as any)}
+/>
+</View>
+
           <Text style={styles.sectionLabel}>About</Text>
           <View style={styles.group}>
             <SettingsRow

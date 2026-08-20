@@ -9,6 +9,7 @@ import {
   getMyStore,
   updateMyStore,
   getPublicStorefront,
+  verifyPayoutAccess,
 } from "../controllers/sellerController.js";
 import {
   createProduct,
@@ -31,6 +32,7 @@ SellerRouter.get(
 );
 
 // ====================== MY STORE ======================
+// ====================== MY STORE ======================
 SellerRouter.get("/store", protect, authorize("seller", "admin"), getMyStore);
 
 SellerRouter.put(
@@ -42,6 +44,14 @@ SellerRouter.put(
     { name: "storeBanner", maxCount: 1 },
   ]),
   updateMyStore
+);
+
+// MUST be before GET /store/:id so "verify-payout" is not treated as an id
+SellerRouter.post(
+  "/store/verify-payout",
+  protect,
+  authorize("seller", "admin"),
+  verifyPayoutAccess
 );
 
 // ====================== PUBLIC STOREFRONT ======================

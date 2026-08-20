@@ -532,7 +532,7 @@ export default function PublicStorefront() {
                 </View>
 
                 <Text style={styles.openLabel}>
-                  Storefront · Explore the collection
+                  Explore this store
                 </Text>
 
                 {!!locationLabel && (
@@ -630,7 +630,7 @@ export default function PublicStorefront() {
           <Animated.View style={{ opacity: content, marginTop: 36 }}>
             <View style={{ paddingHorizontal: H_PAD, marginBottom: 16 }}>
               <Text style={styles.sectionEyebrow}>Featured</Text>
-              <Text style={styles.sectionTitle}>Featured products</Text>
+              <Text style={styles.sectionTitle}>A closer look</Text>
             </View>
 
             <ScrollView
@@ -736,12 +736,12 @@ export default function PublicStorefront() {
             marginTop: 40,
           }}
         >
-          <Text style={styles.sectionEyebrow}>Collection</Text>
+          <Text style={styles.sectionEyebrow}>THE STORE</Text>
           <Text style={styles.sectionTitle}>Explore the collection</Text>
 
           <View style={styles.dividerRow}>
             <View style={styles.dividerLine} />
-            <Text style={styles.dividerText}>All products</Text>
+            <Text style={styles.dividerText}>ALL PRODUCTS</Text>
             <View style={styles.dividerLine} />
           </View>
 

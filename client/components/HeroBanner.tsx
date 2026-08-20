@@ -1,35 +1,11 @@
 /**
- * PlazoreHeroBanner — "Calm Digital Signage" Edition
- *
- * What was fixed / changed:
- * ─────────────────────────────────────────────────────────────────────────
- * FLICKER FIXES:
- *  1. Never set opacity to exactly 0 with .setValue() before crossfade.
- *     Target starts at 0.01 (not 0) so React Native never renders a black gap.
- *  2. copyOpacity is never .setValue() to 0 — always animated smoothly.
- *     The old code did copyOpacity.setValue(0) which caused an instant flash.
- *  3. Image.prefetch called on mount to warm the cache so first paint has
- *     no flicker on image load.
- *  4. The outgoing slide opacity never drops below 0.01 during the overlap
- *     window — guarantees both layers are always partially visible.
- *  5. A brief initial delay (300ms) on first mount lets the layout settle
- *     before auto-rotation begins, preventing first-paint flicker.
- *
- * CINEMATIC CALM FEEL:
- *  1. Crossfade duration extended to 3200ms — slow, breathing transitions
- *     like luxury digital signage in a high-end mall.
- *  2. Dwell time increased to 11000ms — each slide gets its moment.
- *  3. Subtle Ken Burns effect on active image (slow 1.05× zoom drift).
- *  4. Text enters with a gentle upward float + fade (not instant).
- *  5. Gradient overlay softened — less harsh, more atmospheric.
- *  6. CTA pill uses frosted glass instead of flat dark.
- *  7. Progress indicators (dots) are thin, understated, elegant.
- *  8. No aggressive arrows or bold UI chrome — calm and minimal.
+ * PlazoreHeroBanner — edge-to-edge under a visible system status bar
+ * Status bar stays light-content + translucent
+ * Soft top veil so clock / battery stay readable over any slide
  */
 
 import { HERO_SLIDES, HeroSlide, resolveHeroSlides } from '@/constants/heroCampaigns'
 import { Ionicons } from '@expo/vector-icons'
-import { Image as ExpoImage } from 'expo-image'
 import { LinearGradient } from 'expo-linear-gradient'
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
@@ -48,18 +24,15 @@ import {
 } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
-// ─── Timing (calm, breathing pace) ────────────────────────────────────────
-const HOLD_MS       = 11000   // each slide dwells 11s — unhurried
-const CROSSFADE_MS  = 3200    // 3.2s crossfade — cinematic dissolve
-const SWIPE_THRESH  = 52
-const TEXT_ENTER_MS = 1200    // text floats up over 1.2s
-const TEXT_EXIT_MS  = 600     // text exits over 0.6s
+const HOLD_MS = 11000
+const CROSSFADE_MS = 3200
+const SWIPE_THRESH = 52
+const TEXT_ENTER_MS = 1200
+const TEXT_EXIT_MS = 600
 
-// Cinematic easing — slow in, slow out, natural breathing
-const EASE_CROSSFADE = Easing.bezier(0.4, 0.0, 0.2, 1.0)   // Material ease-out
-const EASE_TEXT_ENTER = Easing.bezier(0.25, 0.1, 0.25, 1.0) // gentle ease-out
+const EASE_CROSSFADE = Easing.bezier(0.4, 0.0, 0.2, 1.0)
+const EASE_TEXT_ENTER = Easing.bezier(0.25, 0.1, 0.25, 1.0)
 
-// ─── Types ────────────────────────────────────────────────────────────────
 type Props = {
   slides?: HeroSlide[]
   topChrome?: number
@@ -67,7 +40,6 @@ type Props = {
   onScrollToShowroom?: () => void
 }
 
-// ─── Pre-fetch hero images to prevent first-paint flicker ────────────────
 function prefetchHeroImages(slides: HeroSlide[]) {
   slides.forEach((s) => {
     const src = s.media.source as { uri?: string }
@@ -77,7 +49,6 @@ function prefetchHeroImages(slides: HeroSlide[]) {
   })
 }
 
-// ─── Ken Burns animated image ─────────────────────────────────────────────
 function KenBurnsImage({
   slide,
   width,
@@ -96,8 +67,6 @@ function KenBurnsImage({
       scale.setValue(1.0)
       return
     }
-
-    // Very slow zoom drift — 1.0 → 1.04 over the dwell time
     Animated.timing(scale, {
       toValue: 1.04,
       duration: HOLD_MS,
@@ -107,7 +76,7 @@ function KenBurnsImage({
   }, [isActive])
 
   return (
-    <View style={[styles.mediaClip, { width, height, overflow: 'hidden' }]}>
+    <View style={[styles.mediaClip, { width, height }]}>
       <Animated.View
         style={{
           position: 'absolute',
@@ -129,32 +98,17 @@ function KenBurnsImage({
   )
 }
 
-// ─── Progress Dots (thin, elegant) ────────────────────────────────────────
-function ProgressDots({
-  count,
-  current,
-}: {
-  count: number
-  current: number
-}) {
+function ProgressDots({ count, current }: { count: number; current: number }) {
   if (count < 2) return null
-
   return (
     <View style={styles.dotsWrap}>
       {Array.from({ length: count }, (_, i) => (
-        <View
-          key={i}
-          style={[
-            styles.dot,
-            i === current && styles.dotActive,
-          ]}
-        />
+        <View key={i} style={[styles.dot, i === current && styles.dotActive]} />
       ))}
     </View>
   )
 }
 
-// ─── Main Component ───────────────────────────────────────────────────────
 export default function HeroBanner({
   slides: slidesProp,
   topChrome = 0,
@@ -165,23 +119,27 @@ export default function HeroBanner({
   const window = useWindowDimensions()
 
   const screen = Dimensions.get('screen')
+  // Full-bleed height — image draws under the system status bar
   const heroWidth = Math.max(screen.width, window.width)
   const heroHeight = Math.max(screen.height, window.height) - topChrome
 
+  // Safe top for *content* only (not for status bar — status bar is system UI)
   const statusTop = Math.max(
     insets.top,
-    Platform.OS === 'android' ? StatusBar.currentHeight ?? 24 : 12,
-    12
+    Platform.OS === 'android' ? StatusBar.currentHeight ?? 24 : 20,
+    20
   )
 
-  const bottomPad = Math.max(insets.bottom, Platform.OS === 'android' ? 20 : 12) + 8
+  const bottomPad =
+    Math.max(insets.bottom, Platform.OS === 'android' ? 20 : 12) + 8
 
-  // Edge-to-edge status bar
+  // Keep system status bar visible + light icons on dark hero
   useEffect(() => {
     StatusBar.setBarStyle('light-content', true)
     if (Platform.OS === 'android') {
       StatusBar.setTranslucent(true)
       StatusBar.setBackgroundColor('transparent', true)
+      StatusBar.setHidden(false)
     }
   }, [])
 
@@ -190,36 +148,29 @@ export default function HeroBanner({
     [slidesProp]
   )
 
-  // ── Prefetch images on mount ──────────────────────────────────────────
   useEffect(() => {
     prefetchHeroImages(slides)
-  }, [])
+  }, [slides])
 
-  // ── Opacity refs for crossfade ────────────────────────────────────────
   const opacities = useRef(
     slides.map((_, i) => new Animated.Value(i === 0 ? 1 : 0))
   ).current
 
-  // ── Text animation values ────────────────────────────────────────────
-  // We use a single "textState" ref that tracks which slide the text belongs to
   const textState = useRef({
     slideIndex: 0,
-    opacity: new Animated.Value(0),    // starts at 0, fades in
-    translateY: new Animated.Value(12), // starts slightly below
+    opacity: new Animated.Value(0),
+    translateY: new Animated.Value(12),
   }).current
 
-  // ── State ─────────────────────────────────────────────────────────────
   const [current, setCurrent] = useState(0)
   const currentRef = useRef(0)
   const busy = useRef(false)
   const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const firstMountDone = useRef(false)
 
   useEffect(() => {
     currentRef.current = current
   }, [current])
 
-  // ── Clear / Schedule auto-advance ────────────────────────────────────
   const clearHold = useCallback(() => {
     if (holdTimer.current) {
       clearTimeout(holdTimer.current)
@@ -233,9 +184,8 @@ export default function HeroBanner({
     holdTimer.current = setTimeout(() => {
       goTo(currentRef.current + 1)
     }, HOLD_MS)
-  }, [slides.length])
+  }, [slides.length, clearHold])
 
-  // ── The GO TO function — flicker-free crossfade ──────────────────────
   const goTo = useCallback(
     (raw: number) => {
       if (busy.current || slides.length < 2) return
@@ -246,7 +196,6 @@ export default function HeroBanner({
       busy.current = true
       clearHold()
 
-      // ── STEP 1: Animate text out (float down + fade) ─────────────────
       const textOut = Animated.parallel([
         Animated.timing(textState.opacity, {
           toValue: 0,
@@ -262,12 +211,9 @@ export default function HeroBanner({
         }),
       ])
 
-      // ── STEP 2: Crossfade images ─────────────────────────────────────
-      // Key fix: target starts at 0.01 (not 0) to avoid black gap
-      // The "from" slide fades to 0.01 (not 0) to maintain overlap
       const imageCrossfade = Animated.parallel([
         Animated.timing(opacities[from], {
-          toValue: 0.01, // keep tiny overlap — never fully invisible simultaneously
+          toValue: 0.01,
           duration: CROSSFADE_MS,
           easing: EASE_CROSSFADE,
           useNativeDriver: true,
@@ -280,10 +226,9 @@ export default function HeroBanner({
         }),
       ])
 
-      // Sequence: text exits → images crossfade (with slight overlap)
       Animated.sequence([
         textOut,
-        Animated.delay(400), // brief pause for calmness
+        Animated.delay(400),
         imageCrossfade,
       ]).start(({ finished }) => {
         if (!finished) {
@@ -291,8 +236,6 @@ export default function HeroBanner({
           return
         }
 
-        // ── STEP 3: Lock state after crossfade ─────────────────────────
-        // Hard-set all opacities — from → 0, target → 1
         slides.forEach((_, i) => {
           if (i === target) opacities[i].setValue(1)
           else opacities[i].setValue(0)
@@ -301,10 +244,9 @@ export default function HeroBanner({
         currentRef.current = target
         setCurrent(target)
 
-        // ── STEP 4: Animate text in (float up + fade) ──────────────────
         textState.slideIndex = target
-        textState.translateY.setValue(12) // reset to starting position
-        textState.opacity.setValue(0)      // reset to invisible
+        textState.translateY.setValue(12)
+        textState.opacity.setValue(0)
 
         Animated.parallel([
           Animated.timing(textState.opacity, {
@@ -325,12 +267,10 @@ export default function HeroBanner({
         })
       })
     },
-    [opacities, scheduleHold, slides, textState]
+    [opacities, scheduleHold, slides, textState, clearHold]
   )
 
-  // ── Auto-advance on mount (with initial delay) ───────────────────────
   useEffect(() => {
-    // Fade text in on first mount
     Animated.parallel([
       Animated.timing(textState.opacity, {
         toValue: 1,
@@ -346,9 +286,7 @@ export default function HeroBanner({
       }),
     ]).start()
 
-    // Start auto-advance after dwell time
     const mountTimer = setTimeout(() => {
-      firstMountDone.current = true
       scheduleHold()
     }, HOLD_MS)
 
@@ -358,7 +296,6 @@ export default function HeroBanner({
     }
   }, [])
 
-  // ── Pan gestures ─────────────────────────────────────────────────────
   const pan = useRef(
     PanResponder.create({
       onMoveShouldSetPanResponder: (_, g) =>
@@ -370,7 +307,6 @@ export default function HeroBanner({
     })
   ).current
 
-  // ── Current copy ─────────────────────────────────────────────────────
   const copy = slides[current]
   if (!copy) return null
 
@@ -378,6 +314,9 @@ export default function HeroBanner({
     if (onCtaPress) onCtaPress(copy)
     else if (onScrollToShowroom) onScrollToShowroom()
   }
+
+  // Title bar occupies ~ statusTop + 70 — keep headline below that
+  const titleBarReserve = statusTop + 72
 
   return (
     <View
@@ -389,7 +328,14 @@ export default function HeroBanner({
       }}
       {...pan.panHandlers}
     >
-      {/* ── Image layers (crossfade) ─────────────────────────────────── */}
+      {/* Always re-assert status bar on this screen */}
+      <StatusBar
+        barStyle="light-content"
+        translucent
+        backgroundColor="transparent"
+        hidden={false}
+      />
+
       {slides.map((slide, i) => (
         <Animated.View
           key={slide.id}
@@ -412,25 +358,44 @@ export default function HeroBanner({
         </Animated.View>
       ))}
 
-      {/* ── Atmospheric gradient overlay (softer than original) ──────── */}
+      {/* Soft veil under status bar — keeps system icons readable */}
       <LinearGradient
         pointerEvents="none"
         colors={[
-          'rgba(11,11,15,0.08)',   // very light at top
-          'rgba(11,11,15,0.18)',   // gentle mid
-          'rgba(11,11,15,0.65)',   // readable bottom
+          'rgba(0,0,0,0.55)',
+          'rgba(0,0,0,0.28)',
+          'transparent',
+        ]}
+        locations={[0, 0.55, 1]}
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          height: statusTop + 28,
+          zIndex: 2,
+        }}
+      />
+
+      {/* Atmospheric body gradient */}
+      <LinearGradient
+        pointerEvents="none"
+        colors={[
+          'rgba(11,11,15,0.08)',
+          'rgba(11,11,15,0.18)',
+          'rgba(11,11,15,0.65)',
         ]}
         locations={[0, 0.35, 1]}
         style={StyleSheet.absoluteFill}
       />
 
-      {/* ── Text content (animated entrance/exit) ────────────────────── */}
       <Animated.View
         pointerEvents="box-none"
         style={[
           styles.centerBlock,
           {
-            paddingTop: statusTop + 48,
+            // Clear title bar + status bar
+            paddingTop: titleBarReserve,
             paddingBottom: bottomPad + 56,
             opacity: textState.opacity,
             transform: [{ translateY: textState.translateY }],
@@ -445,20 +410,15 @@ export default function HeroBanner({
             {copy.subheadline}
           </Text>
 
-          {/* CTA — frosted glass pill */}
           <Pressable
             onPress={handleCta}
-            style={({ pressed }) => [
-              styles.cta,
-              pressed && styles.ctaPressed,
-            ]}
+            style={({ pressed }) => [styles.cta, pressed && styles.ctaPressed]}
           >
             <Text style={styles.ctaText}>{copy.ctaLabel}</Text>
           </Pressable>
         </View>
       </Animated.View>
 
-      {/* ── Progress dots ─────────────────────────────────────────────── */}
       <View
         pointerEvents="box-none"
         style={[styles.dotsContainer, { paddingBottom: bottomPad }]}
@@ -466,7 +426,6 @@ export default function HeroBanner({
         <ProgressDots count={slides.length} current={current} />
       </View>
 
-      {/* ── Subtle scroll indicator ──────────────────────────────────── */}
       <View
         pointerEvents="box-none"
         style={[styles.arrowBar, { paddingBottom: bottomPad + 36 }]}
@@ -483,26 +442,23 @@ export default function HeroBanner({
   )
 }
 
-// ─── Styles ─────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
   mediaClip: {
     overflow: 'hidden',
     backgroundColor: '#0B0B0F',
   },
-
   centerBlock: {
     ...StyleSheet.absoluteFillObject,
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 32,
+    zIndex: 3,
   },
-
   copyWrap: {
     alignItems: 'center',
     maxWidth: 340,
     width: '100%',
   },
-
   headline: {
     fontFamily: 'Manrope_700Bold',
     color: '#FFFFFF',
@@ -515,7 +471,6 @@ const styles = StyleSheet.create({
     textShadowOffset: { width: 0, height: 2 },
     textShadowRadius: 8,
   },
-
   sub: {
     fontFamily: 'Manrope_300Light',
     color: '#E8E8E8',
@@ -528,8 +483,6 @@ const styles = StyleSheet.create({
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 6,
   },
-
-  // Frosted glass CTA
   cta: {
     paddingHorizontal: 28,
     paddingVertical: 14,
@@ -550,8 +503,6 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
     textAlign: 'center',
   },
-
-  // Progress dots
   dotsContainer: {
     position: 'absolute',
     left: 0,
@@ -576,8 +527,6 @@ const styles = StyleSheet.create({
     width: 16,
     backgroundColor: 'rgba(255,255,255,0.70)',
   },
-
-  // Scroll indicator
   arrowBar: {
     position: 'absolute',
     left: 0,

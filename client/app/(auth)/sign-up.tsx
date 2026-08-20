@@ -1,296 +1,441 @@
-import { useState } from "react";
+import api from '@/constants/api'
+import { Ionicons } from '@expo/vector-icons'
+import { useAuth, useOAuth, useSignUp } from '@clerk/clerk-expo'
+import { LinearGradient } from 'expo-linear-gradient'
+import * as WebBrowser from 'expo-web-browser'
+import { Link, useRouter } from 'expo-router'
+import React, { useCallback, useState } from 'react'
 import {
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
   View,
-  ActivityIndicator,
-  ScrollView,
-  KeyboardAvoidingView,
-  Platform,
-} from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
-import Toast from "react-native-toast-message";
-import { Ionicons } from "@expo/vector-icons";
-import { useRouter, Link } from "expo-router";
-import { useSignUp, useAuth } from "@clerk/clerk-expo";
-import { COLORS } from "@/constants";
-import api from "@/constants/api";
+} from 'react-native'
+import { SafeAreaView } from 'react-native-safe-area-context'
+import Toast from 'react-native-toast-message'
+
+WebBrowser.maybeCompleteAuthSession()
+
+const BG = '#090B0F'
+const SURFACE = '#11141A'
+const LINE = 'rgba(255,255,255,0.08)'
+const TEXT = '#F5F7FA'
+const SECONDARY = '#A7ADB8'
+const MUTED = '#737A86'
+const GREEN = '#00E575'
+const BLUE = '#3B82F6'
+
+async function afterAuthNavigate(
+  getToken: () => Promise<string | null>,
+  router: ReturnType<typeof useRouter>
+) {
+  try {
+    const token = await getToken()
+    if (!token) {
+      router.replace('/complete-profile' as any)
+      return
+    }
+    const res = await api.get('/users/me', {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    const u = res.data?.data
+    const needsProfile = !u?.phone || !String(u.phone).trim() || !u?.name
+    if (needsProfile) {
+      router.replace('/complete-profile' as any)
+    } else if (!u?.marketplaceRegion) {
+      router.replace('/select-region' as any)
+    } else {
+      router.replace('/(tabs)' as any)
+    }
+  } catch {
+    router.replace('/complete-profile' as any)
+  }
+}
 
 export default function SignUpScreen() {
-  const { isLoaded, signUp, setActive } = useSignUp();
-  const { getToken } = useAuth();
-  const router = useRouter();
+  const { isLoaded, signUp, setActive } = useSignUp()
+  const { getToken } = useAuth()
+  const router = useRouter()
+  const googleOAuth = useOAuth({ strategy: 'oauth_google' })
+  const appleOAuth = useOAuth({ strategy: 'oauth_apple' })
 
-  const [emailAddress, setEmailAddress] = useState("");
-  const [password, setPassword] = useState("");
-  const [firstName, setFirstName] = useState("");
-  const [lastName, setLastName] = useState("");
-  const [phone, setPhone] = useState("");
-  const [code, setCode] = useState("");
-  const [pendingVerification, setPendingVerification] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [emailAddress, setEmailAddress] = useState('')
+  const [password, setPassword] = useState('')
+  const [code, setCode] = useState('')
+  const [pendingVerification, setPendingVerification] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [oauthLoading, setOauthLoading] = useState<'google' | 'apple' | null>(null)
+  const [showPass, setShowPass] = useState(false)
 
   const onSignUpPress = async () => {
-    if (!isLoaded) return;
-
-    if (
-      !emailAddress.trim() ||
-      !password ||
-      !firstName.trim() ||
-      !lastName.trim() ||
-      !phone.trim()
-    ) {
+    if (!isLoaded) return
+    if (!emailAddress.trim() || !password) {
       Toast.show({
-        type: "error",
-        text1: "Missing Fields",
-        text2: "Please fill in all fields including phone number",
-      });
-      return;
+        type: 'error',
+        text1: 'Missing fields',
+        text2: 'Email and password are required',
+      })
+      return
+    }
+    if (password.length < 8) {
+      Toast.show({
+        type: 'error',
+        text1: 'Weak password',
+        text2: 'Use at least 8 characters',
+      })
+      return
     }
 
-    const cleanedPhone = phone.trim().replace(/\s+/g, "");
-    if (cleanedPhone.length < 7 || !/^[+]?[\d]+$/.test(cleanedPhone)) {
-      Toast.show({
-        type: "error",
-        text1: "Invalid phone",
-        text2: "Enter a valid phone number",
-      });
-      return;
-    }
-
-    setLoading(true);
+    setLoading(true)
     try {
       await signUp.create({
         emailAddress: emailAddress.trim(),
         password,
-        firstName: firstName.trim(),
-        lastName: lastName.trim(),
-        unsafeMetadata: { phone: cleanedPhone },
-      });
-
-      await signUp.prepareEmailAddressVerification({
-        strategy: "email_code",
-      });
-
-      setPendingVerification(true);
+      })
+      await signUp.prepareEmailAddressVerification({ strategy: 'email_code' })
+      setPendingVerification(true)
     } catch (err: any) {
       Toast.show({
-        type: "error",
-        text1: "Failed to Sign Up",
-        text2: err?.errors?.[0]?.message ?? "Something went wrong",
-      });
+        type: 'error',
+        text1: 'Sign up failed',
+        text2: err?.errors?.[0]?.message ?? 'Something went wrong',
+      })
     } finally {
-      setLoading(false);
+      setLoading(false)
     }
-  };
+  }
 
   const onVerifyPress = async () => {
-    if (!isLoaded) return;
-
+    if (!isLoaded) return
     if (!code.trim()) {
-      Toast.show({
-        type: "error",
-        text1: "Missing Fields",
-        text2: "Enter verification code",
-      });
-      return;
+      Toast.show({ type: 'error', text1: 'Enter the verification code' })
+      return
     }
-
-    setLoading(true);
+    setLoading(true)
     try {
       const attempt = await signUp.attemptEmailAddressVerification({
         code: code.trim(),
-      });
-
-if (attempt.status === "complete") {
-  await setActive({ session: attempt.createdSessionId });
-
-  // Save phone to MongoDB user
-  try {
-    const token = await getToken();
-    const cleanedPhone = phone.trim().replace(/\s+/g, "");
-    if (token && cleanedPhone) {
-      await api.patch(
-        "/users/me",
-        { phone: cleanedPhone },
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-    }
-  } catch (e) {
-    console.log("Phone sync error:", e);
-  }
-
-  // Go to region selection instead of home
-  router.replace("/select-region");
-} else {
-        Toast.show({
-          type: "error",
-          text1: "Verification incomplete",
-        });
+      })
+      if (attempt.status === 'complete') {
+        await setActive({ session: attempt.createdSessionId })
+        await afterAuthNavigate(getToken, router)
+      } else {
+        Toast.show({ type: 'error', text1: 'Verification incomplete' })
       }
     } catch (err: any) {
       Toast.show({
-        type: "error",
-        text1: "Failed to Verify",
-        text2: err?.errors?.[0]?.message ?? "Invalid code",
-      });
+        type: 'error',
+        text1: 'Verify failed',
+        text2: err?.errors?.[0]?.message ?? 'Invalid code',
+      })
     } finally {
-      setLoading(false);
+      setLoading(false)
     }
-  };
+  }
+
+  const onOAuth = useCallback(
+    async (provider: 'google' | 'apple') => {
+      try {
+        setOauthLoading(provider)
+        const start =
+          provider === 'google'
+            ? googleOAuth.startOAuthFlow
+            : appleOAuth.startOAuthFlow
+        const { createdSessionId, setActive: setOAuthActive } = await start()
+        if (createdSessionId && setOAuthActive) {
+          await setOAuthActive({ session: createdSessionId })
+          await afterAuthNavigate(getToken, router)
+        }
+      } catch (err: any) {
+        Toast.show({
+          type: 'error',
+          text1: `${provider === 'google' ? 'Google' : 'Apple'} sign-in`,
+          text2: err?.errors?.[0]?.message ?? 'Could not complete sign-in',
+        })
+      } finally {
+        setOauthLoading(null)
+      }
+    },
+    [googleOAuth, appleOAuth, getToken, router]
+  )
 
   return (
-    <SafeAreaView className="flex-1 bg-white">
+    <SafeAreaView style={styles.root} edges={['top', 'bottom']}>
       <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-        className="flex-1"
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={{ flex: 1 }}
       >
         <ScrollView
-          contentContainerStyle={{ padding: 28, paddingBottom: 40 }}
+          contentContainerStyle={styles.scroll}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
+          <TouchableOpacity
+            onPress={() => router.back()}
+            style={styles.back}
+            hitSlop={12}
+          >
+            <Ionicons name="arrow-back" size={22} color={TEXT} />
+          </TouchableOpacity>
+
           {!pendingVerification ? (
             <>
-              <TouchableOpacity
-                onPress={() => router.push("/")}
-                className="mb-4 p-1 self-start"
-              >
-                <Ionicons name="arrow-back" size={24} color={COLORS.primary} />
-              </TouchableOpacity>
+              <Text style={styles.kicker}>Plazore</Text>
+              <Text style={styles.title}>Create account</Text>
+              <Text style={styles.lead}>
+                Email and password first. Name, phone, and country come next.
+              </Text>
 
-              <View className="items-center mb-8">
-                <Text className="text-3xl font-bold text-primary mb-2">
-                  Create Account
-                </Text>
-                <Text className="text-secondary">Sign up to get started</Text>
-              </View>
+              <Text style={styles.label}>Email</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="you@email.com"
+                placeholderTextColor="#3D5268"
+                autoCapitalize="none"
+                keyboardType="email-address"
+                value={emailAddress}
+                onChangeText={setEmailAddress}
+              />
 
-              <View className="mb-4">
-                <Text className="text-primary font-medium mb-2">First Name *</Text>
+              <Text style={styles.label}>Password</Text>
+              <View style={styles.passRow}>
                 <TextInput
-                  className="w-full bg-surface p-4 rounded-xl text-primary"
-                  placeholder="John"
-                  placeholderTextColor="#999"
-                  value={firstName}
-                  onChangeText={setFirstName}
-                />
-              </View>
-
-              <View className="mb-4">
-                <Text className="text-primary font-medium mb-2">Last Name *</Text>
-                <TextInput
-                  className="w-full bg-surface p-4 rounded-xl text-primary"
-                  placeholder="Doe"
-                  placeholderTextColor="#999"
-                  value={lastName}
-                  onChangeText={setLastName}
-                />
-              </View>
-
-              <View className="mb-4">
-                <Text className="text-primary font-medium mb-2">Email *</Text>
-                <TextInput
-                  className="w-full bg-surface p-4 rounded-xl text-primary"
-                  placeholder="user@example.com"
-                  placeholderTextColor="#999"
-                  autoCapitalize="none"
-                  keyboardType="email-address"
-                  value={emailAddress}
-                  onChangeText={setEmailAddress}
-                />
-              </View>
-
-              <View className="mb-4">
-                <Text className="text-primary font-medium mb-2">
-                  Phone Number *
-                </Text>
-                <TextInput
-                  className="w-full bg-surface p-4 rounded-xl text-primary"
-                  placeholder="e.g. 08012345678"
-                  placeholderTextColor="#999"
-                  keyboardType="phone-pad"
-                  value={phone}
-                  onChangeText={setPhone}
-                />
-              </View>
-
-              <View className="mb-6">
-                <Text className="text-primary font-medium mb-2">Password *</Text>
-                <TextInput
-                  className="w-full bg-surface p-4 rounded-xl text-primary"
-                  placeholder="********"
-                  placeholderTextColor="#999"
-                  secureTextEntry
+                  style={[styles.input, { flex: 1, marginBottom: 0 }]}
+                  placeholder="Min. 8 characters"
+                  placeholderTextColor="#3D5268"
+                  secureTextEntry={!showPass}
                   value={password}
                   onChangeText={setPassword}
                 />
+                <Pressable
+                  onPress={() => setShowPass((v) => !v)}
+                  style={styles.eye}
+                >
+                  <Ionicons
+                    name={showPass ? 'eye-off-outline' : 'eye-outline'}
+                    size={20}
+                    color={MUTED}
+                  />
+                </Pressable>
               </View>
 
               <TouchableOpacity
-                className="w-full bg-primary py-4 rounded-full items-center mb-10"
                 onPress={onSignUpPress}
                 disabled={loading}
+                activeOpacity={0.9}
+                style={{ marginTop: 8, overflow: 'hidden' }}
               >
-                {loading ? (
-                  <ActivityIndicator color="#fff" />
+                <LinearGradient
+                  colors={[GREEN, BLUE]}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                  style={styles.cta}
+                >
+                  {loading ? (
+                    <ActivityIndicator color="#041412" />
+                  ) : (
+                    <Text style={styles.ctaText}>Continue</Text>
+                  )}
+                </LinearGradient>
+              </TouchableOpacity>
+
+              <View style={styles.dividerRow}>
+                <View style={styles.dividerLine} />
+                <Text style={styles.dividerText}>or</Text>
+                <View style={styles.dividerLine} />
+              </View>
+
+              <TouchableOpacity
+                style={styles.oauthBtn}
+                onPress={() => onOAuth('google')}
+                disabled={!!oauthLoading}
+                activeOpacity={0.85}
+              >
+                {oauthLoading === 'google' ? (
+                  <ActivityIndicator color={TEXT} />
                 ) : (
-                  <Text className="text-white font-bold text-lg">Continue</Text>
+                  <>
+                    <Ionicons name="logo-google" size={18} color={TEXT} />
+                    <Text style={styles.oauthText}>Continue with Google</Text>
+                  </>
                 )}
               </TouchableOpacity>
 
-              <View className="flex-row justify-center">
-                <Text className="text-secondary">Already have an account? </Text>
+              {Platform.OS === 'ios' && (
+                <TouchableOpacity
+                  style={styles.oauthBtn}
+                  onPress={() => onOAuth('apple')}
+                  disabled={!!oauthLoading}
+                  activeOpacity={0.85}
+                >
+                  {oauthLoading === 'apple' ? (
+                    <ActivityIndicator color={TEXT} />
+                  ) : (
+                    <>
+                      <Ionicons name="logo-apple" size={20} color={TEXT} />
+                      <Text style={styles.oauthText}>Continue with Apple</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              )}
+
+              <View style={styles.footer}>
+                <Text style={styles.footerMuted}>Already have an account? </Text>
                 <Link href="/sign-in">
-                  <Text className="text-primary font-bold">Login</Text>
+                  <Text style={styles.footerLink}>Sign in</Text>
                 </Link>
               </View>
             </>
           ) : (
             <>
-              <TouchableOpacity
-                onPress={() => router.back()}
-                className="mb-4 p-1 self-start"
-              >
-                <Ionicons name="arrow-back" size={24} color={COLORS.primary} />
-              </TouchableOpacity>
+              <Text style={styles.kicker}>Almost there</Text>
+              <Text style={styles.title}>Verify email</Text>
+              <Text style={styles.lead}>
+                Enter the code we sent to {emailAddress.trim() || 'your email'}.
+              </Text>
 
-              <View className="items-center mb-8">
-                <Text className="text-3xl font-bold text-primary mb-2">
-                  Verify Email
-                </Text>
-                <Text className="text-secondary text-center">
-                  Enter the code sent to your email
-                </Text>
-              </View>
-
-              <View className="mb-6">
-                <TextInput
-                  className="w-full bg-surface p-4 rounded-xl text-primary text-center tracking-widest"
-                  placeholder="123456"
-                  placeholderTextColor="#999"
-                  keyboardType="number-pad"
-                  value={code}
-                  onChangeText={setCode}
-                />
-              </View>
+              <TextInput
+                style={[styles.input, styles.codeInput]}
+                placeholder="123456"
+                placeholderTextColor="#3D5268"
+                keyboardType="number-pad"
+                value={code}
+                onChangeText={setCode}
+                maxLength={6}
+              />
 
               <TouchableOpacity
-                className="w-full bg-primary py-4 rounded-full items-center"
                 onPress={onVerifyPress}
                 disabled={loading}
+                activeOpacity={0.9}
+                style={{ overflow: 'hidden' }}
               >
-                {loading ? (
-                  <ActivityIndicator color="#fff" />
-                ) : (
-                  <Text className="text-white font-bold text-lg">Verify</Text>
-                )}
+                <LinearGradient
+                  colors={[GREEN, BLUE]}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                  style={styles.cta}
+                >
+                  {loading ? (
+                    <ActivityIndicator color="#041412" />
+                  ) : (
+                    <Text style={styles.ctaText}>Verify & continue</Text>
+                  )}
+                </LinearGradient>
               </TouchableOpacity>
             </>
           )}
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
-  );
+  )
 }
+
+const styles = StyleSheet.create({
+  root: { flex: 1, backgroundColor: BG },
+  scroll: { padding: 24, paddingBottom: 40 },
+  back: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+  },
+  kicker: {
+    color: MUTED,
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 2,
+    textTransform: 'uppercase',
+  },
+  title: {
+    marginTop: 6,
+    color: TEXT,
+    fontSize: 28,
+    fontWeight: '800',
+    letterSpacing: -0.4,
+  },
+  lead: {
+    marginTop: 8,
+    marginBottom: 28,
+    color: SECONDARY,
+    fontSize: 14,
+    lineHeight: 21,
+  },
+  label: {
+    color: MUTED,
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+    marginBottom: 8,
+  },
+  input: {
+    backgroundColor: SURFACE,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: LINE,
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    color: TEXT,
+    fontSize: 16,
+    marginBottom: 16,
+  },
+  passRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+    gap: 8,
+  },
+  eye: { padding: 10 },
+  codeInput: {
+    textAlign: 'center',
+    letterSpacing: 8,
+    fontSize: 22,
+    fontWeight: '700',
+  },
+  cta: {
+    paddingVertical: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  ctaText: { color: '#041412', fontWeight: '800', fontSize: 16 },
+  dividerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 22,
+  },
+  dividerLine: { flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: LINE },
+  dividerText: {
+    marginHorizontal: 12,
+    color: MUTED,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  oauthBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    backgroundColor: SURFACE,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: LINE,
+    borderRadius: 14,
+    paddingVertical: 14,
+    marginBottom: 10,
+  },
+  oauthText: { color: TEXT, fontWeight: '600', fontSize: 15 },
+  footer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    marginTop: 28,
+  },
+  footerMuted: { color: SECONDARY, fontSize: 14 },
+  footerLink: { color: GREEN, fontWeight: '700', fontSize: 14 },
+})

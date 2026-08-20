@@ -8,6 +8,7 @@ import {
   Image,
   Platform,
   Pressable,
+  StatusBar,
   StyleSheet,
   Text,
   View,
@@ -17,7 +18,15 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 const ACCENT = '#C9A962'
 const ICON = '#FFFFFF'
 const GLASS = 'rgba(8,8,10,0.55)'
-const EASE = Easing.bezier(0.22, 1, 0.36, 1)
+const EASE = Easing.out(Easing.cubic)
+
+/** Shared with bottom tab bar */
+const CHROME_IN_START = 0.1
+const CHROME_IN_END = 0.48
+const CHROME_DURATION = 200
+
+/** Single chrome band height — glass, row, and bottom rule all share this end edge */
+const BAR_H = 56
 
 type Props = {
   scrollProgress: number
@@ -42,15 +51,31 @@ function IconButton({
 
   const pressIn = () => {
     Animated.parallel([
-      Animated.timing(scale, { toValue: 0.94, duration: 120, useNativeDriver: true }),
-      Animated.timing(opacity, { toValue: 0.7, duration: 120, useNativeDriver: true }),
+      Animated.timing(scale, {
+        toValue: 0.94,
+        duration: 120,
+        useNativeDriver: true,
+      }),
+      Animated.timing(opacity, {
+        toValue: 0.7,
+        duration: 120,
+        useNativeDriver: true,
+      }),
     ]).start()
   }
 
   const pressOut = () => {
     Animated.parallel([
-      Animated.timing(scale, { toValue: 1, duration: 180, useNativeDriver: true }),
-      Animated.timing(opacity, { toValue: 1, duration: 180, useNativeDriver: true }),
+      Animated.timing(scale, {
+        toValue: 1,
+        duration: 180,
+        useNativeDriver: true,
+      }),
+      Animated.timing(opacity, {
+        toValue: 1,
+        duration: 180,
+        useNativeDriver: true,
+      }),
     ]).start()
   }
 
@@ -63,7 +88,9 @@ function IconButton({
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}
     >
-      <Animated.View style={[styles.iconHit, { transform: [{ scale }], opacity }]}>
+      <Animated.View
+        style={[styles.iconHit, { transform: [{ scale }], opacity }]}
+      >
         {children}
       </Animated.View>
     </Pressable>
@@ -77,10 +104,18 @@ function MenuToggle({ onPress }: { onPress?: () => void }) {
     <Pressable
       onPress={onPress}
       onPressIn={() =>
-        Animated.timing(scale, { toValue: 0.9, duration: 90, useNativeDriver: true }).start()
+        Animated.timing(scale, {
+          toValue: 0.9,
+          duration: 90,
+          useNativeDriver: true,
+        }).start()
       }
       onPressOut={() =>
-        Animated.timing(scale, { toValue: 1, duration: 160, useNativeDriver: true }).start()
+        Animated.timing(scale, {
+          toValue: 1,
+          duration: 160,
+          useNativeDriver: true,
+        }).start()
       }
       hitSlop={14}
       accessibilityRole="button"
@@ -114,7 +149,15 @@ export default function PlazoreTitleBar({
   const logoOpacity = useRef(new Animated.Value(0)).current
   const textOpacity = useRef(new Animated.Value(1)).current
 
-  // Smooth crossfade: PLAZORE text ↔ logo (same pattern as LOUNGE in hub)
+  useEffect(() => {
+    StatusBar.setBarStyle('light-content', true)
+    if (Platform.OS === 'android') {
+      StatusBar.setTranslucent(true)
+      StatusBar.setBackgroundColor('transparent', true)
+      StatusBar.setHidden(false)
+    }
+  }, [])
+
   useEffect(() => {
     if (logoLoaded) {
       Animated.parallel([
@@ -141,26 +184,27 @@ export default function PlazoreTitleBar({
     const p = Math.min(1, Math.max(0, scrollProgress))
     Animated.timing(anim, {
       toValue: p,
-      duration: 180,
+      duration: CHROME_DURATION,
+      easing: EASE,
       useNativeDriver: true,
     }).start()
   }, [scrollProgress, anim])
 
   const slideUp = anim.interpolate({
-    inputRange: [0, 0.25, 1],
-    outputRange: [0, -24, -130],
+    inputRange: [0, CHROME_IN_START, CHROME_IN_END, 1],
+    outputRange: [0, 0, -110, -130],
     extrapolate: 'clamp',
   })
 
   const barOpacity = anim.interpolate({
-    inputRange: [0, 0.2, 0.5],
-    outputRange: [1, 0.7, 0],
+    inputRange: [0, CHROME_IN_START, CHROME_IN_END],
+    outputRange: [1, 1, 0],
     extrapolate: 'clamp',
   })
 
   const glassOpacity = anim.interpolate({
-    inputRange: [0, 0.15, 0.45],
-    outputRange: [0.35, 0.55, 0],
+    inputRange: [0, CHROME_IN_START, CHROME_IN_END],
+    outputRange: [0.22, 0.3, 0],
     extrapolate: 'clamp',
   })
 
@@ -171,8 +215,12 @@ export default function PlazoreTitleBar({
     onMusicPress?.()
   }
 
-  const topPad = Math.max(insets.top - 6, 4)
-  const hidden = scrollProgress > 0.55
+  const statusTop = Math.max(
+    insets.top,
+    Platform.OS === 'android' ? StatusBar.currentHeight ?? 24 : 20,
+    20
+  )
+  const hidden = scrollProgress > CHROME_IN_END
 
   return (
     <Animated.View
@@ -180,110 +228,117 @@ export default function PlazoreTitleBar({
       style={[
         styles.wrap,
         {
-          paddingTop: topPad,
+          paddingTop: statusTop,
           opacity: barOpacity,
           transform: [{ translateY: slideUp }],
         },
       ]}
     >
-      <Animated.View
-        pointerEvents="none"
-        style={[StyleSheet.absoluteFill, { opacity: glassOpacity }]}
-      >
-        {Platform.OS === 'ios' ? (
-          <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} />
-        ) : (
-          <View style={[StyleSheet.absoluteFill, { backgroundColor: GLASS }]} />
-        )}
-        <View
-          style={[
-            StyleSheet.absoluteFill,
-            { backgroundColor: 'rgba(0,0,0,0.28)' },
-          ]}
-        />
-      </Animated.View>
-
-      <LinearGradient
-        pointerEvents="none"
-        colors={['rgba(0,0,0,0.38)', 'rgba(0,0,0,0)']}
-        style={styles.topVeil}
-      />
-
-      {/* Logo + PLAZORE fallback — smooth crossfade, no clash */}
-      <View style={styles.logoWrap} pointerEvents="none">
+      {/*
+        Architecture:
+        [ statusTop safe gap ]
+        [ BAR_H chrome band ]
+          ├ glass (absolute, same height)
+          ├ row (menu | logo | actions)  height BAR_H
+          └ bottom rule  ← ends the nav bar
+      */}
+      <View style={styles.band}>
         <Animated.View
-          style={[
-            styles.logoLayer,
-            { opacity: textOpacity },
-          ]}
+          pointerEvents="none"
+          style={[styles.glass, { opacity: glassOpacity }]}
         >
-          <Text style={styles.logoFallback}>PLAZORE</Text>
-        </Animated.View>
-
-        <Animated.View style={[styles.logoLayer, { opacity: logoOpacity }]}>
-          <Image
-            source={require('../assets/logo.png')}
-            style={styles.logo}
-            resizeMode="contain"
-            onLoad={() => setLogoLoaded(true)}
-            onError={() => setLogoLoaded(false)}
+          {Platform.OS === 'ios' ? (
+            <BlurView
+              intensity={36}
+              tint="dark"
+              style={StyleSheet.absoluteFill}
+            />
+          ) : (
+            <View
+              style={[StyleSheet.absoluteFill, { backgroundColor: GLASS }]}
+            />
+          )}
+          <View
+            style={[
+              StyleSheet.absoluteFill,
+              { backgroundColor: 'rgba(0,0,0,0.18)' },
+            ]}
           />
         </Animated.View>
-      </View>
 
-      <View style={styles.row}>
-        <View style={styles.side}>
-          <MenuToggle onPress={onMenuPress} />
-        </View>
+        <View style={styles.row}>
+          <View style={styles.side}>
+            <MenuToggle onPress={onMenuPress} />
+          </View>
 
-        <View style={styles.center} />
-
-        <View style={[styles.side, styles.sideRight]}>
-          <IconButton
-            onPress={handleMusic}
-            accessibilityLabel={musicOn ? 'Music on' : 'Music off'}
-          >
-            <Ionicons
-              name={musicOn ? 'headset' : 'headset-outline'}
-              size={22}
-              color={musicOn ? ACCENT : ICON}
-            />
-          </IconButton>
-
-          <IconButton
-            onPress={onNotificationsPress}
-            accessibilityLabel="Notifications"
-          >
-            <View>
-              <Ionicons
-                name={
-                  hasUnreadNotifications
-                    ? 'notifications'
-                    : 'notifications-outline'
-                }
-                size={22}
-                color={ICON}
+          {/* Logo / PLAZORE centered in the band */}
+          <View style={styles.center} pointerEvents="none">
+            <Animated.View
+              style={[styles.logoLayer, { opacity: textOpacity }]}
+            >
+              <Text style={styles.logoFallback}>PLAZORE</Text>
+            </Animated.View>
+            <Animated.View
+              style={[styles.logoLayer, { opacity: logoOpacity }]}
+            >
+              <Image
+                source={require('../assets/logo.png')}
+                style={styles.logo}
+                resizeMode="contain"
+                onLoad={() => setLogoLoaded(true)}
+                onError={() => setLogoLoaded(false)}
               />
-              {hasUnreadNotifications ? <View style={styles.dot} /> : null}
-            </View>
-          </IconButton>
-        </View>
-      </View>
+            </Animated.View>
+          </View>
 
-      <View style={styles.bottomRule} pointerEvents="none">
-        <LinearGradient
-          colors={[
-            'transparent',
-            'rgba(255,255,255,0.55)',
-            'rgba(255,255,255,0.9)',
-            'rgba(255,255,255,0.55)',
-            'transparent',
-          ]}
-          locations={[0, 0.18, 0.5, 0.82, 1]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 0 }}
-          style={styles.bottomLine}
-        />
+          <View style={[styles.side, styles.sideRight]}>
+            <IconButton
+              onPress={handleMusic}
+              accessibilityLabel={musicOn ? 'Music on' : 'Music off'}
+            >
+              <Ionicons
+                name={musicOn ? 'headset' : 'headset-outline'}
+                size={22}
+                color={musicOn ? ACCENT : ICON}
+              />
+            </IconButton>
+
+            <IconButton
+              onPress={onNotificationsPress}
+              accessibilityLabel="Notifications"
+            >
+              <View>
+                <Ionicons
+                  name={
+                    hasUnreadNotifications
+                      ? 'notifications'
+                      : 'notifications-outline'
+                  }
+                  size={22}
+                  color={ICON}
+                />
+                {hasUnreadNotifications ? <View style={styles.dot} /> : null}
+              </View>
+            </IconButton>
+          </View>
+        </View>
+
+        {/* Bottom edge of the nav bar — same line ends the chrome */}
+        <View style={styles.bottomRule} pointerEvents="none">
+          <LinearGradient
+            colors={[
+              'transparent',
+              'rgba(255,255,255,0.45)',
+              'rgba(255,255,255,0.9)',
+              'rgba(255,255,255,0.45)',
+              'transparent',
+            ]}
+            locations={[0, 0.18, 0.5, 0.82, 1]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+            style={styles.bottomLine}
+          />
+        </View>
       </View>
     </Animated.View>
   )
@@ -296,61 +351,57 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     zIndex: 40,
-    overflow: 'visible',
   },
-  topVeil: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    height: 88,
+
+  /** One chrome band — glass + row + rule share this box */
+  band: {
+    height: BAR_H,
+    justifyContent: 'flex-end',
   },
-  logoWrap: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    top: 40,
-    bottom: 0,
+
+  glass: {
+    ...StyleSheet.absoluteFillObject,
+  },
+
+  row: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    zIndex: 2,
+  },
+
+  side: {
+    width: 96,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  sideRight: {
+    justifyContent: 'flex-end',
+  },
+
+  center: {
+    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    zIndex: 1,
+    height: BAR_H,
   },
   logoLayer: {
-    position: 'absolute',
+    ...StyleSheet.absoluteFillObject,
     alignItems: 'center',
     justifyContent: 'center',
   },
   logoFallback: {
     color: '#FFFFFF',
-    fontSize: 28,
+    fontSize: 18,
     fontWeight: '800',
-    letterSpacing: 6,
+    letterSpacing: 4,
   },
   logo: {
-    height: 99,
-    width: 280,
+    height: 100,
+    width: 200,
   },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 10,
-    paddingTop: 16,
-    paddingBottom: 0,
-    height: 70,
-    zIndex: 2,
-  },
-  side: {
-    width: 96,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 0,
-  },
-  sideRight: {
-    justifyContent: 'flex-end',
-  },
-  center: {
-    flex: 1,
-  },
+
   iconHit: {
     width: 40,
     height: 40,
@@ -378,23 +429,23 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(12,12,12,0.4)',
   },
+
+  /** Rule is the last pixel of the band */
   bottomRule: {
+    height: 1,
     marginHorizontal: 16,
-    marginTop: 0,
-    marginBottom: 0,
   },
   bottomLine: {
     height: 1,
-    borderRadius: 1,
     ...Platform.select({
       ios: {
         shadowColor: '#FFFFFF',
         shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.4,
-        shadowRadius: 3,
+        shadowOpacity: 0.35,
+        shadowRadius: 2,
       },
       android: {
-        elevation: 2,
+        elevation: 1,
       },
     }),
   },

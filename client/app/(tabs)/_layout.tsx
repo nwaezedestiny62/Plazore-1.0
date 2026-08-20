@@ -31,8 +31,22 @@ const PINK = '#F472B6'
 const EASE = Easing.out(Easing.cubic)
 const LOGO_GRADIENT = [GREEN, '#14B8A6', BLUE] as const
 
-/** Only these tabs show the bottom nav */
+/**
+ * Shared chrome timing — title bar OUT / bottom nav IN
+ * Must match PlazoreTitleBar exactly.
+ */
+const CHROME_IN_START = 0.1
+const CHROME_IN_END = 0.48
+const CHROME_DURATION = 200
+
 const NAV_VISIBLE_ROUTES = new Set(['index', 'search', 'favorites'])
+
+function scrollToNavVisibility(progress: number) {
+  const p = Math.min(1, Math.max(0, progress))
+  if (p <= CHROME_IN_START) return 0
+  if (p >= CHROME_IN_END) return 1
+  return (p - CHROME_IN_START) / (CHROME_IN_END - CHROME_IN_START)
+}
 
 function PlazoreTabsBar({ state, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets()
@@ -52,24 +66,18 @@ function PlazoreTabsBar({ state, navigation }: BottomTabBarProps) {
   const active = state.routes[state.index]?.name
   const onAllowedScreen = NAV_VISIBLE_ROUTES.has(active)
 
-  /**
-   * Visible only on: Home (index), Search, Favorites
-   * Home: still fades with scrollProgress
-   * Search / Favorites: always fully visible
-   * Cart / others: fully hidden
-   */
   useEffect(() => {
     let t = 0
     if (onAllowedScreen) {
       if (active === 'index' && homeChrome) {
-        t = Math.min(1, Math.max(0, (scrollProgress - 0.08) / 0.45))
+        t = scrollToNavVisibility(scrollProgress)
       } else {
         t = 1
       }
     }
     Animated.timing(visibility, {
       toValue: t,
-      duration: 260,
+      duration: CHROME_DURATION,
       easing: EASE,
       useNativeDriver: true,
     }).start()
@@ -160,11 +168,14 @@ function PlazoreTabsBar({ state, navigation }: BottomTabBarProps) {
   const bottom = Math.max(insets.bottom, 6) + 4
   const cartOn = active === 'cart' || itemCount > 0
   const pointerOff =
-    !onAllowedScreen || (active === 'index' && homeChrome && scrollProgress < 0.05)
+    !onAllowedScreen ||
+    (active === 'index' &&
+      homeChrome &&
+      scrollProgress < CHROME_IN_START)
 
   const translateY = visibility.interpolate({
     inputRange: [0, 1],
-    outputRange: [36, 0],
+    outputRange: [28, 0],
   })
   const bagWiggle = bagRotate.interpolate({
     inputRange: [-1, 0, 1],

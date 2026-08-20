@@ -403,3 +403,59 @@ export const updateMyOrderStatus = async (req: Request, res: Response) => {
     res.status(500).json({ success: false, message: error.message });
   }
 };
+
+// ── Gate: last 4 digits of payout accountNumber ──
+export const verifyPayoutAccess = async (req: Request, res: Response) => {
+  try {
+    const user = (req as any).user;
+    if (!user?._id) {
+      return res.status(401).json({ success: false, message: "Not authorized" });
+    }
+
+    const raw = String(
+      req.body?.lastFour ?? req.body?.last4 ?? req.body?.digits ?? ""
+    );
+    const digits = raw.replace(/\D/g, "").slice(-4);
+
+    if (digits.length !== 4) {
+      return res.status(400).json({
+        success: false,
+        message: "Enter exactly 4 digits",
+      });
+    }
+
+    const full = await User.findById(user._id).select("payout");
+    if (!full) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+
+    const stored = String(full.payout?.accountNumber ?? "").replace(/\D/g, "");
+
+    // No account yet → allow setup
+    if (!stored || stored.length < 4) {
+      return res.json({
+        success: true,
+        data: { unlocked: true, setupRequired: true },
+      });
+    }
+
+    const expected = stored.slice(-4);
+    if (digits !== expected) {
+      return res.status(403).json({
+        success: false,
+        message: "Those digits do not match your payout account",
+      });
+    }
+
+    return res.json({
+      success: true,
+      data: { unlocked: true, setupRequired: false },
+    });
+  } catch (error: any) {
+    console.error("verifyPayoutAccess:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Verification failed",
+    });
+  }
+};
