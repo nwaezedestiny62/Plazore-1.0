@@ -5,6 +5,7 @@ import {
 } from '@/components/showroom/ShowroomFlyCart'
 import { useCart } from '@/context/CartContext'
 import { usePlazoreChrome } from '@/context/PlazoreChromeContext'
+import { useSoundtrack } from '@/context/SoundtrackContext'
 import { Ionicons } from '@expo/vector-icons'
 import { BottomTabBarProps } from '@react-navigation/bottom-tabs'
 import { BlurView } from 'expo-blur'
@@ -28,16 +29,13 @@ const TEXT = '#F5F7FA'
 const GREEN = '#00E575'
 const BLUE = '#2563EB'
 const PINK = '#F472B6'
-const EASE = Easing.out(Easing.cubic)
 const LOGO_GRADIENT = [GREEN, '#14B8A6', BLUE] as const
 
-/**
- * Shared chrome timing — title bar OUT / bottom nav IN
- * Must match PlazoreTitleBar exactly.
- */
-const CHROME_IN_START = 0.1
-const CHROME_IN_END = 0.48
-const CHROME_DURATION = 200
+/** Must match PlazoreTitleBar exactly */
+const CHROME_IN_START = 0.02
+const CHROME_IN_END = 0.55
+const CHROME_DURATION = 420
+const EASE_SMOOTH = Easing.bezier(0.22, 0.61, 0.36, 1)
 
 const NAV_VISIBLE_ROUTES = new Set(['index', 'search', 'favorites'])
 
@@ -54,6 +52,7 @@ function PlazoreTabsBar({ state, navigation }: BottomTabBarProps) {
   const fly = useShowroomFlyCart()
   const cartCtx = useCart() as any
   const itemCount = Number(cartCtx?.itemCount ?? 0)
+  const { unlock: unlockSoundtrack } = useSoundtrack()
 
   const visibility = useRef(new Animated.Value(0)).current
   const bagScale = useRef(new Animated.Value(1)).current
@@ -78,7 +77,7 @@ function PlazoreTabsBar({ state, navigation }: BottomTabBarProps) {
     Animated.timing(visibility, {
       toValue: t,
       duration: CHROME_DURATION,
-      easing: EASE,
+      easing: EASE_SMOOTH,
       useNativeDriver: true,
     }).start()
   }, [scrollProgress, homeChrome, active, onAllowedScreen, visibility])
@@ -100,8 +99,8 @@ function PlazoreTabsBar({ state, navigation }: BottomTabBarProps) {
           }),
           Animated.timing(bagScale, {
             toValue: 1,
-            duration: 200,
-            easing: EASE,
+            duration: 220,
+            easing: EASE_SMOOTH,
             useNativeDriver: true,
           }),
         ]),
@@ -126,7 +125,7 @@ function PlazoreTabsBar({ state, navigation }: BottomTabBarProps) {
           Animated.timing(pulse, {
             toValue: 1,
             duration: 280,
-            easing: EASE,
+            easing: EASE_SMOOTH,
             useNativeDriver: true,
           }),
           Animated.timing(pulse, {
@@ -155,6 +154,7 @@ function PlazoreTabsBar({ state, navigation }: BottomTabBarProps) {
   }
 
   const go = (name: string) => {
+    unlockSoundtrack()
     const route = state.routes.find((r) => r.name === name)
     if (!route) return
     const ev = navigation.emit({
@@ -165,18 +165,23 @@ function PlazoreTabsBar({ state, navigation }: BottomTabBarProps) {
     if (!ev.defaultPrevented) navigation.navigate(name as never)
   }
 
+  const onLounge = () => {
+    unlockSoundtrack()
+    openHub()
+  }
+
   const bottom = Math.max(insets.bottom, 6) + 4
   const cartOn = active === 'cart' || itemCount > 0
   const pointerOff =
     !onAllowedScreen ||
-    (active === 'index' &&
-      homeChrome &&
-      scrollProgress < CHROME_IN_START)
+    (active === 'index' && homeChrome && scrollProgress < CHROME_IN_START)
 
+  /** Gentle rise — pairs with title bar’s soft fade */
   const translateY = visibility.interpolate({
     inputRange: [0, 1],
-    outputRange: [28, 0],
+    outputRange: [22, 0],
   })
+
   const bagWiggle = bagRotate.interpolate({
     inputRange: [-1, 0, 1],
     outputRange: ['-12deg', '0deg', '12deg'],
@@ -230,7 +235,7 @@ function PlazoreTabsBar({ state, navigation }: BottomTabBarProps) {
           />
 
           <Pressable
-            onPress={openHub}
+            onPress={onLounge}
             style={styles.loungeSlot}
             accessibilityRole="button"
             accessibilityLabel="Lounge"
@@ -304,20 +309,13 @@ function PlazoreTabsBar({ state, navigation }: BottomTabBarProps) {
                     <Ionicons name="bag-handle" size={15} color="#FFFFFF" />
                   </View>
                 ) : (
-                  <Ionicons
-                    name="bag-handle-outline"
-                    size={18}
-                    color={MUTED}
-                  />
+                  <Ionicons name="bag-handle-outline" size={18} color={MUTED} />
                 )}
               </Animated.View>
 
               {itemCount > 0 && (
                 <Animated.View
-                  style={[
-                    styles.badge,
-                    { transform: [{ scale: badgePop }] },
-                  ]}
+                  style={[styles.badge, { transform: [{ scale: badgePop }] }]}
                 >
                   <LinearGradient
                     colors={['#00E575', '#14B8A6', '#2563EB']}

@@ -1,5 +1,10 @@
+/**
+ * Buyer Settings — Plazore dark
+ */
+
 import { useTheme } from '@/context/ThemeContext'
 import { Ionicons } from '@expo/vector-icons'
+import { LinearGradient } from 'expo-linear-gradient'
 import { useRouter } from 'expo-router'
 import React from 'react'
 import {
@@ -11,15 +16,15 @@ import {
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 
-/* ── Plazore tokens ── */
 const BG = '#090B0F'
 const SURFACE = '#11141A'
 const SURFACE_2 = '#171B22'
 const LINE = 'rgba(255,255,255,0.07)'
 const TEXT = '#F5F7FA'
 const SECONDARY = '#A7ADB8'
-const MUTED = '#6B7280'
+const MUTED = '#737A86'
 const GREEN = '#00E575'
+const BLUE = '#3B82F6'
 
 type RowProps = {
   icon: keyof typeof Ionicons.glyphMap
@@ -27,17 +32,29 @@ type RowProps = {
   subtitle: string
   onPress: () => void
   last?: boolean
+  accent?: boolean
 }
 
-function SettingsRow({ icon, title, subtitle, onPress, last }: RowProps) {
+function SettingsRow({
+  icon,
+  title,
+  subtitle,
+  onPress,
+  last,
+  accent,
+}: RowProps) {
   return (
     <TouchableOpacity
       onPress={onPress}
       activeOpacity={0.75}
       style={[styles.row, !last && styles.rowBorder]}
     >
-      <View style={styles.rowIcon}>
-        <Ionicons name={icon} size={18} color={TEXT} />
+      <View style={[styles.rowIcon, accent && styles.rowIconAccent]}>
+        <Ionicons
+          name={icon}
+          size={18}
+          color={accent ? GREEN : TEXT}
+        />
       </View>
       <View style={styles.rowBody}>
         <Text style={styles.rowTitle}>{title}</Text>
@@ -67,21 +84,26 @@ function SettingsSection({
 
 export default function SettingsScreen() {
   const router = useRouter()
-  // keep theme hook if other screens depend on it
   useTheme()
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
-      {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity
-          onPress={() => router.back()}
+          onPress={() => {
+            if (router.canGoBack()) router.back()
+            else router.replace('/(tabs)' as any)
+          }}
           style={styles.backBtn}
           hitSlop={12}
+          activeOpacity={0.8}
         >
           <Ionicons name="chevron-back" size={22} color={TEXT} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Settings</Text>
+        <View style={styles.headerCenter}>
+          <Text style={styles.headerTitle}>Settings</Text>
+          <Text style={styles.headerSub}>Account & preferences</Text>
+        </View>
         <View style={styles.headerRight} />
       </View>
 
@@ -90,9 +112,21 @@ export default function SettingsScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        <Text style={styles.intro}>
-          Manage your account, marketplace preferences, and privacy in one place.
-        </Text>
+        {/* Intro */}
+        <View style={styles.introCard}>
+          <LinearGradient
+            colors={['rgba(0,229,117,0.12)', 'rgba(59,130,246,0.08)']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.introIcon}
+          >
+            <Ionicons name="options-outline" size={18} color={GREEN} />
+          </LinearGradient>
+          <Text style={styles.introText}>
+            Manage your account, marketplace, and privacy — calm, clear, one
+            place.
+          </Text>
+        </View>
 
         <SettingsSection title="Account">
           <SettingsRow
@@ -100,6 +134,7 @@ export default function SettingsScreen() {
             title="Profile"
             subtitle="Personal information and account details"
             onPress={() => router.push('/settings/profile' as any)}
+            accent
           />
           <SettingsRow
             icon="globe-outline"
@@ -133,20 +168,19 @@ export default function SettingsScreen() {
         </SettingsSection>
 
         <SettingsSection title="Preferences">
-  <SettingsRow
-    icon="language-outline"
-    title="Language"
-    subtitle="App display language"
-    onPress={() => router.push('/settings/language' as any)}
-  />
-  <SettingsRow
-    icon="musical-notes-outline"
-    title="Ambient Music"
-    subtitle="Plazore soundtrack and sound preferences"
-    onPress={() => router.push('/settings/music' as any)}
-    last
-  />
-</SettingsSection>
+          <SettingsRow
+            icon="language-outline"
+            title="Language"
+            subtitle="App display language"
+            onPress={() => router.push('/settings/language' as any)}
+          />
+          <SettingsRow
+  icon="musical-notes-outline"
+  title="Ambient Soundtrack"
+  subtitle="Immerse yourself in the Plazore atmosphere."
+  onPress={() => router.push('/settings/music' as any)}
+/>
+        </SettingsSection>
 
         <SettingsSection title="About">
           <SettingsRow
@@ -174,7 +208,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 8,
-    paddingVertical: 10,
+    paddingTop: 6,
+    paddingBottom: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: LINE,
   },
@@ -184,33 +219,53 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  headerTitle: {
+  headerCenter: {
     flex: 1,
-    textAlign: 'center',
+    alignItems: 'center',
+  },
+  headerTitle: {
     fontSize: 17,
-    fontWeight: '700',
+    fontWeight: '800',
     color: TEXT,
     letterSpacing: -0.3,
+  },
+  headerSub: {
+    marginTop: 2,
+    fontSize: 11,
+    color: MUTED,
   },
   headerRight: {
     width: 42,
   },
 
-  scroll: {
-    flex: 1,
-  },
+  scroll: { flex: 1 },
   scrollContent: {
     paddingHorizontal: 16,
-    paddingTop: 16,
+    paddingTop: 18,
     paddingBottom: 48,
   },
 
-  intro: {
-    fontSize: 13,
-    lineHeight: 20,
-    color: MUTED,
+  introCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: SURFACE,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: LINE,
+    padding: 14,
     marginBottom: 22,
-    marginLeft: 2,
+  },
+  introIcon: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  introText: {
+    flex: 1,
+    fontSize: 13,
+    lineHeight: 19,
+    color: SECONDARY,
   },
 
   section: {
@@ -220,14 +275,13 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
     color: MUTED,
-    letterSpacing: 1.2,
+    letterSpacing: 1.3,
     textTransform: 'uppercase',
     marginBottom: 8,
     marginLeft: 2,
   },
   sectionCard: {
     backgroundColor: SURFACE,
-    borderRadius: 14,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: LINE,
     overflow: 'hidden',
@@ -246,13 +300,16 @@ const styles = StyleSheet.create({
   rowIcon: {
     width: 38,
     height: 38,
-    borderRadius: 10,
     backgroundColor: SURFACE_2,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: LINE,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 12,
+  },
+  rowIconAccent: {
+    backgroundColor: 'rgba(0,229,117,0.1)',
+    borderColor: 'rgba(0,229,117,0.22)',
   },
   rowBody: {
     flex: 1,
@@ -276,6 +333,6 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: MUTED,
     marginTop: 8,
-    letterSpacing: 0.5,
+    letterSpacing: 0.6,
   },
 })

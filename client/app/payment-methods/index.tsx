@@ -1,13 +1,20 @@
+/**
+ * Payment Methods — Plazore style + orb preloader
+ */
+
 import api from '@/constants/api'
 import { useAuth } from '@clerk/clerk-expo'
 import { Ionicons } from '@expo/vector-icons'
 import { LinearGradient } from 'expo-linear-gradient'
 import { useFocusEffect, useRouter } from 'expo-router'
-import React, { useCallback, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
+  Animated,
+  Easing,
   FlatList,
+  Image,
   Modal,
   RefreshControl,
   ScrollView,
@@ -19,19 +26,17 @@ import {
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 
-/* ── Plazore tokens ── */
 const BG = '#090B0F'
 const SURFACE = '#11141A'
 const SURFACE_2 = '#171B22'
-const LINE = 'rgba(255,255,255,0.07)'
+const LINE = 'rgba(255,255,255,0.08)'
 const TEXT = '#F5F7FA'
 const SECONDARY = '#A7ADB8'
-const MUTED = '#6B7280'
+const MUTED = '#737A86'
 const GREEN = '#00E575'
 const BLUE = '#3B82F6'
 const DANGER = '#EF4444'
 
-/** Broader brands — arranged by popularity / region relevance */
 const CARD_BRANDS = [
   { key: 'Visa', color: '#1A1F71', short: 'VISA' },
   { key: 'Mastercard', color: '#EB001B', short: 'MC' },
@@ -55,6 +60,44 @@ function getBrandMeta(brand?: string) {
   )
 }
 
+function StorePreloader() {
+  const rotation = useRef(new Animated.Value(0)).current
+
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.timing(rotation, {
+        toValue: 1,
+        duration: 2600,
+        easing: Easing.linear,
+        useNativeDriver: true,
+      })
+    )
+    loop.start()
+    return () => loop.stop()
+  }, [])
+
+  const rotate = rotation.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0deg', '360deg'],
+  })
+
+  return (
+    <View style={styles.loaderRoot}>
+      <View style={styles.orbWrapper}>
+        <Animated.View style={[styles.orbRing, { transform: [{ rotate }] }]} />
+        <View style={styles.orbLogoWrap}>
+          <Image
+            source={require('@/assets/logo-1.png')}
+            style={styles.orbLogo}
+            resizeMode="contain"
+          />
+        </View>
+      </View>
+      <Text style={styles.loaderLabel}>Loading cards…</Text>
+    </View>
+  )
+}
+
 export default function PaymentMethods() {
   const { getToken } = useAuth()
   const router = useRouter()
@@ -71,6 +114,7 @@ export default function PaymentMethods() {
   const [expiry, setExpiry] = useState('')
   const [cvc, setCvc] = useState('')
   const [isDefault, setIsDefault] = useState(false)
+  const [focus, setFocus] = useState<string | null>(null)
 
   const fetchCards = async () => {
     try {
@@ -104,6 +148,7 @@ export default function PaymentMethods() {
     setExpiry('')
     setCvc('')
     setIsDefault(false)
+    setFocus(null)
   }
 
   const handleSave = async () => {
@@ -200,13 +245,7 @@ export default function PaymentMethods() {
   }
 
   if (loading && !refreshing) {
-    return (
-      <SafeAreaView style={styles.safe}>
-        <View style={styles.loadingWrap}>
-          <ActivityIndicator size="large" color={GREEN} />
-        </View>
-      </SafeAreaView>
-    )
+    return <StorePreloader />
   }
 
   return (
@@ -214,26 +253,31 @@ export default function PaymentMethods() {
       {/* Header */}
       <View style={styles.header}>
         <View style={styles.headerLeft}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+          <TouchableOpacity
+            onPress={() => router.back()}
+            style={styles.backBtn}
+            activeOpacity={0.8}
+          >
             <Ionicons name="chevron-back" size={22} color={TEXT} />
           </TouchableOpacity>
           <View>
+            <Text style={styles.kicker}>Account</Text>
             <Text style={styles.headerTitle}>Payment Methods</Text>
-            <Text style={styles.headerSub}>Manage your cards</Text>
           </View>
         </View>
 
         <TouchableOpacity
           onPress={() => setModalVisible(true)}
           activeOpacity={0.88}
+          style={styles.addHeaderOuter}
         >
           <LinearGradient
-            colors={[GREEN, BLUE]}
+            colors={[GREEN, '#14B8A6', BLUE]}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
             style={styles.addHeaderBtn}
           >
-            <Ionicons name="add" size={22} color="#fff" />
+            <Ionicons name="add" size={22} color="#041412" />
           </LinearGradient>
         </TouchableOpacity>
       </View>
@@ -264,14 +308,15 @@ export default function PaymentMethods() {
             <TouchableOpacity
               onPress={() => setModalVisible(true)}
               activeOpacity={0.88}
+              style={styles.emptyCtaOuter}
             >
               <LinearGradient
-                colors={[GREEN, BLUE]}
+                colors={[GREEN, '#14B8A6', BLUE]}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 0 }}
                 style={styles.emptyCta}
               >
-                <Ionicons name="add" size={18} color="#fff" />
+                <Ionicons name="add" size={18} color="#041412" />
                 <Text style={styles.emptyCtaText}>Add Card</Text>
               </LinearGradient>
             </TouchableOpacity>
@@ -289,7 +334,6 @@ export default function PaymentMethods() {
               ]}
             >
               <View style={styles.cardRow}>
-                {/* Brand mark */}
                 <View
                   style={[
                     styles.brandMark,
@@ -351,7 +395,10 @@ export default function PaymentMethods() {
               showsVerticalScrollIndicator={false}
             >
               <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>New Card</Text>
+                <View>
+                  <Text style={styles.modalKicker}>Secure</Text>
+                  <Text style={styles.modalTitle}>New Card</Text>
+                </View>
                 <TouchableOpacity
                   onPress={() => {
                     setModalVisible(false)
@@ -363,8 +410,7 @@ export default function PaymentMethods() {
                 </TouchableOpacity>
               </View>
 
-              {/* Brand grid — 3 per row, disciplined */}
-              <Text style={styles.label}>Card Brand</Text>
+              <Text style={styles.label}>Card brand</Text>
               <View style={styles.brandGrid}>
                 {CARD_BRANDS.map((b) => {
                   const active = brand === b.key
@@ -379,10 +425,7 @@ export default function PaymentMethods() {
                       ]}
                     >
                       <View
-                        style={[
-                          styles.brandDot,
-                          { backgroundColor: b.color },
-                        ]}
+                        style={[styles.brandDot, { backgroundColor: b.color }]}
                       />
                       <Text
                         style={[
@@ -399,53 +442,89 @@ export default function PaymentMethods() {
               </View>
 
               <Text style={styles.label}>Name on card *</Text>
-              <TextInput
-                value={name}
-                onChangeText={setName}
-                placeholder="Full name"
-                placeholderTextColor={MUTED}
-                style={styles.input}
-                autoCapitalize="words"
-              />
+              <View
+                style={[
+                  styles.field,
+                  focus === 'name' && styles.fieldFocused,
+                ]}
+              >
+                <TextInput
+                  value={name}
+                  onChangeText={setName}
+                  placeholder="Full name"
+                  placeholderTextColor={MUTED}
+                  style={styles.input}
+                  autoCapitalize="words"
+                  onFocus={() => setFocus('name')}
+                  onBlur={() => setFocus(null)}
+                />
+              </View>
 
               <Text style={styles.label}>Card number *</Text>
-              <TextInput
-                value={number}
-                onChangeText={(t) => setNumber(formatCardNumber(t))}
-                placeholder="ACCT-000003"
-                placeholderTextColor={MUTED}
-                style={styles.input}
-                keyboardType="number-pad"
-                maxLength={19}
-              />
+              <View
+                style={[
+                  styles.field,
+                  focus === 'number' && styles.fieldFocused,
+                ]}
+              >
+                <TextInput
+                  value={number}
+                  onChangeText={(t) => setNumber(formatCardNumber(t))}
+                  placeholder="ACCT-000003"
+                  placeholderTextColor={MUTED}
+                  style={styles.input}
+                  keyboardType="number-pad"
+                  maxLength={19}
+                  onFocus={() => setFocus('number')}
+                  onBlur={() => setFocus(null)}
+                />
+              </View>
 
               <View style={styles.row}>
                 <View style={styles.half}>
                   <Text style={styles.label}>Expiry *</Text>
-                  <TextInput
-                    value={expiry}
-                    onChangeText={(t) => setExpiry(formatExpiry(t))}
-                    placeholder="MM/YY"
-                    placeholderTextColor={MUTED}
-                    style={styles.input}
-                    keyboardType="number-pad"
-                    maxLength={5}
-                  />
+                  <View
+                    style={[
+                      styles.field,
+                      focus === 'expiry' && styles.fieldFocused,
+                    ]}
+                  >
+                    <TextInput
+                      value={expiry}
+                      onChangeText={(t) => setExpiry(formatExpiry(t))}
+                      placeholder="MM/YY"
+                      placeholderTextColor={MUTED}
+                      style={styles.input}
+                      keyboardType="number-pad"
+                      maxLength={5}
+                      onFocus={() => setFocus('expiry')}
+                      onBlur={() => setFocus(null)}
+                    />
+                  </View>
                 </View>
                 <View style={styles.half}>
                   <Text style={styles.label}>CVC *</Text>
-                  <TextInput
-                    value={cvc}
-                    onChangeText={(t) =>
-                      setCvc(t.replace(/\D/g, '').slice(0, 4))
-                    }
-                    placeholder="123"
-                    placeholderTextColor={MUTED}
-                    style={styles.input}
-                    keyboardType="number-pad"
-                    maxLength={4}
-                    secureTextEntry
-                  />
+                  <View
+                    style={[
+                      styles.field,
+                      focus === 'cvc' && styles.fieldFocused,
+                    ]}
+                  >
+                    <TextInput
+                      value={cvc}
+                      onChangeText={(t) =>
+                        setCvc(t.replace(/\D/g, '').slice(0, 4))
+                      }
+                      placeholder="123"
+                      placeholderTextColor={MUTED}
+                      style={styles.input}
+                      keyboardType="number-pad"
+                      maxLength={4}
+                      secureTextEntry
+                      onFocus={() => setFocus('cvc')}
+                      onBlur={() => setFocus(null)}
+                    />
+                  </View>
                 </View>
               </View>
 
@@ -455,7 +534,10 @@ export default function PaymentMethods() {
                 activeOpacity={0.8}
               >
                 <View
-                  style={[styles.checkbox, isDefault && styles.checkboxActive]}
+                  style={[
+                    styles.checkbox,
+                    isDefault && styles.checkboxActive,
+                  ]}
                 >
                   {isDefault && (
                     <Ionicons name="checkmark" size={14} color={BG} />
@@ -473,13 +555,17 @@ export default function PaymentMethods() {
                 style={styles.saveWrap}
               >
                 <LinearGradient
-                  colors={saving ? ['#4B5563', '#4B5563'] : [GREEN, BLUE]}
+                  colors={
+                    saving
+                      ? ['#4B5563', '#4B5563']
+                      : [GREEN, '#14B8A6', BLUE]
+                  }
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 0 }}
                   style={styles.saveBtn}
                 >
                   {saving ? (
-                    <ActivityIndicator color="#fff" />
+                    <ActivityIndicator color="#041412" />
                   ) : (
                     <Text style={styles.saveBtnText}>Save Card</Text>
                   )}
@@ -500,7 +586,47 @@ export default function PaymentMethods() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: BG },
-  loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+
+  /* Orb preloader */
+  loaderRoot: {
+    flex: 1,
+    backgroundColor: BG,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  orbWrapper: {
+    width: 110,
+    height: 110,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  orbRing: {
+    position: 'absolute',
+    width: 110,
+    height: 110,
+    borderRadius: 55,
+    borderWidth: 2.4,
+    borderColor: 'transparent',
+    borderTopColor: GREEN,
+    borderRightColor: BLUE,
+    borderBottomColor: 'transparent',
+    borderLeftColor: GREEN,
+  },
+  orbLogoWrap: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: 'rgba(0,229,117,0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  orbLogo: { width: 32, height: 32 },
+  loaderLabel: {
+    marginTop: 18,
+    color: MUTED,
+    fontSize: 13,
+    fontWeight: '600',
+  },
 
   header: {
     flexDirection: 'row',
@@ -517,22 +643,27 @@ const styles = StyleSheet.create({
     height: 40,
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: SURFACE,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: LINE,
+  },
+  kicker: {
+    color: GREEN,
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1.4,
+    textTransform: 'uppercase',
   },
   headerTitle: {
     fontSize: 18,
-    fontWeight: '700',
+    fontWeight: '800',
     color: TEXT,
     letterSpacing: -0.3,
   },
-  headerSub: {
-    fontSize: 11,
-    color: MUTED,
-    marginTop: 1,
-  },
+  addHeaderOuter: { overflow: 'hidden' },
   addHeaderBtn: {
     width: 40,
     height: 40,
-    borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -550,7 +681,6 @@ const styles = StyleSheet.create({
   emptyIcon: {
     width: 80,
     height: 80,
-    borderRadius: 40,
     backgroundColor: SURFACE,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: LINE,
@@ -571,30 +701,29 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     marginBottom: 22,
   },
+  emptyCtaOuter: { overflow: 'hidden' },
   emptyCta: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 22,
     paddingVertical: 13,
-    borderRadius: 14,
     gap: 6,
   },
   emptyCtaText: {
-    color: '#fff',
-    fontWeight: '700',
+    color: '#041412',
+    fontWeight: '800',
     fontSize: 15,
   },
 
   cardItem: {
     backgroundColor: SURFACE,
-    borderRadius: 16,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: LINE,
     padding: 16,
     marginBottom: 12,
   },
   cardItemDefault: {
-    borderColor: GREEN + '55',
+    borderColor: 'rgba(0,229,117,0.45)',
     backgroundColor: SURFACE_2,
   },
   cardRow: {
@@ -604,7 +733,6 @@ const styles = StyleSheet.create({
   brandMark: {
     width: 48,
     height: 34,
-    borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 12,
@@ -634,12 +762,11 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,229,117,0.12)',
     paddingHorizontal: 7,
     paddingVertical: 2,
-    borderRadius: 6,
     gap: 3,
   },
   defaultText: {
     fontSize: 10,
-    fontWeight: '600',
+    fontWeight: '700',
     color: GREEN,
   },
   cardMeta: {
@@ -657,7 +784,6 @@ const styles = StyleSheet.create({
     marginLeft: 4,
   },
 
-  /* Modal */
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.72)',
@@ -665,8 +791,6 @@ const styles = StyleSheet.create({
   },
   modalSheet: {
     backgroundColor: SURFACE,
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderColor: LINE,
     maxHeight: '92%',
@@ -681,36 +805,53 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: 18,
   },
+  modalKicker: {
+    color: GREEN,
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1.4,
+    textTransform: 'uppercase',
+  },
   modalTitle: {
     fontSize: 19,
-    fontWeight: '700',
+    fontWeight: '800',
     color: TEXT,
   },
   modalClose: {
     width: 34,
     height: 34,
-    borderRadius: 17,
     backgroundColor: SURFACE_2,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: LINE,
     alignItems: 'center',
     justifyContent: 'center',
   },
 
   label: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: SECONDARY,
+    fontSize: 11,
+    fontWeight: '700',
+    color: MUTED,
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
     marginBottom: 8,
     marginTop: 14,
   },
-  input: {
+  field: {
     backgroundColor: SURFACE_2,
-    borderRadius: 12,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderWidth: 1,
     borderColor: LINE,
     paddingHorizontal: 14,
-    paddingVertical: 13,
+    minHeight: 50,
+    justifyContent: 'center',
+  },
+  fieldFocused: {
+    borderColor: GREEN,
+    backgroundColor: 'rgba(0,229,117,0.06)',
+  },
+  input: {
     fontSize: 15,
     color: TEXT,
+    paddingVertical: 0,
   },
   row: {
     flexDirection: 'row',
@@ -718,7 +859,6 @@ const styles = StyleSheet.create({
   },
   half: { flex: 1 },
 
-  /* Brand grid — 3 columns, clean */
   brandGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -731,7 +871,6 @@ const styles = StyleSheet.create({
     gap: 7,
     paddingVertical: 11,
     paddingHorizontal: 10,
-    borderRadius: 12,
     backgroundColor: SURFACE_2,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: LINE,
@@ -743,7 +882,6 @@ const styles = StyleSheet.create({
   brandDot: {
     width: 8,
     height: 8,
-    borderRadius: 4,
   },
   brandChipText: {
     fontSize: 12,
@@ -764,7 +902,6 @@ const styles = StyleSheet.create({
   checkbox: {
     width: 22,
     height: 22,
-    borderRadius: 6,
     borderWidth: 2,
     borderColor: MUTED,
     alignItems: 'center',
@@ -782,7 +919,6 @@ const styles = StyleSheet.create({
 
   saveWrap: {
     marginTop: 24,
-    borderRadius: 14,
     overflow: 'hidden',
   },
   saveBtn: {
@@ -791,8 +927,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   saveBtnText: {
-    color: '#fff',
-    fontWeight: '700',
+    color: '#041412',
+    fontWeight: '800',
     fontSize: 16,
   },
   secureNote: {

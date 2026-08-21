@@ -5,11 +5,12 @@
 import api from '@/constants/api'
 import { CATEGORY_LIST } from '@/constants/productCatalog'
 import { Product } from '@/constants/types'
+import { useCart } from '@/context/CartContext'
 import { useMarketplace } from '@/context/MarketplaceContext'
 import { Ionicons } from '@expo/vector-icons'
-import { LinearGradient } from 'expo-linear-gradient'
 import { useAuth, useClerk, useUser } from '@clerk/clerk-expo'
 import { Image as ExpoImage } from 'expo-image'
+import { LinearGradient } from 'expo-linear-gradient'
 import { usePathname, useRouter } from 'expo-router'
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import {
@@ -29,7 +30,6 @@ import {
 } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
-/* ── Plazore Lounge Palette ── */
 const BG = '#050508'
 const SURFACE = '#0B0C12'
 const SURFACE_2 = '#11131C'
@@ -44,32 +44,29 @@ const OPEN_MS = 900
 const CLOSE_MS = 480
 const EASE_LUXURY = Easing.bezier(0.22, 1, 0.36, 1)
 const DEBOUNCE = 280
+const CART_SLIDE_MS = 3200
 
-const TILE_COLORS: Record<string, { bg: string; accent: string; glow: string }> = {
-  home:             { bg: '#0A1C14', accent: '#00E575', glow: 'rgba(0,229,117,0.22)' },
-  cart:             { bg: '#0D172A', accent: '#3B82F6', glow: 'rgba(59,130,246,0.22)' },
-  saved_stores:     { bg: '#1A160E', accent: '#D4A853', glow: 'rgba(212,168,83,0.22)' },
-  profile:          { bg: '#1A0E2A', accent: '#A78BFA', glow: 'rgba(167,139,250,0.22)' },
-  showroom_horizon: { bg: '#091520', accent: '#38BDF8', glow: 'rgba(56,189,248,0.22)' },
-  showroom_chamber: { bg: '#0A1818', accent: '#2DD4BF', glow: 'rgba(45,212,191,0.22)' },
-  showroom_signal:  { bg: '#1E0E28', accent: '#C084FC', glow: 'rgba(192,132,252,0.22)' },
-  showroom_locale:  { bg: '#1E1710', accent: '#FB923C', glow: 'rgba(251,146,60,0.22)' },
-  showroom_atelier: { bg: '#1A0F14', accent: '#F472B6', glow: 'rgba(244,114,182,0.22)' },
-  categories:       { bg: '#0B1E28', accent: '#22D3EE', glow: 'rgba(34,211,238,0.22)' },
-  new:              { bg: '#251A0A', accent: '#FBBF24', glow: 'rgba(251,191,36,0.22)' },
-  trending:         { bg: '#28120A', accent: '#FB923C', glow: 'rgba(251,146,60,0.22)' },
-  stores:           { bg: '#121430', accent: '#6366F1', glow: 'rgba(99,102,241,0.22)' },
-  help:             { bg: '#0D2623', accent: '#2DD4BF', glow: 'rgba(45,212,191,0.22)' },
-  contact:          { bg: '#181230', accent: '#818CF8', glow: 'rgba(129,140,248,0.22)' },
-  about:            { bg: '#0C1C18', accent: '#34D399', glow: 'rgba(52,211,153,0.22)' },
-}
-
-const SHOWROOM_ID_TO_ROOM: Record<string, number> = {
-  showroom_horizon: 1,
-  showroom_chamber: 2,
-  showroom_signal: 3,
-  showroom_locale: 4,
-  showroom_atelier: 5,
+/** Distinct character per tile (webOS-style) */
+const TILE_COLORS: Record<
+  string,
+  { bg: string; accent: string; glow: string; solid?: string }
+> = {
+  home: { bg: '#0A1C14', accent: '#00E575', glow: 'rgba(0,229,117,0.25)', solid: '#0D9488' },
+  browse: { bg: '#0B1E28', accent: '#22D3EE', glow: 'rgba(34,211,238,0.22)', solid: '#0EA5E9' },
+  cart: { bg: '#0D172A', accent: '#3B82F6', glow: 'rgba(59,130,246,0.28)', solid: '#2563EB' },
+  wishlist: { bg: '#1A0F14', accent: '#F472B6', glow: 'rgba(244,114,182,0.25)', solid: '#DB2777' },
+  saved_stores: { bg: '#1A160E', accent: '#D4A853', glow: 'rgba(212,168,83,0.25)', solid: '#B45309' },
+  profile: { bg: '#1A0E2A', accent: '#A78BFA', glow: 'rgba(167,139,250,0.25)', solid: '#7C3AED' },
+  music: { bg: '#1E1030', accent: '#C084FC', glow: 'rgba(192,132,252,0.28)', solid: '#9333EA' },
+  settings: { bg: '#141820', accent: '#94A3B8', glow: 'rgba(148,163,184,0.2)', solid: '#475569' },
+  categories: { bg: '#0B1E28', accent: '#22D3EE', glow: 'rgba(34,211,238,0.22)', solid: '#0891B2' },
+  new: { bg: '#251A0A', accent: '#FBBF24', glow: 'rgba(251,191,36,0.25)', solid: '#D97706' },
+  trending: { bg: '#28120A', accent: '#FB923C', glow: 'rgba(251,146,60,0.25)', solid: '#EA580C' },
+  stores: { bg: '#121430', accent: '#6366F1', glow: 'rgba(99,102,241,0.25)', solid: '#4F46E5' },
+  help: { bg: '#0D2623', accent: '#2DD4BF', glow: 'rgba(45,212,191,0.22)', solid: '#0F766E' },
+  contact: { bg: '#181230', accent: '#818CF8', glow: 'rgba(129,140,248,0.22)', solid: '#4F46E5' },
+  about: { bg: '#0C1C18', accent: '#34D399', glow: 'rgba(52,211,153,0.22)', solid: '#059669' },
+  orders: { bg: '#0F1A24', accent: '#60A5FA', glow: 'rgba(96,165,250,0.22)', solid: '#1D4ED8' },
 }
 
 type NavItem = {
@@ -118,7 +115,6 @@ type SellerInfo = {
 export type PlazoreNavigationHubProps = {
   visible: boolean
   onClose: () => void
-  onScrollToRoom?: (roomNumber: number) => void
   slots?: {
     profile?: React.ReactNode
     recommendations?: React.ReactNode
@@ -130,43 +126,132 @@ export type PlazoreNavigationHubProps = {
 
 const SECTIONS: NavSection[] = [
   {
-    id: 'primary',
-    title: 'Floors',
+    id: 'floors',
+    title: 'Main floors',
     items: [
-      { id: 'home', label: 'Home', subtitle: 'Main showroom', icon: 'home', href: '/(tabs)' },
-      { id: 'cart', label: 'Cart', subtitle: 'Your bag', icon: 'bag-handle', href: '/(tabs)/cart' },
-      { id: 'saved_stores', label: 'Saved Stores', subtitle: 'Your floors', icon: 'bookmark', href: '/saved-stores' },
-      { id: 'profile', label: 'Profile', subtitle: 'Account', icon: 'person', href: '/(tabs)/profile' },
+      {
+        id: 'home',
+        label: 'Mall',
+        subtitle: 'Home showroom',
+        icon: 'storefront',
+        href: '/(tabs)',
+      },
+      {
+        id: 'browse',
+        label: 'Browse',
+        subtitle: 'Search the mall',
+        icon: 'search',
+        href: '/(tabs)/search',
+      },
+      {
+        id: 'cart',
+        label: 'Cart',
+        subtitle: 'Checkout bag',
+        icon: 'bag-handle',
+        href: '/(tabs)/cart',
+      },
+      {
+        id: 'wishlist',
+        label: 'Wishlist',
+        subtitle: 'Saved products',
+        icon: 'heart',
+        href: '/(tabs)/favorites',
+      },
     ],
   },
   {
-    id: 'showroom_rooms',
-    title: 'Showroom Floors & Rooms',
+    id: 'account',
+    title: 'Your space',
     items: [
-      { id: 'showroom_horizon', label: '01. Horizon', subtitle: 'Expanded view', icon: 'eye-outline', href: '/(tabs)' },
-      { id: 'showroom_chamber', label: '02. Chamber', subtitle: 'Private selection', icon: 'key-outline', href: '/(tabs)' },
-      { id: 'showroom_signal', label: '03. Signal', subtitle: 'Spotlight focus', icon: 'radio-outline', href: '/(tabs)' },
-      { id: 'showroom_locale', label: '04. Locale', subtitle: 'Regional walk', icon: 'location-outline', href: '/(tabs)' },
-      { id: 'showroom_atelier', label: '05. Atelier', subtitle: 'Curated gallery', icon: 'sparkles-outline', href: '/(tabs)' },
+      {
+        id: 'profile',
+        label: 'Profile',
+        subtitle: 'Account & prefs',
+        icon: 'person',
+        href: '/(tabs)/profile',
+      },
+      {
+        id: 'orders',
+        label: 'Orders',
+        subtitle: 'Track deliveries',
+        icon: 'cube-outline',
+        href: '/orders',
+      },
+      {
+        id: 'saved_stores',
+        label: 'Saved stores',
+        subtitle: 'Followed brands',
+        icon: 'bookmark',
+        href: '/saved-stores',
+      },
+      {
+        id: 'music',
+        label: 'Music',
+        subtitle: 'Ambient soundtrack',
+        icon: 'musical-notes',
+        href: '/settings/music',
+      },
+      {
+        id: 'settings',
+        label: 'Settings',
+        subtitle: 'App preferences',
+        icon: 'settings-outline',
+        href: '/settings',
+      },
     ],
   },
   {
     id: 'explore',
-    title: 'Explore the Mall',
+    title: 'Explore',
     items: [
-      { id: 'categories', label: 'Categories', subtitle: 'Browse by room', icon: 'apps' },
-      { id: 'new', label: 'New Arrivals', subtitle: 'Just in', icon: 'sparkles' },
-      { id: 'trending', label: 'Trending', subtitle: 'Moving now', icon: 'flame' },
-      { id: 'stores', label: 'Stores', subtitle: 'Seller floors', icon: 'storefront' },
+      {
+        id: 'categories',
+        label: 'Categories',
+        subtitle: 'Shop by type',
+        icon: 'apps',
+      },
+      {
+        id: 'new',
+        label: 'New arrivals',
+        subtitle: 'Just listed',
+        icon: 'sparkles',
+      },
+      {
+        id: 'trending',
+        label: 'Trending',
+        subtitle: 'Popular now',
+        icon: 'flame',
+      },
+      {
+        id: 'stores',
+        label: 'Stores',
+        subtitle: 'Seller directories',
+        icon: 'business-outline',
+      },
     ],
   },
   {
     id: 'support',
-    title: 'Service Desk',
+    title: 'Support',
     items: [
-      { id: 'help', label: 'Help', subtitle: 'Guides', icon: 'help-buoy' },
-      { id: 'contact', label: 'Contact', subtitle: 'Talk to us', icon: 'chatbubbles' },
-      { id: 'about', label: 'About', subtitle: 'Plazore', icon: 'information-circle' },
+      {
+        id: 'help',
+        label: 'Help',
+        subtitle: 'Guides & FAQs',
+        icon: 'help-buoy',
+      },
+      {
+        id: 'contact',
+        label: 'Contact',
+        subtitle: 'Reach Plazore',
+        icon: 'chatbubbles',
+      },
+      {
+        id: 'about',
+        label: 'About',
+        subtitle: 'The digital mall',
+        icon: 'information-circle',
+      },
     ],
   },
 ]
@@ -189,7 +274,7 @@ function FadeSlideIn({
     Animated.timing(anim, {
       toValue: 1,
       duration,
-      delay: delayBase + index * 55,
+      delay: delayBase + index * 48,
       easing: EASE_LUXURY,
       useNativeDriver: true,
     }).start()
@@ -203,7 +288,7 @@ function FadeSlideIn({
           {
             translateY: anim.interpolate({
               inputRange: [0, 1],
-              outputRange: [18, 0],
+              outputRange: [16, 0],
             }),
           },
         ],
@@ -214,6 +299,108 @@ function FadeSlideIn({
   )
 }
 
+/** Smooth horizontal loop of cart product images — fixed step = panel width */
+function CartImageRail({
+  uris,
+  width,
+  height,
+}: {
+  uris: string[]
+  width: number
+  height: number
+}) {
+  const panelW = Math.round(width * 0.42)
+  const slide = useRef(new Animated.Value(0)).current
+  const indexRef = useRef(0)
+  const [index, setIndex] = useState(0)
+
+  useEffect(() => {
+    indexRef.current = 0
+    setIndex(0)
+    slide.setValue(0)
+
+    if (uris.length < 2) return
+
+    let alive = true
+    let timeout: ReturnType<typeof setTimeout> | null = null
+
+    const tick = () => {
+      if (!alive) return
+      const next = (indexRef.current + 1) % uris.length
+      Animated.timing(slide, {
+        toValue: -next * panelW, // must match each image width
+        duration: 520,
+        easing: EASE_LUXURY,
+        useNativeDriver: true,
+      }).start(({ finished }) => {
+        if (!finished || !alive) return
+        indexRef.current = next
+        setIndex(next)
+        timeout = setTimeout(tick, CART_SLIDE_MS)
+      })
+    }
+
+    timeout = setTimeout(tick, CART_SLIDE_MS)
+    return () => {
+      alive = false
+      if (timeout) clearTimeout(timeout)
+      slide.stopAnimation()
+    }
+  }, [uris, panelW, slide])
+
+  if (uris.length === 0) return null
+
+  return (
+    <View
+      style={{
+        position: 'absolute',
+        right: 0,
+        top: 0,
+        bottom: 0,
+        width: panelW,
+        overflow: 'hidden',
+      }}
+      pointerEvents="none"
+    >
+      <Animated.View
+        style={{
+          flexDirection: 'row',
+          height,
+          width: panelW * uris.length,
+          transform: [{ translateX: slide }],
+        }}
+      >
+        {uris.map((uri, i) => (
+          <ExpoImage
+            key={`${uri}-${i}`}
+            source={{ uri }}
+            style={{ width: panelW, height }}
+            contentFit="cover"
+            cachePolicy="memory-disk"
+            transition={0}
+          />
+        ))}
+      </Animated.View>
+      <LinearGradient
+        colors={['rgba(13,23,42,0.95)', 'transparent']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 0 }}
+        style={StyleSheet.absoluteFillObject}
+      />
+      {uris.length > 1 && (
+        <View style={styles.cartDots}>
+          {uris.map((_, i) => (
+            <View
+              key={i}
+              style={[styles.cartDot, i === index && styles.cartDotOn]}
+            />
+          ))}
+        </View>
+      )}
+    </View>
+  )
+}
+
 function MallTile({
   item,
   active,
@@ -221,6 +408,8 @@ function MallTile({
   width,
   height,
   index,
+  cartImages,
+  cartCount,
 }: {
   item: NavItem
   active: boolean
@@ -228,6 +417,8 @@ function MallTile({
   width: number
   height: number
   index: number
+  cartImages?: string[]
+  cartCount?: number
 }) {
   const scale = useRef(new Animated.Value(1)).current
   const palette = TILE_COLORS[item.id] || {
@@ -235,9 +426,11 @@ function MallTile({
     accent: GREEN,
     glow: 'rgba(0,229,117,0.2)',
   }
+  const isCart = item.id === 'cart'
+  const hasCartMedia = isCart && (cartImages?.length ?? 0) > 0
 
   return (
-    <FadeSlideIn index={index} delayBase={180} duration={750}>
+    <FadeSlideIn index={index} delayBase={160} duration={720}>
       <Pressable
         onPress={onPress}
         onPressIn={() =>
@@ -269,21 +462,27 @@ function MallTile({
             transform: [{ scale }],
           }}
         >
-          {/* Soft glow orb */}
           <View
             pointerEvents="none"
             style={{
               position: 'absolute',
-              top: -30,
-              right: -30,
-              width: 90,
-              height: 90,
+              top: -28,
+              right: -28,
+              width: 88,
+              height: 88,
               backgroundColor: palette.glow,
-              opacity: active ? 0.5 : 0.18,
+              opacity: active ? 0.55 : 0.2,
             }}
           />
 
-          {/* Active edge bar */}
+          {hasCartMedia && (
+            <CartImageRail
+              uris={cartImages!}
+              width={width}
+              height={height}
+            />
+          )}
+
           {active && (
             <View
               style={{
@@ -297,25 +496,34 @@ function MallTile({
             />
           )}
 
-          <View
-            style={{
-              width: 40,
-              height: 40,
-              alignItems: 'center',
-              justifyContent: 'center',
-              backgroundColor: `${palette.accent}14`,
-              borderWidth: 1,
-              borderColor: `${palette.accent}30`,
-            }}
-          >
-            <Ionicons
-              name={item.icon}
-              size={20}
-              color={active ? palette.accent : TEXT}
-            />
+          <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
+            <View
+              style={{
+                width: 40,
+                height: 40,
+                alignItems: 'center',
+                justifyContent: 'center',
+                backgroundColor: `${palette.accent}18`,
+                borderWidth: 1,
+                borderColor: `${palette.accent}35`,
+              }}
+            >
+              <Ionicons
+                name={item.icon}
+                size={20}
+                color={active ? palette.accent : TEXT}
+              />
+            </View>
+            {isCart && (cartCount ?? 0) > 0 && (
+              <View style={styles.cartBadge}>
+                <Text style={styles.cartBadgeText}>
+                  {(cartCount ?? 0) > 99 ? '99+' : cartCount}
+                </Text>
+              </View>
+            )}
           </View>
 
-          <View>
+          <View style={{ maxWidth: hasCartMedia ? '55%' : '100%' }}>
             <Text
               style={{
                 color: active ? palette.accent : TEXT,
@@ -345,7 +553,6 @@ function MallTile({
 export default function PlazoreNavigationHub({
   visible,
   onClose,
-  onScrollToRoom,
   slots,
 }: PlazoreNavigationHubProps) {
   const insets = useSafeAreaInsets()
@@ -353,6 +560,31 @@ export default function PlazoreNavigationHub({
   const router = useRouter()
   const pathname = usePathname()
   const { formatProduct } = useMarketplace()
+  const cartCtx = useCart() as any
+  const cartItems = cartCtx?.cart ?? cartCtx?.items ?? cartCtx?.cartItems ?? []
+  const cartCount = Number(
+    cartCtx?.itemCount ??
+      cartItems.reduce(
+        (n: number, i: any) => n + (Number(i.quantity) || 1),
+        0
+      )
+  )
+
+  const cartImages = useMemo(() => {
+    const uris: string[] = []
+    for (const item of cartItems) {
+      const img =
+        item?.product?.images?.[0] ||
+        item?.image ||
+        item?.product?.image ||
+        null
+      if (img && typeof img === 'string' && !uris.includes(img)) {
+        uris.push(img)
+      }
+      if (uris.length >= 8) break
+    }
+    return uris
+  }, [cartItems])
 
   const { user } = useUser()
   const { signOut } = useClerk()
@@ -384,7 +616,7 @@ export default function PlazoreNavigationHub({
   const pad = 16
   const gap = 10
   const tileW = Math.floor((windowW - pad * 2 - gap) / 2)
-  const tileH = Math.round(tileW * 0.9)
+  const tileH = Math.round(tileW * 0.88)
 
   const topInset = Math.max(insets.top, StatusBar.currentHeight ?? 0, 12)
   const bottomInset = Math.max(insets.bottom, 12)
@@ -417,17 +649,17 @@ export default function PlazoreNavigationHub({
       setStoreLogo(null)
       return
     }
-
     let alive = true
-
     ;(async () => {
       try {
         const token = await getTokenRef.current()
         if (!token) return
-
-        const endpoints = ['/seller/store', '/seller/me', '/users/me', '/users/profile']
-
-        for (const ep of endpoints) {
+        for (const ep of [
+          '/seller/store',
+          '/seller/me',
+          '/users/me',
+          '/users/profile',
+        ]) {
           try {
             const res = await api.get(ep, {
               headers: { Authorization: `Bearer ${token}` },
@@ -441,7 +673,7 @@ export default function PlazoreNavigationHub({
               return
             }
           } catch {
-            // try next
+            /* next */
           }
         }
         if (alive) setStoreLogo(null)
@@ -449,7 +681,6 @@ export default function PlazoreNavigationHub({
         if (alive) setStoreLogo(null)
       }
     })()
-
     return () => {
       alive = false
     }
@@ -463,7 +694,9 @@ export default function PlazoreNavigationHub({
         const res = await api.get('/products?limit=80')
         if (!alive) return
         if (res.data?.success) setAllProducts(res.data.data || [])
-      } catch {}
+      } catch {
+        /* ignore */
+      }
     })()
     return () => {
       alive = false
@@ -483,17 +716,14 @@ export default function PlazoreNavigationHub({
       setSearchLoading(false)
       return
     }
-
     let cancelled = false
     setSearchLoading(true)
-
     ;(async () => {
       try {
         const res = await api.get(
           `/ai/search-suggest?q=${encodeURIComponent(debounced)}`
         )
         if (cancelled || !res.data?.success) return
-
         const d = res.data.data
         setServerProducts(Array.isArray(d?.products) ? d.products : [])
         setAiPhrases(Array.isArray(d?.suggestions) ? d.suggestions : [])
@@ -508,7 +738,6 @@ export default function PlazoreNavigationHub({
         if (!cancelled) setSearchLoading(false)
       }
     })()
-
     return () => {
       cancelled = true
     }
@@ -691,11 +920,7 @@ export default function PlazoreNavigationHub({
     const map: Record<string, boolean> = {}
     SECTIONS.forEach((s) =>
       s.items.forEach((item) => {
-        if (SHOWROOM_ID_TO_ROOM[item.id]) {
-          map[item.id] = false
-        } else {
-          map[item.id] = isActive(item.href)
-        }
+        map[item.id] = isActive(item.href)
       })
     )
     if (
@@ -710,37 +935,47 @@ export default function PlazoreNavigationHub({
   }, [pathname])
 
   const navigate = (href?: string, itemId?: string) => {
-    if (itemId && SHOWROOM_ID_TO_ROOM[itemId]) {
-      onClose()
-      requestAnimationFrame(() => {
-        onScrollToRoom?.(SHOWROOM_ID_TO_ROOM[itemId])
-      })
-      return
-    }
-
     onClose()
 
     if (itemId === 'categories') {
       requestAnimationFrame(() => {
-        router.push({ pathname: '/shop', params: { mode: 'categories' } } as any)
+        router.push({
+          pathname: '/(tabs)/search',
+          params: { mode: 'categories' },
+        } as any)
       })
       return
     }
     if (itemId === 'new') {
       requestAnimationFrame(() => {
-        router.push({ pathname: '/shop', params: { mode: 'new' } } as any)
+        router.push({
+          pathname: '/(tabs)/search',
+          params: { mode: 'new' },
+        } as any)
       })
       return
     }
     if (itemId === 'trending') {
       requestAnimationFrame(() => {
-        router.push({ pathname: '/shop', params: { mode: 'trending' } } as any)
+        router.push({
+          pathname: '/(tabs)/search',
+          params: { mode: 'trending' },
+        } as any)
       })
       return
     }
     if (itemId === 'stores') {
       requestAnimationFrame(() => {
-        router.push({ pathname: '/shop', params: { mode: 'stores' } } as any)
+        router.push({
+          pathname: '/(tabs)/search',
+          params: { mode: 'stores' },
+        } as any)
+      })
+      return
+    }
+    if (itemId === 'help' || itemId === 'contact' || itemId === 'about') {
+      requestAnimationFrame(() => {
+        router.push('/settings/about' as any)
       })
       return
     }
@@ -749,7 +984,9 @@ export default function PlazoreNavigationHub({
     requestAnimationFrame(() => {
       try {
         router.push(href as any)
-      } catch {}
+      } catch {
+        /* ignore */
+      }
     })
   }
 
@@ -758,7 +995,9 @@ export default function PlazoreNavigationHub({
     try {
       await signOut()
       router.replace('/sign-in' as any)
-    } catch {}
+    } catch {
+      /* ignore */
+    }
   }
 
   const handleSellerCta = () => {
@@ -781,7 +1020,11 @@ export default function PlazoreNavigationHub({
       statusBarTranslucent
       onRequestClose={onClose}
     >
-      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
+      <StatusBar
+        barStyle="light-content"
+        backgroundColor="transparent"
+        translucent
+      />
       <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)' }}>
         <Animated.View
           style={{
@@ -792,15 +1035,13 @@ export default function PlazoreNavigationHub({
             paddingBottom: bottomInset,
           }}
         >
-          {/* Top bar */}
           <View style={styles.topBar}>
-            <Text style={styles.topLabel}>NAVIGATION</Text>
+            <Text style={styles.topLabel}>LOUNGE</Text>
             <Pressable onPress={onClose} style={styles.closeBtn} hitSlop={12}>
               <Ionicons name="close" size={18} color={TEXT} />
             </Pressable>
           </View>
 
-          {/* Logo / LOUNGE */}
           <Animated.View style={[styles.logoWrap, { opacity: contentFade }]}>
             <Animated.View
               pointerEvents="none"
@@ -808,7 +1049,6 @@ export default function PlazoreNavigationHub({
             >
               <Text style={styles.loungeText}>LOUNGE</Text>
             </Animated.View>
-
             <Animated.View style={{ opacity: logoOpacity }}>
               <Image
                 source={require('../assets/logo-2.png')}
@@ -820,7 +1060,6 @@ export default function PlazoreNavigationHub({
             </Animated.View>
           </Animated.View>
 
-          {/* Search */}
           <Animated.View
             style={[
               styles.searchBar,
@@ -877,7 +1116,11 @@ export default function PlazoreNavigationHub({
                   </View>
                 ) : totalHitsCount === 0 ? (
                   <View style={styles.emptySearch}>
-                    <Ionicons name="search-outline" size={28} color={TEXT_MUTED} />
+                    <Ionicons
+                      name="search-outline"
+                      size={28}
+                      color={TEXT_MUTED}
+                    />
                     <Text style={styles.emptySearchText}>
                       No results for “{query.trim()}”
                     </Text>
@@ -887,18 +1130,23 @@ export default function PlazoreNavigationHub({
                     {groupedHits.products.length > 0 && (
                       <View style={{ marginBottom: 22 }}>
                         <View style={styles.resultHeader}>
-                          <Text style={styles.sectionHeaderInline}>PRODUCTS</Text>
+                          <Text style={styles.sectionHeaderInline}>
+                            PRODUCTS
+                          </Text>
                           <Text style={styles.resultCount}>
                             {groupedHits.products.length}
                           </Text>
                         </View>
-
                         {groupedHits.products.map((h, i) => {
                           if (h.type !== 'product') return null
                           const priceText = formatProduct(h.price, h.region)
-
                           return (
-                            <FadeSlideIn key={h.id} index={i} delayBase={80} duration={650}>
+                            <FadeSlideIn
+                              key={h.id}
+                              index={i}
+                              delayBase={80}
+                              duration={650}
+                            >
                               <Pressable
                                 onPress={() => onHitPress(h)}
                                 style={styles.resultRow}
@@ -919,10 +1167,15 @@ export default function PlazoreNavigationHub({
                                   )}
                                 </View>
                                 <View style={{ flex: 1, minWidth: 0 }}>
-                                  <Text style={styles.resultTitle} numberOfLines={2}>
+                                  <Text
+                                    style={styles.resultTitle}
+                                    numberOfLines={2}
+                                  >
                                     {h.label}
                                   </Text>
-                                  <Text style={styles.resultPrice}>{priceText}</Text>
+                                  <Text style={styles.resultPrice}>
+                                    {priceText}
+                                  </Text>
                                 </View>
                               </Pressable>
                             </FadeSlideIn>
@@ -939,11 +1192,15 @@ export default function PlazoreNavigationHub({
                             {groupedHits.stores.length}
                           </Text>
                         </View>
-
                         {groupedHits.stores.map((h, i) => {
                           if (h.type !== 'store') return null
                           return (
-                            <FadeSlideIn key={h.id} index={i} delayBase={60} duration={600}>
+                            <FadeSlideIn
+                              key={h.id}
+                              index={i}
+                              delayBase={60}
+                              duration={600}
+                            >
                               <Pressable
                                 onPress={() => onHitPress(h)}
                                 style={styles.resultRow}
@@ -956,15 +1213,22 @@ export default function PlazoreNavigationHub({
                                       contentFit="cover"
                                     />
                                   ) : (
-                                    <Ionicons name="storefront" size={20} color={BLUE} />
+                                    <Ionicons
+                                      name="storefront"
+                                      size={20}
+                                      color={BLUE}
+                                    />
                                   )}
                                 </View>
                                 <View style={{ flex: 1, minWidth: 0 }}>
-                                  <Text style={styles.resultTitle} numberOfLines={1}>
+                                  <Text
+                                    style={styles.resultTitle}
+                                    numberOfLines={1}
+                                  >
                                     {h.label}
                                   </Text>
                                   <Text style={styles.resultStoreMeta}>
-                                    Official Storefront
+                                    Official storefront
                                   </Text>
                                 </View>
                               </Pressable>
@@ -978,51 +1242,60 @@ export default function PlazoreNavigationHub({
               </View>
             ) : (
               <>
-                {/* Seller CTA */}
-<FadeSlideIn index={0} delayBase={100}>
-  <Pressable onPress={handleSellerCta}>
-    {isSeller ? (
-      <LinearGradient
-        colors={[GREEN, BLUE]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 0 }}
-        style={styles.sellerCtaActive}
-      >
-        <View style={styles.sellerIconActive}>
-          {storeLogo ? (
-            <Image
-              source={{ uri: storeLogo }}
-              style={{ width: 42, height: 42 }}
-              resizeMode="cover"
-            />
-          ) : (
-            <Ionicons name="storefront" size={18} color={BG} />
-          )}
-        </View>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.sellerTitleActive}>Storefront</Text>
-          <Text style={styles.sellerSubActive}>
-            Products, orders & chats
-          </Text>
-        </View>
-        <Ionicons name="arrow-forward" size={16} color={BG} />
-      </LinearGradient>
-    ) : (
-      <View style={styles.sellerCta}>
-        <View style={styles.sellerIcon}>
-          <Ionicons name="storefront-outline" size={20} color={TEXT} />
-        </View>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.sellerTitle}>Open a Store</Text>
-          <Text style={styles.sellerSub}>
-            Become an official seller on Plazore
-          </Text>
-        </View>
-        <Ionicons name="chevron-forward" size={16} color={TEXT_MUTED} />
-      </View>
-    )}
-  </Pressable>
-</FadeSlideIn>
+                <FadeSlideIn index={0} delayBase={100}>
+                  <Pressable onPress={handleSellerCta}>
+                    {isSeller ? (
+                      <LinearGradient
+                        colors={[GREEN, BLUE]}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 0 }}
+                        style={styles.sellerCtaActive}
+                      >
+                        <View style={styles.sellerIconActive}>
+                          {storeLogo ? (
+                            <Image
+                              source={{ uri: storeLogo }}
+                              style={{ width: 42, height: 42 }}
+                              resizeMode="cover"
+                            />
+                          ) : (
+                            <Ionicons name="storefront" size={18} color={BG} />
+                          )}
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.sellerTitleActive}>
+                            Seller dashboard
+                          </Text>
+                          <Text style={styles.sellerSubActive}>
+                            Products, orders & messages
+                          </Text>
+                        </View>
+                        <Ionicons name="arrow-forward" size={16} color={BG} />
+                      </LinearGradient>
+                    ) : (
+                      <View style={styles.sellerCta}>
+                        <View style={styles.sellerIcon}>
+                          <Ionicons
+                            name="storefront-outline"
+                            size={20}
+                            color={TEXT}
+                          />
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.sellerTitle}>Open a store</Text>
+                          <Text style={styles.sellerSub}>
+                            Sell on Plazore’s digital mall
+                          </Text>
+                        </View>
+                        <Ionicons
+                          name="chevron-forward"
+                          size={16}
+                          color={TEXT_MUTED}
+                        />
+                      </View>
+                    )}
+                  </Pressable>
+                </FadeSlideIn>
 
                 {slots?.profile && (
                   <View style={styles.slotWrap}>{slots.profile}</View>
@@ -1052,6 +1325,10 @@ export default function PlazoreNavigationHub({
                             width={tileW}
                             height={tileH}
                             index={idx}
+                            cartImages={
+                              item.id === 'cart' ? cartImages : undefined
+                            }
+                            cartCount={item.id === 'cart' ? cartCount : undefined}
                           />
                         )
                       })}
@@ -1065,8 +1342,7 @@ export default function PlazoreNavigationHub({
                   </View>
                 )}
 
-                {/* Profile footer */}
-                <FadeSlideIn index={12} delayBase={160}>
+                <FadeSlideIn index={14} delayBase={160}>
                   <View style={styles.footerCard}>
                     <Pressable
                       onPress={() => navigate('/(tabs)/profile')}
@@ -1088,8 +1364,8 @@ export default function PlazoreNavigationHub({
                         </Text>
                         <Text style={styles.footerMeta} numberOfLines={1}>
                           {isSignedIn
-                            ? 'View profile details'
-                            : 'Sign in to sync saved items'}
+                            ? 'View profile'
+                            : 'Sign in to sync your account'}
                         </Text>
                       </View>
                       <Ionicons
@@ -1144,7 +1420,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: LINE,
   },
-
   logoWrap: {
     paddingHorizontal: 20,
     alignItems: 'center',
@@ -1163,7 +1438,6 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     letterSpacing: 7,
   },
-
   searchBar: {
     marginHorizontal: 16,
     marginBottom: 14,
@@ -1183,7 +1457,6 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     paddingVertical: 0,
   },
-
   sectionHeader: {
     color: TEXT_MUTED,
     fontSize: 10,
@@ -1200,95 +1473,97 @@ const styles = StyleSheet.create({
     letterSpacing: 1.6,
     textTransform: 'uppercase',
   },
-
   tileGrid: {
     paddingHorizontal: 16,
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 10,
   },
-
-  sellerCta: {
-  marginHorizontal: 16,
-  marginBottom: 20,
-  flexDirection: 'row',
-  alignItems: 'center',
-  backgroundColor: SURFACE,
-  borderWidth: 1,
-  borderColor: LINE,
-  paddingVertical: 13,
-  paddingHorizontal: 13,
-  gap: 12,
-},
-sellerCtaActive: {
-  marginHorizontal: 16,
-  marginBottom: 20,
-  flexDirection: 'row',
-  alignItems: 'center',
-  paddingVertical: 13,
-  paddingHorizontal: 13,
-  gap: 12,
-},
-sellerIcon: {
-  width: 42,
-  height: 42,
-  alignItems: 'center',
-  justifyContent: 'center',
-  backgroundColor: SURFACE_2,
-},
-sellerIconActive: {
-  width: 42,
-  height: 42,
-  alignItems: 'center',
-  justifyContent: 'center',
-  backgroundColor: 'rgba(9,11,15,0.12)',
-  overflow: 'hidden',
-},
-sellerTitle: {
-  color: TEXT,
-  fontSize: 14,
-  fontWeight: '700',
-},
-sellerSub: {
-  color: TEXT_DIM,
-  fontSize: 12,
-  marginTop: 2,
-},
-sellerTitleActive: {
-  color: BG,
-  fontSize: 14,
-  fontWeight: '700',
-},
-sellerSubActive: {
-  color: 'rgba(9,11,15,0.65)',
-  fontSize: 12,
-  marginTop: 2,
-},
-
-  slotWrap: {
-    marginBottom: 12,
-    paddingHorizontal: 16,
-  },
-
-  emptySearch: {
-    paddingVertical: 40,
+  cartBadge: {
+    marginLeft: 8,
+    minWidth: 20,
+    height: 18,
+    paddingHorizontal: 5,
+    backgroundColor: GREEN,
     alignItems: 'center',
+    justifyContent: 'center',
   },
-  emptySearchText: {
-    color: TEXT_DIM,
-    fontSize: 14,
-    marginTop: 10,
+  cartBadgeText: {
+    color: '#041412',
+    fontSize: 10,
+    fontWeight: '800',
   },
+  cartDots: {
+    position: 'absolute',
+    bottom: 8,
+    right: 8,
+    flexDirection: 'row',
+    gap: 3,
+  },
+  cartDot: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: 'rgba(255,255,255,0.25)',
+  },
+  cartDotOn: {
+    backgroundColor: '#fff',
+    width: 10,
+  },
+  sellerCta: {
+    marginHorizontal: 16,
+    marginBottom: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: SURFACE,
+    borderWidth: 1,
+    borderColor: LINE,
+    paddingVertical: 13,
+    paddingHorizontal: 13,
+    gap: 12,
+  },
+  sellerCtaActive: {
+    marginHorizontal: 16,
+    marginBottom: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 13,
+    paddingHorizontal: 13,
+    gap: 12,
+  },
+  sellerIcon: {
+    width: 42,
+    height: 42,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: SURFACE_2,
+  },
+  sellerIconActive: {
+    width: 42,
+    height: 42,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(9,11,15,0.12)',
+    overflow: 'hidden',
+  },
+  sellerTitle: { color: TEXT, fontSize: 14, fontWeight: '700' },
+  sellerSub: { color: TEXT_DIM, fontSize: 12, marginTop: 2 },
+  sellerTitleActive: { color: BG, fontSize: 14, fontWeight: '700' },
+  sellerSubActive: {
+    color: 'rgba(9,11,15,0.65)',
+    fontSize: 12,
+    marginTop: 2,
+  },
+  slotWrap: { marginBottom: 12, paddingHorizontal: 16 },
+  emptySearch: { paddingVertical: 40, alignItems: 'center' },
+  emptySearchText: { color: TEXT_DIM, fontSize: 14, marginTop: 10 },
   resultHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 12,
   },
-  resultCount: {
-    color: TEXT_MUTED,
-    fontSize: 12,
-  },
+  resultCount: { color: TEXT_MUTED, fontSize: 12 },
   resultRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1303,11 +1578,7 @@ sellerSubActive: {
     justifyContent: 'center',
     overflow: 'hidden',
   },
-  resultTitle: {
-    color: TEXT,
-    fontSize: 14,
-    fontWeight: '500',
-  },
+  resultTitle: { color: TEXT, fontSize: 14, fontWeight: '500' },
   resultPrice: {
     color: GREEN,
     fontSize: 13,
@@ -1320,7 +1591,6 @@ sellerSubActive: {
     marginTop: 3,
     fontWeight: '600',
   },
-
   footerCard: {
     marginHorizontal: 16,
     marginBottom: 8,
@@ -1350,16 +1620,8 @@ sellerSubActive: {
     borderWidth: 1.5,
     borderColor: 'rgba(0,229,117,0.3)',
   },
-  footerName: {
-    color: TEXT,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  footerMeta: {
-    color: TEXT_MUTED,
-    fontSize: 11,
-    marginTop: 1,
-  },
+  footerName: { color: TEXT, fontSize: 14, fontWeight: '700' },
+  footerMeta: { color: TEXT_MUTED, fontSize: 11, marginTop: 1 },
   logoutBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1371,9 +1633,5 @@ sellerSubActive: {
     borderColor: LINE,
     backgroundColor: 'rgba(255,255,255,0.03)',
   },
-  logoutText: {
-    color: TEXT_DIM,
-    fontSize: 12,
-    fontWeight: '600',
-  },
+  logoutText: { color: TEXT_DIM, fontSize: 12, fontWeight: '600' },
 })

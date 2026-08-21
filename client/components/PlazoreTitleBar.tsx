@@ -1,7 +1,18 @@
+/**
+ * PlazoreTitleBar
+ * - Unread count badge (no jiggle)
+ * - Tap bell → /notifications
+ * - Ambient soundtrack from SoundtrackContext
+ */
+
+import api from '@/constants/api'
+import { useSoundtrack } from '@/context/SoundtrackContext'
+import { useAuth } from '@clerk/clerk-expo'
 import { Ionicons } from '@expo/vector-icons'
 import { BlurView } from 'expo-blur'
 import { LinearGradient } from 'expo-linear-gradient'
-import React, { useEffect, useRef, useState } from 'react'
+import { useFocusEffect, useRouter } from 'expo-router'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Animated,
   Easing,
@@ -17,24 +28,23 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 const ACCENT = '#C9A962'
 const ICON = '#FFFFFF'
+const MUTED_ICON = 'rgba(255,255,255,0.42)'
 const GLASS = 'rgba(8,8,10,0.55)'
-const EASE = Easing.out(Easing.cubic)
+const EASE_SMOOTH = Easing.bezier(0.22, 0.61, 0.36, 1)
 
-/** Shared with bottom tab bar */
-const CHROME_IN_START = 0.1
-const CHROME_IN_END = 0.48
-const CHROME_DURATION = 200
+export const CHROME_IN_START = 0.02
+export const CHROME_IN_END = 0.55
+export const CHROME_DURATION = 420
 
-/** Single chrome band height — glass, row, and bottom rule all share this end edge */
 const BAR_H = 56
+const UNREAD_POLL_MS = 45000
 
 type Props = {
   scrollProgress: number
-  hasUnreadNotifications?: boolean
+  /** Optional override count — if omitted, loads from API */
+  unreadCount?: number
   onMenuPress?: () => void
-  onMusicPress?: () => void
   onNotificationsPress?: () => void
-  musicOn?: boolean
 }
 
 function IconButton({
@@ -49,41 +59,41 @@ function IconButton({
   const scale = useRef(new Animated.Value(1)).current
   const opacity = useRef(new Animated.Value(1)).current
 
-  const pressIn = () => {
-    Animated.parallel([
-      Animated.timing(scale, {
-        toValue: 0.94,
-        duration: 120,
-        useNativeDriver: true,
-      }),
-      Animated.timing(opacity, {
-        toValue: 0.7,
-        duration: 120,
-        useNativeDriver: true,
-      }),
-    ]).start()
-  }
-
-  const pressOut = () => {
-    Animated.parallel([
-      Animated.timing(scale, {
-        toValue: 1,
-        duration: 180,
-        useNativeDriver: true,
-      }),
-      Animated.timing(opacity, {
-        toValue: 1,
-        duration: 180,
-        useNativeDriver: true,
-      }),
-    ]).start()
-  }
-
   return (
     <Pressable
       onPress={onPress}
-      onPressIn={pressIn}
-      onPressOut={pressOut}
+      onPressIn={() => {
+        Animated.parallel([
+          Animated.timing(scale, {
+            toValue: 0.92,
+            duration: 140,
+            easing: EASE_SMOOTH,
+            useNativeDriver: true,
+          }),
+          Animated.timing(opacity, {
+            toValue: 0.72,
+            duration: 140,
+            easing: EASE_SMOOTH,
+            useNativeDriver: true,
+          }),
+        ]).start()
+      }}
+      onPressOut={() => {
+        Animated.parallel([
+          Animated.timing(scale, {
+            toValue: 1,
+            duration: 220,
+            easing: EASE_SMOOTH,
+            useNativeDriver: true,
+          }),
+          Animated.timing(opacity, {
+            toValue: 1,
+            duration: 220,
+            easing: EASE_SMOOTH,
+            useNativeDriver: true,
+          }),
+        ]).start()
+      }}
       hitSlop={14}
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}
@@ -99,21 +109,22 @@ function IconButton({
 
 function MenuToggle({ onPress }: { onPress?: () => void }) {
   const scale = useRef(new Animated.Value(1)).current
-
   return (
     <Pressable
       onPress={onPress}
       onPressIn={() =>
         Animated.timing(scale, {
           toValue: 0.9,
-          duration: 90,
+          duration: 120,
+          easing: EASE_SMOOTH,
           useNativeDriver: true,
         }).start()
       }
       onPressOut={() =>
         Animated.timing(scale, {
           toValue: 1,
-          duration: 160,
+          duration: 200,
+          easing: EASE_SMOOTH,
           useNativeDriver: true,
         }).start()
       }
@@ -131,23 +142,69 @@ function MenuToggle({ onPress }: { onPress?: () => void }) {
   )
 }
 
+function isUnreadNotif(n: any): boolean {
+  if (!n) return false
+  if (typeof n.isRead === 'boolean') return n.isRead === false
+  if (typeof n.read === 'boolean') return n.read === false
+  if (typeof n.unread === 'boolean') return n.unread === true
+  return false
+}
+
 export default function PlazoreTitleBar({
   scrollProgress,
-  hasUnreadNotifications = false,
+  unreadCount: unreadProp,
   onMenuPress,
-  onMusicPress,
   onNotificationsPress,
-  musicOn: musicControlled,
 }: Props) {
   const insets = useSafeAreaInsets()
-  const [musicLocal, setMusicLocal] = useState(false)
+  const router = useRouter()
+  const { getToken, isSignedIn } = useAuth()
+  const { enabled, setEnabled, unlock } = useSoundtrack()
+
   const [logoLoaded, setLogoLoaded] = useState(false)
-  const musicOn =
-    typeof musicControlled === 'boolean' ? musicControlled : musicLocal
+  const [countFromApi, setCountFromApi] = useState(0)
+
+  const unreadCount =
+    typeof unreadProp === 'number' ? unreadProp : countFromApi
 
   const anim = useRef(new Animated.Value(0)).current
   const logoOpacity = useRef(new Animated.Value(0)).current
   const textOpacity = useRef(new Animated.Value(1)).current
+
+  const refreshUnread = useCallback(async () => {
+    if (!isSignedIn) {
+      setCountFromApi(0)
+      return
+    }
+    try {
+      const token = await getToken()
+      if (!token) {
+        setCountFromApi(0)
+        return
+      }
+      const res = await api.get('/notifications', {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      const list = res.data?.data || res.data?.notifications || res.data || []
+      const arr = Array.isArray(list) ? list : []
+      const n = arr.filter(isUnreadNotif).length
+      setCountFromApi(n)
+    } catch {
+      /* keep last */
+    }
+  }, [getToken, isSignedIn])
+
+  useFocusEffect(
+    useCallback(() => {
+      refreshUnread()
+    }, [refreshUnread])
+  )
+
+  useEffect(() => {
+    refreshUnread()
+    const id = setInterval(refreshUnread, UNREAD_POLL_MS)
+    return () => clearInterval(id)
+  }, [refreshUnread])
 
   useEffect(() => {
     StatusBar.setBarStyle('light-content', true)
@@ -163,14 +220,14 @@ export default function PlazoreTitleBar({
       Animated.parallel([
         Animated.timing(logoOpacity, {
           toValue: 1,
-          duration: 420,
-          easing: EASE,
+          duration: 480,
+          easing: EASE_SMOOTH,
           useNativeDriver: true,
         }),
         Animated.timing(textOpacity, {
           toValue: 0,
-          duration: 320,
-          easing: EASE,
+          duration: 360,
+          easing: EASE_SMOOTH,
           useNativeDriver: true,
         }),
       ]).start()
@@ -178,41 +235,47 @@ export default function PlazoreTitleBar({
       logoOpacity.setValue(0)
       textOpacity.setValue(1)
     }
-  }, [logoLoaded])
+  }, [logoLoaded, logoOpacity, textOpacity])
 
   useEffect(() => {
     const p = Math.min(1, Math.max(0, scrollProgress))
     Animated.timing(anim, {
       toValue: p,
       duration: CHROME_DURATION,
-      easing: EASE,
+      easing: EASE_SMOOTH,
       useNativeDriver: true,
     }).start()
   }, [scrollProgress, anim])
 
   const slideUp = anim.interpolate({
     inputRange: [0, CHROME_IN_START, CHROME_IN_END, 1],
-    outputRange: [0, 0, -110, -130],
+    outputRange: [0, 0, -18, -36],
     extrapolate: 'clamp',
   })
 
   const barOpacity = anim.interpolate({
     inputRange: [0, CHROME_IN_START, CHROME_IN_END],
-    outputRange: [1, 1, 0],
+    outputRange: [1, 0.98, 0],
     extrapolate: 'clamp',
   })
 
   const glassOpacity = anim.interpolate({
     inputRange: [0, CHROME_IN_START, CHROME_IN_END],
-    outputRange: [0.22, 0.3, 0],
+    outputRange: [0.22, 0.28, 0],
     extrapolate: 'clamp',
   })
 
   const handleMusic = () => {
-    if (typeof musicControlled !== 'boolean') {
-      setMusicLocal((v) => !v)
+    unlock()
+    setEnabled(!enabled)
+  }
+
+  const handleNotifications = () => {
+    if (onNotificationsPress) {
+      onNotificationsPress()
+      return
     }
-    onMusicPress?.()
+    router.push('/notifications' as any)
   }
 
   const statusTop = Math.max(
@@ -221,6 +284,7 @@ export default function PlazoreTitleBar({
     20
   )
   const hidden = scrollProgress > CHROME_IN_END
+  const badgeLabel = unreadCount > 99 ? '99+' : String(unreadCount)
 
   return (
     <Animated.View
@@ -234,14 +298,6 @@ export default function PlazoreTitleBar({
         },
       ]}
     >
-      {/*
-        Architecture:
-        [ statusTop safe gap ]
-        [ BAR_H chrome band ]
-          ├ glass (absolute, same height)
-          ├ row (menu | logo | actions)  height BAR_H
-          └ bottom rule  ← ends the nav bar
-      */}
       <View style={styles.band}>
         <Animated.View
           pointerEvents="none"
@@ -271,16 +327,11 @@ export default function PlazoreTitleBar({
             <MenuToggle onPress={onMenuPress} />
           </View>
 
-          {/* Logo / PLAZORE centered in the band */}
           <View style={styles.center} pointerEvents="none">
-            <Animated.View
-              style={[styles.logoLayer, { opacity: textOpacity }]}
-            >
+            <Animated.View style={[styles.logoLayer, { opacity: textOpacity }]}>
               <Text style={styles.logoFallback}>PLAZORE</Text>
             </Animated.View>
-            <Animated.View
-              style={[styles.logoLayer, { opacity: logoOpacity }]}
-            >
+            <Animated.View style={[styles.logoLayer, { opacity: logoOpacity }]}>
               <Image
                 source={require('../assets/logo.png')}
                 style={styles.logo}
@@ -294,36 +345,43 @@ export default function PlazoreTitleBar({
           <View style={[styles.side, styles.sideRight]}>
             <IconButton
               onPress={handleMusic}
-              accessibilityLabel={musicOn ? 'Music on' : 'Music off'}
+              accessibilityLabel={
+                enabled ? 'Ambient Soundtrack On' : 'Ambient Soundtrack Off'
+              }
             >
               <Ionicons
-                name={musicOn ? 'headset' : 'headset-outline'}
-                size={22}
-                color={musicOn ? ACCENT : ICON}
+                name={enabled ? 'musical-notes' : 'musical-notes-outline'}
+                size={20}
+                color={enabled ? ACCENT : MUTED_ICON}
               />
             </IconButton>
 
             <IconButton
-              onPress={onNotificationsPress}
-              accessibilityLabel="Notifications"
+              onPress={handleNotifications}
+              accessibilityLabel={
+                unreadCount > 0
+                  ? `Notifications, ${unreadCount} unread`
+                  : 'Notifications'
+              }
             >
-              <View>
+              <View style={styles.bellWrap}>
                 <Ionicons
                   name={
-                    hasUnreadNotifications
-                      ? 'notifications'
-                      : 'notifications-outline'
+                    unreadCount > 0 ? 'notifications' : 'notifications-outline'
                   }
                   size={22}
                   color={ICON}
                 />
-                {hasUnreadNotifications ? <View style={styles.dot} /> : null}
+                {unreadCount > 0 ? (
+                  <View style={styles.badge}>
+                    <Text style={styles.badgeText}>{badgeLabel}</Text>
+                  </View>
+                ) : null}
               </View>
             </IconButton>
           </View>
         </View>
 
-        {/* Bottom edge of the nav bar — same line ends the chrome */}
         <View style={styles.bottomRule} pointerEvents="none">
           <LinearGradient
             colors={[
@@ -352,17 +410,13 @@ const styles = StyleSheet.create({
     right: 0,
     zIndex: 40,
   },
-
-  /** One chrome band — glass + row + rule share this box */
   band: {
     height: BAR_H,
     justifyContent: 'flex-end',
   },
-
   glass: {
     ...StyleSheet.absoluteFillObject,
   },
-
   row: {
     flex: 1,
     flexDirection: 'row',
@@ -370,7 +424,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     zIndex: 2,
   },
-
   side: {
     width: 96,
     flexDirection: 'row',
@@ -379,7 +432,6 @@ const styles = StyleSheet.create({
   sideRight: {
     justifyContent: 'flex-end',
   },
-
   center: {
     flex: 1,
     alignItems: 'center',
@@ -398,10 +450,9 @@ const styles = StyleSheet.create({
     letterSpacing: 4,
   },
   logo: {
-    height: 100,
+    height: 83,
     width: 200,
   },
-
   iconHit: {
     width: 40,
     height: 40,
@@ -418,19 +469,32 @@ const styles = StyleSheet.create({
     backgroundColor: ICON,
     borderRadius: 2,
   },
-  dot: {
-    position: 'absolute',
-    top: 0,
-    right: 0,
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-    backgroundColor: ACCENT,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(12,12,12,0.4)',
+  bellWrap: {
+    width: 28,
+    height: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-
-  /** Rule is the last pixel of the band */
+  badge: {
+    position: 'absolute',
+    top: -4,
+    right: -8,
+    minWidth: 16,
+    height: 16,
+    paddingHorizontal: 4,
+    borderRadius: 8,
+    backgroundColor: ACCENT,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1.5,
+    borderColor: 'rgba(12,12,12,0.55)',
+  },
+  badgeText: {
+    color: '#0C0C0C',
+    fontSize: 9,
+    fontWeight: '800',
+    lineHeight: 11,
+  },
   bottomRule: {
     height: 1,
     marginHorizontal: 16,
@@ -444,9 +508,7 @@ const styles = StyleSheet.create({
         shadowOpacity: 0.35,
         shadowRadius: 2,
       },
-      android: {
-        elevation: 1,
-      },
+      android: { elevation: 1 },
     }),
   },
 })

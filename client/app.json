@@ -1,5 +1,8 @@
 {
   "expo": {
+    "name": "Plazore",
+    "slug": "Plazore",
+    "scheme": "plazore",
     "userInterfaceStyle": "dark",
     "android": {
       "adaptiveIcon": {

@@ -513,7 +513,7 @@ export default function SecurePayoutScreen() {
     const message =
       `You are about to update:\n\n${list}\n\n` +
       `What this means:\n` +
-      `• Future seller payouts will go to the bank account on file.\n` +
+      `• Future seller payouts will go to the bank account filled in.\n` +
       `• Shipping defaults apply when you create new products (existing listings keep their own settings).\n` +
       `• After you leave this screen, access locks again and the last 4 digits of the account will be required.\n\n` +
       `Are you sure you want to make this change?`
@@ -551,7 +551,7 @@ export default function SecurePayoutScreen() {
           <Text style={styles.gateTitle}>Protected details</Text>
           <Text style={styles.gateBody}>
             Payout account and shipping defaults are sensitive. Enter the last 4
-            digits of the account number on file to continue.
+            digits of the account number filled in to continue.
           </Text>
 
           <Text style={styles.label}>Last 4 digits</Text>
@@ -641,7 +641,7 @@ export default function SecurePayoutScreen() {
                 marginTop: 4,
               }}
             >
-              No account on file yet. Enter bank details below and save — next
+              No account filled in yet. Enter bank details below and save — next
               visits will require the last 4 digits.
             </Text>
           </View>
