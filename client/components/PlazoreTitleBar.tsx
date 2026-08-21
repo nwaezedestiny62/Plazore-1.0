@@ -33,8 +33,8 @@ const GLASS = 'rgba(8,8,10,0.55)'
 const EASE_SMOOTH = Easing.bezier(0.22, 0.61, 0.36, 1)
 
 export const CHROME_IN_START = 0.02
-export const CHROME_IN_END = 0.55
-export const CHROME_DURATION = 420
+export const CHROME_IN_END = 0.72
+export const CHROME_DURATION = 520
 
 const BAR_H = 56
 const UNREAD_POLL_MS = 45000
@@ -239,6 +239,7 @@ export default function PlazoreTitleBar({
 
   useEffect(() => {
     const p = Math.min(1, Math.max(0, scrollProgress))
+    anim.stopAnimation()
     Animated.timing(anim, {
       toValue: p,
       duration: CHROME_DURATION,
@@ -249,19 +250,21 @@ export default function PlazoreTitleBar({
 
   const slideUp = anim.interpolate({
     inputRange: [0, CHROME_IN_START, CHROME_IN_END, 1],
-    outputRange: [0, 0, -18, -36],
+    outputRange: [0, 0, -12, -28],
     extrapolate: 'clamp',
   })
 
+  // Keep a soft overlap with the room chain so the top chrome never blinks
+  // off before the next layer is visually established.
   const barOpacity = anim.interpolate({
-    inputRange: [0, CHROME_IN_START, CHROME_IN_END],
-    outputRange: [1, 0.98, 0],
+    inputRange: [0, CHROME_IN_START, CHROME_IN_END, 1],
+    outputRange: [1, 0.99, 0.46, 0],
     extrapolate: 'clamp',
   })
 
   const glassOpacity = anim.interpolate({
-    inputRange: [0, CHROME_IN_START, CHROME_IN_END],
-    outputRange: [0.22, 0.28, 0],
+    inputRange: [0, CHROME_IN_START, CHROME_IN_END, 1],
+    outputRange: [0.22, 0.25, 0.12, 0],
     extrapolate: 'clamp',
   })
 
@@ -283,7 +286,7 @@ export default function PlazoreTitleBar({
     Platform.OS === 'android' ? StatusBar.currentHeight ?? 24 : 20,
     20
   )
-  const hidden = scrollProgress > CHROME_IN_END
+  const hidden = scrollProgress > 0.86
   const badgeLabel = unreadCount > 99 ? '99+' : String(unreadCount)
 
   return (

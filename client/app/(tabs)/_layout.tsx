@@ -4,7 +4,13 @@ import {
   useShowroomFlyCart,
 } from '@/components/showroom/ShowroomFlyCart'
 import { useCart } from '@/context/CartContext'
-import { usePlazoreChrome } from '@/context/PlazoreChromeContext'
+import {
+  usePlazoreChrome,
+  CHROME_IN_START,
+  CHROME_IN_END,
+  CHROME_DURATION,
+  EASE_SMOOTH,
+} from '@/context/PlazoreChromeContext'
 import { useSoundtrack } from '@/context/SoundtrackContext'
 import { Ionicons } from '@expo/vector-icons'
 import { BottomTabBarProps } from '@react-navigation/bottom-tabs'
@@ -24,27 +30,14 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 const BG_SCREEN = '#090B0F'
-const MUTED = 'rgba(255,255,255,0.42)'
+const MUTED = 'rgba(255,255,255,0.46)'
 const TEXT = '#F5F7FA'
 const GREEN = '#00E575'
 const BLUE = '#2563EB'
 const PINK = '#F472B6'
 const LOGO_GRADIENT = [GREEN, '#14B8A6', BLUE] as const
 
-/** Must match PlazoreTitleBar exactly */
-const CHROME_IN_START = 0.02
-const CHROME_IN_END = 0.55
-const CHROME_DURATION = 420
-const EASE_SMOOTH = Easing.bezier(0.22, 0.61, 0.36, 1)
-
 const NAV_VISIBLE_ROUTES = new Set(['index', 'search', 'favorites'])
-
-function scrollToNavVisibility(progress: number) {
-  const p = Math.min(1, Math.max(0, progress))
-  if (p <= CHROME_IN_START) return 0
-  if (p >= CHROME_IN_END) return 1
-  return (p - CHROME_IN_START) / (CHROME_IN_END - CHROME_IN_START)
-}
 
 function PlazoreTabsBar({ state, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets()
@@ -54,7 +47,7 @@ function PlazoreTabsBar({ state, navigation }: BottomTabBarProps) {
   const itemCount = Number(cartCtx?.itemCount ?? 0)
   const { unlock: unlockSoundtrack } = useSoundtrack()
 
-  const visibility = useRef(new Animated.Value(0)).current
+  const anim = useRef(new Animated.Value(0)).current
   const bagScale = useRef(new Animated.Value(1)).current
   const bagRotate = useRef(new Animated.Value(0)).current
   const pulse = useRef(new Animated.Value(0)).current
@@ -66,21 +59,29 @@ function PlazoreTabsBar({ state, navigation }: BottomTabBarProps) {
   const onAllowedScreen = NAV_VISIBLE_ROUTES.has(active)
 
   useEffect(() => {
-    let t = 0
+    let target = 0
     if (onAllowedScreen) {
       if (active === 'index' && homeChrome) {
-        t = scrollToNavVisibility(scrollProgress)
+        target = Math.min(1, Math.max(0, scrollProgress))
       } else {
-        t = 1
+        target = 1
       }
     }
-    Animated.timing(visibility, {
-      toValue: t,
-      duration: CHROME_DURATION,
-      easing: EASE_SMOOTH,
-      useNativeDriver: true,
-    }).start()
-  }, [scrollProgress, homeChrome, active, onAllowedScreen, visibility])
+
+    // Home scroll → direct lock (zero shimmer)
+    if (active === 'index' && homeChrome) {
+      anim.setValue(target)
+    } else {
+      // Discrete transitions → clean, snappy snap-up
+      anim.stopAnimation()
+      Animated.timing(anim, {
+        toValue: target,
+        duration: CHROME_DURATION,
+        easing: Easing.bezier(0.16, 1, 0.3, 1), // decisive ease-out (snappy)
+        useNativeDriver: true,
+      }).start()
+    }
+  }, [scrollProgress, homeChrome, active, onAllowedScreen, anim])
 
   useEffect(() => {
     if (itemCount > prevCount.current) {
@@ -176,10 +177,26 @@ function PlazoreTabsBar({ state, navigation }: BottomTabBarProps) {
     !onAllowedScreen ||
     (active === 'index' && homeChrome && scrollProgress < CHROME_IN_START)
 
-  /** Gentle rise — pairs with title bar’s soft fade */
-  const translateY = visibility.interpolate({
-    inputRange: [0, 1],
-    outputRange: [22, 0],
+  // ── Clean snap-up curve ────────────────────────────────────────────────
+  // Opacity becomes visible quickly once the threshold is crossed
+  const barOpacity = anim.interpolate({
+    inputRange: [0, CHROME_IN_START, 0.28, CHROME_IN_END, 1],
+    outputRange: [0, 0.05, 0.55, 0.92, 1],
+    extrapolate: 'clamp',
+  })
+
+  // Stronger rise from below → feels like it snaps into place
+  const translateY = anim.interpolate({
+    inputRange: [0, CHROME_IN_START, CHROME_IN_END, 1],
+    outputRange: [32, 24, 5, 0],
+    extrapolate: 'clamp',
+  })
+
+  // Subtle scale for polished pop
+  const scale = anim.interpolate({
+    inputRange: [0, CHROME_IN_START, CHROME_IN_END, 1],
+    outputRange: [0.94, 0.96, 0.99, 1],
+    extrapolate: 'clamp',
   })
 
   const bagWiggle = bagRotate.interpolate({
@@ -202,8 +219,8 @@ function PlazoreTabsBar({ state, navigation }: BottomTabBarProps) {
         styles.wrap,
         {
           paddingBottom: bottom,
-          opacity: visibility,
-          transform: [{ translateY }],
+          opacity: barOpacity,
+          transform: [{ translateY }, { scale }],
         },
       ]}
     >
@@ -364,7 +381,13 @@ function TabItem({
       <View style={styles.iconBox}>
         <Ionicons name={icon} size={18} color={active ? color : MUTED} />
       </View>
-      <Text style={[styles.label, active && { color, fontWeight: '700' }]}>
+      <Text
+        style={[
+          styles.label,
+          active && { color, fontWeight: '700' },
+        ]}
+        numberOfLines={1}
+      >
         {label}
       </Text>
       {active && (
@@ -405,7 +428,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    paddingHorizontal: 20,
+    paddingHorizontal: 18,
     alignItems: 'center',
   },
   pill: {
@@ -414,13 +437,13 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     overflow: 'visible',
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.1)',
+    borderColor: 'rgba(255,255,255,0.12)',
     backgroundColor: 'rgba(12,14,20,0.94)',
     ...Platform.select({
       ios: {
         shadowColor: '#000',
-        shadowOpacity: 0.4,
-        shadowRadius: 16,
+        shadowOpacity: 0.42,
+        shadowRadius: 18,
         shadowOffset: { width: 0, height: 8 },
       },
       android: { elevation: 14 },
@@ -434,39 +457,40 @@ const styles = StyleSheet.create({
   pillTint: {
     ...StyleSheet.absoluteFillObject,
     borderRadius: 24,
-    backgroundColor: 'rgba(0,0,0,0.18)',
+    backgroundColor: 'rgba(0,0,0,0.16)',
   },
   row: {
     flexDirection: 'row',
     alignItems: 'flex-end',
     justifyContent: 'space-between',
-    paddingHorizontal: 4,
-    paddingTop: 20,
-    paddingBottom: 8,
-    minHeight: 62,
+    paddingHorizontal: 6,
+    paddingTop: 18,
+    paddingBottom: 10,
+    minHeight: 64,
   },
   item: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'flex-end',
-    paddingBottom: 1,
-    height: 44,
+    paddingBottom: 2,
+    height: 46,
   },
   iconBox: {
-    width: 24,
+    width: 26,
     height: 22,
     alignItems: 'center',
     justifyContent: 'center',
   },
   label: {
-    marginTop: 2,
+    marginTop: 3,
     fontSize: 9,
     fontWeight: '600',
     color: MUTED,
-    letterSpacing: 0.15,
+    letterSpacing: 0.2,
+    textAlign: 'center',
   },
   activeDot: {
-    marginTop: 3,
+    marginTop: 4,
     width: 12,
     height: 2.5,
     borderRadius: 2,
@@ -476,23 +500,23 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'flex-end',
-    marginTop: -22,
-    paddingBottom: 1,
+    marginTop: -20,
+    paddingBottom: 2,
   },
   loungeOrb: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 2,
-    borderColor: 'rgba(255,255,255,0.16)',
+    borderColor: 'rgba(255,255,255,0.18)',
     ...Platform.select({
       ios: {
         shadowColor: GREEN,
-        shadowOpacity: 0.35,
-        shadowRadius: 10,
+        shadowOpacity: 0.38,
+        shadowRadius: 12,
         shadowOffset: { width: 0, height: 4 },
       },
       android: { elevation: 10 },
@@ -500,19 +524,20 @@ const styles = StyleSheet.create({
   },
   loungeShine: {
     position: 'absolute',
-    top: 3,
-    left: 7,
-    right: 7,
-    height: 11,
+    top: 4,
+    left: 8,
+    right: 8,
+    height: 12,
     borderRadius: 8,
-    backgroundColor: 'rgba(255,255,255,0.2)',
+    backgroundColor: 'rgba(255,255,255,0.22)',
   },
   loungeLabel: {
-    marginTop: 3,
+    marginTop: 4,
     fontSize: 9,
     fontWeight: '700',
     color: TEXT,
-    letterSpacing: 0.15,
+    letterSpacing: 0.2,
+    textAlign: 'center',
   },
   cartIconBox: {
     width: 34,

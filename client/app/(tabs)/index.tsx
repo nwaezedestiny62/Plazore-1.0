@@ -1,11 +1,16 @@
 import HeroBanner from '@/components/HeroBanner'
 import PlazoreTitleBar from '@/components/PlazoreTitleBar'
 import { AdaptiveShowroom } from '@/components/showroom'
-import ShowroomRoomNav from '@/components/showroom/ShowroomRoomNav'
+import ShowroomRoomNav, {
+  ROOM_NAV_H,
+} from '@/components/showroom/ShowroomRoomNav'
 import { ShowroomFlyCartProvider } from '@/components/showroom/ShowroomFlyCart'
 import api from '@/constants/api'
 import { Product } from '@/constants/types'
-import { usePlazoreChrome } from '@/context/PlazoreChromeContext'
+import {
+  usePlazoreChrome,
+  CHROME_IN_END,
+} from '@/context/PlazoreChromeContext'
 import { useRouter } from 'expo-router'
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import {
@@ -18,6 +23,9 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 const TITLE_BAR_H = 56
+const ROOM_LANDING_GAP = 24
+const ROOM_NAV_PIN_CLEARANCE = 220
+const ROOM_NAV_HOLD_MS = 1200
 
 export default function Home() {
   const { setScrollProgress, setHomeChrome, openHub } = usePlazoreChrome()
@@ -37,6 +45,12 @@ export default function Home() {
   const roomYs = useRef<Record<number, number>>({})
   const scrollRef = useRef<ScrollView>(null)
   const scrollY = useRef(0)
+  const focusedRoom = useRef<number | null>(null)
+  const roomNavPinned = useRef(false)
+  const roomNavHoldUntil = useRef(0)
+  const selectionReleaseTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Prevent flooding React with identical values
+  const lastProgress = useRef(-1)
 
   useEffect(() => {
     setHomeChrome(true)
@@ -76,7 +90,6 @@ export default function Home() {
 
     if (!entries.length) return 1
 
-    // Room whose start is just above the midpoint of the viewport
     const probe = y + windowH * 0.28
     let current = entries[0].n
     for (const e of entries) {
@@ -90,21 +103,48 @@ export default function Home() {
     const y = e.nativeEvent.contentOffset.y
     scrollY.current = y
 
-    const p = Math.min(1, Math.max(0, y / (heroH * 0.35)))
-    setLocalProgress(p)
-    setScrollProgress(p)
+    // ─────────────────────────────────────────────────────────────
+    // SMOOTH CHROME PROGRESS
+    // Stretch the 0 → 1 range so the multi-stop curve (0.02 → 0.72)
+    // has real physical scroll distance. Previously heroH * 0.35
+    // crushed the whole fade into a tiny movement → felt snappy.
+    // ─────────────────────────────────────────────────────────────
+    const chromeDistance = Math.max(heroH * 0.85, showroomY.current * 0.9, 1)
+    const p = Math.min(1, Math.max(0, y / chromeDistance))
 
-    // Nav visibility: 0 while in hero, ramps up as showroom enters
-    const start = showroomY.current - 80
-    const end = showroomY.current + 40
+    // Only push state when value actually moved (cuts re-render noise)
+    if (Math.abs(p - lastProgress.current) >= 0.004) {
+      lastProgress.current = p
+      setLocalProgress(p)
+      setScrollProgress(p)
+    }
+
+    // Room-nav visibility (independent of chrome fade)
+    const start = showroomY.current - 180
+    const end = showroomY.current - 72
     let v = 0
     if (y >= end) v = 1
     else if (y > start) v = (y - start) / (end - start)
-    setNavVisible(v)
 
-    if (v > 0.2) {
-      setActiveRoom(resolveActiveRoom(y))
+    if (roomNavPinned.current && y >= showroomY.current - ROOM_NAV_PIN_CLEARANCE) {
+      v = Math.max(v, 0.98)
+    } else if (y < showroomY.current - ROOM_NAV_PIN_CLEARANCE) {
+      roomNavPinned.current = false
     }
+
+    const nextVisibility =
+      Math.round(Math.min(1, Math.max(0, v)) * 100) / 100
+    const isHoldingSelection = Date.now() < roomNavHoldUntil.current
+    let nextRoom = activeRoom
+    if (isHoldingSelection && focusedRoom.current != null) {
+      nextRoom = focusedRoom.current
+      setActiveRoom(nextRoom)
+    } else if (v > 0.2) {
+      nextRoom = resolveActiveRoom(y)
+      setActiveRoom(nextRoom)
+    }
+
+    setNavVisible(nextVisibility)
   }
 
   const scrollToShowroom = () => {
@@ -117,12 +157,41 @@ export default function Home() {
   const scrollToRoom = useCallback((roomNumber: number) => {
     const rel = roomYs.current[roomNumber]
     if (rel == null) return
-    // Leave space under sticky nav + title band
-    const offset = insets.top + TITLE_BAR_H + 52
-    const target = Math.max(showroomY.current + rel - offset, 0)
-    scrollRef.current?.scrollTo({ y: target, animated: true })
+
+    focusedRoom.current = roomNumber
+    roomNavPinned.current = true
+    roomNavHoldUntil.current = Date.now() + ROOM_NAV_HOLD_MS
     setActiveRoom(roomNumber)
+    setNavVisible(1)
+
+    const landingOffset =
+      insets.top + TITLE_BAR_H + ROOM_NAV_H + ROOM_LANDING_GAP
+    const target = Math.max(showroomY.current + rel - landingOffset, 0)
+    scrollRef.current?.scrollTo({ y: target, animated: true })
   }, [insets.top])
+
+  const onRoomScrollSettled = useCallback(() => {
+    if (selectionReleaseTimer.current) {
+      clearTimeout(selectionReleaseTimer.current)
+      selectionReleaseTimer.current = null
+    }
+    if (focusedRoom.current == null) return
+    setActiveRoom(focusedRoom.current)
+    roomNavHoldUntil.current = Date.now() + 220
+    focusedRoom.current = null
+  }, [])
+
+  const onRoomDragEnd = useCallback(() => {
+    if (focusedRoom.current == null) return
+    if (selectionReleaseTimer.current) clearTimeout(selectionReleaseTimer.current)
+    selectionReleaseTimer.current = setTimeout(() => {
+      selectionReleaseTimer.current = null
+      if (focusedRoom.current == null) return
+      setActiveRoom(focusedRoom.current)
+      focusedRoom.current = null
+      roomNavHoldUntil.current = Date.now() + 220
+    }, 820)
+  }, [])
 
   return (
     <ShowroomFlyCartProvider>
@@ -133,13 +202,12 @@ export default function Home() {
           onNotificationsPress={() => router.push('/notifications')}
         />
 
-        {/* Sticky room chain — only meaningful once showroom is in view */}
         <ShowroomRoomNav
           activeRoom={activeRoom}
           roomCount={roomCount}
           visible={navVisible}
           onSelectRoom={scrollToRoom}
-          topOffset={TITLE_BAR_H}
+          bottomOffset={94}
         />
 
         <ScrollView
@@ -147,8 +215,10 @@ export default function Home() {
           showsVerticalScrollIndicator={false}
           bounces
           scrollEventThrottle={16}
-          decelerationRate="fast"
+          decelerationRate="normal"   // was "fast" — smoother hand-off into chrome
           onScroll={onMainScroll}
+          onMomentumScrollEnd={onRoomScrollSettled}
+          onScrollEndDrag={onRoomDragEnd}
           style={{ flex: 1 }}
         >
           <HeroBanner topChrome={0} onScrollToShowroom={scrollToShowroom} />
