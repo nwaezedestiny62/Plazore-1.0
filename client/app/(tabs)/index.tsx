@@ -7,10 +7,7 @@ import ShowroomRoomNav, {
 import { ShowroomFlyCartProvider } from '@/components/showroom/ShowroomFlyCart'
 import api from '@/constants/api'
 import { Product } from '@/constants/types'
-import {
-  usePlazoreChrome,
-  CHROME_IN_END,
-} from '@/context/PlazoreChromeContext'
+import { usePlazoreChrome } from '@/context/PlazoreChromeContext'
 import { useRouter } from 'expo-router'
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import {
@@ -49,11 +46,13 @@ export default function Home() {
   const roomNavPinned = useRef(false)
   const roomNavHoldUntil = useRef(0)
   const selectionReleaseTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  // Prevent flooding React with identical values
   const lastProgress = useRef(-1)
 
+  // Own the chrome while Home is mounted — start fully hidden
   useEffect(() => {
     setHomeChrome(true)
+    setScrollProgress(0)
+    lastProgress.current = 0
     return () => {
       setHomeChrome(false)
       setScrollProgress(0)
@@ -65,6 +64,7 @@ export default function Home() {
       setLoading(true)
       const res = await api.get('/products?limit=24')
       if (res.data.success) setProducts(res.data.data || [])
+      else setProducts([])
     } catch {
       setProducts([])
     } finally {
@@ -104,22 +104,20 @@ export default function Home() {
     scrollY.current = y
 
     // ─────────────────────────────────────────────────────────────
-    // SMOOTH CHROME PROGRESS
-    // Stretch the 0 → 1 range so the multi-stop curve (0.02 → 0.72)
-    // has real physical scroll distance. Previously heroH * 0.35
-    // crushed the whole fade into a tiny movement → felt snappy.
+    // SMOOTH CHROME PROGRESS (matches title bar)
+    // Longer physical distance = same soft, gradual feel as the title bar.
     // ─────────────────────────────────────────────────────────────
     const chromeDistance = Math.max(heroH * 0.85, showroomY.current * 0.9, 1)
     const p = Math.min(1, Math.max(0, y / chromeDistance))
 
-    // Only push state when value actually moved (cuts re-render noise)
+    // Only push when value actually moved
     if (Math.abs(p - lastProgress.current) >= 0.004) {
       lastProgress.current = p
       setLocalProgress(p)
       setScrollProgress(p)
     }
 
-    // Room-nav visibility (independent of chrome fade)
+    // Room-nav visibility (independent of chrome)
     const start = showroomY.current - 180
     const end = showroomY.current - 72
     let v = 0
@@ -134,14 +132,12 @@ export default function Home() {
 
     const nextVisibility =
       Math.round(Math.min(1, Math.max(0, v)) * 100) / 100
+
     const isHoldingSelection = Date.now() < roomNavHoldUntil.current
-    let nextRoom = activeRoom
     if (isHoldingSelection && focusedRoom.current != null) {
-      nextRoom = focusedRoom.current
-      setActiveRoom(nextRoom)
+      setActiveRoom(focusedRoom.current)
     } else if (v > 0.2) {
-      nextRoom = resolveActiveRoom(y)
-      setActiveRoom(nextRoom)
+      setActiveRoom(resolveActiveRoom(y))
     }
 
     setNavVisible(nextVisibility)
@@ -154,21 +150,24 @@ export default function Home() {
     })
   }
 
-  const scrollToRoom = useCallback((roomNumber: number) => {
-    const rel = roomYs.current[roomNumber]
-    if (rel == null) return
+  const scrollToRoom = useCallback(
+    (roomNumber: number) => {
+      const rel = roomYs.current[roomNumber]
+      if (rel == null) return
 
-    focusedRoom.current = roomNumber
-    roomNavPinned.current = true
-    roomNavHoldUntil.current = Date.now() + ROOM_NAV_HOLD_MS
-    setActiveRoom(roomNumber)
-    setNavVisible(1)
+      focusedRoom.current = roomNumber
+      roomNavPinned.current = true
+      roomNavHoldUntil.current = Date.now() + ROOM_NAV_HOLD_MS
+      setActiveRoom(roomNumber)
+      setNavVisible(1)
 
-    const landingOffset =
-      insets.top + TITLE_BAR_H + ROOM_NAV_H + ROOM_LANDING_GAP
-    const target = Math.max(showroomY.current + rel - landingOffset, 0)
-    scrollRef.current?.scrollTo({ y: target, animated: true })
-  }, [insets.top])
+      const landingOffset =
+        insets.top + TITLE_BAR_H + ROOM_NAV_H + ROOM_LANDING_GAP
+      const target = Math.max(showroomY.current + rel - landingOffset, 0)
+      scrollRef.current?.scrollTo({ y: target, animated: true })
+    },
+    [insets.top]
+  )
 
   const onRoomScrollSettled = useCallback(() => {
     if (selectionReleaseTimer.current) {
@@ -215,7 +214,7 @@ export default function Home() {
           showsVerticalScrollIndicator={false}
           bounces
           scrollEventThrottle={16}
-          decelerationRate="normal"   // was "fast" — smoother hand-off into chrome
+          decelerationRate="normal"
           onScroll={onMainScroll}
           onMomentumScrollEnd={onRoomScrollSettled}
           onScrollEndDrag={onRoomDragEnd}

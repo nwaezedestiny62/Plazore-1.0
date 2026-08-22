@@ -1083,6 +1083,16 @@ export default function Checkout() {
           </View>
         )}
 
+        {canCheckout && hasInternational && selectedAddress && (
+          <View style={styles.intlBox}>
+            <Text style={styles.intlTitle}>International Order</Text>
+            <Text style={styles.intlText}>
+              This order will be reviewed by the seller before shipment begins.
+              Once approved, the seller will prepare and continue delivery.
+            </Text>
+          </View>
+        )}
+
         {/* Receipt */}
         <View style={styles.card}>
           <View style={styles.cardHeader}>
@@ -1113,15 +1123,6 @@ export default function Checkout() {
           </View>
         </View>
 
-        {canCheckout && hasInternational && selectedAddress && (
-          <View style={styles.intlBox}>
-            <Text style={styles.intlTitle}>International Order</Text>
-            <Text style={styles.intlText}>
-              This order will be reviewed by the seller before shipment begins.
-              Once approved, the seller will prepare and continue delivery.
-            </Text>
-          </View>
-        )}
 
         <Text style={styles.footerBrand}>Plazore · Premium Digital Mall</Text>
       </ScrollView>

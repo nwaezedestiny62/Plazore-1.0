@@ -1,8 +1,11 @@
-// client/app/(auth)/sign-in.tsx
 /**
  * Bulletproof auth: login + signup + Google + forgot/reset password
  * Never stays on this screen if already signed in
  * Login fields and signup fields are fully independent
+ *
+ * Exit sequence:
+ * → Full-screen Plazore preloader + “Taking you in…”
+ * → Navigate
  */
 
 import api from '@/constants/api'
@@ -32,6 +35,7 @@ import {
   Platform,
   Pressable,
   ScrollView,
+  StatusBar,
   StyleSheet,
   Text,
   TextInput,
@@ -40,6 +44,7 @@ import {
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import Toast from 'react-native-toast-message'
+import { useSoundtrack } from '@/context/SoundtrackContext'
 
 WebBrowser.maybeCompleteAuthSession()
 
@@ -53,7 +58,6 @@ const EASE = Easing.bezier(0.22, 1, 0.36, 1)
 const GOOGLE_G = 'https://developers.google.com/identity/images/g-logo.png'
 
 type Mode = 'login' | 'signup'
-/** auth = main forms | verify-signup | verify-2fa | forgot | forgot-code | reset-pw */
 type Flow =
   | 'auth'
   | 'verify-signup'
@@ -75,9 +79,7 @@ function clerkMsg(err: any, fallback: string) {
   }
   if (
     code.includes('form_password_incorrect') ||
-    /password is incorrect|wrong password|invalid credentials/i.test(
-      String(msg)
-    )
+    /password is incorrect|wrong password|invalid credentials/i.test(String(msg))
   ) {
     return 'Incorrect password'
   }
@@ -128,6 +130,67 @@ async function afterAuthNavigate(
   }
 }
 
+/** Full-screen Plazore preloader */
+function PlazorePreloader({ label = 'Taking you in…' }: { label?: string }) {
+  const pulse = useRef(new Animated.Value(0.65)).current
+
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, {
+          toValue: 1,
+          duration: 900,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulse, {
+          toValue: 0.65,
+          duration: 900,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+      ])
+    )
+    loop.start()
+    return () => loop.stop()
+  }, [pulse])
+
+  return (
+    <View style={preloaderStyles.wrap}>
+      <StatusBar hidden translucent backgroundColor="transparent" />
+      <Animated.View style={{ opacity: pulse, transform: [{ scale: pulse }] }}>
+        <Image
+          source={require('@/assets/logo-1.png')}
+          style={preloaderStyles.logo}
+          resizeMode="contain"
+        />
+      </Animated.View>
+      <Text style={preloaderStyles.label}>{label}</Text>
+    </View>
+  )
+}
+
+const preloaderStyles = StyleSheet.create({
+  wrap: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: '#090B0F',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 9999,
+  },
+  logo: {
+    width: 100,
+    height: 100,
+    marginBottom: 22,
+  },
+  label: {
+    color: 'rgba(255,255,255,0.72)',
+    fontFamily: 'Poppins_500Medium',
+    fontSize: 15,
+    letterSpacing: 0.3,
+  },
+})
+
 export default function AuthScreen() {
   const [fontsLoaded] = useFonts({
     Poppins_400Regular,
@@ -139,10 +202,10 @@ export default function AuthScreen() {
   const params = useLocalSearchParams<{ mode?: string }>()
   const initialMode: Mode = params.mode === 'signup' ? 'signup' : 'login'
 
-  const { signIn, setActive: setSignInActive, isLoaded: signInLoaded } =
-    useSignIn()
-  const { signUp, setActive: setSignUpActive, isLoaded: signUpLoaded } =
-    useSignUp()
+  const { holdIntroGate, releaseIntroGate } = useSoundtrack()
+
+  const { signIn, setActive: setSignInActive, isLoaded: signInLoaded } = useSignIn()
+  const { signUp, setActive: setSignUpActive, isLoaded: signUpLoaded } = useSignUp()
   const { getToken, isSignedIn, isLoaded: authLoaded } = useAuth()
   const router = useRouter()
   const { startOAuthFlow } = useOAuth({ strategy: 'oauth_google' })
@@ -150,7 +213,6 @@ export default function AuthScreen() {
   const [mode, setMode] = useState<Mode>(initialMode)
   const [flow, setFlow] = useState<Flow>('auth')
 
-  // ── Independent fields: login ≠ signup ──
   const [loginEmail, setLoginEmail] = useState('')
   const [loginPassword, setLoginPassword] = useState('')
   const [signupEmail, setSignupEmail] = useState('')
@@ -168,38 +230,62 @@ export default function AuthScreen() {
   const [emailFocused, setEmailFocused] = useState(false)
   const [passFocused, setPassFocused] = useState(false)
   const [fieldError, setFieldError] = useState<string | null>(null)
-  const [routingOut, setRoutingOut] = useState(false)
+
+  // Exit: idle → preloader → navigate
+  const [exitPhase, setExitPhase] = useState<'idle' | 'preloader'>('idle')
+  const preloaderOpacity = useRef(new Animated.Value(0)).current
 
   const navigatingRef = useRef(false)
-  const segmentAnim = useRef(
-    new Animated.Value(initialMode === 'signup' ? 1 : 0)
-  ).current
-  const formSlide = useRef(
-    new Animated.Value(initialMode === 'signup' ? 1 : 0)
-  ).current
+  const segmentAnim = useRef(new Animated.Value(initialMode === 'signup' ? 1 : 0)).current
+  const formSlide = useRef(new Animated.Value(initialMode === 'signup' ? 1 : 0)).current
   const offlineAnim = useRef(new Animated.Value(0)).current
   const contentFade = useRef(new Animated.Value(0)).current
   const passwordRef = useRef<TextInput>(null)
   const loginPassRef = useRef<TextInput>(null)
 
-  const leaveAuth = useCallback(async () => {
+    const runExitSequence = useCallback(async () => {
     if (navigatingRef.current) return
     navigatingRef.current = true
-    setRoutingOut(true)
+
+    // Keep music silent during “Taking you in…”
+    holdIntroGate()
+
+    StatusBar.setHidden(true, 'fade')
+    if (Platform.OS === 'android') {
+      StatusBar.setTranslucent(true)
+      StatusBar.setBackgroundColor('transparent', true)
+    }
+
+    setExitPhase('preloader')
+    preloaderOpacity.setValue(0)
+    Animated.timing(preloaderOpacity, {
+      toValue: 1,
+      duration: 360,
+      easing: EASE,
+      useNativeDriver: true,
+    }).start()
+
+    await new Promise((r) => setTimeout(r, 900))
+
+    // Preloader done → allow music again (only if it was ON)
+    releaseIntroGate()
+
     try {
       await afterAuthNavigate(getToken, router)
     } catch {
       navigatingRef.current = false
-      setRoutingOut(false)
+      setExitPhase('idle')
+      StatusBar.setHidden(false, 'fade')
+      releaseIntroGate() // safety: don't leave gate held on error
       router.replace('/complete-profile')
     }
-  }, [getToken, router])
+  }, [getToken, router, preloaderOpacity, holdIntroGate, releaseIntroGate])
 
-  // Already signed in → never stay here
+  // Already signed in → run exit sequence
   useEffect(() => {
     if (!authLoaded || !isSignedIn) return
-    leaveAuth()
-  }, [authLoaded, isSignedIn, leaveAuth])
+    runExitSequence()
+  }, [authLoaded, isSignedIn, runExitSequence])
 
   useEffect(() => {
     Animated.timing(contentFade, {
@@ -288,7 +374,7 @@ export default function AuthScreen() {
 
       if (result.status === 'complete') {
         await setSignInActive({ session: result.createdSessionId })
-        await leaveAuth()
+        await runExitSequence()
         return
       }
 
@@ -329,7 +415,7 @@ export default function AuthScreen() {
       })
       if (attempt.status === 'complete') {
         await setSignInActive({ session: attempt.createdSessionId })
-        await leaveAuth()
+        await runExitSequence()
       } else {
         setFieldError('Verification incomplete')
       }
@@ -383,7 +469,7 @@ export default function AuthScreen() {
       })
       if (attempt.status === 'complete') {
         await setSignUpActive({ session: attempt.createdSessionId })
-        await leaveAuth()
+        await runExitSequence()
       } else {
         setFieldError('Verification incomplete')
       }
@@ -394,7 +480,7 @@ export default function AuthScreen() {
     }
   }
 
-  // ── FORGOT PASSWORD (uses login email) ──
+  // ── FORGOT PASSWORD ──
   const onForgotSend = async () => {
     if (!signInLoaded) return
     if (!requireOnline()) return
@@ -481,7 +567,7 @@ export default function AuthScreen() {
       })
       if (result.status === 'complete') {
         await setSignInActive({ session: result.createdSessionId })
-        await leaveAuth()
+        await runExitSequence()
         return
       }
       Toast.show({
@@ -511,7 +597,7 @@ export default function AuthScreen() {
     if (isSignedIn) {
       setOauthLoading(true)
       try {
-        await leaveAuth()
+        await runExitSequence()
       } finally {
         setOauthLoading(false)
       }
@@ -542,7 +628,7 @@ export default function AuthScreen() {
 
       if (sessionId && setOAuthActive) {
         await setOAuthActive({ session: sessionId })
-        await leaveAuth()
+        await runExitSequence()
         return
       }
 
@@ -552,8 +638,7 @@ export default function AuthScreen() {
         text2: 'Please try Google again',
       })
     } catch (err: any) {
-      const msg =
-        err?.errors?.[0]?.message ?? err?.message ?? 'Could not complete'
+      const msg = err?.errors?.[0]?.message ?? err?.message ?? 'Could not complete'
       const lower = String(msg).toLowerCase()
       if (!lower.includes('cancel') && !lower.includes('dismiss')) {
         Toast.show({ type: 'error', text1: 'Google', text2: msg })
@@ -562,14 +647,14 @@ export default function AuthScreen() {
       setOauthLoading(false)
       WebBrowser.coolDownAsync().catch(() => {})
     }
-  }, [startOAuthFlow, leaveAuth, isSignedIn, isOnline])
+  }, [startOAuthFlow, runExitSequence, isSignedIn, isOnline])
 
-  if (authLoaded && isSignedIn && routingOut) {
+  // ── Full-screen preloader ──────────────────────────────────────────────
+  if (exitPhase === 'preloader') {
     return (
-      <View style={[styles.root, styles.centered]}>
-        <ActivityIndicator color={GREEN} size="large" />
-        <Text style={styles.routingText}>Taking you in…</Text>
-      </View>
+      <Animated.View style={{ flex: 1, opacity: preloaderOpacity }}>
+        <PlazorePreloader label="Taking you in…" />
+      </Animated.View>
     )
   }
 
@@ -770,7 +855,7 @@ export default function AuthScreen() {
                   </View>
 
                   <View style={styles.formStack}>
-                    {/* LOGIN — own email/password state */}
+                    {/* LOGIN */}
                     <Animated.View
                       pointerEvents={mode === 'login' ? 'auto' : 'none'}
                       style={[
@@ -861,9 +946,7 @@ export default function AuthScreen() {
                           style={styles.eye}
                         >
                           <Ionicons
-                            name={
-                              showLoginPass ? 'eye-off-outline' : 'eye-outline'
-                            }
+                            name={showLoginPass ? 'eye-off-outline' : 'eye-outline'}
                             size={20}
                             color="rgba(255,255,255,0.5)"
                           />
@@ -878,14 +961,12 @@ export default function AuthScreen() {
                         style={styles.forgotLink}
                         hitSlop={8}
                       >
-                        <Text style={styles.forgotLinkText}>
-                          Forgot password?
-                        </Text>
+                        <Text style={styles.forgotLinkText}>Forgot password?</Text>
                       </Pressable>
 
                       <TouchableOpacity
                         onPress={onLoginPress}
-                        disabled={loading || routingOut}
+                        disabled={loading || exitPhase !== 'idle'}
                         activeOpacity={0.88}
                         style={styles.ctaOuter}
                       >
@@ -911,7 +992,7 @@ export default function AuthScreen() {
 
                       <TouchableOpacity
                         onPress={onGoogle}
-                        disabled={oauthLoading || routingOut}
+                        disabled={oauthLoading || exitPhase !== 'idle'}
                         activeOpacity={0.9}
                         style={styles.googleBtn}
                       >
@@ -924,15 +1005,13 @@ export default function AuthScreen() {
                               style={styles.googleLogo}
                               resizeMode="contain"
                             />
-                            <Text style={styles.googleText}>
-                              Continue with Google
-                            </Text>
+                            <Text style={styles.googleText}>Continue with Google</Text>
                           </>
                         )}
                       </TouchableOpacity>
                     </Animated.View>
 
-                    {/* SIGN UP — own email/password state */}
+                    {/* SIGN UP */}
                     <Animated.View
                       pointerEvents={mode === 'signup' ? 'auto' : 'none'}
                       style={[
@@ -947,9 +1026,7 @@ export default function AuthScreen() {
                       <View
                         style={[
                           styles.field,
-                          emailFocused &&
-                            mode === 'signup' &&
-                            styles.fieldFocused,
+                          emailFocused && mode === 'signup' && styles.fieldFocused,
                         ]}
                       >
                         <Ionicons
@@ -988,9 +1065,7 @@ export default function AuthScreen() {
                       <View
                         style={[
                           styles.field,
-                          passFocused &&
-                            mode === 'signup' &&
-                            styles.fieldFocused,
+                          passFocused && mode === 'signup' && styles.fieldFocused,
                           { marginBottom: 18 },
                         ]}
                       >
@@ -1030,9 +1105,7 @@ export default function AuthScreen() {
                           style={styles.eye}
                         >
                           <Ionicons
-                            name={
-                              showSignupPass ? 'eye-off-outline' : 'eye-outline'
-                            }
+                            name={showSignupPass ? 'eye-off-outline' : 'eye-outline'}
                             size={20}
                             color="rgba(255,255,255,0.5)"
                           />
@@ -1067,7 +1140,7 @@ export default function AuthScreen() {
 
                       <TouchableOpacity
                         onPress={onGoogle}
-                        disabled={oauthLoading || routingOut}
+                        disabled={oauthLoading || exitPhase !== 'idle'}
                         activeOpacity={0.9}
                         style={styles.googleBtn}
                       >
@@ -1080,9 +1153,7 @@ export default function AuthScreen() {
                               style={styles.googleLogo}
                               resizeMode="contain"
                             />
-                            <Text style={styles.googleText}>
-                              Continue with Google
-                            </Text>
+                            <Text style={styles.googleText}>Continue with Google</Text>
                           </>
                         )}
                       </TouchableOpacity>
@@ -1091,7 +1162,7 @@ export default function AuthScreen() {
                 </>
               )}
 
-              {/* ── VERIFY (signup or 2FA) ── */}
+              {/* ── VERIFY ── */}
               {(flow === 'verify-signup' || flow === 'verify-2fa') && (
                 <>
                   <TextInput
@@ -1112,9 +1183,7 @@ export default function AuthScreen() {
                   />
                   <TouchableOpacity
                     onPress={
-                      flow === 'verify-signup'
-                        ? onSignUpVerify
-                        : onLogin2faVerify
+                      flow === 'verify-signup' ? onSignUpVerify : onLogin2faVerify
                     }
                     disabled={loading}
                     activeOpacity={0.88}
@@ -1130,9 +1199,7 @@ export default function AuthScreen() {
                         <ActivityIndicator color="#041412" />
                       ) : (
                         <Text style={styles.ctaText}>
-                          {flow === 'verify-signup'
-                            ? 'Verify & continue'
-                            : 'Verify'}
+                          {flow === 'verify-signup' ? 'Verify & continue' : 'Verify'}
                         </Text>
                       )}
                     </LinearGradient>
@@ -1143,15 +1210,10 @@ export default function AuthScreen() {
                 </>
               )}
 
-              {/* ── FORGOT: email (login email only) ── */}
+              {/* ── FORGOT: email ── */}
               {flow === 'forgot' && (
                 <>
-                  <View
-                    style={[
-                      styles.field,
-                      emailFocused && styles.fieldFocused,
-                    ]}
-                  >
+                  <View style={[styles.field, emailFocused && styles.fieldFocused]}>
                     <Ionicons
                       name="mail-outline"
                       size={18}
@@ -1239,13 +1301,8 @@ export default function AuthScreen() {
                       )}
                     </LinearGradient>
                   </TouchableOpacity>
-                  <Pressable
-                    onPress={() => setFlow('forgot')}
-                    style={styles.backToForm}
-                  >
-                    <Text style={styles.backToFormText}>
-                      Resend / change email
-                    </Text>
+                  <Pressable onPress={() => setFlow('forgot')} style={styles.backToForm}>
+                    <Text style={styles.backToFormText}>Resend / change email</Text>
                   </Pressable>
                 </>
               )}
@@ -1345,12 +1402,7 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#090B0F' },
   safe: { flex: 1 },
   centered: { justifyContent: 'center', alignItems: 'center' },
-  routingText: {
-    marginTop: 14,
-    color: TEXT_DIM,
-    fontFamily: 'Poppins_500Medium',
-    fontSize: 14,
-  },
+
   scroll: {
     paddingHorizontal: 24,
     paddingTop: 16,

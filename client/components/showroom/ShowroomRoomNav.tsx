@@ -383,7 +383,6 @@ const styles = StyleSheet.create({
   launcher: {
     width: 48,
     height: 48,
-    borderRadius: 16,
     overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'center',
@@ -406,7 +405,7 @@ const styles = StyleSheet.create({
   },
   launcherLabel: {
     marginTop: 5,
-    color: TEXT,
+    color: '#FFFFFF',
     fontSize: 9,
     fontWeight: '800',
     letterSpacing: 0.55,
@@ -446,7 +445,6 @@ const styles = StyleSheet.create({
   cardFace: {
     width: 48,
     height: 48,
-    borderRadius: 15,
     overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'center',
@@ -464,12 +462,10 @@ const styles = StyleSheet.create({
     left: 7,
     right: 7,
     height: 10,
-    borderRadius: 8,
     backgroundColor: 'rgba(255,255,255,0.18)',
   },
   activeRing: {
     ...StyleSheet.absoluteFillObject,
-    borderRadius: 15,
     borderWidth: 2,
     borderColor: 'rgba(255,255,255,0.72)',
   },
@@ -485,14 +481,14 @@ const styles = StyleSheet.create({
   },
   cardTitle: {
     marginTop: 1,
-    color: MUTED,
+    color: '#FFFFFF',
     fontSize: 9,
     fontWeight: '700',
     letterSpacing: 0.3,
     textTransform: 'uppercase',
   },
   cardTitleOn: {
-    color: TEXT,
+    color: '#FFFFFF',
   },
   cardGap: {
     width: 10,

@@ -4,13 +4,7 @@ import {
   useShowroomFlyCart,
 } from '@/components/showroom/ShowroomFlyCart'
 import { useCart } from '@/context/CartContext'
-import {
-  usePlazoreChrome,
-  CHROME_IN_START,
-  CHROME_IN_END,
-  CHROME_DURATION,
-  EASE_SMOOTH,
-} from '@/context/PlazoreChromeContext'
+import { usePlazoreChrome } from '@/context/PlazoreChromeContext'
 import { useSoundtrack } from '@/context/SoundtrackContext'
 import { Ionicons } from '@expo/vector-icons'
 import { BottomTabBarProps } from '@react-navigation/bottom-tabs'
@@ -37,6 +31,12 @@ const BLUE = '#2563EB'
 const PINK = '#F472B6'
 const LOGO_GRADIENT = [GREEN, '#14B8A6', BLUE] as const
 
+// Exact same values as PlazoreTitleBar
+const CHROME_IN_START = 0.02
+const CHROME_IN_END = 0.72
+const CHROME_DURATION = 520
+const EASE_SMOOTH = Easing.bezier(0.22, 0.61, 0.36, 1)
+
 const NAV_VISIBLE_ROUTES = new Set(['index', 'search', 'favorites'])
 
 function PlazoreTabsBar({ state, navigation }: BottomTabBarProps) {
@@ -57,31 +57,29 @@ function PlazoreTabsBar({ state, navigation }: BottomTabBarProps) {
 
   const active = state.routes[state.index]?.name
   const onAllowedScreen = NAV_VISIBLE_ROUTES.has(active)
+  const isHome = active === 'index'
 
   useEffect(() => {
     let target = 0
+
     if (onAllowedScreen) {
-      if (active === 'index' && homeChrome) {
+      if (isHome && homeChrome) {
         target = Math.min(1, Math.max(0, scrollProgress))
-      } else {
+      } else if (!isHome) {
         target = 1
       }
+      // isHome && !homeChrome → stay at 0
     }
 
-    // Home scroll → direct lock (zero shimmer)
-    if (active === 'index' && homeChrome) {
-      anim.setValue(target)
-    } else {
-      // Discrete transitions → clean, snappy snap-up
-      anim.stopAnimation()
-      Animated.timing(anim, {
-        toValue: target,
-        duration: CHROME_DURATION,
-        easing: Easing.bezier(0.16, 1, 0.3, 1), // decisive ease-out (snappy)
-        useNativeDriver: true,
-      }).start()
-    }
-  }, [scrollProgress, homeChrome, active, onAllowedScreen, anim])
+    // Always soft 520 ms timing — exact same as title bar
+    anim.stopAnimation()
+    Animated.timing(anim, {
+      toValue: target,
+      duration: CHROME_DURATION,
+      easing: EASE_SMOOTH,
+      useNativeDriver: true,
+    }).start()
+  }, [scrollProgress, homeChrome, isHome, onAllowedScreen, anim])
 
   useEffect(() => {
     if (itemCount > prevCount.current) {
@@ -173,29 +171,27 @@ function PlazoreTabsBar({ state, navigation }: BottomTabBarProps) {
 
   const bottom = Math.max(insets.bottom, 6) + 4
   const cartOn = active === 'cart' || itemCount > 0
+
   const pointerOff =
     !onAllowedScreen ||
-    (active === 'index' && homeChrome && scrollProgress < CHROME_IN_START)
+    (isHome && (!homeChrome || scrollProgress < CHROME_IN_START))
 
-  // ── Clean snap-up curve ────────────────────────────────────────────────
-  // Opacity becomes visible quickly once the threshold is crossed
+  // Exact inverse of title bar curves
   const barOpacity = anim.interpolate({
-    inputRange: [0, CHROME_IN_START, 0.28, CHROME_IN_END, 1],
-    outputRange: [0, 0.05, 0.55, 0.92, 1],
+    inputRange: [0, CHROME_IN_START, CHROME_IN_END, 1],
+    outputRange: [0, 0.01, 0.54, 1],
     extrapolate: 'clamp',
   })
 
-  // Stronger rise from below → feels like it snaps into place
   const translateY = anim.interpolate({
     inputRange: [0, CHROME_IN_START, CHROME_IN_END, 1],
-    outputRange: [32, 24, 5, 0],
+    outputRange: [22, 20, 6, 0],
     extrapolate: 'clamp',
   })
 
-  // Subtle scale for polished pop
   const scale = anim.interpolate({
     inputRange: [0, CHROME_IN_START, CHROME_IN_END, 1],
-    outputRange: [0.94, 0.96, 0.99, 1],
+    outputRange: [0.97, 0.98, 0.995, 1],
     extrapolate: 'clamp',
   })
 
@@ -434,7 +430,6 @@ const styles = StyleSheet.create({
   pill: {
     width: '100%',
     maxWidth: 400,
-    borderRadius: 24,
     overflow: 'visible',
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(255,255,255,0.12)',
@@ -506,7 +501,6 @@ const styles = StyleSheet.create({
   loungeOrb: {
     width: 44,
     height: 44,
-    borderRadius: 22,
     overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'center',

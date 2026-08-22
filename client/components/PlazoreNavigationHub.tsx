@@ -58,7 +58,6 @@ const TILE_COLORS: Record<
   saved_stores: { bg: '#1A160E', accent: '#D4A853', glow: 'rgba(212,168,83,0.25)', solid: '#B45309' },
   profile: { bg: '#1A0E2A', accent: '#A78BFA', glow: 'rgba(167,139,250,0.25)', solid: '#7C3AED' },
   music: { bg: '#1E1030', accent: '#C084FC', glow: 'rgba(192,132,252,0.28)', solid: '#9333EA' },
-  settings: { bg: '#141820', accent: '#94A3B8', glow: 'rgba(148,163,184,0.2)', solid: '#475569' },
   categories: { bg: '#0B1E28', accent: '#22D3EE', glow: 'rgba(34,211,238,0.22)', solid: '#0891B2' },
   new: { bg: '#251A0A', accent: '#FBBF24', glow: 'rgba(251,191,36,0.25)', solid: '#D97706' },
   trending: { bg: '#28120A', accent: '#FB923C', glow: 'rgba(251,146,60,0.25)', solid: '#EA580C' },
@@ -127,7 +126,7 @@ export type PlazoreNavigationHubProps = {
 const SECTIONS: NavSection[] = [
   {
     id: 'floors',
-    title: 'Main floors',
+    title: 'Main Hubs',
     items: [
       {
         id: 'home',
@@ -190,13 +189,6 @@ const SECTIONS: NavSection[] = [
         subtitle: 'Ambient soundtrack',
         icon: 'musical-notes',
         href: '/settings/music',
-      },
-      {
-        id: 'settings',
-        label: 'Settings',
-        subtitle: 'App preferences',
-        icon: 'settings-outline',
-        href: '/settings',
       },
     ],
   },
@@ -1345,7 +1337,7 @@ export default function PlazoreNavigationHub({
                 <FadeSlideIn index={14} delayBase={160}>
                   <View style={styles.footerCard}>
                     <Pressable
-                      onPress={() => navigate('/(tabs)/profile')}
+                      onPress={() => navigate('/settings/profile')}
                       style={styles.footerProfile}
                     >
                       {user?.imageUrl ? (

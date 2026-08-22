@@ -434,7 +434,7 @@ export default function Shop() {
                   {item}
                 </Text>
                 <Text style={{ fontSize: 11, color: '#94A3B8', marginTop: 4 }}>
-                  {PRODUCT_CATEGORIES[item]?.length || 0} sub-rooms
+                  {PRODUCT_CATEGORIES[item]?.length || 0} sub-categories
                 </Text>
               </View>
             </Pressable>

@@ -433,8 +433,8 @@ export default function HeroBanner({
         <Pressable onPress={onScrollToShowroom} hitSlop={20}>
           <Ionicons
             name="chevron-down"
-            size={28}
-            color="rgba(255,255,255,0.35)"
+            size={43}
+            color="rgba(255, 255, 255, 0.67)"
           />
         </Pressable>
       </View>
