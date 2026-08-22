@@ -543,7 +543,6 @@ const styles = StyleSheet.create({
   cartActiveWrap: {
     width: 26,
     height: 26,
-    borderRadius: 8,
     overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'center',
@@ -555,7 +554,6 @@ const styles = StyleSheet.create({
     position: 'absolute',
     width: 22,
     height: 22,
-    borderRadius: 11,
     overflow: 'hidden',
   },
   badge: {
@@ -564,7 +562,6 @@ const styles = StyleSheet.create({
     right: -10,
     minWidth: 18,
     height: 18,
-    borderRadius: 9,
     paddingHorizontal: 5,
     overflow: 'hidden',
     alignItems: 'center',

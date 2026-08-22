@@ -202,7 +202,7 @@ export default function AuthScreen() {
   const params = useLocalSearchParams<{ mode?: string }>()
   const initialMode: Mode = params.mode === 'signup' ? 'signup' : 'login'
 
-  const { holdIntroGate, releaseIntroGate } = useSoundtrack()
+  const { holdIntroGate, releaseIntroGate, forceStop } = useSoundtrack()
 
   const { signIn, setActive: setSignInActive, isLoaded: signInLoaded } = useSignIn()
   const { signUp, setActive: setSignUpActive, isLoaded: signUpLoaded } = useSignUp()
@@ -243,7 +243,16 @@ export default function AuthScreen() {
   const passwordRef = useRef<TextInput>(null)
   const loginPassRef = useRef<TextInput>(null)
 
-    const runExitSequence = useCallback(async () => {
+  // ────────────────────────────────────────────────
+  // CRITICAL: Silence music the entire time we are on Auth screen
+  // (after logout, opener, sign-in, sign-out)
+  // ────────────────────────────────────────────────
+  useEffect(() => {
+    forceStop()
+    holdIntroGate()
+  }, [forceStop, holdIntroGate])
+
+  const runExitSequence = useCallback(async () => {
     if (navigatingRef.current) return
     navigatingRef.current = true
 
@@ -276,7 +285,8 @@ export default function AuthScreen() {
       navigatingRef.current = false
       setExitPhase('idle')
       StatusBar.setHidden(false, 'fade')
-      releaseIntroGate() // safety: don't leave gate held on error
+      // Stay silent if navigation fails
+      holdIntroGate()
       router.replace('/complete-profile')
     }
   }, [getToken, router, preloaderOpacity, holdIntroGate, releaseIntroGate])

@@ -192,7 +192,7 @@ const SECTIONS: NavSection[] = [
       },
     ],
   },
-  {
+   {
     id: 'explore',
     title: 'Explore',
     items: [
@@ -201,24 +201,28 @@ const SECTIONS: NavSection[] = [
         label: 'Categories',
         subtitle: 'Shop by type',
         icon: 'apps',
+        href: '/shop?mode=categories',
       },
       {
         id: 'new',
         label: 'New arrivals',
         subtitle: 'Just listed',
         icon: 'sparkles',
+        href: '/shop?mode=new',
       },
       {
         id: 'trending',
         label: 'Trending',
         subtitle: 'Popular now',
         icon: 'flame',
+        href: '/shop?mode=trending',
       },
       {
         id: 'stores',
         label: 'Stores',
         subtitle: 'Seller directories',
         icon: 'business-outline',
+        href: '/shop?mode=stores',
       },
     ],
   },
@@ -894,7 +898,16 @@ export default function PlazoreNavigationHub({
     outputRange: [-windowW * 0.96, 0],
   })
 
-  const isActive = (href?: string) => {
+    const isActive = (href?: string, itemId?: string) => {
+    if (!href && !itemId) return false
+
+    // Explore tiles → active when /shop matches mode
+    if (itemId === 'categories' || itemId === 'new' || itemId === 'trending' || itemId === 'stores') {
+      if (typeof pathname !== 'string' || !pathname.includes('shop')) return false
+      // pathname alone may not include params; rely on href fragment when available
+      return true // soft highlight any time user is in shop explore surface
+    }
+
     if (!href) return false
     if (href === '/(tabs)' || href === '/(tabs)/') {
       return (
@@ -904,15 +917,15 @@ export default function PlazoreNavigationHub({
         pathname.endsWith('/index')
       )
     }
-    const key = href.split('/').filter(Boolean).pop() || ''
+    const key = href.split('/').filter(Boolean).pop()?.split('?')[0] || ''
     return typeof pathname === 'string' && pathname.includes(key)
   }
 
-  const activeMap = useMemo(() => {
+    const activeMap = useMemo(() => {
     const map: Record<string, boolean> = {}
     SECTIONS.forEach((s) =>
       s.items.forEach((item) => {
-        map[item.id] = isActive(item.href)
+        map[item.id] = isActive(item.href, item.id)
       })
     )
     if (
@@ -926,45 +939,29 @@ export default function PlazoreNavigationHub({
     return map
   }, [pathname])
 
-  const navigate = (href?: string, itemId?: string) => {
+    const navigate = (href?: string, itemId?: string) => {
     onClose()
 
-    if (itemId === 'categories') {
+    // ── Explore → shop.tsx domains ──────────────────────────
+    // shop.tsx modes: categories | new | trending | stores | category
+    const exploreRoutes: Record<string, { mode: string }> = {
+      categories: { mode: 'categories' },
+      new: { mode: 'new' },
+      trending: { mode: 'trending' },
+      stores: { mode: 'stores' },
+    }
+
+    if (itemId && exploreRoutes[itemId]) {
       requestAnimationFrame(() => {
         router.push({
-          pathname: '/(tabs)/search',
-          params: { mode: 'categories' },
+          pathname: '/shop',
+          params: exploreRoutes[itemId],
         } as any)
       })
       return
     }
-    if (itemId === 'new') {
-      requestAnimationFrame(() => {
-        router.push({
-          pathname: '/(tabs)/search',
-          params: { mode: 'new' },
-        } as any)
-      })
-      return
-    }
-    if (itemId === 'trending') {
-      requestAnimationFrame(() => {
-        router.push({
-          pathname: '/(tabs)/search',
-          params: { mode: 'trending' },
-        } as any)
-      })
-      return
-    }
-    if (itemId === 'stores') {
-      requestAnimationFrame(() => {
-        router.push({
-          pathname: '/(tabs)/search',
-          params: { mode: 'stores' },
-        } as any)
-      })
-      return
-    }
+
+    // Support screens
     if (itemId === 'help' || itemId === 'contact' || itemId === 'about') {
       requestAnimationFrame(() => {
         router.push('/settings/about' as any)
@@ -973,9 +970,12 @@ export default function PlazoreNavigationHub({
     }
 
     if (!href) return
+
     requestAnimationFrame(() => {
       try {
-        router.push(href as any)
+        // Strip query string if present; use path only for tab routes
+        const path = href.split('?')[0]
+        router.push(path as any)
       } catch {
         /* ignore */
       }

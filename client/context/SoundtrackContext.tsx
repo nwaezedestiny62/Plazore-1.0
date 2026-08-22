@@ -1,10 +1,13 @@
 /**
- * Plazore Ambient Soundtrack — one global player
- * OFF freezes position · volume 0% ≠ OFF · cycle active tracks only
- *
- * Intro gate (boolean):
- *   holdIntroGate()   → silence (opener / preloader)
- *   releaseIntroGate() → allow play again if enabled was ON
+ * Plazore Ambient Soundtrack — one global player (hardened)
+ * -------------------------------------------------------
+ * Rules enforced:
+ * 1. Exactly one Audio.Sound instance can exist at any time
+ * 2. Music is COMPLETELY silent on opener + preloader + auth screens
+ * 3. Only plays inside the real app environment (after releaseIntroGate)
+ * 4. Respects last saved enabled + position
+ * 5. Logout → force stop
+ * 6. No overlapping / clashing tracks under any race condition
  */
 
 import {
@@ -56,6 +59,8 @@ type Ctx = {
   unlock: () => void
   holdIntroGate: () => void
   releaseIntroGate: () => void
+  /** Call this on logout / auth screens */
+  forceStop: () => void
 }
 
 const SoundtrackContext = createContext<Ctx | null>(null)
@@ -76,7 +81,6 @@ async function loadPrefs(): Promise<Prefs> {
     if (raw) {
       const p = JSON.parse(raw) as Prefs
       return {
-        // missing / undefined → treat as ON (same as before)
         enabled: p.enabled !== false,
         volume: clamp01(typeof p.volume === 'number' ? p.volume : DEFAULT_VOLUME),
         trackId: p.trackId ?? null,
@@ -106,6 +110,7 @@ export function SoundtrackProvider({ children }: { children: React.ReactNode }) 
   const [currentTitle, setCurrentTitle] = useState<string | null>(null)
   const [unlocked, setUnlocked] = useState(false)
 
+  // ─── Refs (single source of truth) ───────────────────────────────────────
   const soundRef = useRef<Audio.Sound | null>(null)
   const indexRef = useRef(0)
   const positionRef = useRef(0)
@@ -113,13 +118,15 @@ export function SoundtrackProvider({ children }: { children: React.ReactNode }) 
   const enabledRef = useRef(true)
   const volumeRef = useRef(DEFAULT_VOLUME)
   const appActiveRef = useRef(true)
-  const advancingRef = useRef(false)
-  const prefsReady = useRef(false)
-  const tracksRef = useRef<SoundtrackTrack[]>([])
   const unlockedRef = useRef(false)
+  const introSilencedRef = useRef(true) // starts silenced → opener never gets audio
+  const tracksRef = useRef<SoundtrackTrack[]>([])
+  const prefsReady = useRef(false)
 
-  // Simple boolean — starts silenced so opener never gets audio
-  const introSilencedRef = useRef(true)
+  // Critical: generation counter kills any stale async work
+  const generationRef = useRef(0)
+  // Serializes all play / load operations
+  const operationLock = useRef(false)
 
   const persist = useCallback(async () => {
     await savePrefs({
@@ -130,6 +137,7 @@ export function SoundtrackProvider({ children }: { children: React.ReactNode }) 
     })
   }, [])
 
+  /** Only true when we are allowed to make sound */
   const canPlay = useCallback(() => {
     return (
       enabledRef.current &&
@@ -148,66 +156,64 @@ export function SoundtrackProvider({ children }: { children: React.ReactNode }) 
     return 0
   }, [])
 
+  // ─── Hard unload (kills any existing sound) ──────────────────────────────
   const unload = useCallback(async () => {
     const s = soundRef.current
     soundRef.current = null
     if (!s) return
     try {
       s.setOnPlaybackStatusUpdate(null)
-      await s.unloadAsync()
+      await s.stopAsync().catch(() => {})
+      await s.unloadAsync().catch(() => {})
     } catch {}
   }, [])
 
-  const fadeTo = useCallback(async (sound: Audio.Sound, target: number) => {
+  const fadeTo = useCallback(async (sound: Audio.Sound, target: number, gen: number) => {
     try {
       const st = await sound.getStatusAsync()
-      if (!st.isLoaded) return
+      if (!st.isLoaded || generationRef.current !== gen) return
       let current = typeof st.volume === 'number' ? st.volume : volumeRef.current
       const step = (target - current) / FADE_STEPS
       for (let i = 0; i < FADE_STEPS; i++) {
+        if (generationRef.current !== gen) return
         current += step
         await sound.setVolumeAsync(clamp01(current))
         await new Promise((r) => setTimeout(r, FADE_MS / FADE_STEPS))
       }
-      await sound.setVolumeAsync(clamp01(target))
+      if (generationRef.current === gen) {
+        await sound.setVolumeAsync(clamp01(target))
+      }
     } catch {}
   }, [])
 
-  const playIndexRef = useRef<
-    (list: SoundtrackTrack[], index: number, seekMs: number) => Promise<void>
-  >(async () => {})
-
-  const advance = useCallback(async (fromEnd: boolean) => {
-    if (advancingRef.current) return
-    if (!enabledRef.current && fromEnd) return
-    advancingRef.current = true
-    try {
-      const list = tracksRef.current
-      if (!list.length) return
-      const next = (indexRef.current + 1) % list.length
-      positionRef.current = 0
-      await playIndexRef.current(list, next, 0)
-    } finally {
-      advancingRef.current = false
-    }
-  }, [])
-
+  // ─── Core play function (fully serialized + generation-guarded) ──────────
   const playIndex = useCallback(
     async (list: SoundtrackTrack[], index: number, seekMs: number) => {
-      if (!list.length) {
-        setState('IDLE')
-        return
-      }
-      const safeIndex = ((index % list.length) + list.length) % list.length
-      const track = list[safeIndex]
-      indexRef.current = safeIndex
-      trackIdRef.current = track.id
-      setCurrentTitle(track.title)
-      setState('LOADING')
+      // Prevent concurrent operations
+      if (operationLock.current) return
+      operationLock.current = true
 
-      await unload()
+      const gen = ++generationRef.current
 
       try {
+        if (!list.length) {
+          setState('IDLE')
+          return
+        }
+
+        const safeIndex = ((index % list.length) + list.length) % list.length
+        const track = list[safeIndex]
+        indexRef.current = safeIndex
+        trackIdRef.current = track.id
+        setCurrentTitle(track.title)
+        setState('LOADING')
+
+        // Kill any previous sound first
+        await unload()
+
+        // Abort if a newer operation started while we were unloading
+        if (generationRef.current !== gen) return
+
         await Audio.setAudioModeAsync({
           playsInSilentModeIOS: true,
           staysActiveInBackground: false,
@@ -225,6 +231,15 @@ export function SoundtrackProvider({ children }: { children: React.ReactNode }) 
           undefined,
           true
         )
+
+        // Abort if generation changed while creating
+        if (generationRef.current !== gen) {
+          try {
+            await sound.unloadAsync()
+          } catch {}
+          return
+        }
+
         soundRef.current = sound
 
         if (seekMs > 0) {
@@ -239,23 +254,36 @@ export function SoundtrackProvider({ children }: { children: React.ReactNode }) 
         }
 
         sound.setOnPlaybackStatusUpdate((status: AVPlaybackStatus) => {
+          // Ignore status from old generations
+          if (generationRef.current !== gen) return
+
           if (!status.isLoaded) {
             if ('error' in status && status.error) {
               console.warn('[soundtrack] error', status.error)
-              void advance(true)
+              // advance only if still current
+              if (generationRef.current === gen) {
+                void advance(true)
+              }
             }
             return
           }
           positionRef.current = status.positionMillis ?? 0
           if (status.didJustFinish && !status.isLooping) {
-            void advance(true)
+            if (generationRef.current === gen) {
+              void advance(true)
+            }
           }
         })
 
+        // Final gate check before making any sound
+        if (generationRef.current !== gen) return
+
         if (canPlay()) {
           await sound.playAsync()
-          await fadeTo(sound, volumeRef.current)
-          setState('PLAYING')
+          await fadeTo(sound, volumeRef.current, gen)
+          if (generationRef.current === gen) {
+            setState('PLAYING')
+          }
         } else if (!enabledRef.current) {
           setState('DISABLED')
         } else {
@@ -264,15 +292,35 @@ export function SoundtrackProvider({ children }: { children: React.ReactNode }) 
 
         await persist()
       } catch (e) {
-        console.warn('[soundtrack] load failed', track.title, e)
-        setState('ERROR')
-        setTimeout(() => void advance(true), 400)
+        console.warn('[soundtrack] load failed', e)
+        if (generationRef.current === gen) {
+          setState('ERROR')
+          setTimeout(() => {
+            if (generationRef.current === gen) void advance(true)
+          }, 400)
+        }
+      } finally {
+        operationLock.current = false
       }
     },
-    [unload, fadeTo, persist, advance, canPlay]
+    [unload, fadeTo, persist, canPlay]
   )
 
-  playIndexRef.current = playIndex
+  // advance needs the latest playIndex
+  const advance = useCallback(
+    async (fromEnd: boolean) => {
+      if (!enabledRef.current && fromEnd) return
+      if (operationLock.current) return
+
+      const list = tracksRef.current
+      if (!list.length) return
+
+      const next = (indexRef.current + 1) % list.length
+      positionRef.current = 0
+      await playIndex(list, next, 0)
+    },
+    [playIndex]
+  )
 
   const refreshCatalog = useCallback(async (force = false) => {
     const list = await fetchActiveSoundtracks(force)
@@ -284,6 +332,7 @@ export function SoundtrackProvider({ children }: { children: React.ReactNode }) 
   const tryStartOrResume = useCallback(async () => {
     if (!canPlay()) return
     if (!tracksRef.current.length) return
+    if (operationLock.current) return
 
     const sound = soundRef.current
     if (sound) {
@@ -301,10 +350,10 @@ export function SoundtrackProvider({ children }: { children: React.ReactNode }) 
     }
 
     const idx = resolveIndex(tracksRef.current, trackIdRef.current)
-    await playIndexRef.current(tracksRef.current, idx, positionRef.current)
-  }, [canPlay, resolveIndex])
+    await playIndex(tracksRef.current, idx, positionRef.current)
+  }, [canPlay, resolveIndex, playIndex])
 
-  // Boot
+  // ─── Boot ────────────────────────────────────────────────────────────────
   useEffect(() => {
     let cancelled = false
     ;(async () => {
@@ -339,7 +388,7 @@ export function SoundtrackProvider({ children }: { children: React.ReactNode }) 
     }
   }, [resolveIndex])
 
-  // Start after unlock (still blocked by intro gate)
+  // Start only after unlock + intro gate released
   useEffect(() => {
     if (!prefsReady.current || !unlocked) return
     if (!canPlay()) return
@@ -347,10 +396,10 @@ export function SoundtrackProvider({ children }: { children: React.ReactNode }) 
     if (soundRef.current) return
 
     const idx = resolveIndex(tracksRef.current, trackIdRef.current)
-    void playIndexRef.current(tracksRef.current, idx, positionRef.current)
-  }, [unlocked, tracks, resolveIndex, canPlay])
+    void playIndex(tracksRef.current, idx, positionRef.current)
+  }, [unlocked, tracks, resolveIndex, canPlay, playIndex])
 
-  // App lifecycle
+  // ─── App lifecycle ───────────────────────────────────────────────────────
   useEffect(() => {
     const onChange = async (next: AppStateStatus) => {
       const active = next === 'active'
@@ -385,12 +434,15 @@ export function SoundtrackProvider({ children }: { children: React.ReactNode }) 
     return () => sub.remove()
   }, [persist, refreshCatalog, canPlay, tryStartOrResume])
 
+  // Cleanup on unmount
   useEffect(() => {
     return () => {
+      generationRef.current++ // kill any in-flight work
       void unload()
     }
   }, [unload])
 
+  // ─── Public API ──────────────────────────────────────────────────────────
   const setEnabled = useCallback(
     async (on: boolean) => {
       enabledRef.current = on
@@ -399,6 +451,7 @@ export function SoundtrackProvider({ children }: { children: React.ReactNode }) 
       const sound = soundRef.current
 
       if (!on) {
+        // Turning OFF → pause and freeze position
         if (sound) {
           try {
             const st = await sound.getStatusAsync()
@@ -413,6 +466,7 @@ export function SoundtrackProvider({ children }: { children: React.ReactNode }) 
         return
       }
 
+      // Turning ON
       unlockedRef.current = true
       setUnlocked(true)
 
@@ -449,8 +503,10 @@ export function SoundtrackProvider({ children }: { children: React.ReactNode }) 
     setUnlocked(true)
   }, [])
 
+  /** Call this on opener, preloader, sign-in, sign-out, logout */
   const holdIntroGate = useCallback(() => {
     introSilencedRef.current = true
+    generationRef.current++ // cancel any pending play
 
     const sound = soundRef.current
     if (sound) {
@@ -465,9 +521,12 @@ export function SoundtrackProvider({ children }: { children: React.ReactNode }) 
         if (enabledRef.current) setState('PAUSED')
         await persist()
       })()
+    } else {
+      if (enabledRef.current) setState('PAUSED')
     }
   }, [persist])
 
+  /** Call this ONLY when user has fully entered the main environment */
   const releaseIntroGate = useCallback(() => {
     introSilencedRef.current = false
     unlockedRef.current = true
@@ -482,11 +541,21 @@ export function SoundtrackProvider({ children }: { children: React.ReactNode }) 
       return
     }
 
-    // Small delay so tracks/prefs are ready after cold start
+    // Small delay so everything is settled
     setTimeout(() => {
       void tryStartOrResume()
-    }, 80)
+    }, 120)
   }, [tryStartOrResume])
+
+  /** Hard stop — use on logout */
+  const forceStop = useCallback(async () => {
+    introSilencedRef.current = true
+    generationRef.current++
+    await unload()
+    if (enabledRef.current) setState('PAUSED')
+    else setState('DISABLED')
+    await persist()
+  }, [unload, persist])
 
   const value = useMemo<Ctx>(
     () => ({
@@ -503,6 +572,7 @@ export function SoundtrackProvider({ children }: { children: React.ReactNode }) 
       unlock,
       holdIntroGate,
       releaseIntroGate,
+      forceStop,
     }),
     [
       state,
@@ -516,6 +586,7 @@ export function SoundtrackProvider({ children }: { children: React.ReactNode }) 
       unlock,
       holdIntroGate,
       releaseIntroGate,
+      forceStop,
     ]
   )
 

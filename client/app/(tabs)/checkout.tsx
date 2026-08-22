@@ -28,15 +28,20 @@ import { ScrollView } from 'react-native-gesture-handler'
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 
 const BG = '#090B0F'
-const SURFACE = '#11141A'
-const SURFACE_2 = '#171B22'
-const LINE = 'rgba(255,255,255,0.07)'
+const SURFACE = '#0E1116'
+const SURFACE_2 = '#14181F'
+const LINE = 'rgba(255,255,255,0.08)'
 const TEXT = '#F5F7FA'
-const SECONDARY = '#A7ADB8'
-const MUTED = '#6B7280'
+const SECONDARY = 'rgba(255,255,255,0.55)'
+const MUTED = 'rgba(255,255,255,0.38)'
 const GREEN = '#00E575'
-const BLUE = '#3B82F6'
+const TEAL = '#14B8A6'
+const BLUE = '#2563EB'
 const DANGER = '#EF4444'
+const GRAD = [GREEN, TEAL, BLUE] as const
+
+const U = 8
+const H_PAD = 16
 
 type OverlayState = {
   title: string
@@ -126,7 +131,6 @@ function maskCard(last4?: string) {
   return `•••• ${last4}`
 }
 
-/* ── Plazore orb (page preloader + order modal) ── */
 function PlazoreOrb({ size = 110 }: { size?: number }) {
   const rotation = useRef(new Animated.Value(0)).current
 
@@ -153,7 +157,14 @@ function PlazoreOrb({ size = 110 }: { size?: number }) {
   const logoImg = size * 0.29
 
   return (
-    <View style={{ width: ring, height: ring, alignItems: 'center', justifyContent: 'center' }}>
+    <View
+      style={{
+        width: ring,
+        height: ring,
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+    >
       <Animated.View
         style={{
           position: 'absolute',
@@ -269,7 +280,6 @@ function TopToast({
   )
 }
 
-/** Full-screen order status modal: orb → tick → success content */
 function OrderStatusModal({
   phase,
   errorMessage,
@@ -283,7 +293,8 @@ function OrderStatusModal({
   onShowroom: () => void
   onCloseError: () => void
 }) {
-  const visible = phase === 'processing' || phase === 'success' || phase === 'error'
+  const visible =
+    phase === 'processing' || phase === 'success' || phase === 'error'
   const tickScale = useRef(new Animated.Value(0)).current
   const contentOpacity = useRef(new Animated.Value(0)).current
   const contentLift = useRef(new Animated.Value(16)).current
@@ -362,12 +373,12 @@ function OrderStatusModal({
                   ]}
                 >
                   <LinearGradient
-                    colors={[GREEN, BLUE]}
+                    colors={[...GRAD]}
                     start={{ x: 0, y: 0 }}
                     end={{ x: 1, y: 1 }}
                     style={styles.tickGradient}
                   >
-                    <Ionicons name="checkmark" size={36} color="#fff" />
+                    <Ionicons name="checkmark" size={36} color="#041412" />
                   </LinearGradient>
                 </Animated.View>
 
@@ -384,7 +395,6 @@ function OrderStatusModal({
                     Your order is confirmed on Plazore.
                   </Text>
 
-                  {/* Order flow */}
                   <View style={styles.infoBlock}>
                     <Text style={styles.infoEyebrow}>HOW YOUR ORDER WORKS</Text>
                     {[
@@ -411,7 +421,7 @@ function OrderStatusModal({
                     ].map((step) => (
                       <View key={step.n} style={styles.flowRow}>
                         <LinearGradient
-                          colors={[GREEN, BLUE]}
+                          colors={[...GRAD]}
                           start={{ x: 0, y: 0 }}
                           end={{ x: 1, y: 1 }}
                           style={styles.flowNum}
@@ -426,19 +436,18 @@ function OrderStatusModal({
                     ))}
                   </View>
 
-                  {/* CTAs */}
                   <Pressable
                     onPress={onViewOrders}
                     style={styles.primaryCtaWrap}
                   >
                     <LinearGradient
-                      colors={[GREEN, BLUE]}
+                      colors={[...GRAD]}
                       start={{ x: 0, y: 0 }}
                       end={{ x: 1, y: 0 }}
                       style={styles.primaryCta}
                     >
                       <Text style={styles.primaryCtaText}>View Order</Text>
-                      <Ionicons name="arrow-forward" size={16} color="#fff" />
+                      <Ionicons name="arrow-forward" size={16} color="#041412" />
                     </LinearGradient>
                   </Pressable>
 
@@ -523,7 +532,7 @@ export default function Checkout() {
         })
       }
     } catch {
-      // keep empty
+      /* keep empty */
     }
   }, [getToken])
 
@@ -732,9 +741,7 @@ export default function Checkout() {
       }
     } catch (error: any) {
       setOrderPhase('error')
-      setOrderError(
-        error.response?.data?.message || 'Something went wrong'
-      )
+      setOrderError(error.response?.data?.message || 'Something went wrong')
     }
   }
 
@@ -768,6 +775,7 @@ export default function Checkout() {
         onCloseError={() => setOrderPhase('idle')}
       />
 
+      {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity
           onPress={() => router.back()}
@@ -779,19 +787,31 @@ export default function Checkout() {
         <Text style={styles.headerTitle}>Checkout</Text>
         <View style={styles.headerRight} />
       </View>
+      <LinearGradient
+        colors={[
+          'transparent',
+          'rgba(0,229,117,0.4)',
+          'rgba(37,99,235,0.3)',
+          'transparent',
+        ]}
+        locations={[0, 0.3, 0.7, 1]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 0 }}
+        style={styles.headerRule}
+      />
 
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        <Text style={styles.stepHint}>Review · Deliver · Pay</Text>
+        <Text style={styles.stepHint}>REVIEW  ·  DELIVER  ·  PAY</Text>
 
         {/* Bag */}
         <View style={styles.card}>
           <View style={styles.cardHeader}>
             <View style={styles.cardHeaderLeft}>
-              <View style={styles.iconCircle}>
+              <View style={styles.iconSquare}>
                 <Ionicons name="bag-handle-outline" size={15} color={SECONDARY} />
               </View>
               <Text style={styles.cardTitle}>Your Bag</Text>
@@ -811,7 +831,8 @@ export default function Checkout() {
               const productRegion = resolveProductRegion(item.product)
               const unit = Number(item.price ?? item.product?.price) || 0
               const lineTotal = unit * (item.quantity || 1)
-              const lineFee = Number(item.product?.shipping?.deliveryFee) || 0
+              const lineFee =
+                Number(item.product?.shipping?.deliveryFee) || 0
               return (
                 <View
                   key={item.id}
@@ -835,7 +856,8 @@ export default function Checkout() {
                       {item.product?.name || 'Product'}
                     </Text>
                     <Text style={styles.itemMeta}>
-                      Qty {item.quantity} · {fmtProduct(unit, productRegion)} each
+                      Qty {item.quantity} · {fmtProduct(unit, productRegion)}{' '}
+                      each
                     </Text>
                     {lineFee > 0 && (
                       <Text style={styles.itemFee}>
@@ -856,7 +878,7 @@ export default function Checkout() {
         <View style={styles.card}>
           <View style={styles.cardHeader}>
             <View style={styles.cardHeaderLeft}>
-              <View style={styles.iconCircle}>
+              <View style={styles.iconSquare}>
                 <Ionicons name="home-outline" size={15} color={SECONDARY} />
               </View>
               <Text style={styles.cardTitle}>Deliver To</Text>
@@ -911,7 +933,7 @@ export default function Checkout() {
                 onPress={() => router.push('/addresses' as any)}
                 style={styles.addBtn}
               >
-                <Ionicons name="add-circle-outline" size={17} color={GREEN} />
+                <Ionicons name="add" size={16} color={GREEN} />
                 <Text style={styles.addBtnText}>Add new address</Text>
               </TouchableOpacity>
             </View>
@@ -936,7 +958,7 @@ export default function Checkout() {
         <View style={styles.card}>
           <View style={styles.cardHeader}>
             <View style={styles.cardHeaderLeft}>
-              <View style={styles.iconCircle}>
+              <View style={styles.iconSquare}>
                 <Ionicons name="card-outline" size={15} color={SECONDARY} />
               </View>
               <Text style={styles.cardTitle}>Pay with Card</Text>
@@ -990,7 +1012,7 @@ export default function Checkout() {
                 onPress={() => router.push('/payment-methods' as any)}
                 style={styles.addBtn}
               >
-                <Ionicons name="add-circle-outline" size={17} color={GREEN} />
+                <Ionicons name="add" size={16} color={GREEN} />
                 <Text style={styles.addBtnText}>Add new card</Text>
               </TouchableOpacity>
             </View>
@@ -1016,8 +1038,12 @@ export default function Checkout() {
           <View style={styles.card}>
             <View style={styles.cardHeader}>
               <View style={styles.cardHeaderLeft}>
-                <View style={styles.iconCircle}>
-                  <Ionicons name="navigate-outline" size={15} color={SECONDARY} />
+                <View style={styles.iconSquare}>
+                  <Ionicons
+                    name="navigate-outline"
+                    size={15}
+                    color={SECONDARY}
+                  />
                 </View>
                 <Text style={styles.cardTitle}>Shipping Route</Text>
               </View>
@@ -1047,7 +1073,9 @@ export default function Checkout() {
                     )}
                     <View style={styles.routeCard}>
                       <View style={styles.routePoint}>
-                        <View style={[styles.routeDotOuter, styles.routeDotBlue]}>
+                        <View
+                          style={[styles.routeDotOuter, styles.routeDotBlue]}
+                        >
                           <View style={styles.routeDotInnerBlue} />
                         </View>
                         <View style={styles.routePointText}>
@@ -1097,7 +1125,7 @@ export default function Checkout() {
         <View style={styles.card}>
           <View style={styles.cardHeader}>
             <View style={styles.cardHeaderLeft}>
-              <View style={styles.iconCircle}>
+              <View style={styles.iconSquare}>
                 <Ionicons name="receipt-outline" size={15} color={SECONDARY} />
               </View>
               <Text style={styles.cardTitle}>Receipt</Text>
@@ -1123,47 +1151,68 @@ export default function Checkout() {
           </View>
         </View>
 
-
         <Text style={styles.footerBrand}>Plazore · Premium Digital Mall</Text>
       </ScrollView>
 
+      {/* Bottom bar */}
       <View style={styles.bottomBar}>
-        <View style={styles.bottomLeft}>
-          <Text style={styles.amountLabel}>Amount due</Text>
-          <Text
-            style={styles.amountValue}
-            numberOfLines={1}
-            adjustsFontSizeToFit
-            minimumFontScale={0.65}
-          >
-            {fmt(totalAmount)}
-          </Text>
-        </View>
-
-        <TouchableOpacity
-          onPress={handlePlaceOrder}
-          disabled={placing || !canCheckout || !cartItems.length}
-          activeOpacity={0.88}
-          style={styles.ctaWrap}
-        >
-          <LinearGradient
-            colors={
-              placing || !canCheckout || !cartItems.length
-                ? ['#374151', '#374151']
-                : [GREEN, BLUE]
-            }
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 0 }}
-            style={styles.ctaBtn}
-          >
-            <Text style={styles.ctaText}>
-              {!canCheckout ? 'Unavailable' : 'Place Order'}
+        <LinearGradient
+          colors={[
+            'transparent',
+            'rgba(0,229,117,0.35)',
+            'rgba(37,99,235,0.25)',
+            'transparent',
+          ]}
+          locations={[0, 0.25, 0.75, 1]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 0 }}
+          style={styles.bottomRule}
+        />
+        <View style={styles.bottomInner}>
+          <View style={styles.bottomLeft}>
+            <Text style={styles.amountLabel}>AMOUNT DUE</Text>
+            <Text
+              style={styles.amountValue}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.65}
+            >
+              {fmt(totalAmount)}
             </Text>
-            {canCheckout && (
-              <Ionicons name="arrow-forward" size={16} color="#fff" />
-            )}
-          </LinearGradient>
-        </TouchableOpacity>
+          </View>
+
+          <TouchableOpacity
+            onPress={handlePlaceOrder}
+            disabled={placing || !canCheckout || !cartItems.length}
+            activeOpacity={0.88}
+            style={styles.ctaWrap}
+          >
+            <LinearGradient
+              colors={
+                placing || !canCheckout || !cartItems.length
+                  ? ['#2A2F38', '#2A2F38']
+                  : [...GRAD]
+              }
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={styles.ctaBtn}
+            >
+              <Text
+                style={[
+                  styles.ctaText,
+                  (placing || !canCheckout || !cartItems.length) && {
+                    color: MUTED,
+                  },
+                ]}
+              >
+                {!canCheckout ? 'Unavailable' : 'Place Order'}
+              </Text>
+              {canCheckout && !placing && (
+                <Ionicons name="arrow-forward" size={16} color="#041412" />
+              )}
+            </LinearGradient>
+          </TouchableOpacity>
+        </View>
       </View>
     </SafeAreaView>
   )
@@ -1179,7 +1228,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     zIndex: 50,
-    paddingHorizontal: 14,
+    paddingHorizontal: H_PAD,
   },
   toastCard: {
     flexDirection: 'row',
@@ -1191,11 +1240,16 @@ const styles = StyleSheet.create({
   },
   toastAccent: { width: 3, alignSelf: 'stretch' },
   toastTitle: { color: TEXT, fontWeight: '700', fontSize: 14 },
-  toastMsg: { color: SECONDARY, fontSize: 12.5, marginTop: 3, lineHeight: 17 },
+  toastMsg: {
+    color: SECONDARY,
+    fontSize: 12.5,
+    marginTop: 3,
+    lineHeight: 17,
+  },
 
   modalRoot: {
     flex: 1,
-    backgroundColor: 'rgba(9,11,15,0.92)',
+    backgroundColor: 'rgba(9,11,15,0.94)',
     justifyContent: 'center',
     paddingHorizontal: 18,
     paddingVertical: 40,
@@ -1229,8 +1283,9 @@ const styles = StyleSheet.create({
   errorIconWrap: {
     width: 72,
     height: 72,
-    borderRadius: 36,
     backgroundColor: 'rgba(239,68,68,0.12)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(239,68,68,0.25)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1249,7 +1304,6 @@ const styles = StyleSheet.create({
   tickGradient: {
     width: 72,
     height: 72,
-    borderRadius: 36,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1277,15 +1331,10 @@ const styles = StyleSheet.create({
   },
   infoEyebrow: {
     fontSize: 10,
-    fontWeight: '700',
+    fontWeight: '800',
     letterSpacing: 1.4,
     color: MUTED,
-    marginBottom: 8,
-  },
-  infoBody: {
-    fontSize: 13,
-    color: SECONDARY,
-    lineHeight: 20,
+    marginBottom: 10,
   },
   flowRow: {
     flexDirection: 'row',
@@ -1295,12 +1344,11 @@ const styles = StyleSheet.create({
   flowNum: {
     width: 24,
     height: 24,
-    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 1,
   },
-  flowNumText: { color: '#fff', fontSize: 11, fontWeight: '800' },
+  flowNumText: { color: '#041412', fontSize: 11, fontWeight: '800' },
   flowTitle: { color: TEXT, fontSize: 13, fontWeight: '700' },
   flowDesc: {
     color: SECONDARY,
@@ -1311,7 +1359,6 @@ const styles = StyleSheet.create({
   primaryCtaWrap: {
     width: '100%',
     marginTop: 8,
-    borderRadius: 14,
     overflow: 'hidden',
   },
   primaryCta: {
@@ -1321,7 +1368,7 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingVertical: 15,
   },
-  primaryCtaText: { color: '#fff', fontWeight: '800', fontSize: 15 },
+  primaryCtaText: { color: '#041412', fontWeight: '800', fontSize: 15 },
   secondaryCta: {
     marginTop: 12,
     paddingVertical: 12,
@@ -1340,41 +1387,48 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 8,
+    paddingHorizontal: U,
     paddingVertical: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: LINE,
   },
   backBtn: {
-    width: 42,
-    height: 42,
+    width: 44,
+    height: 44,
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: SURFACE,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: LINE,
   },
   headerTitle: {
     flex: 1,
     textAlign: 'center',
     fontSize: 17,
-    fontWeight: '700',
+    fontWeight: '800',
     color: TEXT,
     letterSpacing: -0.3,
   },
-  headerRight: { width: 42 },
+  headerRight: { width: 44 },
+  headerRule: {
+    height: 1,
+    marginHorizontal: H_PAD,
+  },
 
   scroll: { flex: 1 },
-  scrollContent: { padding: 14, paddingBottom: 32 },
+  scrollContent: {
+    paddingHorizontal: H_PAD,
+    paddingTop: U * 2,
+    paddingBottom: 32,
+  },
   stepHint: {
     fontSize: 11,
     color: MUTED,
-    letterSpacing: 1.2,
-    textTransform: 'uppercase',
+    letterSpacing: 1.6,
+    fontWeight: '700',
     marginBottom: 14,
-    marginLeft: 2,
   },
 
   card: {
     backgroundColor: SURFACE,
-    borderRadius: 16,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: LINE,
     marginBottom: 12,
@@ -1388,19 +1442,21 @@ const styles = StyleSheet.create({
     paddingVertical: 13,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: LINE,
+    backgroundColor: SURFACE_2,
   },
   cardHeaderLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  iconCircle: {
+  iconSquare: {
     width: 30,
     height: 30,
-    borderRadius: 15,
-    backgroundColor: SURFACE_2,
+    backgroundColor: SURFACE,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: LINE,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  cardTitle: { fontSize: 15, fontWeight: '700', color: TEXT },
-  badge: { fontSize: 12, color: SECONDARY, fontWeight: '500' },
-  link: { fontSize: 13, fontWeight: '600', color: GREEN },
+  cardTitle: { fontSize: 14, fontWeight: '800', color: TEXT },
+  badge: { fontSize: 12, color: SECONDARY, fontWeight: '600' },
+  link: { fontSize: 13, fontWeight: '700', color: GREEN },
 
   emptyBag: { paddingVertical: 28, alignItems: 'center' },
   emptyBagText: { marginTop: 8, fontSize: 13, color: MUTED },
@@ -1417,12 +1473,16 @@ const styles = StyleSheet.create({
   thumb: {
     width: 56,
     height: 56,
-    borderRadius: 12,
     backgroundColor: SURFACE_2,
   },
   thumbPlaceholder: { alignItems: 'center', justifyContent: 'center' },
   itemInfo: { flex: 1, marginLeft: 12, minWidth: 0 },
-  itemName: { fontSize: 13, fontWeight: '600', color: TEXT, lineHeight: 18 },
+  itemName: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: TEXT,
+    lineHeight: 18,
+  },
   itemMeta: { fontSize: 11, color: SECONDARY, marginTop: 3 },
   itemFee: { fontSize: 10, color: MUTED, marginTop: 2 },
   itemTotal: {
@@ -1438,20 +1498,18 @@ const styles = StyleSheet.create({
   selectItem: {
     flexDirection: 'row',
     padding: 12,
-    borderRadius: 12,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: LINE,
     marginBottom: 8,
     backgroundColor: SURFACE,
   },
   selectItemActive: {
-    borderColor: GREEN,
+    borderColor: 'rgba(0,229,117,0.5)',
     backgroundColor: SURFACE_2,
   },
   radio: {
     width: 18,
     height: 18,
-    borderRadius: 9,
     borderWidth: 2,
     borderColor: MUTED,
     marginTop: 2,
@@ -1462,7 +1520,6 @@ const styles = StyleSheet.create({
   radioDot: {
     width: 8,
     height: 8,
-    borderRadius: 4,
     backgroundColor: GREEN,
   },
   selectContent: { flex: 1, marginLeft: 12 },
@@ -1477,9 +1534,10 @@ const styles = StyleSheet.create({
     backgroundColor: SURFACE,
     paddingHorizontal: 7,
     paddingVertical: 2,
-    borderRadius: 6,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: LINE,
   },
-  defaultText: { fontSize: 10, color: SECONDARY, fontWeight: '500' },
+  defaultText: { fontSize: 10, color: SECONDARY, fontWeight: '600' },
   selectSub: {
     fontSize: 12,
     color: SECONDARY,
@@ -1490,22 +1548,26 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 10,
+    paddingVertical: 12,
     gap: 6,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: LINE,
+    backgroundColor: SURFACE_2,
   },
-  addBtnText: { fontSize: 13, fontWeight: '600', color: GREEN },
+  addBtnText: { fontSize: 13, fontWeight: '700', color: GREEN },
 
   emptyBlock: { paddingVertical: 28, alignItems: 'center' },
   emptyIcon: {
     width: 52,
     height: 52,
-    borderRadius: 26,
     backgroundColor: SURFACE_2,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: LINE,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 12,
   },
-  emptyTitle: { fontSize: 14, fontWeight: '600', color: TEXT },
+  emptyTitle: { fontSize: 14, fontWeight: '700', color: TEXT },
   emptySub: { fontSize: 12, color: MUTED, marginTop: 4 },
 
   warningBox: {
@@ -1513,7 +1575,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(245, 158, 11, 0.1)',
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(245, 158, 11, 0.3)',
-    borderRadius: 12,
     padding: 14,
     flexDirection: 'row',
     gap: 12,
@@ -1534,15 +1595,14 @@ const styles = StyleSheet.create({
   },
   storeLabel: {
     fontSize: 10,
-    fontWeight: '600',
+    fontWeight: '800',
     color: MUTED,
-    letterSpacing: 0.6,
+    letterSpacing: 0.8,
     textTransform: 'uppercase',
     marginBottom: 12,
   },
   routeCard: {
     backgroundColor: SURFACE_2,
-    borderRadius: 14,
     padding: 14,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: LINE,
@@ -1551,7 +1611,6 @@ const styles = StyleSheet.create({
   routeDotOuter: {
     width: 18,
     height: 18,
-    borderRadius: 9,
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 2,
@@ -1562,21 +1621,19 @@ const styles = StyleSheet.create({
   routeDotInnerBlue: {
     width: 8,
     height: 8,
-    borderRadius: 4,
     backgroundColor: BLUE,
   },
   routeDotInnerGreen: {
     width: 8,
     height: 8,
-    borderRadius: 4,
     backgroundColor: GREEN,
   },
   routePointText: { flex: 1, minWidth: 0 },
   routeLabel: {
     fontSize: 10,
-    fontWeight: '600',
+    fontWeight: '800',
     color: MUTED,
-    letterSpacing: 0.5,
+    letterSpacing: 0.6,
     textTransform: 'uppercase',
     marginBottom: 3,
   },
@@ -1605,7 +1662,7 @@ const styles = StyleSheet.create({
   receiptLabel: { fontSize: 13, color: SECONDARY },
   receiptValue: {
     fontSize: 13,
-    fontWeight: '600',
+    fontWeight: '700',
     color: TEXT,
     maxWidth: '50%',
     textAlign: 'right',
@@ -1615,7 +1672,7 @@ const styles = StyleSheet.create({
     backgroundColor: LINE,
     marginVertical: 8,
   },
-  totalLabel: { fontSize: 14, fontWeight: '700', color: TEXT },
+  totalLabel: { fontSize: 14, fontWeight: '800', color: TEXT },
   totalValue: {
     fontSize: 17,
     fontWeight: '800',
@@ -1626,16 +1683,15 @@ const styles = StyleSheet.create({
   receiptNote: { fontSize: 11, color: MUTED, marginTop: 10 },
 
   intlBox: {
-    backgroundColor: 'rgba(59, 130, 246, 0.08)',
+    backgroundColor: 'rgba(37, 99, 235, 0.08)',
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(59, 130, 246, 0.25)',
-    borderRadius: 14,
+    borderColor: 'rgba(37, 99, 235, 0.25)',
     padding: 14,
     marginBottom: 12,
   },
   intlTitle: {
     fontSize: 14,
-    fontWeight: '700',
+    fontWeight: '800',
     color: TEXT,
     marginBottom: 6,
   },
@@ -1646,28 +1702,38 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: MUTED,
     marginTop: 8,
-    letterSpacing: 0.6,
+    letterSpacing: 0.8,
+    fontWeight: '600',
   },
 
   bottomBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
     backgroundColor: SURFACE,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: LINE,
-    paddingHorizontal: 14,
+  },
+  bottomRule: { height: 1 },
+  bottomInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: H_PAD,
     paddingTop: 12,
     paddingBottom: Platform.OS === 'ios' ? 14 : 16,
   },
   bottomLeft: { flex: 1, marginRight: 12, minWidth: 0 },
-  amountLabel: { fontSize: 11, color: SECONDARY, marginBottom: 2 },
+  amountLabel: {
+    fontSize: 10,
+    color: MUTED,
+    marginBottom: 3,
+    fontWeight: '800',
+    letterSpacing: 1.1,
+  },
   amountValue: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: '800',
     color: TEXT,
-    letterSpacing: -0.3,
+    letterSpacing: -0.4,
   },
-  ctaWrap: { borderRadius: 14, overflow: 'hidden' },
+  ctaWrap: { overflow: 'hidden' },
   ctaBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1677,5 +1743,5 @@ const styles = StyleSheet.create({
     gap: 8,
     minWidth: 140,
   },
-  ctaText: { color: '#fff', fontWeight: '700', fontSize: 15 },
+  ctaText: { color: '#041412', fontWeight: '800', fontSize: 15 },
 })

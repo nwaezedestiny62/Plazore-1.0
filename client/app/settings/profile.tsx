@@ -3,12 +3,18 @@ import { getRegion, REGION_LIST } from "@/constants/regions";
 import { useMarketplace } from "@/context/MarketplaceContext";
 import { useAuth, useUser } from "@clerk/clerk-expo";
 import { Ionicons } from "@expo/vector-icons";
+import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
 import {
-  ActivityIndicator,
+  Animated,
+  Easing,
   Image,
+  Platform,
+  Pressable,
   ScrollView,
+  StatusBar,
+  StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
@@ -16,6 +22,55 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Toast from "react-native-toast-message";
+
+const GREEN = "#00E575";
+const BLUE = "#3B82F6";
+const BG = "#090B0F";
+const CARD = "#11151C";
+const BORDER = "rgba(255,255,255,0.08)";
+const TEXT = "#FFFFFF";
+const TEXT_DIM = "rgba(255,255,255,0.55)";
+const TEXT_MUTED = "rgba(255,255,255,0.38)";
+
+/** Plazore orb preloader – same style as product / auth screens */
+function PlazoreOrbPreloader() {
+  const pulse = useRef(new Animated.Value(0.65)).current;
+
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, {
+          toValue: 1,
+          duration: 900,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulse, {
+          toValue: 0.65,
+          duration: 900,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [pulse]);
+
+  return (
+    <View style={styles.preloaderWrap}>
+      <StatusBar hidden translucent backgroundColor="transparent" />
+      <Animated.View style={{ opacity: pulse, transform: [{ scale: pulse }] }}>
+        <Image
+          source={require("@/assets/logo-1.png")}
+          style={styles.preloaderLogo}
+          resizeMode="contain"
+        />
+      </Animated.View>
+      <Text style={styles.preloaderLabel}>Loading profile…</Text>
+    </View>
+  );
+}
 
 export default function EditProfileScreen() {
   const { getToken, isSignedIn, isLoaded } = useAuth();
@@ -34,6 +89,8 @@ export default function EditProfileScreen() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [showRegions, setShowRegions] = useState(false);
+  const [nameFocused, setNameFocused] = useState(false);
+  const [phoneFocused, setPhoneFocused] = useState(false);
 
   const regionTouched = useRef(false);
   const loadedOnce = useRef(false);
@@ -49,17 +106,14 @@ export default function EditProfileScreen() {
           setLoading(false);
           return;
         }
-
         const token = await getToken();
         if (!token) {
           setLoading(false);
           return;
         }
-
         const res = await api.get("/users/me", {
           headers: { Authorization: `Bearer ${token}` },
         });
-
         if (res.data?.success) {
           const u = res.data.data;
           setName(u.name || clerkName || "");
@@ -75,7 +129,6 @@ export default function EditProfileScreen() {
         setLoading(false);
       }
     };
-
     load();
   }, [isLoaded, isSignedIn]);
 
@@ -95,10 +148,8 @@ export default function EditProfileScreen() {
       });
       return;
     }
-
     if (saving) return;
     setSaving(true);
-
     try {
       const token = await getToken();
       if (!token) {
@@ -110,7 +161,6 @@ export default function EditProfileScreen() {
         setSaving(false);
         return;
       }
-
       const res = await api.patch(
         "/users/me",
         {
@@ -120,17 +170,13 @@ export default function EditProfileScreen() {
         },
         { headers: { Authorization: `Bearer ${token}` } }
       );
-
       if (!res.data?.success) {
         throw new Error(res.data?.message || "Save failed");
       }
-
       const savedRegion = res.data.data?.marketplaceRegion || region;
-
       setRegionLocal(savedRegion);
       setRegion(savedRegion);
       regionTouched.current = false;
-
       try {
         const parts = trimmedName.split(" ");
         await clerkUser?.update({
@@ -140,14 +186,12 @@ export default function EditProfileScreen() {
       } catch {
         // optional
       }
-
       const chosen = getRegion(savedRegion);
       Toast.show({
         type: "success",
         text1: "Profile updated",
         text2: `Marketplace: ${chosen.name} (${chosen.currency.symbol})`,
       });
-
       router.back();
     } catch (e: any) {
       const status = e?.response?.status;
@@ -173,137 +217,172 @@ export default function EditProfileScreen() {
   };
 
   if (loading) {
-    return (
-      <View className="flex-1 bg-[#070B12] items-center justify-center">
-        <ActivityIndicator color="#7EC8FF" size="large" />
-      </View>
-    );
+    return <PlazoreOrbPreloader />;
   }
 
   const currentRegion = getRegion(region);
 
   return (
-    <SafeAreaView className="flex-1 bg-[#070B12]" edges={["top"]}>
-      <View className="px-5 pt-3 pb-4 flex-row items-center">
-        <TouchableOpacity onPress={() => router.back()} className="mr-4 p-1">
-          <Ionicons name="arrow-back" size={24} color="#DCEBFF" />
+    <SafeAreaView style={styles.root} edges={["top"]}>
+      <StatusBar barStyle="light-content" backgroundColor={BG} />
+
+      {/* Header */}
+      <View style={styles.header}>
+        <TouchableOpacity
+          onPress={() => router.back()}
+          style={styles.backBtn}
+          hitSlop={12}
+          activeOpacity={0.7}
+        >
+          <Ionicons name="arrow-back" size={22} color={TEXT} />
         </TouchableOpacity>
-        <Text className="text-white text-xl font-bold">Edit Profile</Text>
+        <Text style={styles.headerTitle}>Edit Profile</Text>
+        <View style={{ width: 40 }} />
       </View>
 
       <ScrollView
-        className="flex-1 px-5"
-        contentContainerStyle={{ paddingBottom: 48 }}
+        style={styles.scroll}
+        contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
-        <View className="items-center mb-8">
-          {clerkUser?.imageUrl ? (
-            <Image
-              source={{ uri: clerkUser.imageUrl }}
-              style={{ width: 96, height: 96, borderRadius: 48 }}
-            />
-          ) : (
-            <View className="w-24 h-24 rounded-full bg-[#0C1520] items-center justify-center">
-              <Ionicons name="person" size={40} color="#5A7088" />
-            </View>
-          )}
-          <Text className="text-[#7A93A8] text-[13px] mt-3 text-center">
+        {/* Avatar */}
+        <View style={styles.avatarSection}>
+          <View style={styles.avatarRing}>
+            {clerkUser?.imageUrl ? (
+              <Image
+                source={{ uri: clerkUser.imageUrl }}
+                style={styles.avatar}
+              />
+            ) : (
+              <View style={styles.avatarPlaceholder}>
+                <Ionicons name="person" size={42} color={TEXT_MUTED} />
+              </View>
+            )}
+          </View>
+          <Text style={styles.avatarHint}>
             Profile photo is managed by your account provider
           </Text>
         </View>
 
-        <Text className="text-[#AFC3D6] text-sm mb-2 font-medium">
-          Full Name
-        </Text>
-        <TextInput
-          value={name}
-          onChangeText={setName}
-          placeholder="Your full name"
-          placeholderTextColor="#5A7088"
-          className="bg-[#0C1520] border border-[#1A2A3A] rounded-2xl px-4 py-4 text-white mb-5 text-[16px]"
-        />
+        {/* Full Name */}
+        <Text style={styles.label}>Full Name</Text>
+        <View
+          style={[
+            styles.field,
+            nameFocused && styles.fieldFocused,
+          ]}
+        >
+          <Ionicons
+            name="person-outline"
+            size={18}
+            color={nameFocused ? GREEN : TEXT_MUTED}
+            style={styles.fieldIcon}
+          />
+          <TextInput
+            value={name}
+            onChangeText={setName}
+            placeholder="Your full name"
+            placeholderTextColor={TEXT_MUTED}
+            style={styles.input}
+            onFocus={() => setNameFocused(true)}
+            onBlur={() => setNameFocused(false)}
+            autoCapitalize="words"
+            returnKeyType="next"
+          />
+        </View>
 
-        <Text className="text-[#AFC3D6] text-sm mb-2 font-medium">Email</Text>
-        <View className="bg-[#0C1520] border border-[#1A2A3A] rounded-2xl px-4 py-4 mb-5">
-          <Text className="text-[#7A93A8] text-[16px]">
+        {/* Email (read-only) */}
+        <Text style={styles.label}>Email</Text>
+        <View style={[styles.field, styles.fieldReadonly]}>
+          <Ionicons
+            name="mail-outline"
+            size={18}
+            color={TEXT_MUTED}
+            style={styles.fieldIcon}
+          />
+          <Text style={styles.readonlyText} numberOfLines={1}>
             {clerkUser?.emailAddresses?.[0]?.emailAddress || "—"}
           </Text>
         </View>
 
-        <Text className="text-[#AFC3D6] text-sm mb-2 font-medium">
-          Phone Number
-        </Text>
-        <TextInput
-          value={phone}
-          onChangeText={setPhone}
-          placeholder="e.g. 08012345678"
-          placeholderTextColor="#5A7088"
-          keyboardType="phone-pad"
-          className="bg-[#0C1520] border border-[#1A2A3A] rounded-2xl px-4 py-4 text-white mb-5 text-[16px]"
-        />
+        {/* Phone */}
+        <Text style={styles.label}>Phone Number</Text>
+        <View
+          style={[
+            styles.field,
+            phoneFocused && styles.fieldFocused,
+          ]}
+        >
+          <Ionicons
+            name="call-outline"
+            size={18}
+            color={phoneFocused ? GREEN : TEXT_MUTED}
+            style={styles.fieldIcon}
+          />
+          <TextInput
+            value={phone}
+            onChangeText={setPhone}
+            placeholder="e.g. 08012345678"
+            placeholderTextColor={TEXT_MUTED}
+            keyboardType="phone-pad"
+            style={styles.input}
+            onFocus={() => setPhoneFocused(true)}
+            onBlur={() => setPhoneFocused(false)}
+          />
+        </View>
 
-        <Text className="text-[#AFC3D6] text-sm mb-2 font-medium">
-          Marketplace Region
-        </Text>
-        <Text className="text-[#5A7088] text-[12px] mb-2 leading-4">
+        {/* Marketplace Region */}
+        <Text style={styles.label}>Marketplace Region</Text>
+        <Text style={styles.helper}>
           Prices and currency across the app follow this country.
         </Text>
 
-        <TouchableOpacity
+        <Pressable
           onPress={() => setShowRegions((v) => !v)}
-          activeOpacity={0.85}
-          className="bg-[#0C1520] border border-[#1A2A3A] rounded-2xl px-4 py-4 mb-3 flex-row items-center"
+          style={({ pressed }) => [
+            styles.regionBtn,
+            pressed && { opacity: 0.9 },
+          ]}
         >
-          <Text className="text-2xl mr-3">{currentRegion.flag}</Text>
-          <View className="flex-1">
-            <Text className="text-white text-[16px] font-medium">
-              {currentRegion.name}
-            </Text>
-            <Text className="text-[#7A93A8] text-[13px] mt-0.5">
-              Currency: {currentRegion.currency.symbol} (
-              {currentRegion.currency.code})
+          <Text style={styles.regionFlag}>{currentRegion.flag}</Text>
+          <View style={styles.regionInfo}>
+            <Text style={styles.regionName}>{currentRegion.name}</Text>
+            <Text style={styles.regionCurrency}>
+              Currency: {currentRegion.currency.symbol} ({currentRegion.currency.code})
             </Text>
           </View>
           <Ionicons
             name={showRegions ? "chevron-up" : "chevron-down"}
             size={18}
-            color="#7A93A8"
+            color={TEXT_DIM}
           />
-        </TouchableOpacity>
+        </Pressable>
 
         {showRegions && (
-          <View className="bg-[#0C1520] border border-[#1A2A3A] rounded-2xl overflow-hidden mb-5">
+          <View style={styles.regionList}>
             {REGION_LIST.map((r, index) => {
               const selected = region === r.code;
               return (
                 <TouchableOpacity
                   key={r.code}
                   onPress={() => handleSelectRegion(r.code)}
-                  activeOpacity={0.8}
-                  className={`px-4 py-3.5 flex-row items-center ${
-                    selected ? "bg-[#13263B]" : ""
-                  } ${
-                    index < REGION_LIST.length - 1
-                      ? "border-b border-[#1A2A3A]"
-                      : ""
-                  }`}
+                  activeOpacity={0.75}
+                  style={[
+                    styles.regionItem,
+                    selected && styles.regionItemSelected,
+                    index < REGION_LIST.length - 1 && styles.regionItemBorder,
+                  ]}
                 >
-                  <Text className="text-xl mr-3">{r.flag}</Text>
-                  <View className="flex-1">
-                    <Text className="text-white text-[15px] font-medium">
-                      {r.name}
-                    </Text>
-                    <Text className="text-[#7A93A8] text-[12px] mt-0.5">
+                  <Text style={styles.regionItemFlag}>{r.flag}</Text>
+                  <View style={styles.regionItemInfo}>
+                    <Text style={styles.regionItemName}>{r.name}</Text>
+                    <Text style={styles.regionItemCurrency}>
                       {r.currency.symbol} · {r.currency.code}
                     </Text>
                   </View>
                   {selected && (
-                    <Ionicons
-                      name="checkmark-circle"
-                      size={20}
-                      color="#7EC8FF"
-                    />
+                    <Ionicons name="checkmark-circle" size={22} color={GREEN} />
                   )}
                 </TouchableOpacity>
               );
@@ -311,21 +390,272 @@ export default function EditProfileScreen() {
           </View>
         )}
 
+        {/* Save Button */}
         <TouchableOpacity
           onPress={handleSave}
           disabled={saving}
-          activeOpacity={0.85}
-          className="bg-[#7EC8FF] rounded-2xl py-4 items-center mt-4 mb-6"
+          activeOpacity={0.88}
+          style={styles.saveOuter}
         >
-          {saving ? (
-            <ActivityIndicator color="#071018" />
-          ) : (
-            <Text className="text-[#071018] font-extrabold text-[16px]">
-              Save Changes
-            </Text>
-          )}
+          <LinearGradient
+            colors={[GREEN, "#14B8A6", BLUE]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+            style={styles.saveBtn}
+          >
+            {saving ? (
+              <Animated.View>
+                <Text style={styles.saveText}>Saving…</Text>
+              </Animated.View>
+            ) : (
+              <Text style={styles.saveText}>Save Changes</Text>
+            )}
+          </LinearGradient>
         </TouchableOpacity>
+
+        <View style={{ height: 40 }} />
       </ScrollView>
     </SafeAreaView>
   );
 }
+
+const styles = StyleSheet.create({
+  root: {
+    flex: 1,
+    backgroundColor: BG,
+  },
+
+  // Preloader
+  preloaderWrap: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: BG,
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 9999,
+  },
+  preloaderLogo: {
+    width: 96,
+    height: 96,
+    marginBottom: 20,
+  },
+  preloaderLabel: {
+    color: "rgba(255,255,255,0.65)",
+    fontSize: 15,
+    letterSpacing: 0.3,
+    fontWeight: "500",
+  },
+
+  // Header
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  backBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "rgba(255,255,255,0.06)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  headerTitle: {
+    color: TEXT,
+    fontSize: 18,
+    fontWeight: "700",
+    letterSpacing: -0.3,
+  },
+
+  scroll: {
+    flex: 1,
+  },
+  scrollContent: {
+    paddingHorizontal: 20,
+    paddingBottom: 48,
+  },
+
+  // Avatar
+  avatarSection: {
+    alignItems: "center",
+    marginTop: 8,
+    marginBottom: 32,
+  },
+  avatarRing: {
+    width: 108,
+    height: 108,
+    borderRadius: 54,
+    borderWidth: 2,
+    borderColor: "rgba(0,229,117,0.35)",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(0,229,117,0.06)",
+    ...Platform.select({
+      ios: {
+        shadowColor: GREEN,
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.25,
+        shadowRadius: 16,
+      },
+      android: { elevation: 8 },
+    }),
+  },
+  avatar: {
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+  },
+  avatarPlaceholder: {
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    backgroundColor: CARD,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  avatarHint: {
+    marginTop: 14,
+    color: TEXT_MUTED,
+    fontSize: 13,
+    textAlign: "center",
+    lineHeight: 18,
+    paddingHorizontal: 24,
+  },
+
+  // Form
+  label: {
+    color: "rgba(255,255,255,0.72)",
+    fontSize: 13,
+    fontWeight: "600",
+    marginBottom: 8,
+    letterSpacing: 0.2,
+  },
+  helper: {
+    color: TEXT_MUTED,
+    fontSize: 12,
+    lineHeight: 17,
+    marginBottom: 10,
+    marginTop: -2,
+  },
+
+  field: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: CARD,
+    borderWidth: 1,
+    borderColor: BORDER,
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    height: 56,
+    marginBottom: 18,
+  },
+  fieldFocused: {
+    borderColor: GREEN,
+    backgroundColor: "rgba(0,229,117,0.05)",
+  },
+  fieldReadonly: {
+    opacity: 0.75,
+  },
+  fieldIcon: {
+    marginRight: 12,
+  },
+  input: {
+    flex: 1,
+    color: TEXT,
+    fontSize: 16,
+    paddingVertical: 0,
+  },
+  readonlyText: {
+    flex: 1,
+    color: TEXT_DIM,
+    fontSize: 16,
+  },
+
+  // Region
+  regionBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: CARD,
+    borderWidth: 1,
+    borderColor: BORDER,
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    marginBottom: 12,
+  },
+  regionFlag: {
+    fontSize: 26,
+    marginRight: 14,
+  },
+  regionInfo: {
+    flex: 1,
+  },
+  regionName: {
+    color: TEXT,
+    fontSize: 16,
+    fontWeight: "600",
+  },
+  regionCurrency: {
+    color: TEXT_DIM,
+    fontSize: 13,
+    marginTop: 2,
+  },
+
+  regionList: {
+    backgroundColor: CARD,
+    borderWidth: 1,
+    borderColor: BORDER,
+    borderRadius: 16,
+    overflow: "hidden",
+    marginBottom: 24,
+  },
+  regionItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 14,
+    paddingVertical: 13,
+  },
+  regionItemSelected: {
+    backgroundColor: "rgba(0,229,117,0.08)",
+  },
+  regionItemBorder: {
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: BORDER,
+  },
+  regionItemFlag: {
+    fontSize: 22,
+    marginRight: 12,
+  },
+  regionItemInfo: {
+    flex: 1,
+  },
+  regionItemName: {
+    color: TEXT,
+    fontSize: 15,
+    fontWeight: "500",
+  },
+  regionItemCurrency: {
+    color: TEXT_DIM,
+    fontSize: 12,
+    marginTop: 1,
+  },
+
+  // Save
+  saveOuter: {
+    marginTop: 12,
+    borderRadius: 16,
+    overflow: "hidden",
+  },
+  saveBtn: {
+    height: 56,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  saveText: {
+    color: "#041412",
+    fontSize: 16,
+    fontWeight: "800",
+    letterSpacing: 0.3,
+  },
+});

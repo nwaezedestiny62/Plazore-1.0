@@ -32,17 +32,22 @@ if (
   UIManager.setLayoutAnimationEnabledExperimental(true)
 }
 
-/* ── Plazore tokens ── */
+/* ── Plazore tokens — sharp geometry ── */
 const BG = '#090B0F'
-const SURFACE = '#11141A'
-const SURFACE_2 = '#171B22'
-const LINE = 'rgba(255,255,255,0.07)'
+const SURFACE = '#0E1116'
+const SURFACE_2 = '#14181F'
+const LINE = 'rgba(255,255,255,0.08)'
 const TEXT = '#F5F7FA'
-const SECONDARY = '#A7ADB8'
-const MUTED = '#6B7280'
+const SECONDARY = 'rgba(255,255,255,0.55)'
+const MUTED = 'rgba(255,255,255,0.38)'
 const GREEN = '#00E575'
-const BLUE = '#3B82F6'
+const TEAL = '#14B8A6'
+const BLUE = '#2563EB'
 const DANGER = '#EF4444'
+const GRAD = [GREEN, TEAL, BLUE] as const
+
+const U = 8
+const H_PAD = U * 2 // 16
 
 function resolveProductRegion(product: any): string {
   if (!product) return DEFAULT_REGION
@@ -56,12 +61,8 @@ function resolveProductRegion(product: any): string {
 }
 
 export default function Cart() {
-  const {
-    cartItems,
-    removeFromCart,
-    updateQuantity,
-    updateItemNote,
-  } = useCart()
+  const { cartItems, removeFromCart, updateQuantity, updateItemNote } =
+    useCart()
   const {
     format,
     formatProduct,
@@ -175,7 +176,7 @@ export default function Cart() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
-      {/* Header */}
+      {/* Header — flush, no radius */}
       <View style={styles.header}>
         <TouchableOpacity
           onPress={() => router.back()}
@@ -186,9 +187,7 @@ export default function Cart() {
         </TouchableOpacity>
 
         <View style={styles.headerCenter}>
-          <Text style={styles.headerTitle} numberOfLines={1}>
-            Shopping Bag
-          </Text>
+          <Text style={styles.headerTitle}>Shopping Bag</Text>
           {itemCount > 0 && (
             <Text style={styles.headerSub}>
               {itemCount} item{itemCount !== 1 ? 's' : ''}
@@ -199,10 +198,19 @@ export default function Cart() {
         <View style={styles.headerRight} />
       </View>
 
+      {/* Thin accent rule under header */}
+      <LinearGradient
+        colors={['transparent', 'rgba(0,229,117,0.45)', 'rgba(37,99,235,0.35)', 'transparent']}
+        locations={[0, 0.3, 0.7, 1]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 0 }}
+        style={styles.headerRule}
+      />
+
       {cartItems.length === 0 ? (
         <View style={styles.emptyWrap}>
           <View style={styles.emptyIcon}>
-            <Ionicons name="bag-handle-outline" size={34} color={MUTED} />
+            <Ionicons name="bag-handle-outline" size={36} color={MUTED} />
           </View>
           <Text style={styles.emptyTitle}>Your bag is empty</Text>
           <Text style={styles.emptySub}>
@@ -214,7 +222,7 @@ export default function Cart() {
             style={styles.emptyBtnWrap}
           >
             <LinearGradient
-              colors={[GREEN, BLUE]}
+              colors={[...GRAD]}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 0 }}
               style={styles.emptyBtn}
@@ -237,7 +245,7 @@ export default function Cart() {
                   {
                     translateY: bagAnim.interpolate({
                       inputRange: [0, 1],
-                      outputRange: [10, 0],
+                      outputRange: [12, 0],
                     }),
                   },
                 ],
@@ -254,6 +262,9 @@ export default function Cart() {
 
                 return (
                   <View key={item.id} style={styles.card}>
+                    {/* Left green edge accent when present */}
+                    <View style={styles.cardEdge} />
+
                     <View style={styles.cardTop}>
                       {item.product?.images?.[0] ? (
                         <Image
@@ -264,7 +275,7 @@ export default function Cart() {
                         <View style={[styles.thumb, styles.thumbPlaceholder]}>
                           <Ionicons
                             name="image-outline"
-                            size={20}
+                            size={22}
                             color={MUTED}
                           />
                         </View>
@@ -292,7 +303,7 @@ export default function Cart() {
                               style={styles.qtyBtn}
                               hitSlop={8}
                             >
-                              <Ionicons name="remove" size={14} color={TEXT} />
+                              <Ionicons name="remove" size={15} color={TEXT} />
                             </TouchableOpacity>
                             <Text style={styles.qtyValue}>{item.quantity}</Text>
                             <TouchableOpacity
@@ -300,7 +311,7 @@ export default function Cart() {
                               style={styles.qtyBtn}
                               hitSlop={8}
                             >
-                              <Ionicons name="add" size={14} color={TEXT} />
+                              <Ionicons name="add" size={15} color={TEXT} />
                             </TouchableOpacity>
                           </View>
 
@@ -335,7 +346,7 @@ export default function Cart() {
                       <TextInput
                         value={note}
                         onChangeText={(t) => updateItemNote(item.id, t)}
-                        placeholder="e.g. Please pack carefully / Gift wrap / Leave at door…"
+                        placeholder="e.g. Pack carefully · Gift wrap · Leave at door"
                         placeholderTextColor={MUTED}
                         multiline
                         maxLength={120}
@@ -348,65 +359,79 @@ export default function Cart() {
                 )
               })}
 
-              {/* Summary */}
+              {/* Summary — sharp panel */}
               <View style={styles.summaryCard}>
-                <Text style={styles.summaryTitle}>Bag summary</Text>
-
-                <View style={styles.summaryRow}>
-                  <Text style={styles.summaryLabel}>Product Price</Text>
-                  <Text style={styles.summaryValue} numberOfLines={1}>
-                    {fmt(productPrice)}
-                  </Text>
+                <View style={styles.summaryHead}>
+                  <Text style={styles.summaryTitle}>ORDER SUMMARY</Text>
                 </View>
 
-                <View style={styles.summaryRow}>
-                  <Text style={styles.summaryLabel}>Delivery Fee</Text>
-                  <Text style={styles.summaryValue} numberOfLines={1}>
-                    {fmt(deliveryFee)}
-                  </Text>
-                </View>
+                <View style={styles.summaryBody}>
+                  <View style={styles.summaryRow}>
+                    <Text style={styles.summaryLabel}>Product price</Text>
+                    <Text style={styles.summaryValue} numberOfLines={1}>
+                      {fmt(productPrice)}
+                    </Text>
+                  </View>
 
-                <View style={styles.summaryDivider} />
+                  <View style={styles.summaryRow}>
+                    <Text style={styles.summaryLabel}>Delivery fee</Text>
+                    <Text style={styles.summaryValue} numberOfLines={1}>
+                      {fmt(deliveryFee)}
+                    </Text>
+                  </View>
 
-                <View style={styles.summaryRow}>
-                  <Text style={styles.totalLabel}>Total Amount</Text>
-                  <Text style={styles.totalValue} numberOfLines={1}>
-                    {fmt(totalAmount)}
-                  </Text>
+                  <View style={styles.summaryDivider} />
+
+                  <View style={styles.summaryRow}>
+                    <Text style={styles.totalLabel}>Total</Text>
+                    <Text style={styles.totalValue} numberOfLines={1}>
+                      {fmt(totalAmount)}
+                    </Text>
+                  </View>
                 </View>
               </View>
             </Animated.View>
           </ScrollView>
 
-          {/* Bottom bar */}
+          {/* Bottom bar — square */}
           <View style={styles.bottomBar}>
-            <View style={styles.bottomLeft}>
-              <Text style={styles.amountDueLabel}>Amount due</Text>
-              <Text
-                style={styles.amountDueValue}
-                numberOfLines={1}
-                adjustsFontSizeToFit
-                minimumFontScale={0.7}
-              >
-                {fmt(totalAmount)}
-              </Text>
-            </View>
+            <LinearGradient
+              colors={['transparent', 'rgba(0,229,117,0.35)', 'rgba(37,99,235,0.25)', 'transparent']}
+              locations={[0, 0.25, 0.75, 1]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={styles.bottomRule}
+            />
 
-            <TouchableOpacity
-              onPress={() => router.push('/(tabs)/checkout' as any)}
-              activeOpacity={0.88}
-              style={styles.checkoutWrap}
-            >
-              <LinearGradient
-                colors={[GREEN, BLUE]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 0 }}
-                style={styles.checkoutBtn}
+            <View style={styles.bottomInner}>
+              <View style={styles.bottomLeft}>
+                <Text style={styles.amountDueLabel}>AMOUNT DUE</Text>
+                <Text
+                  style={styles.amountDueValue}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.7}
+                >
+                  {fmt(totalAmount)}
+                </Text>
+              </View>
+
+              <TouchableOpacity
+                onPress={() => router.push('/(tabs)/checkout' as any)}
+                activeOpacity={0.88}
+                style={styles.checkoutWrap}
               >
-                <Text style={styles.checkoutText}>Checkout</Text>
-                <Ionicons name="arrow-forward" size={15} color="#fff" />
-              </LinearGradient>
-            </TouchableOpacity>
+                <LinearGradient
+                  colors={[...GRAD]}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                  style={styles.checkoutBtn}
+                >
+                  <Text style={styles.checkoutText}>Checkout</Text>
+                  <Ionicons name="arrow-forward" size={15} color="#041412" />
+                </LinearGradient>
+              </TouchableOpacity>
+            </View>
           </View>
         </>
       )}
@@ -420,20 +445,21 @@ const styles = StyleSheet.create({
     backgroundColor: BG,
   },
 
-  /* Header */
+  /* Header — no radius */
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 8,
+    paddingHorizontal: U,
     paddingVertical: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: LINE,
   },
   backBtn: {
-    width: 42,
-    height: 42,
+    width: 44,
+    height: 44,
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: SURFACE,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: LINE,
   },
   headerCenter: {
     flex: 1,
@@ -441,17 +467,23 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     fontSize: 17,
-    fontWeight: '700',
+    fontWeight: '800',
     color: TEXT,
     letterSpacing: -0.3,
   },
   headerSub: {
     fontSize: 11,
     color: MUTED,
-    marginTop: 1,
+    marginTop: 2,
+    fontWeight: '600',
+    letterSpacing: 0.3,
   },
   headerRight: {
-    width: 42,
+    width: 44,
+  },
+  headerRule: {
+    height: 1,
+    marginHorizontal: H_PAD,
   },
 
   /* Empty */
@@ -459,24 +491,23 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 36,
+    paddingHorizontal: 40,
   },
   emptyIcon: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
+    width: 88,
+    height: 88,
     backgroundColor: SURFACE,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: LINE,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 20,
+    marginBottom: 24,
   },
   emptyTitle: {
-    fontSize: 19,
-    fontWeight: '700',
+    fontSize: 20,
+    fontWeight: '800',
     color: TEXT,
-    letterSpacing: -0.3,
+    letterSpacing: -0.4,
   },
   emptySub: {
     fontSize: 14,
@@ -486,18 +517,18 @@ const styles = StyleSheet.create({
     lineHeight: 21,
   },
   emptyBtnWrap: {
-    marginTop: 28,
-    borderRadius: 14,
+    marginTop: 32,
     overflow: 'hidden',
   },
   emptyBtn: {
-    paddingHorizontal: 28,
-    paddingVertical: 14,
+    paddingHorizontal: 32,
+    paddingVertical: 15,
   },
   emptyBtnText: {
-    color: '#fff',
-    fontWeight: '700',
+    color: '#041412',
+    fontWeight: '800',
     fontSize: 15,
+    letterSpacing: 0.2,
   },
 
   /* Scroll */
@@ -505,27 +536,36 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   scrollContent: {
-    padding: 14,
-    paddingBottom: 24,
+    paddingHorizontal: H_PAD,
+    paddingTop: U * 2,
+    paddingBottom: U * 3,
   },
 
-  /* Card */
+  /* Card — square */
   card: {
     backgroundColor: SURFACE,
-    borderRadius: 16,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: LINE,
-    marginBottom: 12,
+    marginBottom: U * 1.5,
     overflow: 'hidden',
+  },
+  cardEdge: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    width: 2,
+    backgroundColor: GREEN,
+    opacity: 0.55,
   },
   cardTop: {
     flexDirection: 'row',
-    padding: 13,
+    padding: U * 1.75,
+    paddingLeft: U * 2,
   },
   thumb: {
-    width: 70,
-    height: 70,
-    borderRadius: 12,
+    width: 76,
+    height: 76,
     backgroundColor: SURFACE_2,
   },
   thumbPlaceholder: {
@@ -534,7 +574,7 @@ const styles = StyleSheet.create({
   },
   infoCol: {
     flex: 1,
-    marginLeft: 12,
+    marginLeft: U * 1.5,
     minWidth: 0,
   },
   productName: {
@@ -542,43 +582,44 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: TEXT,
     lineHeight: 19,
-    letterSpacing: -0.2,
+    letterSpacing: -0.15,
   },
   unitPrice: {
     fontSize: 14,
-    fontWeight: '700',
+    fontWeight: '800',
     color: GREEN,
-    marginTop: 4,
+    marginTop: 5,
+    letterSpacing: -0.2,
   },
   feeText: {
     fontSize: 11,
     color: MUTED,
-    marginTop: 2,
+    marginTop: 3,
+    fontWeight: '500',
   },
   actionRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 11,
+    marginTop: 12,
   },
   qtyControl: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: SURFACE_2,
-    borderRadius: 999,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: LINE,
   },
   qtyBtn: {
-    width: 30,
-    height: 30,
+    width: 32,
+    height: 32,
     alignItems: 'center',
     justifyContent: 'center',
   },
   qtyValue: {
-    width: 26,
+    width: 28,
     textAlign: 'center',
     fontSize: 13,
-    fontWeight: '600',
+    fontWeight: '700',
     color: TEXT,
   },
   priceBlock: {
@@ -593,75 +634,88 @@ const styles = StyleSheet.create({
     color: TEXT,
   },
   removeBtn: {
-    width: 32,
-    height: 32,
+    width: 34,
+    height: 34,
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: 'rgba(239,68,68,0.08)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(239,68,68,0.2)',
   },
 
   /* Note */
   noteWrap: {
-    paddingHorizontal: 13,
-    paddingBottom: 13,
-    paddingTop: 2,
+    paddingHorizontal: U * 2,
+    paddingBottom: U * 1.75,
+    paddingTop: U,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: LINE,
   },
   noteLabel: {
     fontSize: 10,
-    fontWeight: '600',
+    fontWeight: '800',
     color: MUTED,
-    letterSpacing: 0.4,
+    letterSpacing: 1,
     textTransform: 'uppercase',
-    marginBottom: 6,
+    marginBottom: 7,
   },
   noteInput: {
     backgroundColor: SURFACE_2,
-    borderRadius: 11,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: LINE,
     paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingVertical: 11,
     fontSize: 13,
     color: TEXT,
-    minHeight: 52,
+    minHeight: 56,
     lineHeight: 18,
   },
   noteCount: {
     fontSize: 10,
     color: MUTED,
     textAlign: 'right',
-    marginTop: 4,
+    marginTop: 5,
+    fontWeight: '600',
   },
 
   /* Summary */
   summaryCard: {
     backgroundColor: SURFACE,
-    borderRadius: 16,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: LINE,
-    padding: 16,
-    marginTop: 4,
+    marginTop: U,
+    overflow: 'hidden',
+  },
+  summaryHead: {
+    paddingHorizontal: U * 2,
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: LINE,
+    backgroundColor: SURFACE_2,
   },
   summaryTitle: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: TEXT,
-    marginBottom: 14,
+    fontSize: 11,
+    fontWeight: '800',
+    color: MUTED,
+    letterSpacing: 1.4,
+  },
+  summaryBody: {
+    padding: U * 2,
   },
   summaryRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 10,
+    marginBottom: 11,
   },
   summaryLabel: {
     fontSize: 13,
     color: SECONDARY,
+    fontWeight: '500',
   },
   summaryValue: {
     fontSize: 13,
-    fontWeight: '600',
+    fontWeight: '700',
     color: TEXT,
     maxWidth: '52%',
     textAlign: 'right',
@@ -669,62 +723,71 @@ const styles = StyleSheet.create({
   summaryDivider: {
     height: StyleSheet.hairlineWidth,
     backgroundColor: LINE,
-    marginVertical: 8,
+    marginVertical: 6,
+    marginBottom: 12,
   },
   totalLabel: {
     fontSize: 14,
-    fontWeight: '700',
+    fontWeight: '800',
     color: TEXT,
   },
   totalValue: {
-    fontSize: 16,
+    fontSize: 17,
     fontWeight: '800',
     color: GREEN,
     maxWidth: '52%',
     textAlign: 'right',
+    letterSpacing: -0.3,
   },
 
-  /* Bottom */
+  /* Bottom — square */
   bottomBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
     backgroundColor: SURFACE,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: LINE,
-    paddingHorizontal: 14,
+  },
+  bottomRule: {
+    height: 1,
+  },
+  bottomInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: H_PAD,
     paddingTop: 12,
     paddingBottom: Platform.OS === 'ios' ? 12 : 14,
   },
   bottomLeft: {
     flex: 1,
-    marginRight: 12,
+    marginRight: 14,
     minWidth: 0,
   },
   amountDueLabel: {
-    fontSize: 11,
-    color: SECONDARY,
-    marginBottom: 2,
+    fontSize: 10,
+    color: MUTED,
+    marginBottom: 3,
+    fontWeight: '800',
+    letterSpacing: 1.1,
   },
   amountDueValue: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: '800',
     color: TEXT,
-    letterSpacing: -0.3,
+    letterSpacing: -0.4,
   },
   checkoutWrap: {
-    borderRadius: 13,
     overflow: 'hidden',
   },
   checkoutBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 13,
-    gap: 7,
+    paddingHorizontal: 22,
+    paddingVertical: 14,
+    gap: 8,
   },
   checkoutText: {
-    color: '#fff',
-    fontWeight: '700',
+    color: '#041412',
+    fontWeight: '800',
     fontSize: 15,
+    letterSpacing: 0.2,
   },
 })
