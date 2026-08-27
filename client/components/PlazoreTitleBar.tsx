@@ -1,12 +1,11 @@
 /**
  * PlazoreTitleBar
- * - Unread count badge (no jiggle)
- * - Tap bell → /notifications
- * - Ambient soundtrack from SoundtrackContext
+ * - Always visible (no fade out / slide away)
+ * - Background darkens smoothly with scrollProgress
+ * - Menu + logo + notifications only
  */
 
 import api from '@/constants/api'
-import { useSoundtrack } from '@/context/SoundtrackContext'
 import { useAuth } from '@clerk/clerk-expo'
 import { Ionicons } from '@expo/vector-icons'
 import { BlurView } from 'expo-blur'
@@ -28,8 +27,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 const ACCENT = '#C9A962'
 const ICON = '#FFFFFF'
-const MUTED_ICON = 'rgba(255,255,255,0.42)'
-const GLASS = 'rgba(8,8,10,0.55)'
 const EASE_SMOOTH = Easing.bezier(0.22, 0.61, 0.36, 1)
 
 export const CHROME_IN_START = 0.02
@@ -41,7 +38,6 @@ const UNREAD_POLL_MS = 45000
 
 type Props = {
   scrollProgress: number
-  /** Optional override count — if omitted, loads from API */
   unreadCount?: number
   onMenuPress?: () => void
   onNotificationsPress?: () => void
@@ -159,7 +155,6 @@ export default function PlazoreTitleBar({
   const insets = useSafeAreaInsets()
   const router = useRouter()
   const { getToken, isSignedIn } = useAuth()
-  const { enabled, setEnabled, unlock } = useSoundtrack()
 
   const [logoLoaded, setLogoLoaded] = useState(false)
   const [countFromApi, setCountFromApi] = useState(0)
@@ -187,8 +182,7 @@ export default function PlazoreTitleBar({
       })
       const list = res.data?.data || res.data?.notifications || res.data || []
       const arr = Array.isArray(list) ? list : []
-      const n = arr.filter(isUnreadNotif).length
-      setCountFromApi(n)
+      setCountFromApi(arr.filter(isUnreadNotif).length)
     } catch {
       /* keep last */
     }
@@ -237,6 +231,7 @@ export default function PlazoreTitleBar({
     }
   }, [logoLoaded, logoOpacity, textOpacity])
 
+  // Smooth follow of scroll — darkens only, never hides
   useEffect(() => {
     const p = Math.min(1, Math.max(0, scrollProgress))
     anim.stopAnimation()
@@ -248,30 +243,18 @@ export default function PlazoreTitleBar({
     }).start()
   }, [scrollProgress, anim])
 
-  const slideUp = anim.interpolate({
-    inputRange: [0, CHROME_IN_START, CHROME_IN_END, 1],
-    outputRange: [0, 0, -12, -28],
-    extrapolate: 'clamp',
-  })
-
-  // Keep a soft overlap with the room chain so the top chrome never blinks
-  // off before the next layer is visually established.
-  const barOpacity = anim.interpolate({
-    inputRange: [0, CHROME_IN_START, CHROME_IN_END, 1],
-    outputRange: [1, 0.99, 0.46, 0],
-    extrapolate: 'clamp',
-  })
-
+  // Transparent → solid dark as user scrolls
   const glassOpacity = anim.interpolate({
-    inputRange: [0, CHROME_IN_START, CHROME_IN_END, 1],
-    outputRange: [0.22, 0.25, 0.12, 0],
+    inputRange: [0, 0.25, 0.55, 1],
+    outputRange: [0.12, 0.35, 0.62, 0.92],
     extrapolate: 'clamp',
   })
 
-  const handleMusic = () => {
-    unlock()
-    setEnabled(!enabled)
-  }
+  const veilOpacity = anim.interpolate({
+    inputRange: [0, 0.3, 0.7, 1],
+    outputRange: [0.08, 0.28, 0.55, 0.82],
+    extrapolate: 'clamp',
+  })
 
   const handleNotifications = () => {
     if (onNotificationsPress) {
@@ -286,44 +269,43 @@ export default function PlazoreTitleBar({
     Platform.OS === 'android' ? StatusBar.currentHeight ?? 24 : 20,
     20
   )
-  const hidden = scrollProgress > 0.86
   const badgeLabel = unreadCount > 99 ? '99+' : String(unreadCount)
 
   return (
-    <Animated.View
-      pointerEvents={hidden ? 'none' : 'box-none'}
-      style={[
-        styles.wrap,
-        {
-          paddingTop: statusTop,
-          opacity: barOpacity,
-          transform: [{ translateY: slideUp }],
-        },
-      ]}
+    <View
+      pointerEvents="box-none"
+      style={[styles.wrap, { paddingTop: statusTop }]}
     >
       <View style={styles.band}>
+        {/* Base glass — opacity ramps with scroll */}
         <Animated.View
           pointerEvents="none"
           style={[styles.glass, { opacity: glassOpacity }]}
         >
           {Platform.OS === 'ios' ? (
             <BlurView
-              intensity={36}
+              intensity={48}
               tint="dark"
               style={StyleSheet.absoluteFill}
             />
           ) : (
             <View
-              style={[StyleSheet.absoluteFill, { backgroundColor: GLASS }]}
+              style={[
+                StyleSheet.absoluteFill,
+                { backgroundColor: 'rgba(8,8,10,0.88)' },
+              ]}
             />
           )}
-          <View
-            style={[
-              StyleSheet.absoluteFill,
-              { backgroundColor: 'rgba(0,0,0,0.18)' },
-            ]}
-          />
         </Animated.View>
+
+        {/* Extra dark veil — little by little */}
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            StyleSheet.absoluteFill,
+            { backgroundColor: '#000000', opacity: veilOpacity },
+          ]}
+        />
 
         <View style={styles.row}>
           <View style={styles.side}>
@@ -346,19 +328,6 @@ export default function PlazoreTitleBar({
           </View>
 
           <View style={[styles.side, styles.sideRight]}>
-            <IconButton
-              onPress={handleMusic}
-              accessibilityLabel={
-                enabled ? 'Ambient Soundtrack On' : 'Ambient Soundtrack Off'
-              }
-            >
-              <Ionicons
-                name={enabled ? 'musical-notes' : 'musical-notes-outline'}
-                size={20}
-                color={enabled ? ACCENT : MUTED_ICON}
-              />
-            </IconButton>
-
             <IconButton
               onPress={handleNotifications}
               accessibilityLabel={
@@ -401,7 +370,7 @@ export default function PlazoreTitleBar({
           />
         </View>
       </View>
-    </Animated.View>
+    </View>
   )
 }
 
@@ -428,7 +397,7 @@ const styles = StyleSheet.create({
     zIndex: 2,
   },
   side: {
-    width: 96,
+    width: 72,
     flexDirection: 'row',
     alignItems: 'center',
   },
@@ -470,7 +439,6 @@ const styles = StyleSheet.create({
   line: {
     height: 2.6,
     backgroundColor: ICON,
-    borderRadius: 2,
   },
   bellWrap: {
     width: 28,
@@ -485,7 +453,6 @@ const styles = StyleSheet.create({
     minWidth: 16,
     height: 16,
     paddingHorizontal: 4,
-    borderRadius: 8,
     backgroundColor: ACCENT,
     alignItems: 'center',
     justifyContent: 'center',

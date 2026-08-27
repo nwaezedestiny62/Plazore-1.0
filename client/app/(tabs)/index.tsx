@@ -99,30 +99,31 @@ export default function Home() {
     return current
   }
 
-  const onMainScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const onMainScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
     const y = e.nativeEvent.contentOffset.y
     scrollY.current = y
 
-    // ─────────────────────────────────────────────────────────────
-    // SMOOTH CHROME PROGRESS (matches title bar)
-    // Longer physical distance = same soft, gradual feel as the title bar.
-    // ─────────────────────────────────────────────────────────────
-    const chromeDistance = Math.max(heroH * 0.85, showroomY.current * 0.9, 1)
-    const p = Math.min(1, Math.max(0, y / chromeDistance))
+    // ── Chrome: fully in by the time showroom is on screen ─────────────
+    // start fading when user is halfway through the hero → fully on at showroom
+    const showY = Math.max(showroomY.current, heroH * 0.6, 1)
+    const start = showY * 0.35
+    const end = showY * 0.85
+    let p = 0
+    if (y >= end) p = 1
+    else if (y > start) p = (y - start) / (end - start)
 
-    // Only push when value actually moved
     if (Math.abs(p - lastProgress.current) >= 0.004) {
       lastProgress.current = p
       setLocalProgress(p)
       setScrollProgress(p)
     }
 
-    // Room-nav visibility (independent of chrome)
-    const start = showroomY.current - 180
-    const end = showroomY.current - 72
+    // Room-nav visibility (unchanged)
+    const rStart = showroomY.current - 180
+    const rEnd = showroomY.current - 72
     let v = 0
-    if (y >= end) v = 1
-    else if (y > start) v = (y - start) / (end - start)
+    if (y >= rEnd) v = 1
+    else if (y > rStart) v = (y - rStart) / (rEnd - rStart)
 
     if (roomNavPinned.current && y >= showroomY.current - ROOM_NAV_PIN_CLEARANCE) {
       v = Math.max(v, 0.98)

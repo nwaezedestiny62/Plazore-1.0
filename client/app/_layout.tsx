@@ -1,25 +1,28 @@
-import { Stack } from 'expo-router'
+import '../global.css'
+// if file is globals.css → import '../globals.css'
 import { CartProvider } from '@/context/CartContext'
-import { WishlistProvider } from '@/context/WishlistContext'
-import { GestureHandlerRootView } from 'react-native-gesture-handler'
-import { ClerkProvider } from '@clerk/clerk-expo'
-import { tokenCache } from '@clerk/clerk-expo/token-cache'
 import { MarketplaceProvider } from '@/context/MarketplaceContext'
-import { ThemeProvider } from '@/context/ThemeContext'
 import { PlazoreChromeProvider } from '@/context/PlazoreChromeContext'
 import {
   SoundtrackProvider,
   useSoundtrack,
 } from '@/context/SoundtrackContext'
+import { ThemeProvider } from '@/context/ThemeContext'
+import { WishlistProvider } from '@/context/WishlistContext'
+import { tokenCache } from '@clerk/clerk-expo/token-cache'
+import { ClerkProvider } from '@clerk/clerk-expo'
 import {
-  useFonts,
   Manrope_300Light,
   Manrope_400Regular,
   Manrope_600SemiBold,
   Manrope_700Bold,
+  useFonts,
 } from '@expo-google-fonts/manrope'
+import { Stack } from 'expo-router'
+import { StatusBar as ExpoStatusBar } from 'expo-status-bar'
 import React, { useEffect, useRef, useState } from 'react'
 import {
+  ActivityIndicator,
   Animated,
   Dimensions,
   Easing,
@@ -29,10 +32,11 @@ import {
   StyleSheet,
   View,
 } from 'react-native'
-import { StatusBar as ExpoStatusBar } from 'expo-status-bar'
+import { GestureHandlerRootView } from 'react-native-gesture-handler'
 
+const BG = '#090B0F'
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window')
-const OPENER_MS = 3000
+const OPENER_MS = 3300
 const EASE = Easing.bezier(0.22, 1, 0.36, 1)
 
 /** Opener + intro gate — must sit inside SoundtrackProvider */
@@ -76,16 +80,21 @@ function AppShell() {
 
   return (
     <>
-      <ExpoStatusBar style="light" backgroundColor="#090B0F" />
+      <ExpoStatusBar style="light" backgroundColor={BG} />
       {Platform.OS === 'android' && (
         <StatusBar
           barStyle="light-content"
-          backgroundColor="#090B0F"
+          backgroundColor={BG}
           translucent={false}
         />
       )}
 
-      <Stack screenOptions={{ headerShown: false }} />
+      <Stack
+        screenOptions={{
+          headerShown: false,
+          contentStyle: { backgroundColor: BG },
+        }}
+      />
 
       {showOpener && (
         <Animated.View
@@ -113,18 +122,26 @@ export default function RootLayout() {
 
   if (!fontsLoaded) {
     return (
-      <View style={styles.boot}>
+      <View
+        style={{
+          flex: 1,
+          backgroundColor: BG,
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
         <StatusBar
           barStyle="light-content"
-          backgroundColor="#090B0F"
+          backgroundColor={BG}
           translucent={false}
         />
+        <ActivityIndicator color="#FFFFFF" />
       </View>
     )
   }
 
   return (
-    <GestureHandlerRootView style={styles.root}>
+    <GestureHandlerRootView style={{ flex: 1, backgroundColor: BG }}>
       <ThemeProvider>
         <ClerkProvider tokenCache={tokenCache}>
           <MarketplaceProvider>
@@ -145,14 +162,6 @@ export default function RootLayout() {
 }
 
 const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-    backgroundColor: '#090B0F',
-  },
-  boot: {
-    flex: 1,
-    backgroundColor: '#090B0F',
-  },
   opener: {
     ...StyleSheet.absoluteFillObject,
     zIndex: 9999,
