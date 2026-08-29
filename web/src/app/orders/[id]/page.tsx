@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useAuth } from "@clerk/nextjs";
+import { useMarketplace } from "@/context/MarketplaceContext";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Check, ChevronLeft, Copy, Package, Receipt, X } from "lucide-react";
 import { convertPrice, DEFAULT_REGION, formatMoney, formatProductPrice } from "@/lib/regions";
@@ -25,7 +26,8 @@ export default function OrderDetailPage() {
   const [order, setOrder] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState(false);
-  const displayRegion = DEFAULT_REGION;
+  const { region: marketplaceRegion } = useMarketplace();
+  const displayRegion = marketplaceRegion || DEFAULT_REGION;
 
   const fmt = useCallback(
     (amount: number, fromRegion?: string | null) => {

@@ -297,7 +297,7 @@ export default function SellerLayout() {
       <Tabs.Screen
         name="chat"
         options={{
-          title: 'Chat',
+          title: 'Messages',
           headerShown: false,
           tabBarIcon: ({ color, size }) => (
             <TabIconWithBadge

@@ -6,6 +6,18 @@ import { useEffect } from "react";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000/api";
 
+function safeReturnTo() {
+  try {
+    const v = sessionStorage.getItem("plazore_return_to");
+    if (v && v.startsWith("/") && !v.startsWith("//") && !v.startsWith("/sign-in") && !v.startsWith("/sso-callback")) {
+      return v;
+    }
+  } catch {
+    /* ignore */
+  }
+  return "/";
+}
+
 export default function AuthContinue() {
   const { getToken, isSignedIn, isLoaded } = useAuth();
   const router = useRouter();
@@ -17,10 +29,11 @@ export default function AuthContinue() {
       return;
     }
     (async () => {
+      const next = safeReturnTo();
       try {
         const token = await getToken();
         if (!token) {
-          router.replace("/complete-profile");
+          router.replace(`/complete-profile?redirect_url=${encodeURIComponent(next)}`);
           return;
         }
         const res = await fetch(`${BASE}/users/me`, {
@@ -29,9 +42,13 @@ export default function AuthContinue() {
         const json = await res.json();
         const u = json?.data;
         const needs = !u?.name?.trim() || !u?.phone?.trim();
-        router.replace(needs ? "/complete-profile" : "/");
+        if (needs) {
+          router.replace(`/complete-profile?redirect_url=${encodeURIComponent(next)}`);
+          return;
+        }
+        router.replace(next);
       } catch {
-        router.replace("/complete-profile");
+        router.replace(next);
       }
     })();
   }, [isLoaded, isSignedIn, getToken, router]);

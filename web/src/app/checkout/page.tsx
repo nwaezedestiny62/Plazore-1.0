@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@clerk/nextjs";
+import { useMarketplace } from "@/context/MarketplaceContext";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertCircle,
@@ -118,7 +119,8 @@ export default function CheckoutPage() {
   const [phase, setPhase] = useState<Phase>("idle");
   const [orderError, setOrderError] = useState("");
   const [toast, setToast] = useState<Toast>(null);
-  const displayRegion = DEFAULT_REGION;
+  const { region: marketplaceRegion } = useMarketplace();
+const displayRegion = marketplaceRegion || DEFAULT_REGION;
 
   useEffect(() => {
     setItems(getCart());

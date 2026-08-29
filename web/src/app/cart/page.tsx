@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { ArrowRight, ChevronLeft, Minus, Plus, ShoppingBag, Trash2 } from "lucide-react";
+import { useMarketplace } from "@/context/MarketplaceContext";
 import {
   cartCount,
   getCart,
@@ -31,7 +32,8 @@ function productRegion(product: CartItem["product"]) {
 export default function CartPage() {
   const router = useRouter();
   const [items, setItems] = useState<CartItem[]>([]);
-  const displayRegion = DEFAULT_REGION;
+  const { region: marketplaceRegion } = useMarketplace();
+const displayRegion = marketplaceRegion || DEFAULT_REGION;
 
   const sync = () => setItems(getCart());
 

@@ -8,7 +8,6 @@ export const TILE_COLORS: Record<
   wishlist: { bg: "#1A0F14", accent: "#F472B6", glow: "rgba(244,114,182,0.25)" },
   saved_stores: { bg: "#1A160E", accent: "#D4A853", glow: "rgba(212,168,83,0.25)" },
   profile: { bg: "#1A0E2A", accent: "#A78BFA", glow: "rgba(167,139,250,0.25)" },
-  music: { bg: "#1E1030", accent: "#C084FC", glow: "rgba(192,132,252,0.28)" },
   categories: { bg: "#0B1E28", accent: "#22D3EE", glow: "rgba(34,211,238,0.22)" },
   new: { bg: "#251A0A", accent: "#FBBF24", glow: "rgba(251,191,36,0.25)" },
   trending: { bg: "#28120A", accent: "#FB923C", glow: "rgba(251,146,60,0.25)" },
@@ -17,6 +16,7 @@ export const TILE_COLORS: Record<
   contact: { bg: "#181230", accent: "#818CF8", glow: "rgba(129,140,248,0.22)" },
   about: { bg: "#0C1C18", accent: "#34D399", glow: "rgba(52,211,153,0.22)" },
   orders: { bg: "#0F1A24", accent: "#60A5FA", glow: "rgba(96,165,250,0.22)" },
+  messages: { bg: "#0E1A22", accent: "#38BDF8", glow: "rgba(56,189,248,0.22)" },
 };
 
 export type LoungeItem = {
@@ -49,18 +49,18 @@ export const LOUNGE_SECTIONS: LoungeSection[] = [
     items: [
       { id: "profile", label: "Profile", subtitle: "Account & prefs", href: "/profile" },
       { id: "orders", label: "Orders", subtitle: "Track deliveries", href: "/orders" },
+      { id: "messages", label: "Messages", subtitle: "Product chats", href: "/messages" },
       { id: "saved_stores", label: "Saved stores", subtitle: "Followed brands", href: "/saved-stores" },
-      { id: "music", label: "Music", subtitle: "Ambient soundtrack", href: "/settings/music" },
     ],
   },
   {
     id: "explore",
     title: "Explore",
     items: [
-      { id: "categories", label: "Categories", subtitle: "Shop by type", href: "/browse" },
-      { id: "new", label: "New arrivals", subtitle: "Just listed", href: "/browse" },
-      { id: "trending", label: "Trending", subtitle: "Popular now", href: "/browse" },
-      { id: "stores", label: "Stores", subtitle: "Seller directories", href: "/browse" },
+      { id: "categories", label: "Categories", subtitle: "Shop by type", href: "/shop" },
+      { id: "new", label: "New arrivals", subtitle: "Just listed", href: "/shop?mode=new" },
+      { id: "trending", label: "Trending", subtitle: "Popular now", href: "/shop?mode=trending" },
+      { id: "stores", label: "Stores", subtitle: "Seller directories", href: "/shop?mode=stores" },
     ],
   },
   {
@@ -68,7 +68,7 @@ export const LOUNGE_SECTIONS: LoungeSection[] = [
     title: "Support",
     items: [
       { id: "help", label: "Help", subtitle: "Guides & FAQs", href: "/about" },
-      { id: "contact", label: "Contact", subtitle: "Reach Plazore", href: "/about" },
+      { id: "contact", label: "Contact", subtitle: "Reach Plazore", href: "/about#contact" },
       { id: "about", label: "About", subtitle: "The digital mall", href: "/about" },
     ],
   },

@@ -1,9 +1,10 @@
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
+  AppState,
   Easing,
   FlatList,
   Image,
@@ -25,7 +26,6 @@ import { useAuth } from "@clerk/clerk-expo";
 import api from "@/constants/api";
 import { useMarketplace } from "@/context/MarketplaceContext";
 
-/* ── Plazore palette ── */
 const BG = "#090B0F";
 const SURFACE = "#11141A";
 const SURFACE_2 = "#171B22";
@@ -36,6 +36,7 @@ const MUTED = "#737A86";
 const AI_GREEN = "#10B981";
 const AI_BLUE = "#3B82F6";
 const DANGER = "#F97066";
+const POLL_MS = 2500;
 
 type Message = {
   _id: string;
@@ -69,6 +70,23 @@ type Conversation = {
   myRole?: "buyer" | "seller" | null;
 };
 
+function mergeMessages(prev: Message[], incoming: Message[]): Message[] {
+  const server = incoming.map((m) => ({ ...m, status: "sent" as const }));
+  const locals = prev.filter((m) => m.status === "sending" || m.status === "failed");
+  const keptLocals = locals.filter((local) => {
+    return !server.some(
+      (m) =>
+        m.text === local.text &&
+        Math.abs(new Date(m.createdAt).getTime() - new Date(local.createdAt).getTime()) < 20000,
+    );
+  });
+  const byId = new Map<string, Message>();
+  for (const m of server) byId.set(String(m._id), m);
+  for (const m of keptLocals) byId.set(String(m.localId || m._id), m);
+  return Array.from(byId.values()).sort(
+    (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+  );
+}
 
 function StorePreloader() {
   const rotation = useRef(new Animated.Value(0)).current;
@@ -127,11 +145,15 @@ export default function ChatScreen() {
   const [error, setError] = useState<string | null>(null);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [inputFocused, setInputFocused] = useState(false);
+  const [live, setLive] = useState(false);
 
   const flatListRef = useRef<FlatList>(null);
   const inputRef = useRef<TextInput>(null);
   const mountedRef = useRef(true);
   const inFlight = useRef(false);
+  const polling = useRef(false);
+  const messagesRef = useRef<Message[]>([]);
+  messagesRef.current = messages;
 
   useEffect(() => {
     mountedRef.current = true;
@@ -140,7 +162,6 @@ export default function ChatScreen() {
     };
   }, []);
 
-  /* Resolve current user id early so role is never ambiguous */
   const resolveMyUserId = useCallback(async (token: string) => {
     if (myUserId) return myUserId;
     const endpoints = ["/users/me", "/users/profile", "/user/me"];
@@ -163,17 +184,12 @@ export default function ChatScreen() {
     return null;
   }, [myUserId]);
 
-  /** Derive role strictly from ids — seller must never be treated as chatting with themselves */
   const resolveRole = useCallback(
-    (
-      conv: any,
-      uid: string | null,
-    ): "buyer" | "seller" | null => {
+    (conv: any, uid: string | null): "buyer" | "seller" | null => {
       if (!conv) return null;
       const me = String(uid || "");
       const buyerId = String(conv.buyer?._id || conv.buyer || "");
       const sellerId = String(conv.seller?._id || conv.seller || "");
-
       if (me && buyerId && me === buyerId) return "buyer";
       if (me && sellerId && me === sellerId) return "seller";
       if (conv.myRole === "buyer" || conv.myRole === "seller") return conv.myRole;
@@ -182,13 +198,9 @@ export default function ChatScreen() {
     [],
   );
 
-  /* Keyboard */
   useEffect(() => {
-    const showEvent =
-      Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
-    const hideEvent =
-      Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
-
+    const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
     const onShow = (e: any) => {
       setKeyboardHeight(e?.endCoordinates?.height ?? 0);
       requestAnimationFrame(() => {
@@ -196,7 +208,6 @@ export default function ChatScreen() {
       });
     };
     const onHide = () => setKeyboardHeight(0);
-
     const subShow = Keyboard.addListener(showEvent, onShow);
     const subHide = Keyboard.addListener(hideEvent, onHide);
     return () => {
@@ -204,6 +215,52 @@ export default function ChatScreen() {
       subHide.remove();
     };
   }, []);
+
+  const applyIncoming = useCallback((list: Message[]) => {
+    const prev = messagesRef.current;
+    const next = mergeMessages(prev, list);
+    const grew = next.length > prev.length;
+    const readChanged = next.some((m, i) => {
+      const old = prev.find((p) => p._id === m._id);
+      return old && (old.readBy?.length || 0) !== (m.readBy?.length || 0);
+    });
+    if (grew || readChanged || next.length !== prev.length) {
+      setMessages(next);
+      if (grew) {
+        requestAnimationFrame(() =>
+          flatListRef.current?.scrollToEnd({ animated: true }),
+        );
+      }
+    }
+  }, []);
+
+  const pollMessages = useCallback(async () => {
+    if (!conversationId || !isSignedIn || polling.current) return;
+    polling.current = true;
+    try {
+      const token = await getTokenRef.current();
+      if (!token) return;
+      const messagesRes = await api.get(`/chat/${conversationId}/messages`, {
+        headers: { Authorization: `Bearer ${token}` },
+        timeout: 12000,
+      });
+      if (messagesRes.data?.success && mountedRef.current) {
+        applyIncoming(messagesRes.data.data || []);
+        setLive(true);
+      }
+      api
+        .patch(
+          `/chat/${conversationId}/read`,
+          {},
+          { headers: { Authorization: `Bearer ${token}` }, timeout: 8000 },
+        )
+        .catch(() => {});
+    } catch {
+      /* silent on poll */
+    } finally {
+      polling.current = false;
+    }
+  }, [conversationId, isSignedIn, applyIncoming]);
 
   const loadChat = useCallback(async () => {
     if (!conversationId) {
@@ -238,20 +295,7 @@ export default function ChatScreen() {
       });
 
       if (messagesRes.data?.success && mountedRef.current) {
-        const list: Message[] = (messagesRes.data.data || []).map(
-          (m: Message) => ({ ...m, status: "sent" as const }),
-        );
-        setMessages(list);
-
-        // Infer my id from a message I sent, if profile endpoints failed
-        if (!uid) {
-          for (const m of list) {
-            if (m.sender?._id) {
-              // can't know which is me yet without conv meta
-              break;
-            }
-          }
-        }
+        applyIncoming(messagesRes.data.data || []);
       }
 
       try {
@@ -261,16 +305,10 @@ export default function ChatScreen() {
         });
         if (convRes.data?.success && mountedRef.current) {
           const found =
-            (convRes.data.data || []).find(
-              (c: any) => c._id === conversationId,
-            ) || null;
-
+            (convRes.data.data || []).find((c: any) => c._id === conversationId) ||
+            null;
           if (found) {
-            const role = resolveRole(found, uid);
-            setConversation({
-              ...found,
-              myRole: role,
-            });
+            setConversation({ ...found, myRole: resolveRole(found, uid) });
           }
         }
       } catch {
@@ -285,16 +323,10 @@ export default function ChatScreen() {
         )
         .catch(() => {});
     } catch (err: any) {
-      console.log("Load chat error:", err?.response?.data || err?.message || err);
       if (mountedRef.current) {
         const msg =
-          err?.response?.data?.message ||
-          err?.message ||
-          "Could not load this chat.";
-        if (
-          msg === "Network Error" ||
-          String(msg).toLowerCase().includes("network")
-        ) {
+          err?.response?.data?.message || err?.message || "Could not load this chat.";
+        if (msg === "Network Error" || String(msg).toLowerCase().includes("network")) {
           setError("No internet connection. Check your network and try again.");
         } else if (err?.code === "ECONNABORTED") {
           setError("Request timed out. Try again.");
@@ -306,13 +338,25 @@ export default function ChatScreen() {
       inFlight.current = false;
       if (mountedRef.current) setLoading(false);
     }
-  }, [conversationId, isSignedIn, resolveMyUserId, resolveRole]);
+  }, [conversationId, isSignedIn, resolveMyUserId, resolveRole, applyIncoming]);
 
-  useEffect(() => {
-    setLoading(true);
-    loadChat();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [conversationId, isSignedIn]);
+  useFocusEffect(
+    useCallback(() => {
+      setLoading(true);
+      loadChat();
+      const tick = setInterval(() => {
+        if (AppState.currentState === "active") pollMessages();
+      }, POLL_MS);
+      const sub = AppState.addEventListener("change", (state) => {
+        if (state === "active") pollMessages();
+      });
+      return () => {
+        clearInterval(tick);
+        sub.remove();
+        setLive(false);
+      };
+    }, [loadChat, pollMessages]),
+  );
 
   const handleSend = async () => {
     if (!text.trim() || sending || !conversationId) return;
@@ -357,11 +401,8 @@ export default function ChatScreen() {
         throw new Error(res.data?.message || "Failed to send");
       }
     } catch (err: any) {
-      console.log("Send error:", err?.response?.data || err);
       setMessages((prev) =>
-        prev.map((m) =>
-          m.localId === localId ? { ...m, status: "failed" } : m,
-        ),
+        prev.map((m) => (m.localId === localId ? { ...m, status: "failed" } : m)),
       );
       setText(messageText);
       setError(
@@ -385,15 +426,9 @@ export default function ChatScreen() {
 
   const isMine = useCallback(
     (message: Message) => {
-      if (message.status === "sending" || message.status === "failed")
-        return true;
-
+      if (message.status === "sending" || message.status === "failed") return true;
       const senderId = String(message.sender?._id || "");
-      if (myUserId && senderId) {
-        return senderId === String(myUserId);
-      }
-
-      // Role-based fallback — never treat seller's own id as "other"
+      if (myUserId && senderId) return senderId === String(myUserId);
       if (conversation?.myRole === "buyer" && conversation.buyer?._id) {
         return senderId === String(conversation.buyer._id);
       }
@@ -416,16 +451,8 @@ export default function ChatScreen() {
     }
   };
 
-  /**
-   * Always the OTHER participant — never the signed-in user.
-   * Seller → sees buyer
-   * Buyer  → sees seller / store
-   */
   const otherParty = useMemo(() => {
-    const role =
-      conversation?.myRole ||
-      resolveRole(conversation, myUserId);
-
+    const role = conversation?.myRole || resolveRole(conversation, myUserId);
     if (role === "seller") {
       return {
         name: conversation?.buyer?.name || "Buyer",
@@ -433,21 +460,13 @@ export default function ChatScreen() {
         label: "Buyer",
       };
     }
-
     if (role === "buyer") {
       return {
-        name:
-          conversation?.seller?.storeName ||
-          conversation?.seller?.name ||
-          "Seller",
-        image:
-          conversation?.seller?.storeLogo || conversation?.seller?.image,
+        name: conversation?.seller?.storeName || conversation?.seller?.name || "Seller",
+        image: conversation?.seller?.storeLogo || conversation?.seller?.image,
         label: "Seller",
       };
     }
-
-    // Unknown role: still avoid showing "Seller" as a default identity
-    // Prefer buyer if we look like the seller id matches me
     if (
       myUserId &&
       conversation?.seller?._id &&
@@ -459,7 +478,6 @@ export default function ChatScreen() {
         label: "Buyer",
       };
     }
-
     return {
       name:
         conversation?.seller?.storeName ||
@@ -477,26 +495,17 @@ export default function ChatScreen() {
   const getTicks = (message: Message) => {
     if (!isMine(message)) return null;
     if (message.status === "sending") {
-      return (
-        <Ionicons name="time-outline" size={13} color="rgba(255,255,255,0.55)" />
-      );
+      return <Ionicons name="time-outline" size={13} color="rgba(255,255,255,0.55)" />;
     }
     if (message.status === "failed") {
       return <Ionicons name="alert-circle" size={13} color="#FECACA" />;
     }
-
-    const role =
-      conversation?.myRole || resolveRole(conversation, myUserId);
-    const otherId =
-      role === "buyer"
-        ? conversation?.seller?._id
-        : conversation?.buyer?._id;
-
+    const role = conversation?.myRole || resolveRole(conversation, myUserId);
+    const otherId = role === "buyer" ? conversation?.seller?._id : conversation?.buyer?._id;
     const readByOther =
       !!otherId &&
       Array.isArray(message.readBy) &&
       message.readBy.some((id) => String(id) === String(otherId));
-
     return (
       <Ionicons
         name="checkmark-done"
@@ -506,9 +515,7 @@ export default function ChatScreen() {
     );
   };
 
-  if (loading) {
-    return <StorePreloader />;
-  }
+  if (loading) return <StorePreloader />;
 
   const product = conversation?.product;
 
@@ -522,7 +529,6 @@ export default function ChatScreen() {
       />
 
       <SafeAreaView edges={["top"]} style={{ flex: 1 }}>
-        {/* Header — always the other party */}
         <View style={styles.header}>
           <TouchableOpacity
             onPress={() => router.back()}
@@ -544,29 +550,29 @@ export default function ChatScreen() {
             <Text numberOfLines={1} style={styles.headerName}>
               {otherParty.name}
             </Text>
-            <Text numberOfLines={1} style={styles.headerSub}>
-              {otherParty.label === "Buyer"
-                ? "Buyer inquiry"
-                : otherParty.label === "Seller"
-                  ? "Store conversation"
-                  : "Secure conversation"}
-            </Text>
+            <View style={styles.liveRow}>
+              <View style={[styles.liveDot, live && styles.liveDotOn]} />
+              <Text numberOfLines={1} style={styles.headerSub}>
+                {live
+                  ? "Live"
+                  : otherParty.label === "Buyer"
+                    ? "Buyer inquiry"
+                    : otherParty.label === "Seller"
+                      ? "Store conversation"
+                      : "Secure conversation"}
+              </Text>
+            </View>
           </View>
         </View>
 
         {product ? (
           <TouchableOpacity
             activeOpacity={0.9}
-            onPress={() =>
-              product._id && router.push(`/product/${product._id}` as any)
-            }
+            onPress={() => product._id && router.push(`/product/${product._id}` as any)}
             style={styles.productCard}
           >
             {product.images?.[0] ? (
-              <Image
-                source={{ uri: product.images[0] }}
-                style={styles.productImg}
-              />
+              <Image source={{ uri: product.images[0] }} style={styles.productImg} />
             ) : (
               <View style={[styles.productImg, styles.productImgFallback]}>
                 <Ionicons name="image-outline" size={18} color={MUTED} />
@@ -614,16 +620,11 @@ export default function ChatScreen() {
           ListEmptyComponent={
             <View style={styles.empty}>
               <View style={styles.emptyIcon}>
-                <Ionicons
-                  name="chatbubble-ellipses-outline"
-                  size={28}
-                  color={AI_GREEN}
-                />
+                <Ionicons name="chatbubble-ellipses-outline" size={28} color={AI_GREEN} />
               </View>
               <Text style={styles.emptyTitle}>Start the conversation</Text>
               <Text style={styles.emptyBody}>
-                Ask about condition, shipping, or anything else about this
-                piece.
+                Ask about condition, shipping, or anything else about this piece.
               </Text>
             </View>
           }
@@ -639,23 +640,11 @@ export default function ChatScreen() {
                   mine ? styles.bubbleWrapMine : styles.bubbleWrapOther,
                 ]}
               >
-                <View
-                  style={[
-                    styles.bubble,
-                    mine ? styles.bubbleMine : styles.bubbleOther,
-                  ]}
-                >
+                <View style={[styles.bubble, mine ? styles.bubbleMine : styles.bubbleOther]}>
                   <Text style={styles.bubbleText}>{item.text}</Text>
                 </View>
-                <View
-                  style={[
-                    styles.metaRow,
-                    mine ? { justifyContent: "flex-end" } : null,
-                  ]}
-                >
-                  <Text style={styles.metaTime}>
-                    {formatTime(item.createdAt)}
-                  </Text>
+                <View style={[styles.metaRow, mine ? { justifyContent: "flex-end" } : null]}>
+                  <Text style={styles.metaTime}>{formatTime(item.createdAt)}</Text>
                   {mine && getTicks(item)}
                   {item.status === "failed" && (
                     <Text style={styles.metaFail}>Tap to retry</Text>
@@ -670,18 +659,12 @@ export default function ChatScreen() {
           style={[
             styles.inputBar,
             {
-              paddingBottom:
-                keyboardHeight > 0 ? 10 : Math.max(insets.bottom, 12),
+              paddingBottom: keyboardHeight > 0 ? 10 : Math.max(insets.bottom, 12),
               marginBottom: keyboardHeight > 0 ? keyboardHeight : 0,
             },
           ]}
         >
-          <View
-            style={[
-              styles.inputShell,
-              inputFocused && styles.inputShellFocused,
-            ]}
-          >
+          <View style={[styles.inputShell, inputFocused && styles.inputShellFocused]}>
             <TextInput
               ref={inputRef}
               value={text}
@@ -708,19 +691,13 @@ export default function ChatScreen() {
               activeOpacity={0.85}
               style={[
                 styles.sendBtn,
-                text.trim() && !sending
-                  ? styles.sendBtnActive
-                  : styles.sendBtnIdle,
+                text.trim() && !sending ? styles.sendBtnActive : styles.sendBtnIdle,
               ]}
             >
               {sending ? (
                 <Ionicons name="hourglass-outline" size={18} color={MUTED} />
               ) : (
-                <Ionicons
-                  name="send"
-                  size={17}
-                  color={text.trim() ? BG : MUTED}
-                />
+                <Ionicons name="send" size={17} color={text.trim() ? BG : MUTED} />
               )}
             </TouchableOpacity>
           </View>
@@ -739,7 +716,6 @@ const styles = StyleSheet.create({
     right: 0,
     height: 120,
   },
-  // Preloader
   loaderRoot: {
     flex: 1,
     backgroundColor: BG,
@@ -772,25 +748,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  orbLogo: {
-    width: 32,
-    height: 32,
-  },
-
-  diamondCore: {
-    width: 48,
-    height: 48,
-    backgroundColor: "rgba(16,185,129,0.1)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  loaderLogo: { width: 28, height: 28 },
-  loaderText: {
-    marginTop: 32,
-    color: MUTED,
-    fontSize: 13,
-    letterSpacing: 0.8,
-  },
+  orbLogo: { width: 32, height: 32 },
 
   header: {
     flexDirection: "row",
@@ -824,11 +782,19 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     letterSpacing: -0.2,
   },
+  liveRow: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 2 },
+  liveDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: MUTED,
+  },
+  liveDotOn: { backgroundColor: AI_GREEN },
   headerSub: {
     color: MUTED,
     fontSize: 11,
-    marginTop: 2,
     letterSpacing: 0.3,
+    flex: 1,
   },
 
   productCard: {
@@ -843,10 +809,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   productImg: { width: 48, height: 48, backgroundColor: SURFACE_2 },
-  productImgFallback: {
-    alignItems: "center",
-    justifyContent: "center",
-  },
+  productImgFallback: { alignItems: "center", justifyContent: "center" },
   productName: { color: TEXT, fontSize: 13, fontWeight: "600" },
   productPrice: {
     color: AI_GREEN,

@@ -467,7 +467,7 @@ export default function Profile() {
                       )}
                     </View>
                     <View style={{ flex: 1 }}>
-                      <Text style={styles.ctaTitleActive}>Storefront</Text>
+                      <Text style={styles.ctaTitleActive}>Seller Storefront</Text>
                       <Text style={styles.ctaSubActive}>
                         Products, orders & chats
                       </Text>

@@ -229,7 +229,7 @@ export default function ProfilePage() {
                   )}
                 </span>
                 <span className="flex-1">
-                  <span className="block text-[15px] font-bold text-bg">Storefront</span>
+                  <span className="block text-[15px] font-bold text-bg">Seller Storefront</span>
                   <span className="mt-0.5 block text-xs text-bg/65">Products, orders & chats</span>
                 </span>
                 <ArrowRight className="h-[18px] w-[18px] text-bg" />

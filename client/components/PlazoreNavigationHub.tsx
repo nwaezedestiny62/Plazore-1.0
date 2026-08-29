@@ -57,7 +57,7 @@ const TILE_COLORS: Record<
   wishlist: { bg: '#1A0F14', accent: '#F472B6', glow: 'rgba(244,114,182,0.25)', solid: '#DB2777' },
   saved_stores: { bg: '#1A160E', accent: '#D4A853', glow: 'rgba(212,168,83,0.25)', solid: '#B45309' },
   profile: { bg: '#1A0E2A', accent: '#A78BFA', glow: 'rgba(167,139,250,0.25)', solid: '#7C3AED' },
-  music: { bg: '#1E1030', accent: '#C084FC', glow: 'rgba(192,132,252,0.28)', solid: '#9333EA' },
+ messages: { bg: "#0E1A22", accent: "#38BDF8", glow: "rgba(56,189,248,0.22)", solid: '#504e53' },
   categories: { bg: '#0B1E28', accent: '#22D3EE', glow: 'rgba(34,211,238,0.22)', solid: '#0891B2' },
   new: { bg: '#251A0A', accent: '#FBBF24', glow: 'rgba(251,191,36,0.25)', solid: '#D97706' },
   trending: { bg: '#28120A', accent: '#FB923C', glow: 'rgba(251,146,60,0.25)', solid: '#EA580C' },
@@ -183,13 +183,7 @@ const SECTIONS: NavSection[] = [
         icon: 'bookmark',
         href: '/saved-stores',
       },
-      {
-        id: 'music',
-        label: 'Music',
-        subtitle: 'Ambient soundtrack',
-        icon: 'musical-notes',
-        href: '/settings/music',
-      },
+       { id: "messages", label: "Messages", subtitle: "Product chats", icon: 'chatbubble', href: "/messages" },
     ],
   },
    {
@@ -1028,7 +1022,7 @@ export default function PlazoreNavigationHub({
           }}
         >
           <View style={styles.topBar}>
-            <Text style={styles.topLabel}>LOUNGE</Text>
+            <Text style={styles.topLabel}>NAVIGATION</Text>
             <Pressable onPress={onClose} style={styles.closeBtn} hitSlop={12}>
               <Ionicons name="close" size={18} color={TEXT} />
             </Pressable>
@@ -1256,7 +1250,7 @@ export default function PlazoreNavigationHub({
                         </View>
                         <View style={{ flex: 1 }}>
                           <Text style={styles.sellerTitleActive}>
-                            Seller dashboard
+                            Seller Storefront
                           </Text>
                           <Text style={styles.sellerSubActive}>
                             Products, orders & messages
@@ -1337,7 +1331,6 @@ export default function PlazoreNavigationHub({
                 <FadeSlideIn index={14} delayBase={160}>
                   <View style={styles.footerCard}>
                     <Pressable
-                      onPress={() => navigate('/settings/profile')}
                       style={styles.footerProfile}
                     >
                       {user?.imageUrl ? (
@@ -1356,7 +1349,7 @@ export default function PlazoreNavigationHub({
                         </Text>
                         <Text style={styles.footerMeta} numberOfLines={1}>
                           {isSignedIn
-                            ? 'View profile'
+                            ? 'This profile is currently active'
                             : 'Sign in to sync your account'}
                         </Text>
                       </View>

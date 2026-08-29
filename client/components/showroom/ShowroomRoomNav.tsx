@@ -257,7 +257,7 @@ const styles = StyleSheet.create({
   arrow: {
     width: 26,
     height: 26,
-    marginBottom: 20,
+    marginBottom: -15,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'rgba(12,14,20,0.95)',

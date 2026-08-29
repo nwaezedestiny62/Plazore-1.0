@@ -18,7 +18,7 @@ import { LinearGradient } from 'expo-linear-gradient'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import api from '@/constants/api'
 import { PLAN_FEES } from '@/constants/productCatalog'
-import { PerformanceChart } from '@/components/PerformanceChart'
+import { DashboardPerformanceBars } from '@/components/DashboardPerformanceBars'
 
 const BG = '#090B0F'
 const SURFACE = '#11141A'
@@ -480,8 +480,8 @@ export default function SellerDashboard() {
           </View>
 
           <View style={{ marginTop: 12 }}>
-            <PerformanceChart data={safeSeries} />
-          </View>
+  <DashboardPerformanceBars data={safeSeries /* or analytics?.series || [] */} />
+</View>
 
           <Text style={[styles.cardTitle, { marginTop: 18, marginBottom: 8 }]}>
             Top products

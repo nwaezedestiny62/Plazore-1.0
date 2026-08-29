@@ -1,5 +1,4 @@
 import { SettingsRow } from '@/components/settings/SettingsRow'
-import { SettingsSection } from '@/components/settings/SettingsSection'
 import { Ionicons } from '@expo/vector-icons'
 import { useRouter } from 'expo-router'
 import React, { useEffect, useRef, useState } from 'react'
@@ -17,7 +16,6 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 
 const BG = '#090B0F'
 const SURFACE = '#11141A'
-const SURFACE_2 = '#171B22'
 const LINE = 'rgba(255,255,255,0.07)'
 const TEXT = '#F5F7FA'
 const SECONDARY = '#A7ADB8'
@@ -120,7 +118,10 @@ export default function SellerSettings() {
     <SafeAreaView style={styles.safe} edges={['top']}>
       <View style={styles.header}>
         <TouchableOpacity
-          onPress={() => router.back()}
+          onPress={() => {
+            if (router.canGoBack()) router.back()
+            else router.replace('/seller' as any)
+          }}
           style={styles.backBtn}
           hitSlop={12}
         >
@@ -140,48 +141,69 @@ export default function SellerSettings() {
         >
           <View style={styles.introCard}>
             <View style={styles.introIcon}>
-              <Ionicons name="storefront-outline" size={18} color={GREEN} />
+              <Ionicons name="options-outline" size={18} color={GREEN} />
             </View>
             <Text style={styles.introText}>
-              Manage your storefront, shipping origin, and how the lounge
-              presents your business — calm, clear, one task at a time.
+              Storefront, catalog, orders, and growth — one calm place. Payout
+              stays protected on its own screen.
             </Text>
           </View>
 
+          {/* Store operations */}
           <Text style={styles.sectionLabel}>Store</Text>
           <View style={styles.group}>
             <SettingsRow
-              icon="storefront"
-              title="Store Setup"
-              subtitle="Appearance, logo, banner, and ship-from details."
+              icon="storefront-outline"
+              title="Storefront"
+              subtitle="Logo, banner, name, and public store page"
               onPress={() => router.push('/seller/store' as any)}
+              last
+            />
+          </View>
+
+          {/* Growth */}
+          <Text style={styles.sectionLabel}>Growth</Text>
+          <View style={styles.group}>
+            <SettingsRow
+              icon="sparkles-outline"
+              title="Seller plans"
+              subtitle="Fees, image limits, and visibility tiers"
+              onPress={() => router.push('/seller/subscription' as any)}
+            />
+          </View>
+
+          {/* Account / identity */}
+          <Text style={styles.sectionLabel}>Account</Text>
+          <View style={styles.group}>
+            <SettingsRow
+              icon="card-outline"
+              title="Payout & shipping"
+              subtitle="Bank account and defaults — last 4 digits required"
+              onPress={() => router.push('/seller/settings/payout' as any)}
+            />
+            <SettingsRow
+              icon="person-outline"
+              title="Seller identity"
+              subtitle="Name, phone, and contact details"
+              onPress={() => router.push('/seller/settings/profile' as any)}
             />
             <View style={styles.divider} />
             <SettingsRow
               icon="globe-outline"
-              title="Marketplace Region"
-              subtitle="Choose the marketplace your store operates in."
+              title="Marketplace region"
+              subtitle="Currency and market for your catalog"
               onPress={() => router.push('/seller/settings/region' as any)}
               last
             />
           </View>
 
-           <Text style={styles.sectionLabel}>Store</Text>
-          <View style={styles.group}>
-            <SettingsRow
-  icon="card-outline"
-  title="Payout & shipping"
-  subtitle="Bank account and shipping defaults — protected"
-  onPress={() => router.push('/seller/store/payout' as any)}
-/>
-</View>
-
+          {/* About */}
           <Text style={styles.sectionLabel}>About</Text>
           <View style={styles.group}>
             <SettingsRow
               icon="information-circle-outline"
               title="About Plazore Seller"
-              subtitle="Version and seller platform information."
+              subtitle="Version and seller platform information"
               onPress={() => router.push('/seller/settings/about' as any)}
               last
             />

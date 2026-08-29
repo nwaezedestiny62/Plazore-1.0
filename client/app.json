@@ -4,7 +4,13 @@
     "slug": "Plazore",
     "scheme": "plazore",
     "userInterfaceStyle": "dark",
+    "androidStatusBar": {
+      "barStyle": "light-content",
+      "backgroundColor": "#090B0F",
+      "translucent": false
+    },
     "android": {
+      "userInterfaceStyle": "dark",
       "adaptiveIcon": {
         "backgroundColor": "#090B0F",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -12,7 +18,8 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "edgeToEdgeEnabled": false,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "com.anonymous.Plazore"
     },
     "ios": {
       "supportsTablet": true,

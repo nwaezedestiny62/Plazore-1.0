@@ -39,6 +39,15 @@ const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window')
 const OPENER_MS = 3300
 const EASE = Easing.bezier(0.22, 1, 0.36, 1)
 
+/** Force dark status bar on every platform */
+function applyDarkStatusBar() {
+  StatusBar.setBarStyle('light-content', true)
+  if (Platform.OS === 'android') {
+    StatusBar.setBackgroundColor(BG, true)
+    StatusBar.setTranslucent(false)
+  }
+}
+
 /** Opener + intro gate — must sit inside SoundtrackProvider */
 function AppShell() {
   const { holdIntroGate, releaseIntroGate } = useSoundtrack()
@@ -53,6 +62,7 @@ function AppShell() {
     holdIntroGate()
   }, [holdIntroGate])
 
+  // Opener sequence
   useEffect(() => {
     StatusBar.setHidden(true, 'fade')
     if (Platform.OS === 'android') {
@@ -70,7 +80,8 @@ function AppShell() {
         if (!finished) return
         setShowOpener(false)
         StatusBar.setHidden(false, 'fade')
-        // Opener done → allow music (preloader can hold again if needed)
+        // Restore + lock dark status bar
+        applyDarkStatusBar()
         releaseIntroGate()
       })
     }, OPENER_MS)
@@ -78,14 +89,23 @@ function AppShell() {
     return () => clearTimeout(timer)
   }, [openerOpacity, releaseIntroGate])
 
+  // Keep forcing dark status bar while app is running (handles any later overrides)
+  useEffect(() => {
+    if (showOpener) return
+    applyDarkStatusBar()
+  }, [showOpener])
+
   return (
     <>
-      <ExpoStatusBar style="light" backgroundColor={BG} />
+      {/* Always light icons on dark bg */}
+      <ExpoStatusBar style="light" backgroundColor={BG} translucent={false} />
+
       {Platform.OS === 'android' && (
         <StatusBar
           barStyle="light-content"
           backgroundColor={BG}
           translucent={false}
+          animated
         />
       )}
 
@@ -93,6 +113,10 @@ function AppShell() {
         screenOptions={{
           headerShown: false,
           contentStyle: { backgroundColor: BG },
+          // Extra safety for native stack screens
+          statusBarStyle: 'light',
+          statusBarBackgroundColor: BG,
+          statusBarTranslucent: false,
         }}
       />
 
@@ -120,6 +144,11 @@ export default function RootLayout() {
     Manrope_700Bold,
   })
 
+  // Force dark status bar as early as possible
+  useEffect(() => {
+    applyDarkStatusBar()
+  }, [])
+
   if (!fontsLoaded) {
     return (
       <View
@@ -135,6 +164,7 @@ export default function RootLayout() {
           backgroundColor={BG}
           translucent={false}
         />
+        <ExpoStatusBar style="light" backgroundColor={BG} />
         <ActivityIndicator color="#FFFFFF" />
       </View>
     )
