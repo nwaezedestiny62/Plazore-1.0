@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -13,6 +13,11 @@ import {
   Easing,
   StyleSheet,
   ActivityIndicator,
+  Modal,
+  Pressable,
+  Share,
+  Linking,
+  Platform,
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -31,6 +36,7 @@ const ENTRANCE_H = Math.min(height * 0.34, 280);
 const FEATURED_H = width * 0.78;
 const FEATURED_INTERVAL_MS = 7000;
 const TOAST_MS = 3200;
+const SITE = "https://plazore.com"; // set to your real web origin
 
 const BG = "#090B0F";
 const SURFACE = "#11141A";
@@ -94,7 +100,6 @@ function StorePreloader() {
   );
 }
 
-/** Soft top toast — Plazore tone */
 function TopToast({
   visible,
   message,
@@ -191,7 +196,7 @@ export default function PublicStorefront() {
   const id = Array.isArray(rawId) ? rawId[0] : rawId;
   const router = useRouter();
   const { formatProduct } = useMarketplace();
-  const { getToken, isSignedIn } = useAuth();
+  const { getToken, isSignedIn, isLoaded: authLoaded } = useAuth();
 
   const [store, setStore] = useState<StorePublic | null>(null);
   const [products, setProducts] = useState<any[]>([]);
@@ -203,6 +208,11 @@ export default function PublicStorefront() {
   const [goalExpanded, setGoalExpanded] = useState(false);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
 
+  const [shareOpen, setShareOpen] = useState(false);
+  const [authOpen, setAuthOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [shareBusy, setShareBusy] = useState(false);
+
   const door = useRef(new Animated.Value(0)).current;
   const content = useRef(new Animated.Value(0)).current;
   const identityLift = useRef(new Animated.Value(24)).current;
@@ -212,6 +222,16 @@ export default function PublicStorefront() {
   const saveInFlight = useRef(false);
 
   const storeId = store?._id || store?.id || id || "";
+
+  const storeUrl = useMemo(() => {
+    const key = storeId || id || "";
+    return key ? `${SITE}/store/${key}` : SITE;
+  }, [storeId, id]);
+
+  const shareMessage = useMemo(() => {
+    const name = store?.storeName || "This storefront";
+    return `Shop ${name} on Plazore\n${storeUrl}`;
+  }, [store?.storeName, storeUrl]);
 
   useEffect(() => {
     const load = async () => {
@@ -328,13 +348,33 @@ export default function PublicStorefront() {
     );
   };
 
+  const requireAuthForSave = () => {
+    if (!authLoaded) return false;
+    if (isSignedIn) return true;
+    setAuthOpen(true);
+    return false;
+  };
+
+  const goSignIn = () => {
+    setAuthOpen(false);
+    router.push({
+      pathname: "/(auth)/sign-in" as any,
+      params: { redirect_url: `/store/${storeId || id}` },
+    });
+  };
+
+  const goSignUp = () => {
+    setAuthOpen(false);
+    router.push({
+      pathname: "/(auth)/sign-up" as any,
+      params: { redirect_url: `/store/${storeId || id}` },
+    });
+  };
+
   const handleToggleSave = async () => {
     if (!storeId || saveInFlight.current) return;
 
-    if (!isSignedIn) {
-      router.push("/(auth)/sign-in" as any);
-      return;
-    }
+    if (!requireAuthForSave()) return;
 
     const previous = saved;
     setSaved(!previous);
@@ -345,6 +385,7 @@ export default function PublicStorefront() {
       const token = await getToken();
       if (!token) {
         setSaved(previous);
+        setAuthOpen(true);
         return;
       }
 
@@ -393,6 +434,58 @@ export default function PublicStorefront() {
       setSaveBusy(false);
       saveInFlight.current = false;
     }
+  };
+
+  const shareNative = async () => {
+    try {
+      setShareBusy(true);
+      await Share.share({
+        message: shareMessage,
+        url: Platform.OS === "ios" ? storeUrl : undefined,
+        title: store?.storeName || "Plazore",
+      });
+    } catch {
+      /* cancelled */
+    } finally {
+      setShareBusy(false);
+    }
+  };
+
+  const copyLink = async () => {
+    try {
+      const Clipboard = require("expo-clipboard");
+      if (Clipboard?.setStringAsync) {
+        await Clipboard.setStringAsync(storeUrl);
+      } else {
+        await Share.share({ message: storeUrl });
+      }
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      try {
+        await Share.share({ message: storeUrl });
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      } catch {}
+    }
+  };
+
+  const openWhatsApp = () => {
+    Linking.openURL(
+      `https://wa.me/?text=${encodeURIComponent(shareMessage)}`,
+    ).catch(() => {});
+  };
+
+  const openTwitter = () => {
+    Linking.openURL(
+      `https://twitter.com/intent/tweet?text=${encodeURIComponent(shareMessage)}`,
+    ).catch(() => {});
+  };
+
+  const openFacebook = () => {
+    Linking.openURL(
+      `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(storeUrl)}`,
+    ).catch(() => {});
   };
 
   const locationLabel = [store?.location?.state, store?.location?.country]
@@ -483,6 +576,19 @@ export default function PublicStorefront() {
                 />
                 <Ionicons name="chevron-back" size={20} color={TEXT} />
               </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={() => setShareOpen(true)}
+                activeOpacity={0.85}
+                style={styles.backBtn}
+              >
+                <BlurView
+                  intensity={40}
+                  tint="dark"
+                  style={StyleSheet.absoluteFillObject}
+                />
+                <Ionicons name="share-outline" size={18} color={TEXT} />
+              </TouchableOpacity>
             </SafeAreaView>
           </View>
         </Animated.View>
@@ -531,9 +637,7 @@ export default function PublicStorefront() {
                   ) : null}
                 </View>
 
-                <Text style={styles.openLabel}>
-                  Explore this store
-                </Text>
+                <Text style={styles.openLabel}>Explore this store</Text>
 
                 {!!locationLabel && (
                   <View style={styles.locationRow}>
@@ -809,6 +913,148 @@ export default function PublicStorefront() {
           <Text style={styles.footerText}>Plazore · Digital Mall</Text>
         </View>
       </ScrollView>
+
+      {/* Share sheet */}
+      <Modal
+        visible={shareOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShareOpen(false)}
+      >
+        <Pressable
+          style={styles.sheetScrim}
+          onPress={() => setShareOpen(false)}
+        >
+          <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
+            <View style={styles.sheetHandleBar} />
+            <View style={styles.sheetHead}>
+              <Text style={styles.sheetTitle}>Share storefront</Text>
+              <TouchableOpacity
+                onPress={() => setShareOpen(false)}
+                hitSlop={12}
+              >
+                <Ionicons name="close" size={20} color={MUTED} />
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.sheetSub} numberOfLines={2}>
+              {store.storeName}
+            </Text>
+
+            <TouchableOpacity
+              style={styles.shareRow}
+              onPress={shareNative}
+              disabled={shareBusy}
+              activeOpacity={0.85}
+            >
+              <View style={styles.shareIcon}>
+                <Ionicons name="share-social" size={18} color={AI_GREEN} />
+              </View>
+              <Text style={styles.shareLabel}>
+                {shareBusy ? "Preparing…" : "Share via device"}
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.shareRow}
+              onPress={copyLink}
+              activeOpacity={0.85}
+            >
+              <View style={styles.shareIcon}>
+                <Ionicons
+                  name={copied ? "checkmark" : "link"}
+                  size={18}
+                  color={copied ? AI_GREEN : TEXT}
+                />
+              </View>
+              <Text style={styles.shareLabel}>
+                {copied ? "Link copied" : "Copy link"}
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.shareRow}
+              onPress={openWhatsApp}
+              activeOpacity={0.85}
+            >
+              <View
+                style={[styles.shareIcon, { backgroundColor: "#128C7E22" }]}
+              >
+                <Ionicons name="logo-whatsapp" size={18} color="#25D366" />
+              </View>
+              <Text style={styles.shareLabel}>WhatsApp</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.shareRow}
+              onPress={openTwitter}
+              activeOpacity={0.85}
+            >
+              <View style={styles.shareIcon}>
+                <Ionicons name="logo-twitter" size={18} color="#1DA1F2" />
+              </View>
+              <Text style={styles.shareLabel}>X / Twitter</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.shareRow, { marginBottom: 8 }]}
+              onPress={openFacebook}
+              activeOpacity={0.85}
+            >
+              <View style={styles.shareIcon}>
+                <Ionicons name="logo-facebook" size={18} color="#1877F2" />
+              </View>
+              <Text style={styles.shareLabel}>Facebook</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* Auth gate — Save store */}
+      <Modal
+        visible={authOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setAuthOpen(false)}
+      >
+        <Pressable
+          style={styles.sheetScrim}
+          onPress={() => setAuthOpen(false)}
+        >
+          <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
+            <View style={styles.sheetHandleBar} />
+            <View style={styles.sheetHead}>
+              <Text style={styles.sheetTitle}>Continue on Plazore</Text>
+              <TouchableOpacity
+                onPress={() => setAuthOpen(false)}
+                hitSlop={12}
+              >
+                <Ionicons name="close" size={20} color={MUTED} />
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.sheetSub}>
+              Sign in to save this storefront. You’ll land back here when
+              you’re done.
+            </Text>
+
+            <TouchableOpacity
+              style={styles.authPrimary}
+              onPress={goSignIn}
+              activeOpacity={0.9}
+            >
+              <Text style={styles.authPrimaryText}>Sign in</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.authSecondary}
+              onPress={goSignUp}
+              activeOpacity={0.9}
+            >
+              <Text style={styles.authSecondaryText}>
+                Create a Plazore account
+              </Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -819,7 +1065,6 @@ const styles = StyleSheet.create({
     backgroundColor: BG,
   },
 
-  /* Top toast */
   toastWrap: {
     position: "absolute",
     top: 0,
@@ -952,6 +1197,9 @@ const styles = StyleSheet.create({
     right: 0,
     paddingHorizontal: 14,
     paddingTop: 4,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
   },
   backBtn: {
     width: 42,
@@ -1253,5 +1501,93 @@ const styles = StyleSheet.create({
     color: AI_GREEN,
     fontSize: 13,
     fontWeight: "600",
+  },
+
+  /* Share + auth sheets */
+  sheetScrim: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.58)",
+    justifyContent: "flex-end",
+  },
+  sheet: {
+    backgroundColor: SURFACE,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderColor: LINE,
+    paddingHorizontal: 18,
+    paddingBottom: 28,
+    paddingTop: 10,
+  },
+  sheetHandleBar: {
+    alignSelf: "center",
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: "rgba(255,255,255,0.14)",
+    marginBottom: 12,
+  },
+  sheetHead: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 6,
+  },
+  sheetTitle: {
+    color: TEXT,
+    fontSize: 17,
+    fontWeight: "700",
+  },
+  sheetSub: {
+    color: MUTED,
+    fontSize: 13,
+    lineHeight: 19,
+    marginBottom: 16,
+  },
+  shareRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingVertical: 13,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: LINE,
+  },
+  shareIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: SURFACE_2,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: LINE,
+  },
+  shareLabel: {
+    color: TEXT,
+    fontSize: 15,
+    fontWeight: "600",
+  },
+  authPrimary: {
+    height: 52,
+    borderRadius: 14,
+    backgroundColor: TEXT,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 10,
+  },
+  authPrimaryText: {
+    color: BG,
+    fontSize: 15,
+    fontWeight: "800",
+  },
+  authSecondary: {
+    height: 48,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  authSecondaryText: {
+    color: AI_GREEN,
+    fontSize: 14,
+    fontWeight: "700",
   },
 });

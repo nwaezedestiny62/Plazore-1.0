@@ -2,10 +2,11 @@
  * PlazoreTitleBar
  * - Always visible (no fade out / slide away)
  * - Background darkens smoothly with scrollProgress
- * - Menu + logo + notifications only
+ * - Menu + logo + wishlist (count) + notifications (count)
  */
 
 import api from '@/constants/api'
+import { useWishlist } from '@/context/WishlistContext'
 import { useAuth } from '@clerk/clerk-expo'
 import { Ionicons } from '@expo/vector-icons'
 import { BlurView } from 'expo-blur'
@@ -41,6 +42,13 @@ type Props = {
   unreadCount?: number
   onMenuPress?: () => void
   onNotificationsPress?: () => void
+  onWishlistPress?: () => void
+}
+
+function formatBadge(n: number) {
+  if (!n || n < 1) return ''
+  if (n > 99) return '99+'
+  return String(n)
 }
 
 function IconButton({
@@ -90,7 +98,7 @@ function IconButton({
           }),
         ]).start()
       }}
-      hitSlop={14}
+      hitSlop={12}
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}
     >
@@ -138,6 +146,19 @@ function MenuToggle({ onPress }: { onPress?: () => void }) {
   )
 }
 
+function CountBadge({ count }: { count: number }) {
+  const label = formatBadge(count)
+  if (!label) return null
+  const wide = label.length >= 3
+  return (
+    <View style={[styles.badge, wide && styles.badgeWide]}>
+      <Text style={styles.badgeText} numberOfLines={1}>
+        {label}
+      </Text>
+    </View>
+  )
+}
+
 function isUnreadNotif(n: any): boolean {
   if (!n) return false
   if (typeof n.isRead === 'boolean') return n.isRead === false
@@ -151,10 +172,20 @@ export default function PlazoreTitleBar({
   unreadCount: unreadProp,
   onMenuPress,
   onNotificationsPress,
+  onWishlistPress,
 }: Props) {
   const insets = useSafeAreaInsets()
   const router = useRouter()
   const { getToken, isSignedIn } = useAuth()
+
+  // Wishlist count from shared context (live when items toggle)
+  let wishlistCount = 0
+  try {
+    const wl = useWishlist() as { wishlist?: unknown[] } | undefined
+    wishlistCount = Array.isArray(wl?.wishlist) ? wl!.wishlist!.length : 0
+  } catch {
+    wishlistCount = 0
+  }
 
   const [logoLoaded, setLogoLoaded] = useState(false)
   const [countFromApi, setCountFromApi] = useState(0)
@@ -231,7 +262,6 @@ export default function PlazoreTitleBar({
     }
   }, [logoLoaded, logoOpacity, textOpacity])
 
-  // Smooth follow of scroll — darkens only, never hides
   useEffect(() => {
     const p = Math.min(1, Math.max(0, scrollProgress))
     anim.stopAnimation()
@@ -243,18 +273,24 @@ export default function PlazoreTitleBar({
     }).start()
   }, [scrollProgress, anim])
 
-  // Transparent → solid dark as user scrolls
-  const glassOpacity = anim.interpolate({
-    inputRange: [0, 0.25, 0.55, 1],
-    outputRange: [0.12, 0.35, 0.62, 0.92],
-    extrapolate: 'clamp',
-  })
+  // transparent until ~6% scroll, then lock to solid glass
+const glassOpacity = anim.interpolate({
+  inputRange: [0, 0.04, 0.08, 1],
+  outputRange: [0, 0, 0.88, 0.92],
+  extrapolate: 'clamp',
+})
 
-  const veilOpacity = anim.interpolate({
-    inputRange: [0, 0.3, 0.7, 1],
-    outputRange: [0.08, 0.28, 0.55, 0.82],
-    extrapolate: 'clamp',
-  })
+const veilOpacity = anim.interpolate({
+  inputRange: [0, 0.04, 0.08, 1],
+  outputRange: [0, 0, 0.55, 0.72],
+  extrapolate: 'clamp',
+})
+
+const borderOpacity = anim.interpolate({
+  inputRange: [0, 0.05, 0.1, 1],
+  outputRange: [0, 0, 1, 1],
+  extrapolate: 'clamp',
+})
 
   const handleNotifications = () => {
     if (onNotificationsPress) {
@@ -264,12 +300,19 @@ export default function PlazoreTitleBar({
     router.push('/notifications' as any)
   }
 
+  const handleWishlist = () => {
+    if (onWishlistPress) {
+      onWishlistPress()
+      return
+    }
+    router.push('/favorites' as any)
+  }
+
   const statusTop = Math.max(
     insets.top,
     Platform.OS === 'android' ? StatusBar.currentHeight ?? 24 : 20,
     20
   )
-  const badgeLabel = unreadCount > 99 ? '99+' : String(unreadCount)
 
   return (
     <View
@@ -277,38 +320,49 @@ export default function PlazoreTitleBar({
       style={[styles.wrap, { paddingTop: statusTop }]}
     >
       <View style={styles.band}>
-        {/* Base glass — opacity ramps with scroll */}
         <Animated.View
           pointerEvents="none"
           style={[styles.glass, { opacity: glassOpacity }]}
         >
           {Platform.OS === 'ios' ? (
-            <BlurView
-              intensity={48}
-              tint="dark"
-              style={StyleSheet.absoluteFill}
-            />
-          ) : (
-            <View
-              style={[
-                StyleSheet.absoluteFill,
-                { backgroundColor: 'rgba(8,8,10,0.88)' },
-              ]}
-            />
-          )}
+  <BlurView intensity={48} tint="dark" style={StyleSheet.absoluteFill} />
+) : (
+  <View
+    style={[
+      StyleSheet.absoluteFill,
+      { backgroundColor: 'rgba(9,11,15,0.88)' }, // was 8,8,10
+    ]}
+  />
+)}
         </Animated.View>
 
-        {/* Extra dark veil — little by little */}
         <Animated.View
-          pointerEvents="none"
-          style={[
-            StyleSheet.absoluteFill,
-            { backgroundColor: '#000000', opacity: veilOpacity },
-          ]}
-        />
-
+  pointerEvents="none"
+  style={[
+    StyleSheet.absoluteFill,
+    { backgroundColor: '#090B0F', opacity: veilOpacity },
+  ]}
+/>
+<Animated.View
+  style={[styles.bottomRule, { opacity: borderOpacity }]}
+  pointerEvents="none"
+>
+  <LinearGradient
+    colors={[
+      'transparent',
+      'rgba(255,255,255,0.2)',
+      'rgba(255,255,255,0.35)',
+      'rgba(255,255,255,0.2)',
+      'transparent',
+    ]}
+    locations={[0, 0.18, 0.5, 0.82, 1]}
+    start={{ x: 0, y: 0 }}
+    end={{ x: 1, y: 0 }}
+    style={styles.bottomLine}
+  />
+</Animated.View>
         <View style={styles.row}>
-          <View style={styles.side}>
+          <View style={styles.sideLeft}>
             <MenuToggle onPress={onMenuPress} />
           </View>
 
@@ -318,7 +372,7 @@ export default function PlazoreTitleBar({
             </Animated.View>
             <Animated.View style={[styles.logoLayer, { opacity: logoOpacity }]}>
               <Image
-                source={require('../assets/logo.png')}
+                source={require('../assets/logo-1.png')}
                 style={styles.logo}
                 resizeMode="contain"
                 onLoad={() => setLogoLoaded(true)}
@@ -327,7 +381,25 @@ export default function PlazoreTitleBar({
             </Animated.View>
           </View>
 
-          <View style={[styles.side, styles.sideRight]}>
+          <View style={styles.sideRight}>
+            <IconButton
+              onPress={handleWishlist}
+              accessibilityLabel={
+                wishlistCount > 0
+                  ? `Wishlist, ${wishlistCount} items`
+                  : 'Wishlist'
+              }
+            >
+              <View style={styles.iconWrap}>
+                <Ionicons
+                  name={wishlistCount > 0 ? 'heart' : 'heart-outline'}
+                  size={22}
+                  color={ICON}
+                />
+                <CountBadge count={wishlistCount} />
+              </View>
+            </IconButton>
+
             <IconButton
               onPress={handleNotifications}
               accessibilityLabel={
@@ -336,7 +408,7 @@ export default function PlazoreTitleBar({
                   : 'Notifications'
               }
             >
-              <View style={styles.bellWrap}>
+              <View style={styles.iconWrap}>
                 <Ionicons
                   name={
                     unreadCount > 0 ? 'notifications' : 'notifications-outline'
@@ -344,11 +416,7 @@ export default function PlazoreTitleBar({
                   size={22}
                   color={ICON}
                 />
-                {unreadCount > 0 ? (
-                  <View style={styles.badge}>
-                    <Text style={styles.badgeText}>{badgeLabel}</Text>
-                  </View>
-                ) : null}
+                <CountBadge count={unreadCount} />
               </View>
             </IconButton>
           </View>
@@ -393,16 +461,20 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 10,
+    paddingHorizontal: 8,
     zIndex: 2,
   },
-  side: {
-    width: 72,
+  sideLeft: {
+    width: 48,
     flexDirection: 'row',
     alignItems: 'center',
   },
   sideRight: {
+    minWidth: 96,
+    flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'flex-end',
+    gap: 0,
   },
   center: {
     flex: 1,
@@ -422,12 +494,18 @@ const styles = StyleSheet.create({
     letterSpacing: 4,
   },
   logo: {
-    height: 83,
-    width: 200,
+    height: 52,
+    width: 140,
   },
   iconHit: {
     width: 40,
     height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  iconWrap: {
+    width: 28,
+    height: 28,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -440,16 +518,10 @@ const styles = StyleSheet.create({
     height: 2.6,
     backgroundColor: ICON,
   },
-  bellWrap: {
-    width: 28,
-    height: 28,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   badge: {
     position: 'absolute',
-    top: -4,
-    right: -8,
+    top: -5,
+    right: -9,
     minWidth: 16,
     height: 16,
     paddingHorizontal: 4,
@@ -458,6 +530,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: 1.5,
     borderColor: 'rgba(12,12,12,0.55)',
+  },
+  badgeWide: {
+    minWidth: 22,
+    paddingHorizontal: 3,
+    right: -12,
   },
   badgeText: {
     color: '#0C0C0C',

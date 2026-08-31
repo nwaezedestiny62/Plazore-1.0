@@ -1,6 +1,7 @@
 export type HeroSlide = {
   id: string;
   image: string;
+  kicker: string;
   headline: string;
   subheadline: string;
   ctaLabel: string;
@@ -10,36 +11,41 @@ export const HERO_SLIDES: HeroSlide[] = [
   {
     id: "welcome",
     image: "/hero/welcome.jpg",
-    headline: "Plazore",
-    subheadline: "A quieter way to discover what matters.",
-    ctaLabel: "Enter",
+    kicker: "PLAZORE",
+    headline: "Discover with intention",
+    subheadline: "A quieter digital mall — curated pieces, trusted sellers, no noise.",
+    ctaLabel: "Enter the mall",
   },
   {
     id: "summer",
     image: "/hero/summer-poster.jpg",
-    headline: "Summer, gently",
-    subheadline: "Pieces that feel like warm light and slow afternoons.",
-    ctaLabel: "Browse",
+    kicker: "SEASON",
+    headline: "Light, considered",
+    subheadline: "Warm tones and calm silhouettes for unhurried days.",
+    ctaLabel: "Browse the edit",
   },
   {
     id: "featured-seller",
     image: "/hero/featured-seller.jpg",
-    headline: "Featured Maker",
-    subheadline: "Craft meets confidence. A storefront worth lingering in.",
-    ctaLabel: "Visit",
+    kicker: "MAKERS",
+    headline: "Stores worth lingering in",
+    subheadline: "Independent storefronts built with care — open them, stay a while.",
+    ctaLabel: "Visit makers",
   },
   {
     id: "christmas",
     image: "/hero/christmas-poster.jpg",
-    headline: "Thoughtful Season",
-    subheadline: "Gifts that say something, for the people who mean it.",
-    ctaLabel: "Explore",
+    kicker: "GIFTS",
+    headline: "Chosen, not rushed",
+    subheadline: "Thoughtful pieces for the people who matter.",
+    ctaLabel: "Explore gifts",
   },
   {
     id: "new-arrivals",
     image: "/hero/new-arrivals.jpg",
-    headline: "Just Arrived",
-    subheadline: "New pieces, same calm. Take your time.",
-    ctaLabel: "See More",
+    kicker: "ARRIVALS",
+    headline: "Just placed",
+    subheadline: "New work on the floor. Same calm pace.",
+    ctaLabel: "See what's new",
   },
 ];

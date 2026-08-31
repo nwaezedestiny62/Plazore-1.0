@@ -3,11 +3,13 @@
  * -------------------------------------------------------
  * Rules enforced:
  * 1. Exactly one Audio.Sound instance can exist at any time
- * 2. Music is COMPLETELY silent on opener + preloader + auth screens
- * 3. Only plays inside the real app environment (after releaseIntroGate)
- * 4. Respects last saved enabled + position
- * 5. Logout → force stop
- * 6. No overlapping / clashing tracks under any race condition
+ * 2. Music is COMPLETELY silent until the user turns it ON in Settings
+ * 3. Silent on opener + preloader + auth screens (intro gate)
+ * 4. Only plays inside the real app environment (after releaseIntroGate)
+ *    AND only if enabled === true from Settings
+ * 5. Respects last saved enabled + position
+ * 6. Logout → force stop
+ * 7. No overlapping / clashing tracks under any race condition
  */
 
 import {
@@ -31,6 +33,9 @@ const PREFS_KEY = '@plazore/soundtrack_prefs_v1'
 const DEFAULT_VOLUME = 0.2
 const FADE_MS = 700
 const FADE_STEPS = 14
+
+/** Default OFF — user must enable in Settings */
+const DEFAULT_ENABLED = false
 
 export type SoundtrackState =
   | 'IDLE'
@@ -81,7 +86,8 @@ async function loadPrefs(): Promise<Prefs> {
     if (raw) {
       const p = JSON.parse(raw) as Prefs
       return {
-        enabled: p.enabled !== false,
+        // Only ON if user explicitly saved true
+        enabled: p.enabled === true,
         volume: clamp01(typeof p.volume === 'number' ? p.volume : DEFAULT_VOLUME),
         trackId: p.trackId ?? null,
         positionMs: Math.max(0, Number(p.positionMs) || 0),
@@ -89,7 +95,7 @@ async function loadPrefs(): Promise<Prefs> {
     }
   } catch {}
   return {
-    enabled: true,
+    enabled: DEFAULT_ENABLED,
     volume: DEFAULT_VOLUME,
     trackId: null,
     positionMs: 0,
@@ -104,28 +110,25 @@ async function savePrefs(p: Prefs) {
 
 export function SoundtrackProvider({ children }: { children: React.ReactNode }) {
   const [tracks, setTracks] = useState<SoundtrackTrack[]>([])
-  const [enabled, setEnabledState] = useState(true)
+  const [enabled, setEnabledState] = useState(DEFAULT_ENABLED)
   const [volume, setVolumeState] = useState(DEFAULT_VOLUME)
-  const [state, setState] = useState<SoundtrackState>('IDLE')
+  const [state, setState] = useState<SoundtrackState>('DISABLED')
   const [currentTitle, setCurrentTitle] = useState<string | null>(null)
   const [unlocked, setUnlocked] = useState(false)
 
-  // ─── Refs (single source of truth) ───────────────────────────────────────
   const soundRef = useRef<Audio.Sound | null>(null)
   const indexRef = useRef(0)
   const positionRef = useRef(0)
   const trackIdRef = useRef<string | null>(null)
-  const enabledRef = useRef(true)
+  const enabledRef = useRef(DEFAULT_ENABLED)
   const volumeRef = useRef(DEFAULT_VOLUME)
   const appActiveRef = useRef(true)
   const unlockedRef = useRef(false)
-  const introSilencedRef = useRef(true) // starts silenced → opener never gets audio
+  const introSilencedRef = useRef(true)
   const tracksRef = useRef<SoundtrackTrack[]>([])
   const prefsReady = useRef(false)
 
-  // Critical: generation counter kills any stale async work
   const generationRef = useRef(0)
-  // Serializes all play / load operations
   const operationLock = useRef(false)
 
   const persist = useCallback(async () => {
@@ -137,10 +140,10 @@ export function SoundtrackProvider({ children }: { children: React.ReactNode }) 
     })
   }, [])
 
-  /** Only true when we are allowed to make sound */
+  /** Sound only when: Settings ON + app active + unlocked + intro released */
   const canPlay = useCallback(() => {
     return (
-      enabledRef.current &&
+      enabledRef.current === true &&
       appActiveRef.current &&
       unlockedRef.current &&
       !introSilencedRef.current
@@ -156,7 +159,6 @@ export function SoundtrackProvider({ children }: { children: React.ReactNode }) 
     return 0
   }, [])
 
-  // ─── Hard unload (kills any existing sound) ──────────────────────────────
   const unload = useCallback(async () => {
     const s = soundRef.current
     soundRef.current = null
@@ -186,16 +188,20 @@ export function SoundtrackProvider({ children }: { children: React.ReactNode }) 
     } catch {}
   }, [])
 
-  // ─── Core play function (fully serialized + generation-guarded) ──────────
   const playIndex = useCallback(
     async (list: SoundtrackTrack[], index: number, seekMs: number) => {
-      // Prevent concurrent operations
       if (operationLock.current) return
       operationLock.current = true
 
       const gen = ++generationRef.current
 
       try {
+        // Hard gate: never load/play if user has not enabled soundtrack
+        if (!enabledRef.current) {
+          setState('DISABLED')
+          return
+        }
+
         if (!list.length) {
           setState('IDLE')
           return
@@ -208,11 +214,13 @@ export function SoundtrackProvider({ children }: { children: React.ReactNode }) 
         setCurrentTitle(track.title)
         setState('LOADING')
 
-        // Kill any previous sound first
         await unload()
 
-        // Abort if a newer operation started while we were unloading
         if (generationRef.current !== gen) return
+        if (!enabledRef.current) {
+          setState('DISABLED')
+          return
+        }
 
         await Audio.setAudioModeAsync({
           playsInSilentModeIOS: true,
@@ -232,11 +240,11 @@ export function SoundtrackProvider({ children }: { children: React.ReactNode }) 
           true
         )
 
-        // Abort if generation changed while creating
-        if (generationRef.current !== gen) {
+        if (generationRef.current !== gen || !enabledRef.current) {
           try {
             await sound.unloadAsync()
           } catch {}
+          if (!enabledRef.current) setState('DISABLED')
           return
         }
 
@@ -254,13 +262,12 @@ export function SoundtrackProvider({ children }: { children: React.ReactNode }) 
         }
 
         sound.setOnPlaybackStatusUpdate((status: AVPlaybackStatus) => {
-          // Ignore status from old generations
           if (generationRef.current !== gen) return
+          if (!enabledRef.current) return
 
           if (!status.isLoaded) {
             if ('error' in status && status.error) {
               console.warn('[soundtrack] error', status.error)
-              // advance only if still current
               if (generationRef.current === gen) {
                 void advance(true)
               }
@@ -275,13 +282,12 @@ export function SoundtrackProvider({ children }: { children: React.ReactNode }) 
           }
         })
 
-        // Final gate check before making any sound
         if (generationRef.current !== gen) return
 
         if (canPlay()) {
           await sound.playAsync()
           await fadeTo(sound, volumeRef.current, gen)
-          if (generationRef.current === gen) {
+          if (generationRef.current === gen && enabledRef.current) {
             setState('PLAYING')
           }
         } else if (!enabledRef.current) {
@@ -295,9 +301,13 @@ export function SoundtrackProvider({ children }: { children: React.ReactNode }) 
         console.warn('[soundtrack] load failed', e)
         if (generationRef.current === gen) {
           setState('ERROR')
-          setTimeout(() => {
-            if (generationRef.current === gen) void advance(true)
-          }, 400)
+          if (enabledRef.current) {
+            setTimeout(() => {
+              if (generationRef.current === gen && enabledRef.current) {
+                void advance(true)
+              }
+            }, 400)
+          }
         }
       } finally {
         operationLock.current = false
@@ -306,10 +316,9 @@ export function SoundtrackProvider({ children }: { children: React.ReactNode }) 
     [unload, fadeTo, persist, canPlay]
   )
 
-  // advance needs the latest playIndex
   const advance = useCallback(
     async (fromEnd: boolean) => {
-      if (!enabledRef.current && fromEnd) return
+      if (!enabledRef.current) return
       if (operationLock.current) return
 
       const list = tracksRef.current
@@ -353,18 +362,18 @@ export function SoundtrackProvider({ children }: { children: React.ReactNode }) 
     await playIndex(tracksRef.current, idx, positionRef.current)
   }, [canPlay, resolveIndex, playIndex])
 
-  // ─── Boot ────────────────────────────────────────────────────────────────
+  // Boot — load prefs; never auto-enable
   useEffect(() => {
     let cancelled = false
     ;(async () => {
       const prefs = await loadPrefs()
       if (cancelled) return
 
-      enabledRef.current = prefs.enabled
+      enabledRef.current = prefs.enabled === true
       volumeRef.current = prefs.volume
       trackIdRef.current = prefs.trackId
       positionRef.current = prefs.positionMs
-      setEnabledState(prefs.enabled)
+      setEnabledState(prefs.enabled === true)
       setVolumeState(prefs.volume)
       prefsReady.current = true
 
@@ -381,14 +390,15 @@ export function SoundtrackProvider({ children }: { children: React.ReactNode }) 
       const idx = resolveIndex(list, prefs.trackId)
       indexRef.current = idx
       setCurrentTitle(list[idx]?.title ?? null)
-      setState(prefs.enabled ? 'PAUSED' : 'DISABLED')
+      // Stay silent until user enables in Settings
+      setState(prefs.enabled === true ? 'PAUSED' : 'DISABLED')
     })()
     return () => {
       cancelled = true
     }
   }, [resolveIndex])
 
-  // Start only after unlock + intro gate released
+  // Start only if enabled + unlock + intro released
   useEffect(() => {
     if (!prefsReady.current || !unlocked) return
     if (!canPlay()) return
@@ -399,7 +409,6 @@ export function SoundtrackProvider({ children }: { children: React.ReactNode }) 
     void playIndex(tracksRef.current, idx, positionRef.current)
   }, [unlocked, tracks, resolveIndex, canPlay, playIndex])
 
-  // ─── App lifecycle ───────────────────────────────────────────────────────
   useEffect(() => {
     const onChange = async (next: AppStateStatus) => {
       const active = next === 'active'
@@ -418,6 +427,7 @@ export function SoundtrackProvider({ children }: { children: React.ReactNode }) 
         }
         await persist()
         if (enabledRef.current) setState('PAUSED')
+        else setState('DISABLED')
         return
       }
 
@@ -434,24 +444,21 @@ export function SoundtrackProvider({ children }: { children: React.ReactNode }) 
     return () => sub.remove()
   }, [persist, refreshCatalog, canPlay, tryStartOrResume])
 
-  // Cleanup on unmount
   useEffect(() => {
     return () => {
-      generationRef.current++ // kill any in-flight work
+      generationRef.current++
       void unload()
     }
   }, [unload])
 
-  // ─── Public API ──────────────────────────────────────────────────────────
   const setEnabled = useCallback(
     async (on: boolean) => {
-      enabledRef.current = on
-      setEnabledState(on)
+      enabledRef.current = on === true
+      setEnabledState(on === true)
 
       const sound = soundRef.current
 
       if (!on) {
-        // Turning OFF → pause and freeze position
         if (sound) {
           try {
             const st = await sound.getStatusAsync()
@@ -466,7 +473,7 @@ export function SoundtrackProvider({ children }: { children: React.ReactNode }) 
         return
       }
 
-      // Turning ON
+      // User turned ON in Settings — still respect intro gate + app active
       unlockedRef.current = true
       setUnlocked(true)
 
@@ -488,7 +495,7 @@ export function SoundtrackProvider({ children }: { children: React.ReactNode }) 
       volumeRef.current = next
       setVolumeState(next)
       const sound = soundRef.current
-      if (sound) {
+      if (sound && enabledRef.current) {
         try {
           await sound.setVolumeAsync(next)
         } catch {}
@@ -503,10 +510,9 @@ export function SoundtrackProvider({ children }: { children: React.ReactNode }) 
     setUnlocked(true)
   }, [])
 
-  /** Call this on opener, preloader, sign-in, sign-out, logout */
   const holdIntroGate = useCallback(() => {
     introSilencedRef.current = true
-    generationRef.current++ // cancel any pending play
+    generationRef.current++
 
     const sound = soundRef.current
     if (sound) {
@@ -518,20 +524,20 @@ export function SoundtrackProvider({ children }: { children: React.ReactNode }) 
             await sound.pauseAsync()
           }
         } catch {}
-        if (enabledRef.current) setState('PAUSED')
+        setState(enabledRef.current ? 'PAUSED' : 'DISABLED')
         await persist()
       })()
     } else {
-      if (enabledRef.current) setState('PAUSED')
+      setState(enabledRef.current ? 'PAUSED' : 'DISABLED')
     }
   }, [persist])
 
-  /** Call this ONLY when user has fully entered the main environment */
   const releaseIntroGate = useCallback(() => {
     introSilencedRef.current = false
     unlockedRef.current = true
     setUnlocked(true)
 
+    // Still silent if user never enabled in Settings
     if (!enabledRef.current) {
       setState('DISABLED')
       return
@@ -541,19 +547,16 @@ export function SoundtrackProvider({ children }: { children: React.ReactNode }) 
       return
     }
 
-    // Small delay so everything is settled
     setTimeout(() => {
-      void tryStartOrResume()
+      if (enabledRef.current) void tryStartOrResume()
     }, 120)
   }, [tryStartOrResume])
 
-  /** Hard stop — use on logout */
   const forceStop = useCallback(async () => {
     introSilencedRef.current = true
     generationRef.current++
     await unload()
-    if (enabledRef.current) setState('PAUSED')
-    else setState('DISABLED')
+    setState(enabledRef.current ? 'PAUSED' : 'DISABLED')
     await persist()
   }, [unload, persist])
 

@@ -200,6 +200,7 @@ export default function Home() {
           scrollProgress={scrollProgress}
           onMenuPress={openHub}
           onNotificationsPress={() => router.push('/notifications')}
+          onWishlistPress={() => router.push('/favorites')}
         />
 
         <ShowroomRoomNav

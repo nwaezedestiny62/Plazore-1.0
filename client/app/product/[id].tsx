@@ -1,3 +1,8 @@
+/**
+ * Product Details — Plazore mobile
+ * + share sheet · auth gate · tighter AI / confidence
+ */
+
 import { useCart } from "@/context/CartContext";
 import { useMarketplace } from "@/context/MarketplaceContext";
 import { useWishlist } from "@/context/WishlistContext";
@@ -25,7 +30,11 @@ import {
   Dimensions,
   Easing,
   Image,
+  Linking,
+  Modal,
   Platform,
+  Pressable,
+  Share,
   StatusBar,
   StyleSheet,
   Text,
@@ -51,11 +60,20 @@ const AI_BLUE = "#3B82F6";
 const ERROR = "#EF6262";
 
 const GRADIENT_COLORS = [AI_GREEN, "#14B8A6", AI_BLUE] as const;
+const SITE = "https://plazore.com"; // swap for your real web origin if different
+const PENDING_KEY = "plazore_pending_action";
 
 const FONT = {
   space500: "SpaceGrotesk_500Medium",
   space600: "SpaceGrotesk_600SemiBold",
 };
+
+type PendingAction =
+  | "wishlist"
+  | "add_to_cart"
+  | "buy_now"
+  | "message"
+  | null;
 
 function GradientText({
   children,
@@ -83,7 +101,6 @@ function GradientText({
   );
 }
 
-/** Clamps long text; shows Read more when needed */
 function ExpandableText({
   text,
   style,
@@ -184,7 +201,7 @@ function normalizeSpecs(raw: any): Record<string, string> {
   return {};
 }
 
-function PlazoreAIOrb({ size = 64 }: { size?: number }) {
+function PlazoreAIOrb({ size = 48 }: { size?: number }) {
   const rotation = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -220,7 +237,7 @@ function PlazoreAIOrb({ size = 64 }: { size?: number }) {
           width: size,
           height: size,
           borderRadius: size / 2,
-          borderWidth: 2.2,
+          borderWidth: 2,
           borderColor: "transparent",
           borderTopColor: AI_GREEN,
           borderRightColor: AI_BLUE,
@@ -258,7 +275,7 @@ export default function ProductDetails() {
   const { id: rawId } = useLocalSearchParams<{ id: string | string[] }>();
   const id = Array.isArray(rawId) ? rawId[0] : rawId;
   const router = useRouter();
-  const { getToken, isSignedIn } = useAuth();
+  const { getToken, isSignedIn, isLoaded: authLoaded } = useAuth();
 
   const [product, setProduct] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -270,6 +287,12 @@ export default function ProductDetails() {
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [aiData, setAiData] = useState<PlazoreAIData | null>(null);
   const [aiReady, setAiReady] = useState(false);
+
+  const [shareOpen, setShareOpen] = useState(false);
+  const [authOpen, setAuthOpen] = useState(false);
+  const [pending, setPending] = useState<PendingAction>(null);
+  const [copied, setCopied] = useState(false);
+  const [shareBusy, setShareBusy] = useState(false);
 
   const aiReveal = useRef(new Animated.Value(0)).current;
   const aiLift = useRef(new Animated.Value(12)).current;
@@ -421,6 +444,55 @@ export default function ProductDetails() {
     setLiked(!!isInWishlist?.(product._id));
   }, [product?._id, wishlistApi.wishlist]);
 
+  const productUrl = useMemo(() => {
+    if (!product?._id) return SITE;
+    return `${SITE}/product/${product._id}`;
+  }, [product?._id]);
+
+  const shareMessage = useMemo(() => {
+    if (!product) return "Discover this on Plazore.";
+    const name = String(product.name || "This piece");
+    const price =
+      product.price != null
+        ? formatProduct(Number(product.price), product.region)
+        : "";
+    return price
+      ? `${name} · ${price}\nOn Plazore — shop with confidence.\n${productUrl}`
+      : `${name}\nOn Plazore — shop with confidence.\n${productUrl}`;
+  }, [product, productUrl, formatProduct]);
+
+  const requireAuth = useCallback(
+    (action: PendingAction) => {
+      if (!authLoaded) return false;
+      if (isSignedIn) return true;
+      setPending(action);
+      setAuthOpen(true);
+      return false;
+    },
+    [authLoaded, isSignedIn],
+  );
+
+  const goSignIn = () => {
+    try {
+      if (pending && product?._id) {
+        // AsyncStorage alternative if you prefer persistence
+      }
+    } catch {}
+    setAuthOpen(false);
+    router.push({
+      pathname: "/sign-in" as any,
+      params: { redirect_url: `/product/${id}` },
+    });
+  };
+
+  const goSignUp = () => {
+    setAuthOpen(false);
+    router.push({
+      pathname: "/sign-up" as any,
+      params: { redirect_url: `/product/${id}` },
+    });
+  };
+
   const pulseHeart = () => {
     Animated.sequence([
       Animated.timing(heartScale, {
@@ -481,7 +553,23 @@ export default function ProductDetails() {
     [product, busy, liked, mutateWishlist, addToWishlist, toggleWishlist],
   );
 
-  const handleHeartPress = () => runWishlist("toggle");
+  const handleHeartPress = () => {
+    if (!requireAuth("wishlist")) return;
+    runWishlist("toggle");
+  };
+
+  const handleAddToBag = () => {
+    if (!product) return;
+    if (!requireAuth("add_to_cart")) return;
+    addToCart(product, "");
+  };
+
+  const handleBuyNow = () => {
+    if (!product) return;
+    if (!requireAuth("buy_now")) return;
+    addToCart(product, "");
+    router.push("/(tabs)/checkout" as any);
+  };
 
   const openDocument = async (url: string) => {
     try {
@@ -490,11 +578,16 @@ export default function ProductDetails() {
   };
 
   const handleMessageSeller = async () => {
-    if (!product?._id || messaging || isOwnProduct || !isSignedIn) return;
+    if (!product?._id || messaging || isOwnProduct) return;
+    if (!requireAuth("message")) return;
     try {
       setMessaging(true);
       const token = await getToken();
-      if (!token) return;
+      if (!token) {
+        setAuthOpen(true);
+        setPending("message");
+        return;
+      }
       const res = await api.post(
         "/chat/start",
         { productId: product._id },
@@ -511,6 +604,61 @@ export default function ProductDetails() {
     } finally {
       setMessaging(false);
     }
+  };
+
+  const shareNative = async () => {
+    if (!product) return;
+    try {
+      setShareBusy(true);
+      await Share.share({
+        message: shareMessage,
+        url: Platform.OS === "ios" ? productUrl : undefined,
+        title: String(product.name || "Plazore"),
+      });
+    } catch {
+      /* user cancelled */
+    } finally {
+      setShareBusy(false);
+    }
+  };
+
+  const copyLink = async () => {
+    try {
+      // Prefer expo-clipboard if installed; fallback Share
+      const Clipboard = require("expo-clipboard");
+      if (Clipboard?.setStringAsync) {
+        await Clipboard.setStringAsync(productUrl);
+      } else {
+        await Share.share({ message: productUrl });
+      }
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      try {
+        await Share.share({ message: productUrl });
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      } catch {}
+    }
+  };
+
+  const openWhatsApp = () => {
+    const u = `https://wa.me/?text=${encodeURIComponent(shareMessage)}`;
+    Linking.openURL(u).catch(() => {});
+  };
+
+  const openTwitter = () => {
+    const u = `https://twitter.com/intent/tweet?text=${encodeURIComponent(
+      shareMessage,
+    )}`;
+    Linking.openURL(u).catch(() => {});
+  };
+
+  const openFacebook = () => {
+    const u = `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(
+      productUrl,
+    )}`;
+    Linking.openURL(u).catch(() => {});
   };
 
   const onCarouselScroll = useRef(
@@ -599,7 +747,7 @@ export default function ProductDetails() {
       .join(", ") ||
     null;
 
-  const showProductCommunication = isSignedIn && !isOwnProduct;
+  const showProductCommunication = !isOwnProduct;
   const inStock = Number(product.stock) > 0;
 
   return (
@@ -793,7 +941,7 @@ export default function ProductDetails() {
               )}
             </View>
 
-            {/* ═══ Plazore AI — Space Grotesk only here ═══ */}
+            {/* Plazore AI — slightly smaller */}
             <View style={styles.aiCard}>
               <LinearGradient
                 colors={["rgba(20,24,32,0.85)", "rgba(17,20,26,0.9)"]}
@@ -804,16 +952,16 @@ export default function ProductDetails() {
 
               {!aiReady ? (
                 <View style={styles.aiLoader}>
-                  <PlazoreAIOrb size={56} />
+                  <PlazoreAIOrb size={44} />
                 </View>
               ) : (
                 <Animated.View
                   style={{
                     opacity: aiReveal,
                     transform: [{ translateY: aiLift }],
-                    paddingHorizontal: 18,
-                    paddingTop: 16,
-                    paddingBottom: 14,
+                    paddingHorizontal: 14,
+                    paddingTop: 12,
+                    paddingBottom: 11,
                   }}
                 >
                   <View style={styles.aiHeader}>
@@ -834,12 +982,12 @@ export default function ProductDetails() {
                         : "Plazore AI is preparing a thoughtful reading of this listing."
                     }
                     style={styles.aiSummary}
-                    numberOfLines={4}
+                    numberOfLines={3}
                   />
 
                   {aiData?.status === "ready" &&
                     aiData.highlights?.length > 0 && (
-                      <View style={{ marginTop: 14 }}>
+                      <View style={{ marginTop: 10 }}>
                         <Text style={styles.aiSectionTitle}>Key Points</Text>
 
                         <View style={styles.highlightRow}>
@@ -892,7 +1040,7 @@ export default function ProductDetails() {
               )}
             </View>
 
-            {/* ═══ Buyer Confidence ═══ */}
+            {/* Buyer Confidence — tighter */}
             <View style={styles.confidenceCard}>
               <LinearGradient
                 colors={["rgba(16,185,129,0.08)", "rgba(59,130,246,0.06)"]}
@@ -909,7 +1057,7 @@ export default function ProductDetails() {
                 >
                   <Ionicons
                     name="shield-checkmark"
-                    size={12}
+                    size={11}
                     color="#FFFFFF"
                   />
                 </LinearGradient>
@@ -926,7 +1074,7 @@ export default function ProductDetails() {
                   "Drawn from merchant verification history, transparent disclosures, and regional standards."
                 }
                 style={styles.confidenceBody}
-                numberOfLines={3}
+                numberOfLines={2}
               />
             </View>
 
@@ -1131,7 +1279,7 @@ export default function ProductDetails() {
         <View style={styles.actionBar}>
           <View style={styles.actionRow}>
             <TouchableOpacity
-              onPress={() => addToCart(product, "")}
+              onPress={handleAddToBag}
               style={styles.secondaryBtn}
               activeOpacity={0.85}
             >
@@ -1139,10 +1287,7 @@ export default function ProductDetails() {
             </TouchableOpacity>
 
             <TouchableOpacity
-              onPress={() => {
-                addToCart(product, "");
-                router.push("/(tabs)/checkout" as any);
-              }}
+              onPress={handleBuyNow}
               activeOpacity={0.9}
               style={styles.primaryBtn}
             >
@@ -1178,34 +1323,188 @@ export default function ProductDetails() {
               <Ionicons name="chevron-back" size={18} color={TEXT} />
             </TouchableOpacity>
 
-            <View style={{ alignItems: "center" }}>
+            <View style={styles.topRight}>
               <TouchableOpacity
-                onPress={handleHeartPress}
+                onPress={() => setShareOpen(true)}
                 activeOpacity={0.85}
-                disabled={busy}
-                style={[
-                  styles.topBtn,
-                  liked && {
-                    borderColor: "rgba(239,98,98,0.4)",
-                    backgroundColor: "rgba(9,11,15,0.75)",
-                  },
-                ]}
+                style={styles.topBtn}
               >
-                <Animated.View style={{ transform: [{ scale: heartScale }] }}>
-                  <Ionicons
-                    name={liked ? "heart" : "heart-outline"}
-                    size={17}
-                    color={liked ? ERROR : TEXT}
-                  />
-                </Animated.View>
+                <Ionicons name="share-outline" size={17} color={TEXT} />
               </TouchableOpacity>
-              {wishlistCount > 0 && (
-                <Text style={styles.wishCount}>{wishlistCount}</Text>
-              )}
+
+              <View style={{ alignItems: "center" }}>
+                <TouchableOpacity
+                  onPress={handleHeartPress}
+                  activeOpacity={0.85}
+                  disabled={busy}
+                  style={[
+                    styles.topBtn,
+                    liked && {
+                      borderColor: "rgba(239,98,98,0.4)",
+                      backgroundColor: "rgba(9,11,15,0.75)",
+                    },
+                  ]}
+                >
+                  <Animated.View style={{ transform: [{ scale: heartScale }] }}>
+                    <Ionicons
+                      name={liked ? "heart" : "heart-outline"}
+                      size={17}
+                      color={liked ? ERROR : TEXT}
+                    />
+                  </Animated.View>
+                </TouchableOpacity>
+                {wishlistCount > 0 && (
+                  <Text style={styles.wishCount}>{wishlistCount}</Text>
+                )}
+              </View>
             </View>
           </Animated.View>
         </SafeAreaView>
       </Animated.View>
+
+      {/* Share sheet */}
+      <Modal
+        visible={shareOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShareOpen(false)}
+      >
+        <Pressable
+          style={styles.sheetScrim}
+          onPress={() => setShareOpen(false)}
+        >
+          <Pressable
+            style={styles.sheet}
+            onPress={(e) => e.stopPropagation()}
+          >
+            <View style={styles.sheetHandleBar} />
+            <View style={styles.sheetHead}>
+              <Text style={styles.sheetTitle}>Share this piece</Text>
+              <TouchableOpacity
+                onPress={() => setShareOpen(false)}
+                hitSlop={12}
+              >
+                <Ionicons name="close" size={20} color={MUTED} />
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.sheetSub} numberOfLines={2}>
+              {String(product.name || "")}
+            </Text>
+
+            <TouchableOpacity
+              style={styles.shareRow}
+              onPress={shareNative}
+              disabled={shareBusy}
+              activeOpacity={0.85}
+            >
+              <View style={styles.shareIcon}>
+                <Ionicons name="share-social" size={18} color={AI_GREEN} />
+              </View>
+              <Text style={styles.shareLabel}>
+                {shareBusy ? "Preparing…" : "Share via device"}
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.shareRow}
+              onPress={copyLink}
+              activeOpacity={0.85}
+            >
+              <View style={styles.shareIcon}>
+                <Ionicons
+                  name={copied ? "checkmark" : "link"}
+                  size={18}
+                  color={copied ? AI_GREEN : TEXT}
+                />
+              </View>
+              <Text style={styles.shareLabel}>
+                {copied ? "Link copied" : "Copy link"}
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.shareRow}
+              onPress={openWhatsApp}
+              activeOpacity={0.85}
+            >
+              <View style={[styles.shareIcon, { backgroundColor: "#128C7E22" }]}>
+                <Ionicons name="logo-whatsapp" size={18} color="#25D366" />
+              </View>
+              <Text style={styles.shareLabel}>WhatsApp</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.shareRow}
+              onPress={openTwitter}
+              activeOpacity={0.85}
+            >
+              <View style={styles.shareIcon}>
+                <Ionicons name="logo-twitter" size={18} color="#1DA1F2" />
+              </View>
+              <Text style={styles.shareLabel}>X / Twitter</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.shareRow, { marginBottom: 8 }]}
+              onPress={openFacebook}
+              activeOpacity={0.85}
+            >
+              <View style={styles.shareIcon}>
+                <Ionicons name="logo-facebook" size={18} color="#1877F2" />
+              </View>
+              <Text style={styles.shareLabel}>Facebook</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* Auth gate */}
+      <Modal
+        visible={authOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setAuthOpen(false)}
+      >
+        <Pressable
+          style={styles.sheetScrim}
+          onPress={() => setAuthOpen(false)}
+        >
+          <Pressable
+            style={styles.sheet}
+            onPress={(e) => e.stopPropagation()}
+          >
+            <View style={styles.sheetHandleBar} />
+            <View style={styles.sheetHead}>
+              <Text style={styles.sheetTitle}>Continue on Plazore</Text>
+              <TouchableOpacity
+                onPress={() => setAuthOpen(false)}
+                hitSlop={12}
+              >
+                <Ionicons name="close" size={20} color={MUTED} />
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.sheetSub}>
+              Sign in to save, message the seller, or complete your purchase.
+              You’ll return to this product.
+            </Text>
+
+            <TouchableOpacity
+              style={styles.authPrimary}
+              onPress={goSignIn}
+              activeOpacity={0.9}
+            >
+              <Text style={styles.authPrimaryText}>Sign in</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.authSecondary}
+              onPress={goSignUp}
+              activeOpacity={0.9}
+            >
+              <Text style={styles.authSecondaryText}>Create a Plazore account</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -1414,74 +1713,73 @@ const styles = StyleSheet.create({
     fontWeight: "500",
   },
 
-  /* AI — Space Grotesk */
   aiCard: {
-    borderRadius: 20,
+    borderRadius: 16,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: "rgba(16,185,129,0.22)",
-    marginBottom: 22,
+    marginBottom: 16,
     overflow: "hidden",
     backgroundColor: "rgba(17,20,26,0.65)",
   },
   aiLoader: {
-    height: 118,
+    height: 88,
     alignItems: "center",
     justifyContent: "center",
   },
   aiHeader: {
     flexDirection: "row",
     alignItems: "center",
-    marginBottom: 4,
-    gap: 8,
+    marginBottom: 2,
+    gap: 7,
   },
-  aiLogo: { width: 22, height: 22 },
+  aiLogo: { width: 18, height: 18 },
   aiLabel: {
     color: "#FFFFFF",
     fontFamily: FONT.space600,
-    fontSize: 17,
+    fontSize: 15,
     letterSpacing: -0.3,
   },
   aiQuickInsights: {
     color: "rgba(255,255,255,0.88)",
     fontFamily: FONT.space500,
-    fontSize: 14,
-    marginBottom: 12,
+    fontSize: 12.5,
+    marginBottom: 8,
     marginTop: 2,
   },
   aiSummary: {
     color: TEXT,
-    fontSize: 15.2,
-    lineHeight: 23,
+    fontSize: 14,
+    lineHeight: 20,
     letterSpacing: -0.15,
   },
   aiSectionTitle: {
     color: TEXT,
-    fontSize: 14.5,
+    fontSize: 13,
     fontWeight: "700",
-    marginBottom: 9,
+    marginBottom: 7,
     letterSpacing: -0.2,
   },
   highlightRow: {
     flexDirection: "row",
     alignItems: "flex-start",
-    marginBottom: 7,
+    marginBottom: 6,
   },
   bullet: {
-    width: 4.5,
-    height: 4.5,
-    borderRadius: 2.5,
-    marginTop: 8,
-    marginRight: 10,
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    marginTop: 7,
+    marginRight: 9,
   },
   highlightText: {
     color: SECONDARY,
-    fontSize: 14.5,
-    lineHeight: 20.5,
+    fontSize: 13.5,
+    lineHeight: 19,
     flex: 1,
   },
   showMoreBtn: {
-    marginTop: 12,
-    paddingVertical: 10,
+    marginTop: 10,
+    paddingVertical: 8,
     borderRadius: 999,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: "rgba(255,255,255,0.13)",
@@ -1492,51 +1790,51 @@ const styles = StyleSheet.create({
   },
   showMoreText: {
     color: TEXT,
-    fontSize: 13.5,
+    fontSize: 12.5,
     fontWeight: "500",
   },
 
-  confidenceCard: {
-    borderRadius: 16,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: "rgba(16,185,129,0.22)",
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    marginBottom: 24,
-    overflow: "hidden",
-    backgroundColor: "rgba(17,20,26,0.7)",
-  },
-  confidenceHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 6,
-    gap: 7,
-  },
-  confidenceBadge: {
-    width: 22,
-    height: 22,
-    borderRadius: 7,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  confidenceEyebrow: {
-    fontFamily: FONT.space500,
-    fontSize: 10,
-    letterSpacing: 1.2,
-    textTransform: "uppercase",
-  },
-  confidenceLevel: {
-    color: TEXT,
-    fontSize: 14.5,
-    fontWeight: "700",
-    marginBottom: 4,
-    letterSpacing: -0.2,
-  },
-  confidenceBody: {
-    color: SECONDARY,
-    fontSize: 13,
-    lineHeight: 19,
-  },
+confidenceCard: {
+  borderRadius: 12,
+  borderWidth: StyleSheet.hairlineWidth,
+  borderColor: "rgba(16,185,129,0.22)",
+  paddingHorizontal: 10,     // was 12
+  paddingVertical: 8,        // was 10
+  marginBottom: 16,          // was 20
+  overflow: "hidden",
+  backgroundColor: "rgba(17,20,26,0.7)",
+},
+confidenceHeader: {
+  flexDirection: "row",
+  alignItems: "center",
+  marginBottom: 3,
+  gap: 5,
+},
+confidenceBadge: {
+  width: 18,                 // was 20
+  height: 18,
+  borderRadius: 5,
+  alignItems: "center",
+  justifyContent: "center",
+},
+confidenceEyebrow: {
+  fontFamily: FONT.space500,
+  fontSize: 9,
+  letterSpacing: 1,
+  textTransform: "uppercase",
+},
+confidenceLevel: {
+  color: TEXT,
+  fontSize: 12.5,            // was 13.5
+  fontWeight: "700",
+  marginBottom: 2,
+  letterSpacing: -0.2,
+},
+confidenceBody: {
+  color: SECONDARY,
+  fontSize: 12,              // was 12.5
+  lineHeight: 16.5,
+},
 
   sectionEyebrow: {
     color: "#FFFFFF",
@@ -1828,6 +2126,11 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
   },
+  topRight: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 8,
+  },
   topBtn: {
     width: 42,
     height: 42,
@@ -1843,5 +2146,92 @@ const styles = StyleSheet.create({
     fontSize: 10.5,
     fontWeight: "700",
     marginTop: 3,
+  },
+
+  sheetScrim: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.58)",
+    justifyContent: "flex-end",
+  },
+  sheet: {
+    backgroundColor: SURFACE,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderColor: LINE,
+    paddingHorizontal: 18,
+    paddingBottom: 28,
+    paddingTop: 10,
+  },
+  sheetHandleBar: {
+    alignSelf: "center",
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: "rgba(255,255,255,0.14)",
+    marginBottom: 12,
+  },
+  sheetHead: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 6,
+  },
+  sheetTitle: {
+    color: TEXT,
+    fontSize: 17,
+    fontWeight: "700",
+  },
+  sheetSub: {
+    color: MUTED,
+    fontSize: 13,
+    lineHeight: 19,
+    marginBottom: 16,
+  },
+  shareRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingVertical: 13,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: LINE,
+  },
+  shareIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: SURFACE_2,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: LINE,
+  },
+  shareLabel: {
+    color: TEXT,
+    fontSize: 15,
+    fontWeight: "600",
+  },
+  authPrimary: {
+    height: 52,
+    borderRadius: 14,
+    backgroundColor: TEXT,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 10,
+  },
+  authPrimaryText: {
+    color: BG,
+    fontSize: 15,
+    fontWeight: "800",
+  },
+  authSecondary: {
+    height: 48,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  authSecondaryText: {
+    color: AI_GREEN,
+    fontSize: 14,
+    fontWeight: "700",
   },
 });

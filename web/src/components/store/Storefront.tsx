@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useAuth, useSignIn } from "@clerk/nextjs";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AppFeaturePrompt, type AppFeature } from "@/components/app/AppFeaturePrompt";
+import { useEffect, useState } from "react";
 import {
   Bookmark,
   CheckCircle,
@@ -20,13 +20,14 @@ import { useMarketplace } from "@/context/MarketplaceContext";
 import { DEFAULT_REGION, formatProductPrice } from "@/lib/regions";
 import type { Product } from "@/lib/types";
 
-const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000/api";
-const GOOGLE_G = "https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg";
-const PENDING_KEY = "plazore_store_pending";
 const FEATURED_MS = 7000;
 
 function storeKey(store: StorePublic) {
-  return String((store as { _id?: string; id?: string })._id || (store as { id?: string }).id || "");
+  return String(
+    (store as { _id?: string; id?: string })._id ||
+      (store as { id?: string }).id ||
+      ""
+  );
 }
 
 function ChromeBtn({
@@ -96,34 +97,22 @@ export function Storefront({
   products: Product[];
 }) {
   const router = useRouter();
-  const pathname = usePathname();
-  const { getToken, isSignedIn, isLoaded } = useAuth();
-  const { signIn } = useSignIn();
   const { region: marketplaceRegion } = useMarketplace();
   const displayRegion = marketplaceRegion || DEFAULT_REGION;
 
   const [featured, setFeatured] = useState(0);
   const [descOpen, setDescOpen] = useState(false);
   const [goalOpen, setGoalOpen] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [saveBusy, setSaveBusy] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [shareBusy, setShareBusy] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [authOpen, setAuthOpen] = useState(false);
-  const [googleBusy, setGoogleBusy] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
-  const ranPending = useRef(false);
-  const saveInFlight = useRef(false);
+  const [prompt, setPrompt] = useState<AppFeature | null>(null);
 
   const id = storeKey(store);
   const locationLabel = [store.location?.state, store.location?.country]
     .filter(Boolean)
     .join(", ");
   const current = products[featured];
-  const returnTo = pathname || `/store/${id}`;
-  const signInHref = `/sign-in?redirect_url=${encodeURIComponent(returnTo)}`;
-  const signUpHref = `/sign-in?mode=signup&redirect_url=${encodeURIComponent(returnTo)}`;
   const storeUrl =
     typeof window !== "undefined"
       ? `${window.location.origin}/store/${id}`
@@ -133,11 +122,6 @@ export function Storefront({
   const priceOf = (p: Product) =>
     formatProductPrice(Number(p.price) || 0, p.region, displayRegion);
 
-  const showToast = (msg: string) => {
-    setToast(msg);
-    window.setTimeout(() => setToast(null), 3200);
-  };
-
   useEffect(() => {
     if (products.length <= 1) return;
     const t = setInterval(() => {
@@ -145,136 +129,6 @@ export function Storefront({
     }, FEATURED_MS);
     return () => clearInterval(t);
   }, [products.length]);
-
-  useEffect(() => {
-    if (!isSignedIn || !id) {
-      setSaved(false);
-      return;
-    }
-    (async () => {
-      try {
-        const token = await getToken();
-        if (!token) return;
-        const res = await fetch(`${API}/saved-stores`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        const json = await res.json().catch(() => ({}));
-        if (json?.success && Array.isArray(json.data)) {
-          setSaved(json.data.some((s: { _id?: string; id?: string }) => String(s._id || s.id) === id));
-        }
-      } catch {
-        /* ignore */
-      }
-    })();
-  }, [getToken, id, isSignedIn]);
-
-  const toggleSave = useCallback(async () => {
-    if (!id || saveInFlight.current) return;
-    const previous = saved;
-    setSaved(!previous);
-    setSaveBusy(true);
-    saveInFlight.current = true;
-    try {
-      const token = await getToken();
-      if (!token) {
-        setSaved(previous);
-        setAuthOpen(true);
-        return;
-      }
-      const res = await fetch(`${API}/saved-stores/toggle`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ storeId: id }),
-      });
-      const json = await res.json().catch(() => ({}));
-      const msg = String(json?.message || "").toLowerCase();
-      const own =
-        res.status === 403 ||
-        msg.includes("own store") ||
-        msg.includes("own storefront") ||
-        msg.includes("cannot save") ||
-        msg.includes("yourself");
-      if (own) {
-        setSaved(false);
-        showToast("This is your storefront — share it with shoppers instead.");
-        return;
-      }
-      if (json?.success) {
-        if (typeof json.saved === "boolean") setSaved(json.saved);
-        showToast(json.saved === false || previous ? "Store removed from saved" : "Store saved");
-      } else {
-        setSaved(previous);
-        showToast(json?.message || "Could not save this store.");
-      }
-    } catch {
-      setSaved(previous);
-      showToast("Could not save this store.");
-    } finally {
-      setSaveBusy(false);
-      saveInFlight.current = false;
-    }
-  }, [getToken, id, saved]);
-
-  const requireSave = () => {
-    if (!isLoaded) return;
-    if (isSignedIn) {
-      void toggleSave();
-      return;
-    }
-    try {
-      sessionStorage.setItem(PENDING_KEY, JSON.stringify({ action: "save", storeId: id }));
-      sessionStorage.setItem("plazore_return_to", returnTo);
-    } catch {
-      /* ignore */
-    }
-    setAuthOpen(true);
-  };
-
-  useEffect(() => {
-    if (!isLoaded || !isSignedIn || ranPending.current) return;
-    try {
-      const raw = sessionStorage.getItem(PENDING_KEY);
-      if (!raw) return;
-      const parsed = JSON.parse(raw) as { action?: string; storeId?: string };
-      if (parsed.storeId && parsed.storeId !== id) return;
-      if (parsed.action !== "save") return;
-      ranPending.current = true;
-      sessionStorage.removeItem(PENDING_KEY);
-      setAuthOpen(false);
-      void toggleSave();
-    } catch {
-      /* ignore */
-    }
-  }, [id, isLoaded, isSignedIn, toggleSave]);
-
-  const continueGoogle = async () => {
-    try {
-      sessionStorage.setItem("plazore_return_to", returnTo);
-      sessionStorage.setItem(PENDING_KEY, JSON.stringify({ action: "save", storeId: id }));
-    } catch {
-      /* ignore */
-    }
-    if (!signIn) {
-      router.push(signInHref);
-      return;
-    }
-    setGoogleBusy(true);
-    try {
-      const { error } = await signIn.sso({
-        strategy: "oauth_google",
-        redirectCallbackUrl: "/sso-callback",
-        redirectUrl: "/auth/continue",
-      });
-      if (error) router.push(signInHref);
-    } catch {
-      router.push(signInHref);
-    } finally {
-      setGoogleBusy(false);
-    }
-  };
 
   const copyLink = async () => {
     try {
@@ -323,7 +177,7 @@ export function Storefront({
       href={`/product/${current._id}`}
       className="block overflow-hidden rounded-[24px] border border-white/8 bg-[#11141A]"
     >
-      <div className="relative aspect-[4/5] sm:aspect-[4/5] lg:aspect-[16/10]">
+      <div className="relative aspect-[4/5] lg:aspect-[16/10]">
         {current.images?.[0] ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={current.images[0]} alt={current.name} className="h-full w-full object-cover" />
@@ -341,15 +195,7 @@ export function Storefront({
 
   return (
     <div className="min-h-dvh overflow-x-hidden bg-[#090B0F] text-[#F5F7FA]">
-      {toast ? (
-        <div className="pointer-events-none fixed inset-x-0 top-3 z-50 flex justify-center px-4 pt-[env(safe-area-inset-top)]">
-          <div className="flex max-w-md items-center gap-2.5 rounded-2xl border border-white/10 bg-[#11141A]/95 px-3.5 py-2.5 shadow-xl backdrop-blur">
-            <Store className="h-4 w-4 shrink-0 text-[#10B981]" />
-            <p className="text-[13px] font-medium leading-5">{toast}</p>
-          </div>
-        </div>
-      ) : null}
-
+      {/* Banner */}
       <div className="relative h-[34vh] min-h-[220px] max-h-[280px] bg-[#07080C] lg:h-[42vh] lg:max-h-[420px]">
         {store.storeBanner ? (
           // eslint-disable-next-line @next/next/no-img-element
@@ -382,7 +228,9 @@ export function Storefront({
             </div>
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
-                <h1 className="text-xl font-extrabold tracking-tight lg:text-3xl">{store.storeName}</h1>
+                <h1 className="text-xl font-extrabold tracking-tight lg:text-3xl">
+                  {store.storeName}
+                </h1>
                 {store.isVerified ? (
                   <span className="inline-flex items-center gap-1 rounded-full bg-[#10B981]/12 px-2 py-0.5 text-[10px] font-bold text-[#10B981]">
                     <CheckCircle className="h-3 w-3" /> Verified
@@ -401,7 +249,11 @@ export function Storefront({
 
           {store.storeDescription ? (
             <div className="mt-4">
-              <p className={`text-[14.5px] leading-[22px] text-[#A7ADB8] ${descOpen ? "" : "line-clamp-3"}`}>
+              <p
+                className={`text-[14.5px] leading-[22px] text-[#A7ADB8] ${
+                  descOpen ? "" : "line-clamp-3"
+                }`}
+              >
                 {store.storeDescription}
               </p>
               {store.storeDescription.length > 110 ? (
@@ -418,8 +270,12 @@ export function Storefront({
 
           {store.businessGoal ? (
             <div className="mt-3.5 rounded-2xl border border-white/6 bg-white/[0.03] px-3.5 py-3">
-              <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.14em] text-[#737A86]">Our goal</p>
-              <p className={`text-sm leading-5 ${goalOpen ? "" : "line-clamp-2"}`}>{store.businessGoal}</p>
+              <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.14em] text-[#737A86]">
+                Our goal
+              </p>
+              <p className={`text-sm leading-5 ${goalOpen ? "" : "line-clamp-2"}`}>
+                {store.businessGoal}
+              </p>
               {store.businessGoal.length > 80 ? (
                 <button
                   type="button"
@@ -432,19 +288,16 @@ export function Storefront({
             </div>
           ) : null}
 
+          {/* Save = app-only prompt */}
           <div className="mt-[18px] flex items-center gap-2.5">
             <button
               type="button"
-              onClick={requireSave}
-              disabled={saveBusy}
-              className={`flex flex-1 items-center justify-center gap-2 rounded-2xl border py-3.5 text-sm font-bold disabled:opacity-60 ${
-                saved
-                  ? "border-[#10B981]/35 bg-[#10B981]/12 text-[#10B981]"
-                  : "border-[#252A33] bg-[#171B22]"
-              }`}
+              onClick={() => setPrompt("saved_stores")}
+              aria-label="Save store"
+              className="flex h-12 items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.04] px-4 text-[13px] font-semibold text-[#F5F7FA]"
             >
-              <Bookmark className={`h-4 w-4 ${saved ? "fill-current" : ""}`} />
-              {saveBusy ? "Saving…" : saved ? "Saved" : "Save store"}
+              <Bookmark className="h-4 w-4 text-[#D4A853]" strokeWidth={2.2} />
+              Save store
             </button>
             <span className="rounded-2xl border border-white/7 bg-white/[0.04] px-3.5 py-3.5 text-[13px] font-semibold text-[#A7ADB8]">
               {products.length} products
@@ -454,7 +307,9 @@ export function Storefront({
 
         {products.length > 0 ? (
           <section className="mt-9">
-            <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#737A86]">Featured</p>
+            <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#737A86]">
+              Featured
+            </p>
             <p className="mt-1 text-xl font-bold tracking-tight">A closer look</p>
             <div className="mt-4">{featuredCard}</div>
             {products.length > 1 ? (
@@ -464,7 +319,9 @@ export function Storefront({
                     key={i}
                     type="button"
                     onClick={() => setFeatured(i)}
-                    className={`h-[5px] rounded-full ${i === featured ? "w-[18px] bg-[#10B981]" : "w-1.5 bg-white/20"}`}
+                    className={`h-[5px] rounded-full ${
+                      i === featured ? "w-[18px] bg-[#10B981]" : "w-1.5 bg-white/20"
+                    }`}
                     aria-label={`Featured ${i + 1}`}
                   />
                 ))}
@@ -474,11 +331,15 @@ export function Storefront({
         ) : null}
 
         <section className="mt-10">
-          <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#737A86]">The store</p>
+          <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#737A86]">
+            The store
+          </p>
           <p className="mt-1 text-xl font-bold tracking-tight">Explore the collection</p>
           <div className="my-[18px] flex items-center gap-3">
             <span className="h-px flex-1 bg-[#252A33]" />
-            <span className="text-[10px] uppercase tracking-[0.16em] text-[#737A86]">All products</span>
+            <span className="text-[10px] uppercase tracking-[0.16em] text-[#737A86]">
+              All products
+            </span>
             <span className="h-px flex-1 bg-[#252A33]" />
           </div>
 
@@ -491,7 +352,7 @@ export function Storefront({
               </p>
             </div>
           ) : (
-            <div className="grid grid-cols-2 gap-3.5 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+            <div className="grid grid-cols-2 gap-3.5 md:grid-cols-3 lg:grid-cols-4">
               {products.map((p) => (
                 <Link
                   key={String(p._id)}
@@ -505,7 +366,9 @@ export function Storefront({
                     ) : null}
                   </div>
                   <div className="px-3 pb-3 pt-2.5">
-                    <p className="line-clamp-2 text-[13px] font-semibold leading-[18px]">{p.name}</p>
+                    <p className="line-clamp-2 text-[13px] font-semibold leading-[18px]">
+                      {p.name}
+                    </p>
                     <p className="mt-1.5 text-[14.5px] font-extrabold">{priceOf(p)}</p>
                   </div>
                 </Link>
@@ -520,9 +383,10 @@ export function Storefront({
         </footer>
       </div>
 
+      {/* Share sheet */}
       {shareOpen ? (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/75 sm:items-center sm:p-6">
-          <div className="w-full max-w-md max-h-[90dvh] overflow-y-auto border border-white/10 bg-[#11141A] sm:rounded-2xl">
+          <div className="max-h-[90dvh] w-full max-w-md overflow-y-auto border border-white/10 bg-[#11141A] sm:rounded-2xl">
             <div className="flex items-center justify-between border-b border-white/8 px-4 py-3.5">
               <p className="text-[15px] font-bold">Share store</p>
               <button
@@ -541,7 +405,7 @@ export function Storefront({
                   { id: "x" as const, label: "X" },
                   { id: "telegram" as const, label: "Telegram" },
                   { id: "facebook" as const, label: "Facebook" },
-                ]
+                ] as const
               ).map((item) => (
                 <button
                   key={item.id}
@@ -584,55 +448,8 @@ export function Storefront({
         </div>
       ) : null}
 
-      {authOpen ? (
-        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/75 sm:items-center sm:p-6">
-          <div className="w-full max-w-md max-h-[90dvh] overflow-y-auto border border-white/10 bg-[#11141A] sm:rounded-2xl">
-            <div className="flex items-start justify-between gap-3 px-5 pt-5">
-              <div className="min-w-0">
-                <p className="text-[16px] font-extrabold leading-snug">Sign in to save this store</p>
-                <p className="mt-1.5 text-[13px] leading-5 text-white/55">
-                  Saved stores live on your Plazore account so you can come back to {store.storeName} anytime.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setAuthOpen(false)}
-                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/6"
-                aria-label="Close"
-              >
-                <X className="h-4 w-4 text-white/50" />
-              </button>
-            </div>
-            <div className="space-y-2.5 px-5 py-5">
-              <button
-                type="button"
-                disabled={googleBusy}
-                onClick={continueGoogle}
-                className="flex h-12 w-full items-center justify-center gap-2.5 rounded-xl bg-white text-[14px] font-bold text-[#1F1F1F]"
-              >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={GOOGLE_G} alt="" className="h-5 w-5" />
-                {googleBusy ? "Connecting…" : "Continue with Google"}
-              </button>
-              <Link
-                href={signInHref}
-                className="flex h-12 w-full items-center justify-center rounded-xl border border-white/12 bg-[#171B22] text-[14px] font-bold"
-              >
-                Sign in
-              </Link>
-              <Link
-                href={signUpHref}
-                className="flex h-12 w-full items-center justify-center rounded-xl text-[14px] font-bold text-[#00E575]"
-              >
-                Create a Plazore account
-              </Link>
-              <p className="pt-1 text-center text-[11px] leading-4 text-white/38">
-                After you sign in, you’ll land back on this storefront and it will save.
-              </p>
-            </div>
-          </div>
-        </div>
-      ) : null}
+      {/* App necessity — Save store */}
+      <AppFeaturePrompt feature={prompt} onClose={() => setPrompt(null)} />
     </div>
   );
 }
@@ -647,7 +464,10 @@ export function StoreMissing() {
       <p className="mt-2 text-sm leading-[21px] text-[#A7ADB8]">
         This store is not reliable right now, check back soon.
       </p>
-      <Link href="/" className="mt-6 rounded-full bg-[#F5F7FA] px-6 py-3 text-[13px] font-bold text-[#090B0F]">
+      <Link
+        href="/"
+        className="mt-6 rounded-full bg-[#F5F7FA] px-6 py-3 text-[13px] font-bold text-[#090B0F]"
+      >
         Go back
       </Link>
     </div>

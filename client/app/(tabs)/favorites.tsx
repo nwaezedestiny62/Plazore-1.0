@@ -1,7 +1,7 @@
 /**
  * Wishlist / Saved Products — Plazore dark
  * Stacked cards · 2 per row · no cart · top overlay sort
- * No floating nav on this screen
+ * Custom bar left of title → opens Navigation Hub
  */
 
 import PlazoreNavigationHub from '@/components/PlazoreNavigationHub'
@@ -74,6 +74,17 @@ type OverlayState = {
   durationMs?: number
 } | null
 
+/** Same 3-line custom bar as PlazoreTitleBar (22 / 15 / 22) */
+function CustomBarIcon() {
+  return (
+    <View style={styles.menuLines}>
+      <View style={[styles.line, { width: 22 }]} />
+      <View style={[styles.line, { width: 15 }]} />
+      <View style={[styles.line, { width: 22 }]} />
+    </View>
+  )
+}
+
 function TopOverlay({
   state,
   onDismiss,
@@ -119,10 +130,7 @@ function TopOverlay({
     ]).start()
 
     if (!state.actions?.length) {
-      timer.current = setTimeout(
-        () => onDismiss(),
-        state.durationMs ?? 3800
-      )
+      timer.current = setTimeout(() => onDismiss(), state.durationMs ?? 3800)
     }
 
     return () => {
@@ -155,12 +163,7 @@ function TopOverlay({
         <View style={[styles.overlayAccent, { backgroundColor: accent }]} />
         <View style={styles.overlayBody}>
           <View style={styles.overlayTop}>
-            <View
-              style={[
-                styles.overlayIcon,
-                { backgroundColor: `${accent}22` },
-              ]}
-            >
+            <View style={[styles.overlayIcon, { backgroundColor: `${accent}22` }]}>
               <Ionicons
                 name={
                   state.tone === 'danger'
@@ -410,8 +413,23 @@ export default function Favorites() {
     <View style={[styles.root, { paddingTop: insets.top }]}>
       <TopOverlay state={overlay} onDismiss={() => setOverlay(null)} />
 
+      {/* Title bar: custom bar (left) + Saved Products */}
       <View style={styles.header}>
-        <Text style={styles.title}>Saved Products</Text>
+        <View style={styles.titleRow}>
+          <Pressable
+            onPress={() => setHubOpen(true)}
+            hitSlop={14}
+            accessibilityRole="button"
+            accessibilityLabel="Open navigation"
+            style={styles.barHit}
+          >
+            <CustomBarIcon />
+          </Pressable>
+
+          <Text style={styles.title} numberOfLines={1}>
+            Saved Products
+          </Text>
+        </View>
 
         <View style={styles.metaRowHeader}>
           <Text style={styles.count}>
@@ -490,6 +508,23 @@ const styles = StyleSheet.create({
   root: {
     flex: 1,
     backgroundColor: BG,
+  },
+
+  menuLines: {
+    width: 22,
+    gap: 5.5,
+    alignItems: 'flex-start',
+  },
+  line: {
+    height: 2.6,
+    backgroundColor: TEXT,
+  },
+  barHit: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 4,
   },
 
   overlayWrap: {
@@ -576,18 +611,22 @@ const styles = StyleSheet.create({
 
   header: {
     paddingHorizontal: PAD,
-    paddingTop: 6,
+    paddingTop: 4,
     paddingBottom: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: 'rgba(255,255,255,0.06)',
   },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
   title: {
-    fontSize: 28,
+    flex: 1,
+    fontSize: 26,
     fontWeight: '700',
     color: TEXT,
     letterSpacing: -0.6,
-    marginBottom: 10,
-    textAlign: 'left',
   },
   metaRowHeader: {
     flexDirection: 'row',
