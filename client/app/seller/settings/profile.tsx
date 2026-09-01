@@ -213,22 +213,6 @@ export default function SellerIdentityScreen() {
     <SafeAreaView style={styles.root} edges={['top']}>
       <StatusBar barStyle="light-content" backgroundColor={BG} />
 
-      <View style={styles.header}>
-        <TouchableOpacity
-          onPress={() => router.back()}
-          style={styles.backBtn}
-          hitSlop={12}
-          activeOpacity={0.7}
-        >
-          <Ionicons name="arrow-back" size={22} color={TEXT} />
-        </TouchableOpacity>
-        <View style={styles.headerCenter}>
-          <Text style={styles.headerTitle}>Seller identity</Text>
-          <Text style={styles.headerSub}>Private · not your storefront</Text>
-        </View>
-        <View style={{ width: 40 }} />
-      </View>
-
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}

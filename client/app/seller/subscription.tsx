@@ -71,7 +71,7 @@ const PLANS: PlanDef[] = [
   },
   {
     id: 'global',
-    name: 'Global Reach',
+    name: 'Dominant Niche',
     feePct: 5,
     icon: 'globe-outline',
     features: [
@@ -92,7 +92,7 @@ const PLANS: PlanDef[] = [
   },
   {
     id: 'dominant',
-    name: 'Dominant Visibility',
+    name: 'Global Reach',
     feePct: 2,
     limited: true,
     icon: 'diamond-outline',
@@ -107,10 +107,10 @@ const PLANS: PlanDef[] = [
 
 const PLAN_LABEL: Record<string, string> = {
   free: 'Free Seller',
-  global: 'Global Reach',
-  pro: 'Global Reach',
+  global: 'Dominant Niche',
+  pro: 'Dominant Niche',
   business: 'Business Plus',
-  dominant: 'Dominant Visibility',
+  dominant: 'Global Reach',
 }
 
 function resolvePlanPrice(planId: PlanId, regionCode: string): string {

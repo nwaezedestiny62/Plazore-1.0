@@ -54,7 +54,7 @@ const PLANS: PlanDef[] = [
   },
   {
     id: "global",
-    name: "Global Reach",
+    name: "Dominant Niche",
     feePct: 5,
     Icon: Globe2,
     features: [
@@ -75,7 +75,7 @@ const PLANS: PlanDef[] = [
   },
   {
     id: "dominant",
-    name: "Dominant Visibility",
+    name: "Global Reach",
     feePct: 2,
     limited: true,
     Icon: Diamond,
@@ -90,10 +90,10 @@ const PLANS: PlanDef[] = [
 
 const PLAN_LABEL: Record<string, string> = {
   free: "Free Seller",
-  global: "Global Reach",
-  pro: "Global Reach",
+  global: "Dominant Niche",
+  pro: "Dominant Niche",
   business: "Business Plus",
-  dominant: "Dominant Visibility",
+  dominant: "Global Reach",
 };
 
 const REGION_META: Record<

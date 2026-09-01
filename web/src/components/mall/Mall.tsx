@@ -17,38 +17,107 @@ import { cartCount } from "@/lib/cart";
 import { useMarketplace } from "@/context/MarketplaceContext";
 import { DEFAULT_REGION, formatProductPrice } from "@/lib/regions";
 import type { Product } from "@/lib/types";
+import {
+  fetchShowroom,
+  type ShowroomRooms,
+} from "@/lib/api";
+import {
+  getShowroomSessionId,
+  saveShowroomSessionId,
+} from "@/lib/showroomEvents";
 import { ProductCard } from "./ProductCard";
 import { ShowroomFlyCartProvider, useShowroomFlyCart } from "./ShowroomFlyCart";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000/api";
 const PENDING_KEY = "plazore_pending_action";
 
-function splitRooms(products: Product[]) {
-  if (products.length > 0 && products.length <= 4) {
+type RoomTitlePair = readonly [string, string];
+
+type RoomTitles = {
+  one: RoomTitlePair;
+  two: RoomTitlePair;
+  three: RoomTitlePair;
+  four: RoomTitlePair;
+};
+
+const ROOM_TITLES: RoomTitles = {
+  one: ["THE HORIZON", "Expanded View"],
+  two: ["THE CHAMBER", "Private Selection"],
+  three: ["THE SIGNAL", "Worth Your Attention"],
+  four: ["THE LOCALE", "From Your Region"],
+};
+
+const TINY_TITLES: RoomTitles = {
+  one: ["THE SHOWROOM", "Take a look around"],
+  two: ["THE EDIT", "Side by Side"],
+  three: ["THE SIGNAL", "Worth Your Attention"],
+  four: ["THE LOCALE", "From Around You"],
+};
+
+type SplitRooms = {
+  one: Product[];
+  two: Product[];
+  three: Product[];
+  four: Product[];
+  titles: RoomTitles;
+};
+
+function uniqueCount(rooms?: ShowroomRooms | null, products?: Product[]) {
+  const ids = new Set<string>();
+  const add = (list?: Product[]) => {
+    (list || []).forEach((p) => p?._id && ids.add(String(p._id)));
+  };
+  add(rooms?.[1]);
+  add(rooms?.[2]);
+  add(rooms?.[3]);
+  add(rooms?.[4]);
+  add(products);
+  return ids.size;
+}
+
+function buildRooms(
+  products: Product[],
+  serverRooms?: ShowroomRooms | null
+): SplitRooms {
+  const count = uniqueCount(serverRooms, products);
+  const hasServerRooms =
+    !!serverRooms &&
+    ((serverRooms[1]?.length || 0) > 0 ||
+      (serverRooms[2]?.length || 0) > 0 ||
+      (serverRooms[3]?.length || 0) > 0 ||
+      (serverRooms[4]?.length || 0) > 0);
+
+  // Tiny catalog → reuse the same products across rooms
+  if (count > 0 && count <= 4) {
+    const pool =
+      (serverRooms?.[1]?.length ? serverRooms[1] : products).slice(0, 4);
     return {
-      one: products,
-      two: products,
-      three: products,
-      four: products,
-      titles: {
-        one: ["THE SHOWROOM", "Take a look around"] as const,
-        two: ["THE EDIT", "Side by Side"] as const,
-        three: ["THE SIGNAL", "Worth Your Attention"] as const,
-        four: ["THE LOCALE", "From Around You"] as const,
-      },
+      one: pool,
+      two: pool,
+      three: pool,
+      four: pool,
+      titles: TINY_TITLES,
     };
   }
+
+  // Preferred path: use ranked rooms from server
+  if (hasServerRooms && serverRooms) {
+    return {
+      one: serverRooms[1] || [],
+      two: serverRooms[2] || [],
+      three: serverRooms[3] || [],
+      four: serverRooms[4] || [],
+      titles: ROOM_TITLES,
+    };
+  }
+
+  // Fallback: naive split from flat list
   return {
-    one: products.slice(0, 4),
-    two: products.slice(4, 8),
-    three: products.slice(8, 12),
-    four: products.slice(12),
-    titles: {
-      one: ["THE HORIZON", "Expanded View"] as const,
-      two: ["THE CHAMBER", "Private Selection"] as const,
-      three: ["THE SIGNAL", "Worth Your Attention"] as const,
-      four: ["THE LOCALE", "From Your Region"] as const,
-    },
+    one: products.slice(0, 50),
+    two: products.slice(50, 64),
+    three: products.slice(64, 80),
+    four: products.slice(80, 113),
+    titles: ROOM_TITLES,
   };
 }
 
@@ -242,7 +311,6 @@ function MallChrome({
         </div>
       </header>
 
-      {/* Wishlist app prompt — lives with chrome */}
       <AppFeaturePrompt feature={prompt} onClose={() => setPrompt(null)} />
     </>
   );
@@ -427,8 +495,24 @@ function RoomThreeStage({ products }: { products: Product[] }) {
   );
 }
 
-function MallInner({ products, loading }: { products: Product[]; loading: boolean }) {
+function MallInner({
+  products: initialProducts,
+  rooms: initialRooms,
+  loading: initialLoading,
+}: {
+  products: Product[];
+  rooms?: ShowroomRooms | null;
+  loading: boolean;
+}) {
   const { getToken, isSignedIn } = useAuth();
+  const marketplace = useMarketplace() as { region?: string } | null;
+  const region = marketplace?.region || DEFAULT_REGION;
+
+  const [products, setProducts] = useState<Product[]>(initialProducts || []);
+  const [serverRooms, setServerRooms] = useState<ShowroomRooms | null>(
+    initialRooms || null
+  );
+  const [loading, setLoading] = useState(initialLoading);
   const [slide, setSlide] = useState(0);
   const [progress, setProgress] = useState(0);
   const [activeRoom, setActiveRoom] = useState(1);
@@ -436,8 +520,33 @@ function MallInner({ products, loading }: { products: Product[]; loading: boolea
   const [notifN, setNotifN] = useState(0);
   const showroomRef = useRef<HTMLElement>(null);
   const roomRefs = useRef<Record<number, HTMLElement | null>>({});
+  const fetchedRef = useRef(false);
 
-  const rooms = useMemo(() => splitRooms(products), [products]);
+  // Client adaptive fetch with session + region (same idea as mobile)
+  useEffect(() => {
+    if (fetchedRef.current) return;
+    fetchedRef.current = true;
+
+    (async () => {
+      try {
+        const sessionId = getShowroomSessionId();
+        const result = await fetchShowroom({ region, sessionId });
+        if (result.sessionId) saveShowroomSessionId(result.sessionId);
+        if (result.products?.length) setProducts(result.products);
+        if (result.rooms) setServerRooms(result.rooms);
+      } catch {
+        /* keep SSR data */
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [region]);
+
+  const rooms = useMemo(
+    () => buildRooms(products, serverRooms),
+    [products, serverRooms]
+  );
+
   const roomCount = useMemo(() => {
     let n = 0;
     if (rooms.one.length) n++;
@@ -768,10 +877,18 @@ function MallInner({ products, loading }: { products: Product[]; loading: boolea
   );
 }
 
-export function Mall({ products, loading }: { products: Product[]; loading: boolean }) {
+export function Mall({
+  products,
+  rooms = null,
+  loading,
+}: {
+  products: Product[];
+  rooms?: ShowroomRooms | null;
+  loading: boolean;
+}) {
   return (
     <ShowroomFlyCartProvider>
-      <MallInner products={products} loading={loading} />
+      <MallInner products={products} rooms={rooms} loading={loading} />
     </ShowroomFlyCartProvider>
   );
 }

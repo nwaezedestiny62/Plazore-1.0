@@ -367,6 +367,14 @@ export default function SellerLayout() {
         }}
       />
       <Tabs.Screen
+        name="settings/profile"
+        options={{
+          href: null,
+          title: 'Seller Profile',
+          headerLeft: () => <HeaderBack />,
+        }}
+      />
+      <Tabs.Screen
         name="settings/about"
         options={{
           href: null,
