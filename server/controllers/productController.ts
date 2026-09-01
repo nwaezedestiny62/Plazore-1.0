@@ -1,12 +1,14 @@
 import { Request, Response } from "express";
 import Product from "../models/Products.js";
 import User from "../models/User.js";
+import ShowroomEvent from "../models/ShowroomEvent.js";
 import ProductAI from "../models/ProductAI.js";
 import ProductPerformance from "../models/ProductPerformance.js";
 import { trackProductPerformance } from "../utils/performance.js";
 import cloudinary from "../config/cloudinary.js";
 import { enqueueProductAI } from "../services/jobs/generateProductAI.js";
 import { generateProductFingerprint } from "../services/plazoreAI/index.js";
+import { generateShowroom, rankProductsForSearch } from "../services/showroomRanker.js";
 
 const getUser = (req: Request) => (req as any).user;
 
@@ -245,43 +247,20 @@ export const getProducts = async (req: Request, res: Response) => {
     }
 
     // ── Trending re-rank (real performance data + wishlist) ──
-    if (sortParam === "trending" && products.length > 0) {
-      const ids = products.map((p: any) => p._id);
+        // ── Rank by commerce / interest / search when requested ──
+    const wantsRank =
+      sortParam === "trending" ||
+      sortParam === "relevant" ||
+      Boolean(req.query.q || req.query.search);
 
-      const perfs = await ProductPerformance.find({
-        product: { $in: ids },
-      })
-        .select("product score purchases cartAdds views")
-        .lean();
-
-      const scoreMap = new Map<string, number>();
-
-      perfs.forEach((p: any) => {
-        // Weighted score: purchases heavily favored, then carts, then views
-        const computed =
-          (p.purchases || 0) * 15 +
-          (p.cartAdds || 0) * 5 +
-          (p.views || 0) * 1 +
-          (p.score || 0);
-
-        scoreMap.set(String(p.product), computed);
-      });
-
-      products.sort((a: any, b: any) => {
-        const sa = scoreMap.get(String(a._id)) || 0;
-        const sb = scoreMap.get(String(b._id)) || 0;
-
-        // Secondary signal: wishlistCount
-        const wa = a.wishlistCount || 0;
-        const wb = b.wishlistCount || 0;
-
-        if (sb !== sa) return sb - sa;
-        if (wb !== wa) return wb - wa;
-
-        // Final fallback: newest
-        return (
-          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-        );
+    if (wantsRank && products.length > 0) {
+      const user = getUser(req);
+      products = await rankProductsForSearch({
+        products,
+        region: buyerRegion,
+        userId: user?._id ? String(user._id) : null,
+        sessionId: String(req.query.sessionId || "list"),
+        searchQuery: String(req.query.q || req.query.search || ""),
       });
     }
 
@@ -823,6 +802,144 @@ export const deleteProduct = async (req: Request, res: Response) => {
     res.status(500).json({
       success: false,
       message: error.message || "Failed to delete product",
+    });
+  }
+};
+// ======================================================
+// PUBLIC - Showroom (ranked rooms)
+// ======================================================
+export const getShowroom = async (req: Request, res: Response) => {
+  try {
+    const region = String(req.query.region || "NG").trim() || "NG";
+    const sessionId = String(req.query.sessionId || "").trim() || undefined;
+    const searchQuery = String(req.query.q || req.query.search || "").trim();
+    const forceRefresh =
+      String(req.query.refresh || "") === "1" ||
+      String(req.query.refresh || "") === "true";
+
+    const user = getUser(req);
+    const userId = user?._id ? String(user._id) : null;
+
+    const result = await generateShowroom({
+      region,
+      sessionId,
+      userId,
+      searchQuery: searchQuery || undefined,
+      forceRefresh,
+    });
+
+    // Flat list also returned for backward compatibility with AdaptiveShowroom
+    const flat = [
+      ...(result.rooms[1] || []),
+      ...(result.rooms[2] || []),
+      ...(result.rooms[3] || []),
+      ...(result.rooms[4] || []),
+    ];
+
+    // Dedupe while preserving order (rooms may reuse when inventory is tiny)
+    const seen = new Set<string>();
+    const data: any[] = [];
+    for (const p of flat) {
+      const id = String(p._id);
+      if (seen.has(id)) continue;
+      seen.add(id);
+      data.push(p);
+    }
+
+    res.json({
+      success: true,
+      sessionId: result.sessionId,
+      region: result.region,
+      cached: result.cached,
+      rooms: {
+        1: result.rooms[1],
+        2: result.rooms[2],
+        3: result.rooms[3],
+        4: result.rooms[4],
+      },
+      data, // flat ranked list (AdaptiveShowroom can still use this)
+      meta: (result as any).meta || {},
+    });
+  } catch (error: any) {
+    console.error("getShowroom error:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message || "Failed to build showroom",
+    });
+  }
+};
+
+// ======================================================
+// PUBLIC - Track showroom behavioural events
+// ======================================================
+export const trackShowroomEvent = async (req: Request, res: Response) => {
+  try {
+    const user = getUser(req);
+    const { sessionId, productId, type, room, position, region } = req.body || {};
+
+    const allowed = [
+      "impression",
+      "open",
+      "cart",
+      "wishlist",
+      "purchase",
+      "skip",
+    ] as const;
+
+    type EventType = (typeof allowed)[number];
+
+    const eventType = String(type || "") as EventType;
+
+    if (!sessionId || !productId || !allowed.includes(eventType)) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "sessionId, productId and type (impression|open|cart|wishlist|purchase|skip) required",
+      });
+    }
+
+    const doc = await ShowroomEvent.create({
+      sessionId: String(sessionId),
+      user: user?._id || null,
+      product: productId,
+      type: eventType,
+      room: room != null ? Number(room) : undefined,
+      position: position != null ? Number(position) : 0,
+      region: String(region || "NG").trim() || "NG",
+    });
+
+    // Also feed ProductPerformance for commerce signals
+    if (eventType === "open") {
+      trackProductPerformance({
+        productId: String(productId),
+        action: "view",
+        actorUserId: user?._id?.toString?.() || null,
+      }).catch(() => {});
+    }
+    if (eventType === "cart") {
+      trackProductPerformance({
+        productId: String(productId),
+        action: "cart",
+        actorUserId: user?._id?.toString?.() || null,
+      }).catch(() => {});
+    }
+    if (eventType === "purchase") {
+      trackProductPerformance({
+        productId: String(productId),
+        action: "purchase",
+        actorUserId: user?._id?.toString?.() || null,
+      }).catch(() => {});
+    }
+
+    res.json({
+      success: true,
+      data: { id: String((doc as any)._id) },
+    });
+  } catch (error: any) {
+    console.error("trackShowroomEvent error:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message || "Failed to track event",
     });
   }
 };

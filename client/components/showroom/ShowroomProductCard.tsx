@@ -3,11 +3,13 @@
  * Completely flicker-free auto image rotation
  * Supports dark mode for text colours
  * Cart button triggers fly-to-cart (never navigates)
+ * Tracks impression / open / cart for showroom ranking
  */
 
 import { Product } from '@/constants/types'
 import { useCart } from '@/context/CartContext'
 import { useMarketplace } from '@/context/MarketplaceContext'
+import { trackShowroomEvent } from '@/services/showroomEvents'
 import { Ionicons } from '@expo/vector-icons'
 import { Image } from 'expo-image'
 import { Link } from 'expo-router'
@@ -25,7 +27,7 @@ import { useShowroomFlyCart } from './ShowroomFlyCart'
 
 const SCREEN_W = Dimensions.get('window').width
 const H_PADDING = 16
-const GAP = 4   // was 12 — tight space between cards
+const GAP = 4
 const CARD_WIDTH = (SCREEN_W - H_PADDING * 2 - GAP) / 2
 
 const IMAGE_ASPECT = 1.35
@@ -38,6 +40,8 @@ type Props = {
   product: Product
   style?: any
   dark?: boolean
+  room?: number
+  position?: number
 }
 
 function resolveShipLocation(product: Product): string {
@@ -62,6 +66,8 @@ export default function ShowroomProductCard({
   product,
   style,
   dark = false,
+  room,
+  position,
 }: Props) {
   const { formatProduct } = useMarketplace()
   const { addToCart } = useCart()
@@ -74,6 +80,7 @@ export default function ShowroomProductCard({
   const hasMultiple = images.length > 1
 
   const cartBtnRef = useRef<View>(null)
+  const impressed = useRef(false)
 
   const opacities = useRef(
     images.map((_, i) => new Animated.Value(i === 0 ? 1 : 0.01))
@@ -82,6 +89,30 @@ export default function ShowroomProductCard({
   const currentRef = useRef(0)
   const busy = useRef(false)
   const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Impression once when the card mounts
+  useEffect(() => {
+    if (impressed.current || !product?._id) return
+    impressed.current = true
+    trackShowroomEvent({
+      productId: String(product._id),
+      type: 'impression',
+      room,
+      position,
+      region: product.region,
+    })
+  }, [product?._id, product?.region, room, position])
+
+  const trackOpen = useCallback(() => {
+    if (!product?._id) return
+    trackShowroomEvent({
+      productId: String(product._id),
+      type: 'open',
+      room,
+      position,
+      region: product.region,
+    })
+  }, [product?._id, product?.region, room, position])
 
   const clearHold = useCallback(() => {
     if (holdTimer.current) {
@@ -144,6 +175,14 @@ export default function ShowroomProductCard({
   }, [hasMultiple])
 
   const handleAddToCart = useCallback(() => {
+    trackShowroomEvent({
+      productId: String(product._id),
+      type: 'cart',
+      room,
+      position,
+      region: product.region,
+    })
+
     cartBtnRef.current?.measureInWindow((x, y, width, height) => {
       if (width <= 0 || height <= 0) {
         addToCart(product)
@@ -155,9 +194,8 @@ export default function ShowroomProductCard({
         addToCart(product)
       }
     })
-  }, [product, flyCart, addToCart])
+  }, [product, flyCart, addToCart, room, position])
 
-  // Same width behavior as original: base CARD_WIDTH, style can override
   const imageHeight = CARD_WIDTH * IMAGE_ASPECT
 
   const textPrimary = dark ? '#FFFFFF' : '#111111'
@@ -168,7 +206,10 @@ export default function ShowroomProductCard({
     <View style={[styles.card, { width: CARD_WIDTH }, style]}>
       <View style={[styles.imageWrap, { height: imageHeight }]}>
         <Link href={`/product/${product._id}` as any} asChild>
-          <Pressable style={StyleSheet.absoluteFillObject}>
+          <Pressable
+            style={StyleSheet.absoluteFillObject}
+            onPress={trackOpen}
+          >
             {images.length > 0 ? (
               images.map((uri, i) => (
                 <Animated.View
@@ -205,7 +246,7 @@ export default function ShowroomProductCard({
       </View>
 
       <Link href={`/product/${product._id}` as any} asChild>
-        <Pressable style={styles.info}>
+        <Pressable style={styles.info} onPress={trackOpen}>
           <Text style={[styles.name, { color: textPrimary }]} numberOfLines={1}>
             {product.name}
           </Text>

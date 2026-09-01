@@ -1,6 +1,7 @@
 import HeroBanner from '@/components/HeroBanner'
 import PlazoreTitleBar from '@/components/PlazoreTitleBar'
 import { AdaptiveShowroom } from '@/components/showroom'
+import { useMarketplace } from '@/context/MarketplaceContext'
 import ShowroomRoomNav, {
   ROOM_NAV_H,
 } from '@/components/showroom/ShowroomRoomNav'
@@ -8,6 +9,10 @@ import { ShowroomFlyCartProvider } from '@/components/showroom/ShowroomFlyCart'
 import api from '@/constants/api'
 import { Product } from '@/constants/types'
 import { usePlazoreChrome } from '@/context/PlazoreChromeContext'
+import {
+  getShowroomSessionId,
+  saveShowroomSessionId,
+} from '@/services/showroomEvents'
 import { useRouter } from 'expo-router'
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import {
@@ -27,11 +32,18 @@ const ROOM_NAV_HOLD_MS = 1200
 export default function Home() {
   const { setScrollProgress, setHomeChrome, openHub } = usePlazoreChrome()
   const router = useRouter()
+    const { region } = useMarketplace()
   const insets = useSafeAreaInsets()
   const { height: windowH } = useWindowDimensions()
   const heroH = Math.max(windowH, 1)
 
   const [products, setProducts] = useState<Product[]>([])
+  const [rooms, setRooms] = useState<{
+    1: Product[]
+    2: Product[]
+    3: Product[]
+    4: Product[]
+  } | null>(null)
   const [loading, setLoading] = useState(true)
   const [scrollProgress, setLocalProgress] = useState(0)
   const [activeRoom, setActiveRoom] = useState(1)
@@ -45,10 +57,11 @@ export default function Home() {
   const focusedRoom = useRef<number | null>(null)
   const roomNavPinned = useRef(false)
   const roomNavHoldUntil = useRef(0)
-  const selectionReleaseTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const selectionReleaseTimer = useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  )
   const lastProgress = useRef(-1)
 
-  // Own the chrome while Home is mounted — start fully hidden
   useEffect(() => {
     setHomeChrome(true)
     setScrollProgress(0)
@@ -59,22 +72,74 @@ export default function Home() {
     }
   }, [setHomeChrome, setScrollProgress])
 
-  const fetchProducts = async () => {
+    const fetchProducts = useCallback(async () => {
     try {
       setLoading(true)
-      const res = await api.get('/products?limit=24')
-      if (res.data.success) setProducts(res.data.data || [])
-      else setProducts([])
+
+      const sessionId = await getShowroomSessionId()
+      let list: Product[] = []
+      let nextRooms: {
+        1: Product[]
+        2: Product[]
+        3: Product[]
+        4: Product[]
+      } | null = null
+
+      try {
+        const res = await api.get('/products/showroom', {
+          params: {
+            sessionId,
+            region,
+          },
+        })
+
+        if (res.data?.success) {
+          if (res.data.sessionId) {
+            await saveShowroomSessionId(res.data.sessionId)
+          }
+
+          if (res.data.rooms) {
+            nextRooms = {
+              1: res.data.rooms[1] || [],
+              2: res.data.rooms[2] || [],
+              3: res.data.rooms[3] || [],
+              4: res.data.rooms[4] || [],
+            }
+          }
+
+          if (Array.isArray(res.data.data) && res.data.data.length > 0) {
+            list = res.data.data
+          } else if (nextRooms) {
+            list = [
+              ...nextRooms[1],
+              ...nextRooms[2],
+              ...nextRooms[3],
+              ...nextRooms[4],
+            ]
+          }
+        }
+      } catch {
+        const res = await api.get('/products', {
+          params: { limit: 140, region },
+        })
+        if (res.data?.success && Array.isArray(res.data.data)) {
+          list = res.data.data
+        }
+      }
+
+      setRooms(nextRooms)
+      setProducts(list)
     } catch {
+      setRooms(null)
       setProducts([])
     } finally {
       setLoading(false)
     }
-  }
+  }, [region])
 
   useEffect(() => {
     fetchProducts()
-  }, [])
+  }, [fetchProducts])
 
   const onRoomLayout = useCallback((roomNumber: number, y: number) => {
     roomYs.current[roomNumber] = y
@@ -99,12 +164,10 @@ export default function Home() {
     return current
   }
 
-    const onMainScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+  const onMainScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
     const y = e.nativeEvent.contentOffset.y
     scrollY.current = y
 
-    // ── Chrome: fully in by the time showroom is on screen ─────────────
-    // start fading when user is halfway through the hero → fully on at showroom
     const showY = Math.max(showroomY.current, heroH * 0.6, 1)
     const start = showY * 0.35
     const end = showY * 0.85
@@ -118,14 +181,16 @@ export default function Home() {
       setScrollProgress(p)
     }
 
-    // Room-nav visibility (unchanged)
     const rStart = showroomY.current - 180
     const rEnd = showroomY.current - 72
     let v = 0
     if (y >= rEnd) v = 1
     else if (y > rStart) v = (y - rStart) / (rEnd - rStart)
 
-    if (roomNavPinned.current && y >= showroomY.current - ROOM_NAV_PIN_CLEARANCE) {
+    if (
+      roomNavPinned.current &&
+      y >= showroomY.current - ROOM_NAV_PIN_CLEARANCE
+    ) {
       v = Math.max(v, 0.98)
     } else if (y < showroomY.current - ROOM_NAV_PIN_CLEARANCE) {
       roomNavPinned.current = false
@@ -232,6 +297,7 @@ export default function Home() {
           >
             <AdaptiveShowroom
               products={products}
+              rooms={rooms}
               loading={loading}
               onRoomLayout={onRoomLayout}
             />

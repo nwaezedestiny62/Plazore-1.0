@@ -6,83 +6,154 @@ import RoomTwo from './RoomTwo'
 import RoomThree from './RoomThree'
 import RoomFour from './RoomFour'
 
+export type ShowroomRooms = {
+  1?: Product[]
+  2?: Product[]
+  3?: Product[]
+  4?: Product[]
+}
+
 interface AdaptiveShowroomProps {
   products: Product[]
+  rooms?: ShowroomRooms | null
   loading: boolean
   onRoomLayout?: (roomNumber: number, y: number) => void
 }
 
+const ROOM_CAPACITY = {
+  1: 50,
+  2: 14,
+  3: 16,
+  4: 33,
+} as const
+
+function uniqueCount(rooms?: ShowroomRooms | null, products?: Product[]) {
+  const ids = new Set<string>()
+  const add = (list?: Product[]) => {
+    ;(list || []).forEach((p) => p?._id && ids.add(String(p._id)))
+  }
+  add(rooms?.[1])
+  add(rooms?.[2])
+  add(rooms?.[3])
+  add(rooms?.[4])
+  add(products)
+  return ids.size
+}
+
 export default function AdaptiveShowroom({
   products,
+  rooms,
   loading,
   onRoomLayout,
 }: AdaptiveShowroomProps) {
-  const count = products?.length || 0
+  const count = uniqueCount(rooms, products)
 
   const sections = useMemo(() => {
     const p = products || []
+    const serverRooms = rooms && (rooms[1]?.length || rooms[2]?.length || rooms[3]?.length || rooms[4]?.length)
 
-    // Small catalog → still fill all four rooms (no Room 5)
-    if (p.length > 0 && p.length <= 4) {
+    // Tiny catalog → reuse the same products in every room
+    const tinyPool =
+      (rooms?.[1]?.length ? rooms[1] : p).slice(0, 4)
+
+    if (count > 0 && count <= 4) {
+      const pool = tinyPool.length ? tinyPool : p
       return [
         {
           type: 'one' as const,
-          products: p,
-          title: 'THE SHOWROOM',
-          subtitle: 'Take a look around',
+          products: pool,
+          title: 'THE HORIZON',
+          subtitle: 'Expanded View',
         },
         {
           type: 'two' as const,
-          products: p,
-          title: 'THE EDIT',
-          subtitle: 'Side by Side',
+          products: pool,
+          title: 'THE CHAMBER',
+          subtitle: 'Private Selection',
         },
         {
           type: 'three' as const,
-          products: p,
+          products: pool,
           title: 'THE SIGNAL',
           subtitle: 'Worth Your Attention',
         },
         {
           type: 'four' as const,
-          products: p,
+          products: pool,
           title: 'THE LOCALE',
-          subtitle: 'From Around You',
-          regionLabel: 'A look at what\'s around you',
+          subtitle: 'From Your Region',
+          regionLabel: "A look at what's around you",
         },
       ]
     }
 
-    // Normal path — 4 rooms only (former Room 5 slice folded into Room 4)
+    // Preferred path: use server-ranked rooms as-is
+    if (serverRooms) {
+      return [
+        {
+          type: 'one' as const,
+          products: (rooms?.[1] || []).slice(0, ROOM_CAPACITY[1]),
+          title: 'THE HORIZON',
+          subtitle: 'Expanded View',
+        },
+        {
+          type: 'two' as const,
+          products: (rooms?.[2] || []).slice(0, ROOM_CAPACITY[2]),
+          title: 'THE CHAMBER',
+          subtitle: 'Private Selection',
+        },
+        {
+          type: 'three' as const,
+          products: (rooms?.[3] || []).slice(0, ROOM_CAPACITY[3]),
+          title: 'THE SIGNAL',
+          subtitle: 'Worth Your Attention',
+        },
+        {
+          type: 'four' as const,
+          products: (rooms?.[4] || []).slice(0, ROOM_CAPACITY[4]),
+          title: 'THE LOCALE',
+          subtitle: 'From Your Region',
+          regionLabel: "A look at what's around you",
+        },
+      ].filter((s) => s.products.length > 0)
+    }
+
+    // Fallback: slice the flat list
+    let cursor = 0
+    const take = (n: number) => {
+      const slice = p.slice(cursor, cursor + n)
+      cursor += slice.length
+      return slice
+    }
+
     return [
       {
         type: 'one' as const,
-        products: p.slice(0, 4),
+        products: take(ROOM_CAPACITY[1]),
         title: 'THE HORIZON',
         subtitle: 'Expanded View',
       },
       {
         type: 'two' as const,
-        products: p.slice(4, 8),
+        products: take(ROOM_CAPACITY[2]),
         title: 'THE CHAMBER',
         subtitle: 'Private Selection',
       },
       {
         type: 'three' as const,
-        products: p.slice(8, 12),
+        products: take(ROOM_CAPACITY[3]),
         title: 'THE SIGNAL',
         subtitle: 'Worth Your Attention',
       },
       {
         type: 'four' as const,
-        // Was 12–16; now takes the rest so nothing is dropped
-        products: p.slice(12),
+        products: take(ROOM_CAPACITY[4]),
         title: 'THE LOCALE',
         subtitle: 'From Your Region',
-        regionLabel: 'A look at what\'s around you',
+        regionLabel: "A look at what's around you",
       },
     ].filter((s) => s.products.length > 0)
-  }, [products])
+  }, [products, rooms, count])
 
   if (loading) {
     return (
@@ -142,7 +213,7 @@ export default function AdaptiveShowroom({
 
         return (
           <View
-            key={idx}
+            key={`${section.type}-${idx}`}
             onLayout={(e) => {
               onRoomLayout?.(roomNumber, e.nativeEvent.layout.y)
             }}

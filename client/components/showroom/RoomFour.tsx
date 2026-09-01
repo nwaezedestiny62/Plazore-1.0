@@ -2,9 +2,10 @@
  * RoomFour — THE LOCALE
  * Regional marketplace room.
  * Bright, open, grounded — “The Walk”
+ * Official capacity: 33 products.
  */
 import { Product } from '@/constants/types'
-import React from 'react'
+import React, { useMemo } from 'react'
 import {
   Dimensions,
   ScrollView,
@@ -17,7 +18,8 @@ import ScrollFadeUp from './ScrollFadeUp'
 
 const { width: SCREEN_W } = Dimensions.get('window')
 const CARD_W = Math.min(SCREEN_W * 0.58, 220)
-const CARD_GAP = 4 // was 16 — tight spacing between cards
+const CARD_GAP = 4
+const ROOM_CAPACITY = 33
 
 interface RoomFourProps {
   products: Product[]
@@ -27,11 +29,16 @@ interface RoomFourProps {
 }
 
 export default function RoomFour({
-  products,
+  products: incoming,
   title = 'THE LOCALE',
   subtitle = 'From Your Region',
-  regionLabel = 'Regional Selection',
+  regionLabel = "A look at what's around you",
 }: RoomFourProps) {
+  const products = useMemo(
+    () => (incoming || []).slice(0, ROOM_CAPACITY),
+    [incoming]
+  )
+
   return (
     <View style={styles.room}>
       <View style={styles.header}>
@@ -46,28 +53,35 @@ export default function RoomFour({
         </ScrollFadeUp>
       </View>
 
-      <ScrollFadeUp delay={200} duration={650} distance={24}>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.rail}
-          decelerationRate="fast"
-          snapToInterval={CARD_W + CARD_GAP}
-          snapToAlignment="start"
-        >
-          {products.map((product, index) => (
-            <View
-              key={`${product._id}-locale-${index}`}
-              style={[styles.cardWrap, { width: CARD_W, marginRight: CARD_GAP }]}
-            >
-              <ShowroomProductCard
-                product={product}
-                style={{ width: CARD_W }}
-              />
-            </View>
-          ))}
-        </ScrollView>
-      </ScrollFadeUp>
+      {products.length > 0 && (
+        <ScrollFadeUp delay={200} duration={650} distance={24}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.rail}
+            decelerationRate="fast"
+            snapToInterval={CARD_W + CARD_GAP}
+            snapToAlignment="start"
+          >
+            {products.map((product, index) => (
+              <View
+                key={`${product._id}-locale-${index}`}
+                style={[
+                  styles.cardWrap,
+                  { width: CARD_W, marginRight: CARD_GAP },
+                ]}
+              >
+                <ShowroomProductCard
+                  product={product}
+                  room={4}
+                  position={index}
+                  style={{ width: CARD_W }}
+                />
+              </View>
+            ))}
+          </ScrollView>
+        </ScrollFadeUp>
+      )}
 
       <ScrollFadeUp delay={320} duration={500} distance={12}>
         <Text style={styles.note}>
@@ -82,7 +96,7 @@ const styles = StyleSheet.create({
   room: {
     backgroundColor: '#F7F1E9',
     paddingTop: 52,
-    paddingBottom: 100, // ← increased for more space after the final text
+    paddingBottom: 100,
     width: SCREEN_W,
   },
   header: {
@@ -120,7 +134,7 @@ const styles = StyleSheet.create({
     color: '#A89888',
     textAlign: 'center',
     marginTop: 28,
-    marginBottom: 24, // ← extra breathing room after the note
+    marginBottom: 24,
     paddingHorizontal: 24,
   },
 })

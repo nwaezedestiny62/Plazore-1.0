@@ -1,5 +1,5 @@
 import { Product } from '@/constants/types'
-import React from 'react'
+import React, { useMemo } from 'react'
 import { Dimensions, StyleSheet, Text, View } from 'react-native'
 import ShowroomProductCard from './ShowroomProductCard'
 import ScrollFadeUp from './ScrollFadeUp'
@@ -17,14 +17,17 @@ export default function RoomTwo({
   title = 'THE CHAMBER',
   subtitle = 'Private Selection',
 }: RoomTwoProps) {
-  // Take first two products for the dual focus
-  const left = products[0]
-  const right = products[1]
-  const rest = products.slice(2)
+  const { left, right, rest } = useMemo(() => {
+    const list = products || []
+    return {
+      left: list[0],
+      right: list[1],
+      rest: list.slice(2, 14),
+    }
+  }, [products])
 
   return (
     <View style={styles.room}>
-      {/* Header */}
       <View style={styles.header}>
         <ScrollFadeUp delay={40} duration={550} distance={16}>
           <Text style={styles.kicker}>{title}</Text>
@@ -37,32 +40,46 @@ export default function RoomTwo({
         </ScrollFadeUp>
       </View>
 
-      {/* Dual large products */}
-      <View style={styles.dual}>
-        {left && (
-          <ScrollFadeUp delay={200} duration={700} distance={30} style={styles.dualItem}>
-            <ShowroomProductCard product={left} />
-          </ScrollFadeUp>
-        )}
-        {right && (
-          <ScrollFadeUp delay={280} duration={700} distance={30} style={styles.dualItem}>
-            <ShowroomProductCard product={right} />
-          </ScrollFadeUp>
-        )}
-      </View>
+      {(left || right) && (
+        <View style={styles.dual}>
+          {left && (
+            <ScrollFadeUp
+              delay={200}
+              duration={700}
+              distance={30}
+              style={styles.dualItem}
+            >
+              <ShowroomProductCard product={left} room={2} position={0} />
+            </ScrollFadeUp>
+          )}
+          {right && (
+            <ScrollFadeUp
+              delay={280}
+              duration={700}
+              distance={30}
+              style={styles.dualItem}
+            >
+              <ShowroomProductCard product={right} room={2} position={1} />
+            </ScrollFadeUp>
+          )}
+        </View>
+      )}
 
-      {/* Remaining products in a quieter secondary row if any */}
       {rest.length > 0 && (
         <View style={styles.secondary}>
           {rest.map((product, index) => (
             <ScrollFadeUp
               key={`${product._id}-s-${index}`}
-              delay={360 + index * 70}
+              delay={360 + index * 55}
               duration={600}
               distance={22}
               style={styles.secondaryItem}
             >
-              <ShowroomProductCard product={product} />
+              <ShowroomProductCard
+                product={product}
+                room={2}
+                position={index + 2}
+              />
             </ScrollFadeUp>
           ))}
         </View>

@@ -21,15 +21,6 @@ export type ProductsResponse = {
   data: import("./types").Product[];
 };
 
-export async function fetchMallProducts() {
-  try {
-    const json = await apiGet<ProductsResponse>("/products?limit=24");
-    return json.data || [];
-  } catch {
-    return [];
-  }
-}
-
 export async function searchSuggest(q: string) {
   try {
     const json = await apiGet<{
@@ -88,5 +79,70 @@ export async function fetchStore(id: string) {
     };
   } catch {
     return { store: null, products: [] };
+  }
+}
+
+export type ShowroomRooms = {
+  1: import("./types").Product[];
+  2: import("./types").Product[];
+  3: import("./types").Product[];
+  4: import("./types").Product[];
+};
+
+export type ShowroomResponse = {
+  success: boolean;
+  sessionId?: string;
+  data?: import("./types").Product[];
+  rooms?: {
+    1?: import("./types").Product[];
+    2?: import("./types").Product[];
+    3?: import("./types").Product[];
+    4?: import("./types").Product[];
+  };
+};
+
+export async function fetchMallProducts() {
+  try {
+    const json = await apiGet<ProductsResponse>("/products?limit=140");
+    return json.data || [];
+  } catch {
+    return [];
+  }
+}
+
+export async function fetchShowroom(opts?: {
+  region?: string;
+  sessionId?: string;
+}) {
+  const params = new URLSearchParams();
+  if (opts?.region) params.set("region", opts.region);
+  if (opts?.sessionId) params.set("sessionId", opts.sessionId);
+  const qs = params.toString();
+
+  try {
+    const json = await apiGet<ShowroomResponse>(
+      `/products/showroom${qs ? `?${qs}` : ""}`
+    );
+
+    const rooms: ShowroomRooms = {
+      1: json.rooms?.[1] || [],
+      2: json.rooms?.[2] || [],
+      3: json.rooms?.[3] || [],
+      4: json.rooms?.[4] || [],
+    };
+
+    const products =
+      Array.isArray(json.data) && json.data.length
+        ? json.data
+        : [...rooms[1], ...rooms[2], ...rooms[3], ...rooms[4]];
+
+    return {
+      products,
+      rooms,
+      sessionId: json.sessionId || "",
+    };
+  } catch {
+    const products = await fetchMallProducts();
+    return { products, rooms: null as ShowroomRooms | null, sessionId: "" };
   }
 }

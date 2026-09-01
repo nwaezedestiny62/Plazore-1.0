@@ -3,11 +3,12 @@
  * Single-product focus stage.
  * Dark, deliberate, almost ceremonial.
  * Cart button is rendered only once (no stacking).
+ * Official capacity: 16 products.
  */
 
 import { Product } from '@/constants/types'
 import { Image } from 'expo-image'
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Animated,
   Dimensions,
@@ -21,6 +22,7 @@ import { Ionicons } from '@expo/vector-icons'
 import { useShowroomFlyCart } from './ShowroomFlyCart'
 import { useCart } from '@/context/CartContext'
 import { useMarketplace } from '@/context/MarketplaceContext'
+import { trackShowroomEvent } from '@/services/showroomEvents'
 import { Link } from 'expo-router'
 import ScrollFadeUp from './ScrollFadeUp'
 
@@ -29,6 +31,7 @@ const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window')
 const HOLD_MS = 5200
 const CROSSFADE_MS = 1800
 const EASE = Easing.bezier(0.4, 0.0, 0.2, 1.0)
+const ROOM_CAPACITY = 16
 
 interface RoomThreeProps {
   products: Product[]
@@ -37,23 +40,50 @@ interface RoomThreeProps {
 }
 
 export default function RoomThree({
-  products,
+  products: incoming,
   title = 'THE SIGNAL',
   subtitle = 'Worth Your Attention',
 }: RoomThreeProps) {
+  const products = useMemo(
+    () => (incoming || []).slice(0, ROOM_CAPACITY),
+    [incoming]
+  )
+
   const { formatProduct } = useMarketplace()
   const [current, setCurrent] = useState(0)
   const currentRef = useRef(0)
   const busy = useRef(false)
   const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const impressed = useRef(false)
 
   const opacities = useRef(
     products.map((_, i) => new Animated.Value(i === 0 ? 1 : 0.01))
   ).current
 
   useEffect(() => {
+    if (opacities.length !== products.length) {
+      currentRef.current = 0
+      setCurrent(0)
+    }
+  }, [products.length])
+
+  useEffect(() => {
     currentRef.current = current
   }, [current])
+
+  useEffect(() => {
+    if (impressed.current || products.length === 0) return
+    impressed.current = true
+    products.forEach((product, i) => {
+      trackShowroomEvent({
+        productId: String(product._id),
+        type: 'impression',
+        room: 3,
+        position: i,
+        region: product.region,
+      })
+    })
+  }, [products])
 
   const clearHold = useCallback(() => {
     if (holdTimer.current) {
@@ -62,23 +92,30 @@ export default function RoomThree({
     }
   }, [])
 
-  // inside component:
-const flyCart = useShowroomFlyCart()
-const { addToCart } = useCart()
-const cartBtnRef = useRef<View>(null)
+  const flyCart = useShowroomFlyCart()
+  const { addToCart } = useCart()
+  const cartBtnRef = useRef<View>(null)
 
-const handleAddToCart = () => {
-  const product = products[currentRef.current]
-  if (!product) return
+  const handleAddToCart = () => {
+    const product = products[currentRef.current]
+    if (!product) return
 
-  cartBtnRef.current?.measureInWindow((x, y, width, height) => {
-    if (flyCart) {
-      flyCart.flyAdd(product, { x, y, width, height })
-    } else {
-      addToCart(product)
-    }
-  })
-}
+    trackShowroomEvent({
+      productId: String(product._id),
+      type: 'cart',
+      room: 3,
+      position: currentRef.current,
+      region: product.region,
+    })
+
+    cartBtnRef.current?.measureInWindow((x, y, width, height) => {
+      if (flyCart) {
+        flyCart.flyAdd(product, { x, y, width, height })
+      } else {
+        addToCart(product)
+      }
+    })
+  }
 
   const scheduleHold = useCallback(() => {
     clearHold()
@@ -92,7 +129,8 @@ const handleAddToCart = () => {
     (raw: number) => {
       if (busy.current || products.length < 2) return
       const from = currentRef.current
-      const target = ((raw % products.length) + products.length) % products.length
+      const target =
+        ((raw % products.length) + products.length) % products.length
       if (target === from) return
 
       busy.current = true
@@ -138,11 +176,8 @@ const handleAddToCart = () => {
 
   if (!products.length) return null
 
-  const active = products[current]
-
   return (
     <View style={styles.room}>
-      {/* Header */}
       <View style={styles.header}>
         <ScrollFadeUp delay={40} duration={600} distance={16}>
           <Text style={styles.kicker}>{title}</Text>
@@ -152,9 +187,7 @@ const handleAddToCart = () => {
         </ScrollFadeUp>
       </View>
 
-      {/* Main Stage */}
       <View style={styles.stage}>
-        {/* Product layers (images + text only) */}
         {products.map((product, i) => (
           <Animated.View
             key={product._id}
@@ -165,7 +198,18 @@ const handleAddToCart = () => {
             ]}
           >
             <Link href={`/product/${product._id}` as any} asChild>
-              <Pressable style={styles.stageInner}>
+              <Pressable
+                style={styles.stageInner}
+                onPress={() =>
+                  trackShowroomEvent({
+                    productId: String(product._id),
+                    type: 'open',
+                    room: 3,
+                    position: i,
+                    region: product.region,
+                  })
+                }
+              >
                 <View style={styles.imageWrap}>
                   {product.images?.[0] ? (
                     <Image
@@ -198,19 +242,16 @@ const handleAddToCart = () => {
           </Animated.View>
         ))}
 
-        {/* SINGLE cart button — lives outside the layers so it never stacks */}
-        {/* SINGLE cart button — outside layers so it never stacks */}
-<Pressable
-  ref={cartBtnRef}
-  onPress={handleAddToCart}
-  style={styles.cartButton}
-  hitSlop={12}
->
-  <Ionicons name="cart-outline" size={17} color="#111" />
-</Pressable>
+        <Pressable
+          ref={cartBtnRef}
+          onPress={handleAddToCart}
+          style={styles.cartButton}
+          hitSlop={12}
+        >
+          <Ionicons name="cart-outline" size={17} color="#111" />
+        </Pressable>
       </View>
 
-      {/* Dots */}
       {products.length > 1 && (
         <View style={styles.dots}>
           {products.map((_, i) => (
@@ -275,11 +316,9 @@ const styles = StyleSheet.create({
   placeholder: {
     backgroundColor: '#1A1A1A',
   },
-  // Single cart button — same design as product cards
   cartButton: {
     position: 'absolute',
-    // Position it relative to the image area
-    top: (SCREEN_H * 0.58 * 0.78) - 11 - 34, // bottom of image area
+    top: SCREEN_H * 0.58 * 0.78 - 11 - 34,
     right: 24 + 11,
     width: 34,
     height: 34,

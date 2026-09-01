@@ -1,6 +1,6 @@
 import { Product } from '@/constants/types'
 import { Image } from 'expo-image'
-import React from 'react'
+import React, { useMemo } from 'react'
 import {
   Dimensions,
   ScrollView,
@@ -13,7 +13,7 @@ import ScrollFadeUp from './ScrollFadeUp'
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window')
 const CARD_W = Math.min(SCREEN_W * 0.58, 220)
-const CARD_GAP = 8 // was 14 — tight spacing between cards
+const CARD_GAP = 8
 
 interface RoomOneProps {
   products: Product[]
@@ -23,13 +23,19 @@ interface RoomOneProps {
 
 export default function RoomOne({
   products,
-  title = 'THE SHOWROOM',
-  subtitle = 'Take a look around',
+  title = 'THE HORIZON',
+  subtitle = 'Expanded View',
 }: RoomOneProps) {
-  const featureImage = products[0]?.images?.[0]
+  const { railA, railB, featureImage } = useMemo(() => {
+    const list = products || []
+    const mid = Math.ceil(list.length / 2)
 
-  const railA = products
-  const railB = [...products].reverse()
+    return {
+      featureImage: list[0]?.images?.[0],
+      railA: list.slice(0, Math.min(mid, 25)),
+      railB: list.slice(mid, mid + 25),
+    }
+  }, [products])
 
   return (
     <View style={styles.room}>
@@ -60,61 +66,69 @@ export default function RoomOne({
         </View>
       </ScrollFadeUp>
 
-      <View style={styles.railSection}>
-        <ScrollFadeUp delay={160} duration={550} distance={18}>
-          <Text style={styles.railLabel}>NOW SHOWING</Text>
-        </ScrollFadeUp>
+      {railA.length > 0 && (
+        <View style={styles.railSection}>
+          <ScrollFadeUp delay={160} duration={550} distance={18}>
+            <Text style={styles.railLabel}>NOW SHOWING</Text>
+          </ScrollFadeUp>
 
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.rail}
-          decelerationRate="fast"
-          snapToInterval={CARD_W + CARD_GAP}
-        >
-          {railA.map((product, index) => (
-            <ScrollFadeUp
-              key={`a-${product._id}-${index}`}
-              delay={220 + index * 70}
-              duration={600}
-              distance={24}
-              style={{ width: CARD_W, marginRight: CARD_GAP }}
-            >
-              <ShowroomProductCard
-                product={product}
-                dark
-                style={{ width: CARD_W }}
-              />
-            </ScrollFadeUp>
-          ))}
-        </ScrollView>
-      </View>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.rail}
+            decelerationRate="fast"
+            snapToInterval={CARD_W + CARD_GAP}
+          >
+            {railA.map((product, index) => (
+              <ScrollFadeUp
+                key={`a-${product._id}-${index}`}
+                delay={220 + index * 55}
+                duration={600}
+                distance={24}
+                style={{ width: CARD_W, marginRight: CARD_GAP }}
+              >
+                <ShowroomProductCard
+                  product={product}
+                  dark
+                  room={1}
+                  position={index}
+                  style={{ width: CARD_W }}
+                />
+              </ScrollFadeUp>
+            ))}
+          </ScrollView>
+        </View>
+      )}
 
-      <View style={[styles.railSection, { paddingTop: 28 }]}>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.rail}
-          decelerationRate="fast"
-          snapToInterval={CARD_W + CARD_GAP}
-        >
-          {railB.map((product, index) => (
-            <ScrollFadeUp
-              key={`b-${product._id}-${index}`}
-              delay={320 + index * 70}
-              duration={600}
-              distance={24}
-              style={{ width: CARD_W, marginRight: CARD_GAP }}
-            >
-              <ShowroomProductCard
-                product={product}
-                dark
-                style={{ width: CARD_W }}
-              />
-            </ScrollFadeUp>
-          ))}
-        </ScrollView>
-      </View>
+      {railB.length > 0 && (
+        <View style={[styles.railSection, { paddingTop: 28 }]}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.rail}
+            decelerationRate="fast"
+            snapToInterval={CARD_W + CARD_GAP}
+          >
+            {railB.map((product, index) => (
+              <ScrollFadeUp
+                key={`b-${product._id}-${index}`}
+                delay={320 + index * 55}
+                duration={600}
+                distance={24}
+                style={{ width: CARD_W, marginRight: CARD_GAP }}
+              >
+                <ShowroomProductCard
+                  product={product}
+                  dark
+                  room={1}
+                  position={railA.length + index}
+                  style={{ width: CARD_W }}
+                />
+              </ScrollFadeUp>
+            ))}
+          </ScrollView>
+        </View>
+      )}
     </View>
   )
 }

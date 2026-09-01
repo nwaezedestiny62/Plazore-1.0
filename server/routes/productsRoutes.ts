@@ -3,6 +3,8 @@ import {
   createProduct,
   getProduct,
   getProducts,
+  getShowroom,
+  trackShowroomEvent,
   updateProduct,
   deleteProduct,
   setProductVisibility,
@@ -13,8 +15,10 @@ import SellerRouter from "./sellerRoutes.js";
 
 const ProductRouter = express.Router();
 
-// Public
+// Public — specific paths BEFORE /:id
 ProductRouter.get("/", getProducts);
+ProductRouter.get("/showroom", getShowroom);
+ProductRouter.post("/showroom/event", trackShowroomEvent);
 ProductRouter.get("/:id", getProduct);
 
 // Admin create/update/delete
