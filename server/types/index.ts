@@ -74,14 +74,12 @@ export interface IOrder extends Document {
   updatedAt: Date;
 }
 
-/** Where this product ships from (not seller home address) */
 export interface IFulfillmentLocation {
   countryCode: string;
   country: string;
   stateCode?: string;
   state?: string;
   city: string;
-  /** Public-safe: "Lagos, Nigeria" — never street-level */
   displayLabel: string;
 }
 
@@ -103,7 +101,6 @@ export interface IProduct extends Document {
   isFeatured: boolean;
   isActive: boolean;
   seller: Types.ObjectId;
-  /** Marketplace currency/region inherited from seller (e.g. "NG") */
   region: string;
   shipping?: {
     method: "self" | "courier";
@@ -111,13 +108,42 @@ export interface IProduct extends Document {
     deliveryFee?: number;
   };
   fulfillmentLocation?: IFulfillmentLocation;
-  /** Category-specific structured data */
   specifications?: Map<string, string> | Record<string, string>;
-  /** Cloudinary metadata only */
   verificationDocuments?: IVerificationDocument[];
   wishlistCount?: number;
   createdAt: Date;
   updatedAt: Date;
+}
+
+export type ModerationStatus =
+  | "NORMAL"
+  | "ACTIVITY_CHECK"
+  | "UNDER_REVIEW"
+  | "SUSPENDED"
+  | "BLOCKED"
+  | "PARDONED"
+  | "RESTORED";
+
+export type ModerationLastOutcome = "PARDONED" | "RESTORED" | null;
+
+export interface IModerationSide {
+  status: ModerationStatus;
+  reason?: string;
+  publicReason?: string;
+  startedAt?: Date;
+  endsAt?: Date;
+  caseId?: Types.ObjectId;
+  updatedAt?: Date;
+  lastOutcome?: ModerationLastOutcome;
+  restrictions?: {
+    preventNewListings?: boolean;
+    preventPublishing?: boolean;
+  };
+}
+
+export interface IUserModeration {
+  buyer: IModerationSide;
+  seller: IModerationSide;
 }
 
 export interface IUser extends Document {
@@ -157,6 +183,8 @@ export interface IUser extends Document {
     deliveryMethod?: "courier" | "self" | "";
     courierCompany?: string;
   };
+
+  moderation?: IUserModeration;
 
   createdAt: Date;
   updatedAt: Date;

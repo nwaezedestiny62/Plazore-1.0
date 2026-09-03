@@ -7,7 +7,10 @@ import { useState } from "react";
 import { Menu, X } from "lucide-react";
 
 const NAV = [
-  { section: "Core", items: [{ href: "/overview", label: "Overview" }] },
+  {
+    section: "Core",
+    items: [{ href: "/overview", label: "Overview" }],
+  },
   {
     section: "Marketplace",
     items: [
@@ -17,10 +20,11 @@ const NAV = [
     ],
   },
   {
-    section: "Support",
+    section: "Trust & Safety",
     items: [
-      { href: "/contact", label: "Contact Inbox" },
+      { href: "/moderation", label: "Moderation" },
       { href: "/reports", label: "Reports" },
+      { href: "/contact", label: "Contact Inbox" },
     ],
   },
   {
@@ -55,9 +59,12 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
           >
             {open ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
           </button>
-          {/* Put logo in admin/public/plazore-logo.png */}
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/plazore-logo.png" alt="Plazore" className="h-8 w-8 object-contain" />
+          <img
+            src="/plazore-logo.png"
+            alt="Plazore"
+            className="h-8 w-8 object-contain"
+          />
           <div>
             <p className="text-[13px] font-semibold tracking-wide">Plazore Admin</p>
             <p className="hidden text-[10px] uppercase tracking-[0.16em] text-[#737A86] sm:block">
@@ -65,7 +72,8 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
             </p>
           </div>
         </div>
-        <UserButton afterSignOutUrl="/sign-in" />
+        {/* Clerk v6+: afterSignOutUrl removed — configure signOutUrl on ClerkProvider if needed */}
+        <UserButton />
       </header>
 
       <div className="mx-auto flex max-w-[1600px]">
@@ -83,7 +91,8 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
                 <div className="space-y-1">
                   {group.items.map((item) => {
                     const active =
-                      pathname === item.href || pathname.startsWith(item.href + "/");
+                      pathname === item.href ||
+                      pathname.startsWith(item.href + "/");
                     return (
                       <Link
                         key={item.href}
@@ -104,6 +113,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
             ))}
           </nav>
         </aside>
+
         {open && (
           <button
             type="button"
@@ -111,6 +121,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
             onClick={() => setOpen(false)}
           />
         )}
+
         <main className="min-h-[calc(100dvh-3.5rem)] min-w-0 flex-1 p-4 md:p-6 lg:p-8">
           {children}
         </main>

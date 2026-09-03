@@ -145,6 +145,7 @@ export const getAdminUsers = async (req: Request, res: Response) => {
         { email: { $regex: q, $options: "i" } },
         { storeName: { $regex: q, $options: "i" } },
         { phone: { $regex: q, $options: "i" } },
+        { clerkId: { $regex: q, $options: "i" } },
       ];
     }
 
@@ -154,7 +155,7 @@ export const getAdminUsers = async (req: Request, res: Response) => {
         .skip((page - 1) * limit)
         .limit(limit)
         .select(
-          "name email phone role image marketplaceRegion storeName storeDescription isSellerVerified isSellerSuspended sellerAppliedAt shippingDefaults createdAt updatedAt"
+          "name email phone role image clerkId marketplaceRegion storeName storeDescription businessGoal storeLogo storeBanner isSellerVerified isSellerSuspended sellerAppliedAt payout shippingDefaults createdAt updatedAt"
         )
         .lean(),
       User.countDocuments(filter),
@@ -192,32 +193,84 @@ export const getAdminUsers = async (req: Request, res: Response) => {
   }
 };
 
+/** FULL user document + rich related data */
 export const getAdminUserDetail = async (req: Request, res: Response) => {
   try {
-    const user = await User.findById(req.params.id)
-      .select(
-        "name email phone role image marketplaceRegion storeName storeDescription storeLogo isSellerVerified isSellerSuspended sellerAppliedAt shippingDefaults createdAt updatedAt"
-      )
-      .lean();
-    if (!user) return res.status(404).json({ success: false, message: "User not found" });
+    // No .select() — return every field on the user
+    const user = await User.findById(req.params.id).lean();
+    if (!user) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
 
-    const [products, orderCount, productCount] = await Promise.all([
+    const [
+      products,
+      productCount,
+      activeProductCount,
+      orderCountAsBuyer,
+      orderCountAsSeller,
+      recentOrdersAsBuyer,
+      recentOrdersAsSeller,
+      gmvAsSeller,
+    ] = await Promise.all([
       user.role === "seller"
         ? Product.find({ seller: user._id })
             .sort({ createdAt: -1 })
-            .limit(40)
-            .select("name price images category isActive region stock fulfillmentLocation createdAt")
+            .limit(50)
+            .select(
+              "name price images category subCategory brand stock isActive region fulfillmentLocation createdAt updatedAt"
+            )
             .lean()
         : Promise.resolve([]),
-      Order.countDocuments({
-        $or: [{ buyer: user._id }, { seller: user._id }],
-      }),
-      user.role === "seller" ? Product.countDocuments({ seller: user._id }) : Promise.resolve(0),
+      user.role === "seller"
+        ? Product.countDocuments({ seller: user._id })
+        : Promise.resolve(0),
+      user.role === "seller"
+        ? Product.countDocuments({ seller: user._id, isActive: true })
+        : Promise.resolve(0),
+      Order.countDocuments({ buyer: user._id }),
+      Order.countDocuments({ seller: user._id }),
+      Order.find({ buyer: user._id })
+        .sort({ createdAt: -1 })
+        .limit(10)
+        .populate("seller", "name storeName")
+        .select("orderNumber orderStatus paymentStatus totalAmount createdAt")
+        .lean(),
+      Order.find({ seller: user._id })
+        .sort({ createdAt: -1 })
+        .limit(10)
+        .populate("buyer", "name email")
+        .select("orderNumber orderStatus paymentStatus totalAmount createdAt")
+        .lean(),
+      user.role === "seller"
+        ? Order.aggregate([
+            {
+              $match: {
+                seller: user._id,
+                orderStatus: { $ne: "Cancelled" },
+                paymentStatus: "paid",
+              },
+            },
+            { $group: { _id: null, total: { $sum: "$totalAmount" } } },
+          ])
+        : Promise.resolve([]),
     ]);
 
     res.json({
       success: true,
-      data: { user, products, stats: { orderCount, productCount } },
+      data: {
+        user, // FULL document
+        products,
+        stats: {
+          productCount,
+          activeProductCount,
+          orderCountAsBuyer,
+          orderCountAsSeller,
+          orderCount: orderCountAsBuyer + orderCountAsSeller,
+          gmv: Math.round((gmvAsSeller as any)?.[0]?.total || 0),
+        },
+        recentOrdersAsBuyer,
+        recentOrdersAsSeller,
+      },
     });
   } catch (error: any) {
     res.status(500).json({ success: false, message: error.message });
@@ -280,10 +333,36 @@ export const setSellerSuspended = async (req: Request, res: Response) => {
     }
     user.isSellerSuspended = Boolean(req.body?.suspended);
     await user.save();
+
+    // Return full user so UI can live-update without another fetch if desired
+    const full = await User.findById(user._id).lean();
+
     res.json({
       success: true,
       message: user.isSellerSuspended ? "Seller suspended" : "Seller reactivated",
-      data: { _id: user._id, isSellerSuspended: user.isSellerSuspended },
+      data: full,
+    });
+  } catch (error: any) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+export const setSellerVerified = async (req: Request, res: Response) => {
+  try {
+    const user = await User.findById(req.params.id);
+    if (!user) return res.status(404).json({ success: false, message: "User not found" });
+    if (user.role !== "seller") {
+      return res.status(400).json({ success: false, message: "User is not a seller" });
+    }
+    user.isSellerVerified = Boolean(req.body?.verified);
+    await user.save();
+
+    const full = await User.findById(user._id).lean();
+
+    res.json({
+      success: true,
+      message: user.isSellerVerified ? "Seller verified" : "Seller verification removed",
+      data: full,
     });
   } catch (error: any) {
     res.status(500).json({ success: false, message: error.message });
@@ -306,7 +385,6 @@ export const setProductActive = async (req: Request, res: Response) => {
   }
 };
 
-/** Orders — includes orderNumber (PLZ#xxxxx) */
 export const getAdminOrders = async (req: Request, res: Response) => {
   try {
     const page = Math.max(1, parseInt(String(req.query.page || "1"), 10));
@@ -324,7 +402,6 @@ export const getAdminOrders = async (req: Request, res: Response) => {
     if (region) filter["shippingAddress.country"] = { $regex: region, $options: "i" };
 
     if (q) {
-      // Search PLZ# code, orderNumber, or fall through to post-populate name search
       const orderNumberQ = q.replace(/^#/, "").trim();
       filter.$or = [
         { orderNumber: { $regex: orderNumberQ, $options: "i" } },
@@ -348,7 +425,6 @@ export const getAdminOrders = async (req: Request, res: Response) => {
       Order.countDocuments(filter),
     ]);
 
-    // Extra filter on populated buyer/seller names when q is present
     let data = raw;
     if (q) {
       const ql = q.toLowerCase();
@@ -397,7 +473,6 @@ export const getAdminOrderDetail = async (req: Request, res: Response) => {
   }
 };
 
-// ── Contact ─────────────────────────────────────────────
 export const getAdminContacts = async (req: Request, res: Response) => {
   try {
     const page = Math.max(1, parseInt(String(req.query.page || "1"), 10));
@@ -453,8 +528,8 @@ export const updateAdminContact = async (req: Request, res: Response) => {
   try {
     const item = await ContactMessage.findById(req.params.id);
     if (!item) return res.status(404).json({ success: false, message: "Not found" });
-
     const admin = (req as any).user;
+
     if (req.body.status) item.status = req.body.status;
     if (req.body.response) {
       item.responses.push({
@@ -476,7 +551,6 @@ export const updateAdminContact = async (req: Request, res: Response) => {
   }
 };
 
-// ── Reports ─────────────────────────────────────────────
 export const getAdminReports = async (req: Request, res: Response) => {
   try {
     const page = Math.max(1, parseInt(String(req.query.page || "1"), 10));

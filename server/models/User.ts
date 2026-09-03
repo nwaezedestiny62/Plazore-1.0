@@ -1,7 +1,42 @@
 import mongoose from "mongoose";
 import { IUser } from "../types/index.js";
 
-const userSchema = new mongoose.Schema<IUser>(
+const moderationSideSchema = new mongoose.Schema(
+  {
+    status: {
+      type: String,
+      enum: [
+        "NORMAL",
+        "ACTIVITY_CHECK",
+        "UNDER_REVIEW",
+        "SUSPENDED",
+        "BLOCKED",
+        "PARDONED",
+        "RESTORED",
+      ],
+      default: "NORMAL",
+    },
+    reason: { type: String, default: "" },
+    publicReason: { type: String, default: "" },
+    startedAt: { type: Date },
+    endsAt: { type: Date },
+    caseId: { type: mongoose.Schema.Types.ObjectId, ref: "ModerationCase" },
+    updatedAt: { type: Date },
+    // do NOT put null in enum — use String + default undefined
+    lastOutcome: {
+      type: String,
+      enum: ["PARDONED", "RESTORED"],
+      default: undefined,
+    },
+    restrictions: {
+      preventNewListings: { type: Boolean, default: false },
+      preventPublishing: { type: Boolean, default: false },
+    },
+  },
+  { _id: false }
+);
+
+const userSchema = new mongoose.Schema(
   {
     name: { type: String, trim: true },
     email: { type: String, unique: true, trim: true },
@@ -14,14 +49,12 @@ const userSchema = new mongoose.Schema<IUser>(
       default: "buyer",
     },
 
-    // Marketplace Region
     marketplaceRegion: {
       type: String,
       default: "NG",
       index: true,
     },
 
-    // Seller profile
     storeName: { type: String, trim: true },
     storeDescription: { type: String, default: "" },
     businessGoal: { type: String, default: "" },
@@ -31,14 +64,12 @@ const userSchema = new mongoose.Schema<IUser>(
     isSellerSuspended: { type: Boolean, default: false },
     sellerAppliedAt: { type: Date },
 
-    // Payout
     payout: {
       bankName: { type: String, default: "" },
       accountName: { type: String, default: "" },
       accountNumber: { type: String, default: "" },
     },
 
-    // Shipping defaults
     shippingDefaults: {
       address: {
         street: { type: String },
@@ -53,6 +84,11 @@ const userSchema = new mongoose.Schema<IUser>(
         default: "",
       },
       courierCompany: { type: String, default: "" },
+    },
+
+    moderation: {
+      buyer: { type: moderationSideSchema, default: () => ({}) },
+      seller: { type: moderationSideSchema, default: () => ({}) },
     },
   },
   { timestamps: true }
