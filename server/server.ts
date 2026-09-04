@@ -21,6 +21,7 @@ import ChatRouter from "./routes/chatRoutes.js";
 import SavedStoreRouter from "./routes/savedStoreRoutes.js";
 import PaymentMethodRouter from "./routes/paymentMethodRoutes.js";
 import ModerationRouter from "./routes/moderationRoutes.js";
+import ContactRouter from "./routes/contactRoutes.js";
 
 const app = express();
 
@@ -71,6 +72,7 @@ app.use("/api/ai", AIRouter);
 app.use("/api/chat", ChatRouter);
 app.use("/api/saved-stores", SavedStoreRouter);
 app.use("/api/payment-methods", PaymentMethodRouter);
+app.use("/api/contact", ContactRouter);
 
 // Single moderation mount (covers /me + admin actions)
 app.use("/api/moderation", ModerationRouter);

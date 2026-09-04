@@ -5,6 +5,7 @@ import Order from "../models/Order.js";
 import ContactMessage from "../models/ContactMessage.js";
 import ProductPerformance from "../models/ProductPerformance.js";
 import Report from "../models/Report.js";
+import Notification from "../models/Notification.js";
 
 const COUNTRY_ALIASES: Record<string, string[]> = {
   NG: ["NG", "Nigeria"],
@@ -19,6 +20,19 @@ const COUNTRY_ALIASES: Record<string, string[]> = {
 
 function escapeRegex(s: string) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+async function safeNotify(userId: any, title: string, message: string) {
+  try {
+    await Notification.create({
+      user: userId,
+      type: "general",
+      title,
+      message,
+    });
+  } catch (e) {
+    console.error("admin notify skipped:", (e as any)?.message);
+  }
 }
 
 export const getDashboardStats = async (req: Request, res: Response) => {
@@ -76,17 +90,35 @@ export const getDashboardStats = async (req: Request, res: Response) => {
         .limit(8)
         .populate("buyer", "name email")
         .populate("seller", "name storeName email")
-        .select("orderNumber orderStatus paymentStatus totalAmount createdAt"),
-      ContactMessage.countDocuments({ status: "new" }),
+        .select(
+          "orderNumber orderStatus paymentStatus totalAmount createdAt"
+        ),
+           ContactMessage.countDocuments({ status: "new" } as any),
       ContactMessage.countDocuments({
-        status: { $in: ["new", "open", "in_progress"] },
-      }),
-      Report.countDocuments({ status: "new" }),
+        status: {
+          $in: [
+            "new",
+            "open",
+            "in_progress",
+            "awaiting_user",
+            "awaiting_plazore",
+          ],
+        },
+      } as any),
+      Report.countDocuments({
+        status: { $in: ["new", "Submitted"] },
+      } as any),
       Report.countDocuments({
         priority: { $in: ["high", "critical"] },
-        status: { $nin: ["resolved", "closed"] },
-      }),
-      Report.countDocuments({ status: { $nin: ["resolved", "closed"] } }),
+        status: {
+          $nin: ["resolved", "closed", "Resolved", "Closed"],
+        },
+      } as any),
+      Report.countDocuments({
+        status: {
+          $nin: ["resolved", "closed", "Resolved", "Closed"],
+        },
+      } as any),
     ]);
 
     res.json({
@@ -169,16 +201,23 @@ export const getAdminUsers = async (req: Request, res: Response) => {
 
     if (region) {
       and.push({
-        marketplaceRegion: { $regex: `^${escapeRegex(region)}$`, $options: "i" },
+        marketplaceRegion: {
+          $regex: `^${escapeRegex(region)}$`,
+          $options: "i",
+        },
       });
     }
 
-    // Country matches marketplaceRegion OR address country (code + full name)
     if (country) {
       const code = country.toUpperCase();
       const aliases = COUNTRY_ALIASES[code] || [country, code];
       const countryOr: any[] = [
-        { marketplaceRegion: { $regex: `^${escapeRegex(code)}$`, $options: "i" } },
+        {
+          marketplaceRegion: {
+            $regex: `^${escapeRegex(code)}$`,
+            $options: "i",
+          },
+        },
       ];
       for (const a of aliases) {
         countryOr.push({
@@ -216,11 +255,14 @@ export const getAdminUsers = async (req: Request, res: Response) => {
         { storeName: { $regex: q, $options: "i" } },
         { phone: { $regex: q, $options: "i" } },
         { clerkId: { $regex: q, $options: "i" } },
-        { marketplaceRegion: { $regex: `^${escapeRegex(q)}$`, $options: "i" } },
+        {
+          marketplaceRegion: {
+            $regex: `^${escapeRegex(q)}$`,
+            $options: "i",
+          },
+        },
       ];
-      if (/^[a-f\d]{24}$/i.test(q)) {
-        or.push({ _id: q });
-      }
+      if (/^[a-f\d]{24}$/i.test(q)) or.push({ _id: q });
       and.push({ $or: or });
     }
 
@@ -405,7 +447,9 @@ export const getAdminUserDetail = async (req: Request, res: Response) => {
   try {
     const user: any = await User.findById(req.params.id).lean();
     if (!user) {
-      return res.status(404).json({ success: false, message: "User not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "User not found" });
     }
 
     const [
@@ -567,7 +611,6 @@ export const getAdminProducts = async (req: Request, res: Response) => {
 
     const ids = rawItems.map((p: any) => p._id);
 
-    // Primary: ProductPerformance (written on view / cart / purchase)
     const perfDocs = ids.length
       ? await ProductPerformance.find({ product: { $in: ids } })
           .select("product views cartAdds purchases score")
@@ -587,7 +630,6 @@ export const getAdminProducts = async (req: Request, res: Response) => {
       };
     }
 
-    // Fallback: orders → checkouts (if performance docs are empty / lagging)
     const orderAgg = ids.length
       ? await Order.aggregate([
           { $match: { "items.product": { $in: ids } } },
@@ -597,7 +639,6 @@ export const getAdminProducts = async (req: Request, res: Response) => {
             $group: {
               _id: "$items.product",
               qty: { $sum: { $ifNull: ["$items.quantity", 1] } },
-              orders: { $sum: 1 },
             },
           },
         ])
@@ -608,25 +649,6 @@ export const getAdminProducts = async (req: Request, res: Response) => {
       orderMap[String(row._id)] = Number(row.qty) || 0;
     }
 
-    // Fallback: live carts → how many carts currently hold this product
-    const cartAgg = ids.length
-      ? await Order.db
-          .collection("carts")
-          .aggregate([
-            { $unwind: "$items" },
-            { $match: { "items.product": { $in: ids } } },
-            {
-              $group: {
-                _id: "$items.product",
-                carts: { $sum: 1 },
-              },
-            },
-          ])
-          .toArray()
-          .catch(() => [])
-      : [];
-
-    // Prefer Cart model if collection name differs
     let cartMap: Record<string, number> = {};
     try {
       const Cart = (await import("../models/Cart.js")).default;
@@ -634,21 +656,14 @@ export const getAdminProducts = async (req: Request, res: Response) => {
         ? await Cart.aggregate([
             { $unwind: "$items" },
             { $match: { "items.product": { $in: ids } } },
-            {
-              $group: {
-                _id: "$items.product",
-                carts: { $sum: 1 },
-              },
-            },
+            { $group: { _id: "$items.product", carts: { $sum: 1 } } },
           ])
         : [];
       for (const row of liveCarts as any[]) {
         cartMap[String(row._id)] = Number(row.carts) || 0;
       }
     } catch {
-      for (const row of cartAgg as any[]) {
-        cartMap[String(row._id)] = Number(row.carts) || 0;
-      }
+      /* optional */
     }
 
     let data = rawItems.map((p: any) => {
@@ -659,20 +674,12 @@ export const getAdminProducts = async (req: Request, res: Response) => {
         purchases: 0,
         score: 0,
       };
-
-      // Prefer performance counters; if 0, use order/cart fallbacks
       const views = perf.views;
       const cartAdds = Math.max(perf.cartAdds, cartMap[id] || 0);
       const checkouts = Math.max(perf.purchases, orderMap[id] || 0);
-
       return {
         ...p,
-        metrics: {
-          views,
-          cartAdds,
-          purchases: checkouts,
-          score: perf.score,
-        },
+        metrics: { views, cartAdds, purchases: checkouts, score: perf.score },
         views,
         cartAdds,
         checkouts,
@@ -680,12 +687,11 @@ export const getAdminProducts = async (req: Request, res: Response) => {
     });
 
     if (needsPerfSort) {
-      const key =
-        sort.startsWith("views")
-          ? "views"
-          : sort.startsWith("cart")
-            ? "cartAdds"
-            : "checkouts";
+      const key = sort.startsWith("views")
+        ? "views"
+        : sort.startsWith("cart")
+          ? "cartAdds"
+          : "checkouts";
       const desc = sort.endsWith("High");
       data.sort((a: any, b: any) =>
         desc ? (b[key] || 0) - (a[key] || 0) : (a[key] || 0) - (b[key] || 0)
@@ -719,7 +725,9 @@ export const setSellerSuspended = async (req: Request, res: Response) => {
   try {
     const user = await User.findById(req.params.id);
     if (!user)
-      return res.status(404).json({ success: false, message: "User not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "User not found" });
     if (user.role !== "seller") {
       return res
         .status(400)
@@ -730,7 +738,9 @@ export const setSellerSuspended = async (req: Request, res: Response) => {
     const full = await User.findById(user._id).lean();
     res.json({
       success: true,
-      message: user.isSellerSuspended ? "Seller suspended" : "Seller reactivated",
+      message: user.isSellerSuspended
+        ? "Seller suspended"
+        : "Seller reactivated",
       data: full,
     });
   } catch (error: any) {
@@ -742,7 +752,9 @@ export const setSellerVerified = async (req: Request, res: Response) => {
   try {
     const user = await User.findById(req.params.id);
     if (!user)
-      return res.status(404).json({ success: false, message: "User not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "User not found" });
     if (user.role !== "seller") {
       return res
         .status(400)
@@ -853,7 +865,12 @@ export const getAdminOrders = async (req: Request, res: Response) => {
     res.json({
       success: true,
       data,
-      pagination: { page, limit, total, pages: Math.ceil(total / limit) || 1 },
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit) || 1,
+      },
     });
   } catch (error: any) {
     res.status(500).json({ success: false, message: error.message });
@@ -871,12 +888,16 @@ export const getAdminOrderDetail = async (req: Request, res: Response) => {
       .populate("items.product", "name images price isActive region")
       .lean();
     if (!order)
-      return res.status(404).json({ success: false, message: "Order not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Order not found" });
     res.json({ success: true, data: order });
   } catch (error: any) {
     res.status(500).json({ success: false, message: error.message });
   }
 };
+
+/** ─── CONTACT (admin workspace) ─── */
 
 export const getAdminContacts = async (req: Request, res: Response) => {
   try {
@@ -888,28 +909,81 @@ export const getAdminContacts = async (req: Request, res: Response) => {
     const status = String(req.query.status || "").trim();
     const contactAs = String(req.query.contactAs || "").trim();
     const category = String(req.query.category || "").trim();
+    const contextType = String(req.query.contextType || "").trim();
+    const priority = String(req.query.priority || "").trim();
+    const q = String(req.query.q || "").trim();
+    const unread = String(req.query.unread || "").trim();
 
     const filter: any = {};
     if (status) filter.status = status;
     if (contactAs) filter.contactAs = contactAs;
     if (category) filter.category = category;
+    if (contextType) filter.contextType = contextType;
+    if (priority) filter.priority = priority;
+    if (unread === "1") filter.unreadByAdmin = true;
+    if (q) {
+      filter.$or = [
+        { email: { $regex: q, $options: "i" } },
+        { subject: { $regex: q, $options: "i" } },
+        { message: { $regex: q, $options: "i" } },
+      ];
+    }
 
-    const [items, total] = await Promise.all([
+    const [
+      items,
+      total,
+      cNew,
+      cOpen,
+      cAwaitUser,
+      cAwaitPlazore,
+      cResolved,
+      cClosed,
+      cUnread,
+      cHigh,
+    ] = await Promise.all([
       ContactMessage.find(filter)
-        .sort({ createdAt: -1 })
+        .sort({ lastMessageAt: -1, createdAt: -1 })
         .skip((page - 1) * limit)
         .limit(limit)
-        .populate("user", "name email role storeName")
+        .populate("user", "name email role storeName marketplaceRegion")
         .populate("relatedProduct", "name")
         .populate("relatedSeller", "name storeName")
+        .populate("assignedAdmin", "name email")
         .lean(),
-      ContactMessage.countDocuments(filter),
+           ContactMessage.countDocuments({ status: "new" } as any),
+      ContactMessage.countDocuments({
+        status: { $in: ["open", "in_progress"] },
+      } as any),
+      ContactMessage.countDocuments({ status: "awaiting_user" } as any),
+      ContactMessage.countDocuments({ status: "awaiting_plazore" } as any),
+      ContactMessage.countDocuments({ status: "resolved" } as any),
+      ContactMessage.countDocuments({ status: "closed" } as any),
+      ContactMessage.countDocuments({ unreadByAdmin: true } as any),
+      ContactMessage.countDocuments({
+        priority: { $in: ["high", "critical"] },
+      } as any),
     ]);
 
     res.json({
       success: true,
       data: items,
-      pagination: { page, limit, total, pages: Math.ceil(total / limit) || 1 },
+      counts: {
+        new: cNew,
+        open: cOpen,
+        awaiting_user: cAwaitUser,
+        awaiting_plazore: cAwaitPlazore,
+        resolved: cResolved,
+        closed: cClosed,
+        unread: cUnread,
+        high: cHigh,
+        all: await ContactMessage.countDocuments({}),
+      },
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit) || 1,
+      },
     });
   } catch (error: any) {
     res.status(500).json({ success: false, message: error.message });
@@ -919,10 +993,13 @@ export const getAdminContacts = async (req: Request, res: Response) => {
 export const getAdminContactDetail = async (req: Request, res: Response) => {
   try {
     const item = await ContactMessage.findById(req.params.id)
-      .populate("user", "name email role storeName marketplaceRegion")
-      .populate("relatedProduct", "name price isActive")
-      .populate("relatedSeller", "name storeName email")
+      .populate("user", "name email role storeName marketplaceRegion phone")
+      .populate("relatedProduct", "name price isActive images")
+      .populate("relatedSeller", "name storeName email marketplaceRegion")
       .populate("relatedOrder")
+      .populate("assignedAdmin", "name email")
+      .populate("messages.sender", "name email")
+      .populate("internalNotes.admin", "name email")
       .populate("responses.admin", "name email")
       .lean();
     if (!item)
@@ -939,24 +1016,90 @@ export const updateAdminContact = async (req: Request, res: Response) => {
     if (!item)
       return res.status(404).json({ success: false, message: "Not found" });
     const admin = (req as any).user;
+    const now = new Date();
 
     if (req.body.status) item.status = req.body.status;
-    if (req.body.response) {
+    if (req.body.priority) (item as any).priority = req.body.priority;
+    if (req.body.assignedAdmin !== undefined) {
+      item.assignedAdmin = req.body.assignedAdmin || admin._id;
+    } else {
+      item.assignedAdmin = admin._id;
+    }
+
+    const replyBody = String(
+      req.body.response || req.body.reply || ""
+    ).trim();
+    if (replyBody) {
+      if (!Array.isArray((item as any).messages)) {
+        (item as any).messages = [];
+      }
+      (item as any).messages.push({
+        senderType: "admin",
+        sender: admin._id,
+        body: replyBody,
+        createdAt: now,
+      });
+      if (!Array.isArray(item.responses)) item.responses = [] as any;
       item.responses.push({
         admin: admin._id,
-        body: String(req.body.response).trim(),
-        createdAt: new Date(),
+        body: replyBody,
+        createdAt: now,
       } as any);
-      if (item.status === "new") item.status = "open";
+
+      if (!req.body.status) {
+        try {
+          item.status = "awaiting_user" as any;
+        } catch {
+          item.status = "open" as any;
+        }
+      }
+      (item as any).unreadByUser = true;
+      (item as any).unreadByAdmin = false;
+      (item as any).lastMessageAt = now;
+
+      await safeNotify(
+        item.user,
+        "Plazore replied",
+        "You have a new response regarding your contact request."
+      );
     }
-    if (["resolved", "closed"].includes(item.status)) {
-      if (item.status === "resolved") item.resolvedAt = new Date();
-      if (item.status === "closed") item.closedAt = new Date();
+
+    const note = String(req.body.internalNote || "").trim();
+    if (note) {
+      if (!Array.isArray((item as any).internalNotes)) {
+        (item as any).internalNotes = [];
+      }
+      (item as any).internalNotes.push({
+        admin: admin._id,
+        body: note,
+        createdAt: now,
+      });
     }
-    item.assignedAdmin = admin._id;
+
+    if (req.body.markRead === true) {
+      (item as any).unreadByAdmin = false;
+    }
+
+    if (["resolved", "closed"].includes(String(item.status))) {
+      if (item.status === "resolved") item.resolvedAt = now;
+      if (item.status === "closed") item.closedAt = now;
+    }
+
     await item.save();
-    res.json({ success: true, data: item });
+
+    const fresh = await ContactMessage.findById(item._id)
+      .populate("user", "name email role storeName")
+      .populate("relatedProduct", "name")
+      .populate("relatedSeller", "name storeName")
+      .populate("assignedAdmin", "name email")
+      .populate("messages.sender", "name")
+      .populate("internalNotes.admin", "name")
+      .populate("responses.admin", "name")
+      .lean();
+
+    res.json({ success: true, data: fresh });
   } catch (error: any) {
+    console.error("updateAdminContact:", error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
@@ -992,7 +1135,12 @@ export const getAdminReports = async (req: Request, res: Response) => {
     res.json({
       success: true,
       data: items,
-      pagination: { page, limit, total, pages: Math.ceil(total / limit) || 1 },
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit) || 1,
+      },
     });
   } catch (error: any) {
     res.status(500).json({ success: false, message: error.message });
@@ -1012,9 +1160,11 @@ export const updateAdminReport = async (req: Request, res: Response) => {
       item.resolutionNote = req.body.resolutionNote;
     }
     item.assignedAdmin = admin._id;
-    if (["resolved", "closed"].includes(item.status)) {
-      if (item.status === "resolved") item.resolvedAt = new Date();
-      if (item.status === "closed") item.closedAt = new Date();
+    if (["resolved", "closed", "Resolved", "Closed"].includes(String(item.status))) {
+      if (String(item.status).toLowerCase() === "resolved")
+        item.resolvedAt = new Date();
+      if (String(item.status).toLowerCase() === "closed")
+        item.closedAt = new Date();
     }
     await item.save();
     res.json({ success: true, data: item });
@@ -1025,7 +1175,9 @@ export const updateAdminReport = async (req: Request, res: Response) => {
 
 export const pingPresence = async (req: Request, res: Response) => {
   try {
-    const platform = ["web", "app", "admin"].includes(String(req.body?.platform))
+    const platform = ["web", "app", "admin"].includes(
+      String(req.body?.platform)
+    )
       ? String(req.body.platform)
       : "web";
     const id = (req as any).user?._id;
