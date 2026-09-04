@@ -15,6 +15,7 @@ import {
   updateAdminContact,
   getAdminReports,
   updateAdminReport,
+  pingPresence,
 } from "../controllers/adminController.js";
 
 const AdminRouter = express.Router();
@@ -40,5 +41,8 @@ AdminRouter.patch("/contacts/:id", ...adminOnly, updateAdminContact);
 
 AdminRouter.get("/reports", ...adminOnly, getAdminReports);
 AdminRouter.patch("/reports/:id", ...adminOnly, updateAdminReport);
+
+// Any logged-in user (not admin-only) — used by web + mobile to record last seen
+AdminRouter.post("/me/presence", protect, pingPresence);
 
 export default AdminRouter;

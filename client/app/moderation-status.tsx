@@ -1,3 +1,5 @@
+"use client";
+
 import { useAuth } from "@clerk/clerk-expo";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -32,43 +34,38 @@ const ART = {
   restored: require("@/assets/moderation/moderation-restored.png"),
 } as const;
 
-function titleFor(
-  kind: string,
-  context: ModContext
-): { title: string; body: string; cta: string } {
+function titleFor(kind: string, context: ModContext) {
   const seller = context === "seller";
   switch (kind) {
     case "review":
       return {
-        title: seller ? "Seller World under review" : "Account under review",
-        body: "We're reviewing activity on this side of Plazore. Access is paused until the check is complete.",
+        title: seller ? "Seller World is under review" : "Your account is under review",
+        body: seller
+          ? "We're checking activity on Seller World. Store tools stay paused until that review is finished."
+          : "We're checking activity on this account. Marketplace access stays paused until the review is finished.",
         cta: "Understood",
       };
     case "suspended":
       return {
-        title: seller
-          ? "Seller World is suspended"
-          : "Plazore access is suspended",
+        title: seller ? "Seller World is paused" : "Plazore access is paused",
         body: seller
-          ? "You can't manage products, orders, or store settings right now. Buyer shopping may still work."
-          : "Marketplace access is temporarily limited. You can come back when the restriction ends or is lifted.",
+          ? "You can't manage products, orders, or store settings right now. This lasts until the pause period ends. Buyer shopping may still work."
+          : "Marketplace access is limited until this pause period ends. You don't need to do anything on your side.",
         cta: "Got it",
       };
     case "blocked":
       return {
-        title: seller
-          ? "Seller World is blocked"
-          : "Plazore account is blocked",
+        title: seller ? "Seller World is blocked" : "This account is blocked",
         body: seller
-          ? "Seller tools are locked. This does not automatically block you as a buyer."
-          : "Access to this side of Plazore is blocked until further notice.",
+          ? "Seller tools stay locked until Plazore lifts the block. This does not automatically block you as a buyer."
+          : "Access to this side of Plazore stays blocked until it is lifted.",
         cta: "Close",
       };
     case "pardoned":
       return {
         title: "You're clear",
-        body: "Review is complete. No further action is required on your account.",
-        cta: "Proceed",
+        body: "The review is complete. No further action is required on your account.",
+        cta: "Continue",
       };
     case "restored":
       return {
@@ -76,25 +73,14 @@ function titleFor(
         body: seller
           ? "Seller World is available again. You can continue managing your store."
           : "Your Plazore access is available again.",
-        cta: "Proceed",
+        cta: "Continue",
       };
     default:
       return {
         title: "All clear",
-        body: "No moderation restriction on this side.",
+        body: "There's no restriction on this side of your account.",
         cta: "Continue",
       };
-  }
-}
-
-function formatEnds(endsAt?: string | null) {
-  if (!endsAt) return null;
-  try {
-    const d = new Date(endsAt);
-    if (d.getTime() <= Date.now()) return "Ending soon / expired";
-    return `Until ${d.toLocaleString()}`;
-  } catch {
-    return null;
   }
 }
 
@@ -109,28 +95,22 @@ export default function ModerationStatusScreen() {
     endsAt?: string;
   }>();
 
-  const context: ModContext =
-    params.context === "seller" ? "seller" : "buyer";
+  const context: ModContext = params.context === "seller" ? "seller" : "buyer";
 
-  // Seed from route params so UI paints immediately — no spinner flash
   const seedSide: ModSide | null = params.status
     ? {
         status: String(params.status),
-        publicReason: params.publicReason
-          ? String(params.publicReason)
-          : "",
-        endsAt: params.endsAt ? String(params.endsAt) : null,
+        publicReason: params.publicReason ? String(params.publicReason) : "",
       }
     : null;
 
   const [side, setSide] = useState<ModSide | null>(seedSide);
-  // Only show spinner if we arrived with NO params at all
   const [booting, setBooting] = useState(!seedSide);
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
   const fetchedOnce = useRef(false);
   const navigating = useRef(false);
 
-  // Fetch once on mount — never re-run when getToken identity changes
   useEffect(() => {
     if (fetchedOnce.current) return;
     fetchedOnce.current = true;
@@ -146,11 +126,9 @@ export default function ModerationStatusScreen() {
         }
         const m = await fetchMyModeration(token);
         if (cancelled) return;
-        if (m?.[context]) {
-          setSide(m[context]);
-        }
+        if (m?.[context]) setSide(m[context]);
       } catch {
-        // keep seed from params
+        /* keep seed */
       } finally {
         if (!cancelled) setBooting(false);
       }
@@ -169,7 +147,7 @@ export default function ModerationStatusScreen() {
 
   const copy = titleFor(kind, context);
   const publicReason = side?.publicReason || "";
-  const endsLabel = formatEnds(side?.endsAt);
+  const locked = kind === "review" || kind === "suspended" || kind === "blocked";
 
   const leaveLocked = () => {
     if (navigating.current) return;
@@ -180,17 +158,26 @@ export default function ModerationStatusScreen() {
   const onProceed = async () => {
     if (busy || navigating.current) return;
     setBusy(true);
-    try {
-      const token = await getToken();
+    setError("");
 
-      // Clear outcome BEFORE navigating back into seller — prevents redirect loop
-      if (token && (kind === "pardoned" || kind === "restored")) {
+    try {
+      if (!locked) {
+        const token = await getToken();
+        if (!token) {
+          setError("Couldn't confirm your session. Please try again.");
+          navigating.current = false;
+          setBusy(false);
+          return;
+        }
         await clearLastOutcome(token, context);
+        setSide((prev) =>
+          prev ? { ...prev, lastOutcome: null, publicReason: "" } : prev
+        );
       }
 
       navigating.current = true;
 
-      if (kind === "review" || kind === "suspended" || kind === "blocked") {
+      if (locked) {
         router.replace("/(tabs)" as any);
         return;
       }
@@ -202,6 +189,7 @@ export default function ModerationStatusScreen() {
       }
     } catch {
       navigating.current = false;
+      setError("Couldn't finish this step. Please try again.");
     } finally {
       setBusy(false);
     }
@@ -236,7 +224,6 @@ export default function ModerationStatusScreen() {
       ) : (
         <View style={styles.body}>
           <Image source={art} style={styles.art} resizeMode="contain" />
-
           <Text style={styles.title}>{copy.title}</Text>
           <Text style={styles.bodyText}>{copy.body}</Text>
 
@@ -247,9 +234,7 @@ export default function ModerationStatusScreen() {
             </View>
           )}
 
-          {endsLabel && (kind === "suspended" || kind === "blocked") && (
-            <Text style={styles.ends}>{endsLabel}</Text>
-          )}
+          {!!error && <Text style={styles.error}>{error}</Text>}
 
           <TouchableOpacity
             activeOpacity={0.88}
@@ -264,18 +249,15 @@ export default function ModerationStatusScreen() {
             )}
           </TouchableOpacity>
 
-          {(kind === "review" ||
-            kind === "suspended" ||
-            kind === "blocked") &&
-            context === "seller" && (
-              <TouchableOpacity
-                onPress={leaveLocked}
-                style={styles.secondary}
-                activeOpacity={0.8}
-              >
-                <Text style={styles.secondaryText}>Continue as buyer</Text>
-              </TouchableOpacity>
-            )}
+          {locked && context === "seller" && (
+            <TouchableOpacity
+              onPress={leaveLocked}
+              style={styles.secondary}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.secondaryText}>Continue as buyer</Text>
+            </TouchableOpacity>
+          )}
         </View>
       )}
     </View>
@@ -283,42 +265,23 @@ export default function ModerationStatusScreen() {
 }
 
 const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-    backgroundColor: BG,
-    paddingHorizontal: 24,
-  },
-  header: {
-    marginBottom: 8,
-  },
+  root: { flex: 1, backgroundColor: BG, paddingHorizontal: 24 },
+  header: { marginBottom: 8 },
   kicker: {
     color: GREEN,
     fontSize: 11,
     fontWeight: "700",
     letterSpacing: 1.6,
   },
-  modLabel: {
-    marginTop: 4,
-    color: MUTED,
-    fontSize: 13,
-    fontWeight: "600",
-  },
-  center: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-  },
+  modLabel: { marginTop: 4, color: MUTED, fontSize: 13, fontWeight: "600" },
+  center: { flex: 1, alignItems: "center", justifyContent: "center" },
   body: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
     paddingBottom: 40,
   },
-  art: {
-    width: 220,
-    height: 220,
-    marginBottom: 28,
-  },
+  art: { width: 220, height: 220, marginBottom: 28 },
   title: {
     color: TEXT,
     fontSize: 22,
@@ -350,16 +313,8 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
     marginBottom: 6,
   },
-  reasonText: {
-    color: TEXT,
-    fontSize: 14,
-    lineHeight: 20,
-  },
-  ends: {
-    marginTop: 12,
-    color: MUTED,
-    fontSize: 13,
-  },
+  reasonText: { color: TEXT, fontSize: 14, lineHeight: 20 },
+  error: { marginTop: 12, color: "#F5A3A3", fontSize: 13, textAlign: "center" },
   cta: {
     marginTop: 28,
     width: "100%",
@@ -374,13 +329,6 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     letterSpacing: 0.3,
   },
-  secondary: {
-    marginTop: 14,
-    paddingVertical: 12,
-  },
-  secondaryText: {
-    color: MUTED,
-    fontSize: 14,
-    fontWeight: "600",
-  },
+  secondary: { marginTop: 14, paddingVertical: 12 },
+  secondaryText: { color: MUTED, fontSize: 14, fontWeight: "600" },
 });

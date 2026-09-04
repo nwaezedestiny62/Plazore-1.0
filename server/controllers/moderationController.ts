@@ -2,6 +2,10 @@ import { Request, Response } from "express";
 import User from "../models/User.js";
 import Product from "../models/Products.js";
 import Order from "../models/Order.js";
+import Address from "../models/Address.js";
+import Wishlist from "../models/Wishlist.js";
+import PaymentMethod from "../models/PaymentMethod.js";
+import SavedStores from "../models/SavedStores.js";
 import Report from "../models/Report.js";
 import ModerationCase from "../models/ModerationCase.js";
 import ModerationEvent from "../models/ModerationEvent.js";
@@ -225,6 +229,10 @@ export const getModerationProfile = async (req: Request, res: Response) => {
       orderAsSeller,
       recentOrdersBuyer,
       recentOrdersSeller,
+      addresses,
+      paymentMethods,
+      wishlistDoc,
+      savedStoresDoc,
     ] = await Promise.all([
       ModerationCase.find({ user: user._id }).sort({ createdAt: -1 }).limit(25).lean(),
       ModerationEvent.find({ user: user._id })
@@ -232,9 +240,7 @@ export const getModerationProfile = async (req: Request, res: Response) => {
         .limit(50)
         .populate("admin", "name email")
         .lean(),
-      Report.find({
-        $or: [{ reporter: user._id }, { seller: user._id }],
-      })
+      Report.find({ $or: [{ reporter: user._id }, { seller: user._id }] })
         .sort({ createdAt: -1 })
         .limit(25)
         .lean(),
@@ -258,7 +264,35 @@ export const getModerationProfile = async (req: Request, res: Response) => {
         .limit(8)
         .select("orderNumber orderStatus paymentStatus totalAmount createdAt")
         .lean(),
+      Address.find({ user: user._id })
+        .sort({ isDefault: -1, createdAt: -1 })
+        .limit(20)
+        .select("type street city state zipCode country isDefault")
+        .lean(),
+      PaymentMethod.find({ user: user._id })
+        .sort({ isDefault: -1, createdAt: -1 })
+        .limit(20)
+        .select("brand name last4 expMonth expYear isDefault")
+        .lean(),
+      Wishlist.findOne({ user: user._id })
+        .populate("products", "name price isActive")
+        .lean(),
+      SavedStores.findOne({ user: user._id })
+        .populate("stores", "name storeName image")
+        .lean(),
     ]);
+
+    const wishlist = ((wishlistDoc as any)?.products || []).map((p: any) => ({
+      _id: p?._id,
+      name: p?.name,
+      price: p?.price,
+      isActive: p?.isActive,
+    }));
+
+    const savedStores = ((savedStoresDoc as any)?.stores || []).map((s: any) => ({
+      _id: s?._id,
+      name: s?.storeName || s?.name,
+    }));
 
     res.json({
       success: true,
@@ -270,13 +304,121 @@ export const getModerationProfile = async (req: Request, res: Response) => {
         events,
         reports,
         products,
+        addresses,
+        paymentMethods,
+        wishlist,
+        savedStores,
         activity: {
           productCount,
           orderAsBuyer,
           orderAsSeller,
           recentOrdersBuyer,
           recentOrdersSeller,
+          addressCount: addresses.length,
+          paymentMethodCount: paymentMethods.length,
+          wishlistCount: wishlist.length,
+          savedStoreCount: savedStores.length,
         },
+      },
+    });
+  } catch (e: any) {
+    res.status(500).json({ success: false, message: e.message });
+  }
+};
+
+export const suspendAccount = async (req: Request, res: Response) => {
+  try {
+    const context = req.body.context as Context;
+    if (context !== "buyer" && context !== "seller") {
+      return res
+        .status(400)
+        .json({ success: false, message: "context must be buyer or seller" });
+    }
+
+    const reason = String(req.body.reason || "").trim();
+    if (!reason) {
+      return res.status(400).json({ success: false, message: "Reason is required" });
+    }
+
+    const rawHours = req.body.durationHours;
+    const rawDays = req.body.durationDays;
+    let hours = Number(rawHours);
+    if (!Number.isFinite(hours) || hours < 0) {
+      const days = Math.max(0, Number(rawDays || 0));
+      hours = days * 24;
+    }
+    hours = Math.max(0, Math.min(24 * 90, Math.floor(hours)));
+
+    const endsAt =
+      hours > 0 ? new Date(Date.now() + hours * 60 * 60 * 1000) : undefined;
+
+    const publicReason =
+      context === "seller"
+        ? "Seller World is temporarily unavailable. Access returns when this period ends."
+        : "Plazore access is temporarily limited. It returns when this period ends.";
+
+    const admin = (req as any).user;
+    const user: any = await User.findById(req.params.id);
+    if (!user) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+
+    const prev = getCtx(user, context).status;
+    let caseId = getCtx(user, context).caseId;
+
+    if (!caseId) {
+      const c = await ModerationCase.create({
+        user: user._id,
+        context,
+        status: "SUSPENDED",
+        previousStatus: prev,
+        reason,
+        publicReason,
+        endsAt,
+        openedBy: admin._id,
+        active: true,
+      });
+      caseId = c._id;
+    } else {
+      await ModerationCase.findByIdAndUpdate(caseId, {
+        status: "SUSPENDED",
+        reason,
+        publicReason,
+        endsAt: endsAt || null,
+        active: true,
+      });
+    }
+
+    await applyState(user, context, "SUSPENDED", {
+      reason,
+      publicReason,
+      endsAt: endsAt || null,
+      caseId,
+      lastOutcome: null,
+    });
+
+    await logEvent({
+      caseId,
+      user: user._id,
+      context,
+      action: "SUSPENDED",
+      previousState: prev,
+      newState: "SUSPENDED",
+      reason,
+      publicReason,
+      durationHours: hours || undefined,
+      endsAt,
+      admin: admin._id,
+    });
+
+    res.json({
+      success: true,
+      message: "Account suspended",
+      data: {
+        context,
+        status: "SUSPENDED",
+        endsAt: endsAt || null,
+        durationHours: hours || null,
       },
     });
   } catch (e: any) {
@@ -410,97 +552,7 @@ export const pardonAccount = async (req: Request, res: Response) => {
   }
 };
 
-export const suspendAccount = async (req: Request, res: Response) => {
-  try {
-    const context = req.body.context as Context;
-    if (context !== "buyer" && context !== "seller") {
-      return res
-        .status(400)
-        .json({ success: false, message: "context must be buyer or seller" });
-    }
 
-    const reason = String(req.body.reason || "").trim();
-    if (!reason) {
-      return res.status(400).json({ success: false, message: "Reason is required" });
-    }
-
-    const days = Math.max(0, Number(req.body.durationDays || 0));
-    const endsAt =
-      days > 0 ? new Date(Date.now() + days * 24 * 60 * 60 * 1000) : undefined;
-
-    const publicReason =
-      context === "seller"
-        ? "Your Seller World access is temporarily suspended"
-        : "Your Plazore access is temporarily suspended";
-
-    const admin = (req as any).user;
-    const user: any = await User.findById(req.params.id);
-    if (!user) {
-      return res.status(404).json({ success: false, message: "User not found" });
-    }
-
-    const prev = getCtx(user, context).status;
-    let caseId = getCtx(user, context).caseId;
-
-    if (!caseId) {
-      const c = await ModerationCase.create({
-        user: user._id,
-        context,
-        status: "SUSPENDED",
-        previousStatus: prev,
-        reason,
-        publicReason,
-        endsAt,
-        openedBy: admin._id,
-        active: true,
-      });
-      caseId = c._id;
-    } else {
-      await ModerationCase.findByIdAndUpdate(caseId, {
-        status: "SUSPENDED",
-        reason,
-        publicReason,
-        endsAt: endsAt || null,
-        active: true,
-      });
-    }
-
-    await applyState(user, context, "SUSPENDED", {
-      reason,
-      publicReason,
-      endsAt: endsAt || null,
-      caseId,
-      lastOutcome: null,
-    });
-
-    await logEvent({
-      caseId,
-      user: user._id,
-      context,
-      action: "SUSPENDED",
-      previousState: prev,
-      newState: "SUSPENDED",
-      reason,
-      publicReason,
-      durationDays: days || undefined,
-      endsAt,
-      admin: admin._id,
-    });
-
-    res.json({
-      success: true,
-      message: "Account suspended",
-      data: {
-        context,
-        status: "SUSPENDED",
-        endsAt: endsAt || null,
-        durationDays: days || null,
-      },
-    });
-  } catch (e: any) {
-    res.status(500).json({ success: false, message: e.message });
-  }
-};
 
 export const blockAccount = async (req: Request, res: Response) => {
   try {
@@ -517,9 +569,9 @@ export const blockAccount = async (req: Request, res: Response) => {
     }
 
     const publicReason =
-      context === "seller"
-        ? "Your Seller World access is currently blocked"
-        : "Your Plazore account is currently blocked";
+  context === "seller"
+    ? "Seller World is blocked until Plazore lifts this restriction."
+    : "This side of Plazore is blocked until it is lifted.";
 
     const admin = (req as any).user;
     const user: any = await User.findById(req.params.id);

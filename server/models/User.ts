@@ -22,7 +22,6 @@ const moderationSideSchema = new mongoose.Schema(
     endsAt: { type: Date },
     caseId: { type: mongoose.Schema.Types.ObjectId, ref: "ModerationCase" },
     updatedAt: { type: Date },
-    // do NOT put null in enum — use String + default undefined
     lastOutcome: {
       type: String,
       enum: ["PARDONED", "RESTORED"],
@@ -89,6 +88,13 @@ const userSchema = new mongoose.Schema(
     moderation: {
       buyer: { type: moderationSideSchema, default: () => ({}) },
       seller: { type: moderationSideSchema, default: () => ({}) },
+    },
+
+    lastSeenAt: { type: Date, index: true },
+    lastSeenPlatform: {
+      type: String,
+      enum: ["web", "app", "admin"],
+      default: undefined,
     },
   },
   { timestamps: true }

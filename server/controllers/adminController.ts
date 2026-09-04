@@ -3,12 +3,27 @@ import User from "../models/User.js";
 import Product from "../models/Products.js";
 import Order from "../models/Order.js";
 import ContactMessage from "../models/ContactMessage.js";
+import ProductPerformance from "../models/ProductPerformance.js";
 import Report from "../models/Report.js";
+
+const COUNTRY_ALIASES: Record<string, string[]> = {
+  NG: ["NG", "Nigeria"],
+  GB: ["GB", "UK", "United Kingdom", "Great Britain"],
+  US: ["US", "USA", "United States", "United States of America"],
+  GH: ["GH", "Ghana"],
+  KE: ["KE", "Kenya"],
+  ZA: ["ZA", "South Africa"],
+  CA: ["CA", "Canada"],
+  EU: ["EU", "Europe"],
+};
+
+function escapeRegex(s: string) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
 export const getDashboardStats = async (req: Request, res: Response) => {
   try {
     const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-
     const [
       totalUsers,
       totalBuyers,
@@ -63,7 +78,9 @@ export const getDashboardStats = async (req: Request, res: Response) => {
         .populate("seller", "name storeName email")
         .select("orderNumber orderStatus paymentStatus totalAmount createdAt"),
       ContactMessage.countDocuments({ status: "new" }),
-      ContactMessage.countDocuments({ status: { $in: ["new", "open", "in_progress"] } }),
+      ContactMessage.countDocuments({
+        status: { $in: ["new", "open", "in_progress"] },
+      }),
       Report.countDocuments({ status: "new" }),
       Report.countDocuments({
         priority: { $in: ["high", "critical"] },
@@ -127,45 +144,218 @@ export const getDashboardStats = async (req: Request, res: Response) => {
 export const getAdminUsers = async (req: Request, res: Response) => {
   try {
     const page = Math.max(1, parseInt(String(req.query.page || "1"), 10));
-    const limit = Math.min(50, Math.max(1, parseInt(String(req.query.limit || "20"), 10)));
+    const limit = Math.min(
+      50,
+      Math.max(1, parseInt(String(req.query.limit || "20"), 10))
+    );
     const role = String(req.query.role || "").trim();
     const q = String(req.query.q || "").trim();
     const region = String(req.query.region || "").trim();
+    const country = String(req.query.country || "").trim();
+    const state = String(req.query.state || "").trim();
     const city = String(req.query.city || "").trim();
+    const sort = String(req.query.sort || "newest").trim();
+    const spot = String(req.query.spot || "").trim();
 
-    const filter: any = {};
-    if (role && ["buyer", "seller", "admin"].includes(role)) filter.role = role;
-    if (region) filter.marketplaceRegion = region;
-    if (city) {
-      filter["shippingDefaults.address.city"] = { $regex: city, $options: "i" };
+    const and: any[] = [];
+    const now = Date.now();
+    const d1 = new Date(now - 24 * 3600000);
+    const d7 = new Date(now - 7 * 86400000);
+    const d30 = new Date(now - 30 * 86400000);
+
+    if (role && ["buyer", "seller", "admin"].includes(role)) {
+      and.push({ role });
     }
+
+    if (region) {
+      and.push({
+        marketplaceRegion: { $regex: `^${escapeRegex(region)}$`, $options: "i" },
+      });
+    }
+
+    // Country matches marketplaceRegion OR address country (code + full name)
+    if (country) {
+      const code = country.toUpperCase();
+      const aliases = COUNTRY_ALIASES[code] || [country, code];
+      const countryOr: any[] = [
+        { marketplaceRegion: { $regex: `^${escapeRegex(code)}$`, $options: "i" } },
+      ];
+      for (const a of aliases) {
+        countryOr.push({
+          "shippingDefaults.address.country": {
+            $regex: `^${escapeRegex(a)}$`,
+            $options: "i",
+          },
+        });
+      }
+      and.push({ $or: countryOr });
+    }
+
+    if (state) {
+      and.push({
+        "shippingDefaults.address.state": {
+          $regex: escapeRegex(state),
+          $options: "i",
+        },
+      });
+    }
+
+    if (city) {
+      and.push({
+        "shippingDefaults.address.city": {
+          $regex: escapeRegex(city),
+          $options: "i",
+        },
+      });
+    }
+
     if (q) {
-      filter.$or = [
+      const or: any[] = [
         { name: { $regex: q, $options: "i" } },
         { email: { $regex: q, $options: "i" } },
         { storeName: { $regex: q, $options: "i" } },
         { phone: { $regex: q, $options: "i" } },
         { clerkId: { $regex: q, $options: "i" } },
+        { marketplaceRegion: { $regex: `^${escapeRegex(q)}$`, $options: "i" } },
       ];
+      if (/^[a-f\d]{24}$/i.test(q)) {
+        or.push({ _id: q });
+      }
+      and.push({ $or: or });
     }
 
-    const [items, total] = await Promise.all([
+    if (spot === "unverified") {
+      and.push({
+        role: "seller",
+        isSellerVerified: { $ne: true },
+        isSellerSuspended: { $ne: true },
+      });
+    } else if (spot === "suspended") {
+      and.push({ isSellerSuspended: true });
+    } else if (spot === "new") {
+      and.push({ createdAt: { $gte: d7 } });
+    } else if (spot === "active") {
+      and.push({
+        $or: [
+          { lastSeenAt: { $gte: d1 } },
+          {
+            $and: [
+              {
+                $or: [
+                  { lastSeenAt: null },
+                  { lastSeenAt: { $exists: false } },
+                ],
+              },
+              { updatedAt: { $gte: d1 } },
+            ],
+          },
+        ],
+      });
+    } else if (spot === "dormant") {
+      and.push({
+        $or: [
+          { lastSeenAt: { $lte: d30 } },
+          {
+            $and: [
+              {
+                $or: [
+                  { lastSeenAt: null },
+                  { lastSeenAt: { $exists: false } },
+                ],
+              },
+              { updatedAt: { $lte: d30 } },
+            ],
+          },
+        ],
+      });
+    } else if (spot === "no-region") {
+      and.push({
+        $or: [
+          { marketplaceRegion: { $exists: false } },
+          { marketplaceRegion: "" },
+          { marketplaceRegion: null },
+        ],
+      });
+    }
+
+    const filter = and.length ? { $and: and } : {};
+
+    const sortMap: Record<string, any> = {
+      newest: { createdAt: -1 },
+      oldest: { createdAt: 1 },
+      lastSeen: { lastSeenAt: -1, updatedAt: -1 },
+      name: { name: 1 },
+    };
+
+    const [items, total, roleCounts, allForHealth] = await Promise.all([
       User.find(filter)
-        .sort({ createdAt: -1 })
+        .sort(sortMap[sort] || sortMap.newest)
         .skip((page - 1) * limit)
         .limit(limit)
         .select(
-          "name email phone role image clerkId marketplaceRegion storeName storeDescription businessGoal storeLogo storeBanner isSellerVerified isSellerSuspended sellerAppliedAt payout shippingDefaults createdAt updatedAt"
+          "name email phone role image clerkId marketplaceRegion storeName storeDescription businessGoal storeLogo storeBanner isSellerVerified isSellerSuspended sellerAppliedAt payout shippingDefaults lastSeenAt lastSeenPlatform createdAt updatedAt"
         )
         .lean(),
       User.countDocuments(filter),
+      User.aggregate([{ $group: { _id: "$role", n: { $sum: 1 } } }]),
+      User.find({}).select("lastSeenAt updatedAt").lean(),
     ]);
 
-    const sellerIds = items.filter((u: any) => u.role === "seller").map((u: any) => u._id);
-    const statsMap: Record<string, { total: number; active: number }> = {};
+    const counts = { all: 0, buyer: 0, seller: 0, admin: 0 };
+    for (const r of roleCounts as any[]) {
+      const key = String(r._id || "");
+      if (key in counts) (counts as any)[key] = r.n;
+      counts.all += r.n;
+    }
 
+    let active24h = 0;
+    let quiet7d = 0;
+    let idle30d = 0;
+    let dormant = 0;
+    let unknown = 0;
+    for (const u of allForHealth as any[]) {
+      const seen = u.lastSeenAt || u.updatedAt;
+      if (!seen) {
+        unknown += 1;
+        continue;
+      }
+      const hrs = (now - new Date(seen).getTime()) / 3600000;
+      if (Number.isNaN(hrs)) unknown += 1;
+      else if (hrs < 24) active24h += 1;
+      else if (hrs < 24 * 7) quiet7d += 1;
+      else if (hrs < 24 * 30) idle30d += 1;
+      else dormant += 1;
+    }
+
+    const known = active24h + quiet7d + idle30d + dormant;
+    const activeShare = known > 0 ? active24h / known : 0;
+    const dormantShare = known > 0 ? dormant / known : 0;
+    let healthScore = Math.round(
+      Math.max(5, Math.min(98, 40 + activeShare * 55 - dormantShare * 35))
+    );
+    let healthLabel = "Steady";
+    let healthTone: "green" | "warn" | "error" = "green";
+    if (known === 0) {
+      healthScore = 50;
+      healthLabel = "Insufficient presence data";
+      healthTone = "warn";
+    } else if (healthScore >= 72) {
+      healthLabel = "Healthy activity";
+      healthTone = "green";
+    } else if (healthScore >= 48) {
+      healthLabel = "Mixed activity";
+      healthTone = "warn";
+    } else {
+      healthLabel = "Low activity";
+      healthTone = "error";
+    }
+
+    const sellerIds = items
+      .filter((u: any) => u.role === "seller")
+      .map((u: any) => u._id);
+    const statsMap: Record<string, { total: number; active: number }> = {};
     if (sellerIds.length) {
-      const counts = await Product.aggregate([
+      const grouped = await Product.aggregate([
         { $match: { seller: { $in: sellerIds } } },
         {
           $group: {
@@ -175,7 +365,7 @@ export const getAdminUsers = async (req: Request, res: Response) => {
           },
         },
       ]);
-      for (const c of counts) {
+      for (const c of grouped) {
         statsMap[String(c._id)] = { total: c.total, active: c.active };
       }
     }
@@ -184,20 +374,36 @@ export const getAdminUsers = async (req: Request, res: Response) => {
       success: true,
       data: items.map((u: any) => ({
         ...u,
+        lastSeenAt: u.lastSeenAt || u.updatedAt || u.createdAt,
         productStats: statsMap[String(u._id)] || { total: 0, active: 0 },
       })),
-      pagination: { page, limit, total, pages: Math.ceil(total / limit) || 1 },
+      counts,
+      activityHealth: {
+        score: healthScore,
+        label: healthLabel,
+        tone: healthTone,
+        active24h,
+        quiet7d,
+        idle30d,
+        dormant,
+        unknown,
+        total: counts.all,
+      },
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit) || 1,
+      },
     });
   } catch (error: any) {
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
-/** FULL user document + rich related data */
 export const getAdminUserDetail = async (req: Request, res: Response) => {
   try {
-    // No .select() — return every field on the user
-    const user = await User.findById(req.params.id).lean();
+    const user: any = await User.findById(req.params.id).lean();
     if (!user) {
       return res.status(404).json({ success: false, message: "User not found" });
     }
@@ -258,7 +464,10 @@ export const getAdminUserDetail = async (req: Request, res: Response) => {
     res.json({
       success: true,
       data: {
-        user, // FULL document
+        user: {
+          ...user,
+          lastSeenAt: user.lastSeenAt || user.updatedAt || user.createdAt,
+        },
         products,
         stats: {
           productCount,
@@ -280,12 +489,16 @@ export const getAdminUserDetail = async (req: Request, res: Response) => {
 export const getAdminProducts = async (req: Request, res: Response) => {
   try {
     const page = Math.max(1, parseInt(String(req.query.page || "1"), 10));
-    const limit = Math.min(50, Math.max(1, parseInt(String(req.query.limit || "20"), 10)));
+    const limit = Math.min(
+      50,
+      Math.max(1, parseInt(String(req.query.limit || "20"), 10))
+    );
     const q = String(req.query.q || "").trim();
     const region = String(req.query.region || "").trim();
     const city = String(req.query.city || "").trim();
     const active = String(req.query.active || "").trim();
     const sellerId = String(req.query.seller || "").trim();
+    const sort = String(req.query.sort || "newest").trim();
 
     const filter: any = {};
     if (q) {
@@ -293,33 +506,211 @@ export const getAdminProducts = async (req: Request, res: Response) => {
         { name: { $regex: q, $options: "i" } },
         { brand: { $regex: q, $options: "i" } },
         { category: { $regex: q, $options: "i" } },
+        { subCategory: { $regex: q, $options: "i" } },
       ];
     }
     if (region) filter.region = region;
-    if (city) filter["fulfillmentLocation.city"] = { $regex: city, $options: "i" };
+    if (city) {
+      filter["fulfillmentLocation.city"] = { $regex: city, $options: "i" };
+    }
     if (active === "true") filter.isActive = true;
     if (active === "false") filter.isActive = false;
     if (sellerId) filter.seller = sellerId;
 
-    const [items, total] = await Promise.all([
-      Product.find(filter)
-        .sort({ createdAt: -1 })
-        .skip((page - 1) * limit)
-        .limit(limit)
-        .populate("seller", "name storeName email marketplaceRegion isSellerSuspended")
-        .select(
-          "name price images category subCategory brand stock isActive region seller fulfillmentLocation createdAt updatedAt"
-        )
-        .lean(),
+    const sortMap: Record<string, any> = {
+      newest: { createdAt: -1 },
+      oldest: { createdAt: 1 },
+      priceHigh: { price: -1 },
+      priceLow: { price: 1 },
+      name: { name: 1 },
+      stockHigh: { stock: -1 },
+      stockLow: { stock: 1 },
+    };
+
+    const perfSortKeys = [
+      "viewsHigh",
+      "viewsLow",
+      "cartHigh",
+      "cartLow",
+      "checkoutHigh",
+      "checkoutLow",
+    ];
+    const needsPerfSort = perfSortKeys.includes(sort);
+
+    const [rawItems, total, activeCount, inactiveCount] = await Promise.all([
+      needsPerfSort
+        ? Product.find(filter)
+            .populate(
+              "seller",
+              "name storeName email marketplaceRegion isSellerSuspended"
+            )
+            .select(
+              "name price images category subCategory brand stock isActive region seller fulfillmentLocation wishlistCount createdAt updatedAt description"
+            )
+            .lean()
+        : Product.find(filter)
+            .sort(sortMap[sort] || sortMap.newest)
+            .skip((page - 1) * limit)
+            .limit(limit)
+            .populate(
+              "seller",
+              "name storeName email marketplaceRegion isSellerSuspended"
+            )
+            .select(
+              "name price images category subCategory brand stock isActive region seller fulfillmentLocation wishlistCount createdAt updatedAt description"
+            )
+            .lean(),
       Product.countDocuments(filter),
+      Product.countDocuments({ isActive: true }),
+      Product.countDocuments({ isActive: false }),
     ]);
+
+    const ids = rawItems.map((p: any) => p._id);
+
+    // Primary: ProductPerformance (written on view / cart / purchase)
+    const perfDocs = ids.length
+      ? await ProductPerformance.find({ product: { $in: ids } })
+          .select("product views cartAdds purchases score")
+          .lean()
+      : [];
+
+    const perfMap: Record<
+      string,
+      { views: number; cartAdds: number; purchases: number; score: number }
+    > = {};
+    for (const p of perfDocs as any[]) {
+      perfMap[String(p.product)] = {
+        views: Number(p.views) || 0,
+        cartAdds: Number(p.cartAdds) || 0,
+        purchases: Number(p.purchases) || 0,
+        score: Number(p.score) || 0,
+      };
+    }
+
+    // Fallback: orders → checkouts (if performance docs are empty / lagging)
+    const orderAgg = ids.length
+      ? await Order.aggregate([
+          { $match: { "items.product": { $in: ids } } },
+          { $unwind: "$items" },
+          { $match: { "items.product": { $in: ids } } },
+          {
+            $group: {
+              _id: "$items.product",
+              qty: { $sum: { $ifNull: ["$items.quantity", 1] } },
+              orders: { $sum: 1 },
+            },
+          },
+        ])
+      : [];
+
+    const orderMap: Record<string, number> = {};
+    for (const row of orderAgg as any[]) {
+      orderMap[String(row._id)] = Number(row.qty) || 0;
+    }
+
+    // Fallback: live carts → how many carts currently hold this product
+    const cartAgg = ids.length
+      ? await Order.db
+          .collection("carts")
+          .aggregate([
+            { $unwind: "$items" },
+            { $match: { "items.product": { $in: ids } } },
+            {
+              $group: {
+                _id: "$items.product",
+                carts: { $sum: 1 },
+              },
+            },
+          ])
+          .toArray()
+          .catch(() => [])
+      : [];
+
+    // Prefer Cart model if collection name differs
+    let cartMap: Record<string, number> = {};
+    try {
+      const Cart = (await import("../models/Cart.js")).default;
+      const liveCarts = ids.length
+        ? await Cart.aggregate([
+            { $unwind: "$items" },
+            { $match: { "items.product": { $in: ids } } },
+            {
+              $group: {
+                _id: "$items.product",
+                carts: { $sum: 1 },
+              },
+            },
+          ])
+        : [];
+      for (const row of liveCarts as any[]) {
+        cartMap[String(row._id)] = Number(row.carts) || 0;
+      }
+    } catch {
+      for (const row of cartAgg as any[]) {
+        cartMap[String(row._id)] = Number(row.carts) || 0;
+      }
+    }
+
+    let data = rawItems.map((p: any) => {
+      const id = String(p._id);
+      const perf = perfMap[id] || {
+        views: 0,
+        cartAdds: 0,
+        purchases: 0,
+        score: 0,
+      };
+
+      // Prefer performance counters; if 0, use order/cart fallbacks
+      const views = perf.views;
+      const cartAdds = Math.max(perf.cartAdds, cartMap[id] || 0);
+      const checkouts = Math.max(perf.purchases, orderMap[id] || 0);
+
+      return {
+        ...p,
+        metrics: {
+          views,
+          cartAdds,
+          purchases: checkouts,
+          score: perf.score,
+        },
+        views,
+        cartAdds,
+        checkouts,
+      };
+    });
+
+    if (needsPerfSort) {
+      const key =
+        sort.startsWith("views")
+          ? "views"
+          : sort.startsWith("cart")
+            ? "cartAdds"
+            : "checkouts";
+      const desc = sort.endsWith("High");
+      data.sort((a: any, b: any) =>
+        desc ? (b[key] || 0) - (a[key] || 0) : (a[key] || 0) - (b[key] || 0)
+      );
+      const start = (page - 1) * limit;
+      data = data.slice(start, start + limit);
+    }
 
     res.json({
       success: true,
-      data: items,
-      pagination: { page, limit, total, pages: Math.ceil(total / limit) || 1 },
+      data,
+      counts: {
+        all: activeCount + inactiveCount,
+        active: activeCount,
+        inactive: inactiveCount,
+      },
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit) || 1,
+      },
     });
   } catch (error: any) {
+    console.error("getAdminProducts error:", error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
@@ -327,16 +718,16 @@ export const getAdminProducts = async (req: Request, res: Response) => {
 export const setSellerSuspended = async (req: Request, res: Response) => {
   try {
     const user = await User.findById(req.params.id);
-    if (!user) return res.status(404).json({ success: false, message: "User not found" });
+    if (!user)
+      return res.status(404).json({ success: false, message: "User not found" });
     if (user.role !== "seller") {
-      return res.status(400).json({ success: false, message: "User is not a seller" });
+      return res
+        .status(400)
+        .json({ success: false, message: "User is not a seller" });
     }
     user.isSellerSuspended = Boolean(req.body?.suspended);
     await user.save();
-
-    // Return full user so UI can live-update without another fetch if desired
     const full = await User.findById(user._id).lean();
-
     res.json({
       success: true,
       message: user.isSellerSuspended ? "Seller suspended" : "Seller reactivated",
@@ -350,18 +741,21 @@ export const setSellerSuspended = async (req: Request, res: Response) => {
 export const setSellerVerified = async (req: Request, res: Response) => {
   try {
     const user = await User.findById(req.params.id);
-    if (!user) return res.status(404).json({ success: false, message: "User not found" });
+    if (!user)
+      return res.status(404).json({ success: false, message: "User not found" });
     if (user.role !== "seller") {
-      return res.status(400).json({ success: false, message: "User is not a seller" });
+      return res
+        .status(400)
+        .json({ success: false, message: "User is not a seller" });
     }
     user.isSellerVerified = Boolean(req.body?.verified);
     await user.save();
-
     const full = await User.findById(user._id).lean();
-
     res.json({
       success: true,
-      message: user.isSellerVerified ? "Seller verified" : "Seller verification removed",
+      message: user.isSellerVerified
+        ? "Seller verified"
+        : "Seller verification removed",
       data: full,
     });
   } catch (error: any) {
@@ -372,7 +766,10 @@ export const setSellerVerified = async (req: Request, res: Response) => {
 export const setProductActive = async (req: Request, res: Response) => {
   try {
     const product = await Product.findById(req.params.id);
-    if (!product) return res.status(404).json({ success: false, message: "Product not found" });
+    if (!product)
+      return res
+        .status(404)
+        .json({ success: false, message: "Product not found" });
     product.isActive = Boolean(req.body?.active);
     await product.save();
     res.json({
@@ -388,7 +785,10 @@ export const setProductActive = async (req: Request, res: Response) => {
 export const getAdminOrders = async (req: Request, res: Response) => {
   try {
     const page = Math.max(1, parseInt(String(req.query.page || "1"), 10));
-    const limit = Math.min(50, Math.max(1, parseInt(String(req.query.limit || "20"), 10)));
+    const limit = Math.min(
+      50,
+      Math.max(1, parseInt(String(req.query.limit || "20"), 10))
+    );
     const status = String(req.query.status || "").trim();
     const payment = String(req.query.payment || "").trim();
     const q = String(req.query.q || "").trim();
@@ -399,7 +799,8 @@ export const getAdminOrders = async (req: Request, res: Response) => {
     if (status) filter.orderStatus = status;
     if (payment) filter.paymentStatus = payment;
     if (city) filter["shippingAddress.city"] = { $regex: city, $options: "i" };
-    if (region) filter["shippingAddress.country"] = { $regex: region, $options: "i" };
+    if (region)
+      filter["shippingAddress.country"] = { $regex: region, $options: "i" };
 
     if (q) {
       const orderNumberQ = q.replace(/^#/, "").trim();
@@ -463,10 +864,14 @@ export const getAdminOrderDetail = async (req: Request, res: Response) => {
   try {
     const order = await Order.findById(req.params.id)
       .populate("buyer", "name email phone marketplaceRegion")
-      .populate("seller", "name storeName email phone marketplaceRegion isSellerSuspended")
+      .populate(
+        "seller",
+        "name storeName email phone marketplaceRegion isSellerSuspended"
+      )
       .populate("items.product", "name images price isActive region")
       .lean();
-    if (!order) return res.status(404).json({ success: false, message: "Order not found" });
+    if (!order)
+      return res.status(404).json({ success: false, message: "Order not found" });
     res.json({ success: true, data: order });
   } catch (error: any) {
     res.status(500).json({ success: false, message: error.message });
@@ -476,7 +881,10 @@ export const getAdminOrderDetail = async (req: Request, res: Response) => {
 export const getAdminContacts = async (req: Request, res: Response) => {
   try {
     const page = Math.max(1, parseInt(String(req.query.page || "1"), 10));
-    const limit = Math.min(50, Math.max(1, parseInt(String(req.query.limit || "20"), 10)));
+    const limit = Math.min(
+      50,
+      Math.max(1, parseInt(String(req.query.limit || "20"), 10))
+    );
     const status = String(req.query.status || "").trim();
     const contactAs = String(req.query.contactAs || "").trim();
     const category = String(req.query.category || "").trim();
@@ -517,7 +925,8 @@ export const getAdminContactDetail = async (req: Request, res: Response) => {
       .populate("relatedOrder")
       .populate("responses.admin", "name email")
       .lean();
-    if (!item) return res.status(404).json({ success: false, message: "Not found" });
+    if (!item)
+      return res.status(404).json({ success: false, message: "Not found" });
     res.json({ success: true, data: item });
   } catch (error: any) {
     res.status(500).json({ success: false, message: error.message });
@@ -527,7 +936,8 @@ export const getAdminContactDetail = async (req: Request, res: Response) => {
 export const updateAdminContact = async (req: Request, res: Response) => {
   try {
     const item = await ContactMessage.findById(req.params.id);
-    if (!item) return res.status(404).json({ success: false, message: "Not found" });
+    if (!item)
+      return res.status(404).json({ success: false, message: "Not found" });
     const admin = (req as any).user;
 
     if (req.body.status) item.status = req.body.status;
@@ -554,7 +964,10 @@ export const updateAdminContact = async (req: Request, res: Response) => {
 export const getAdminReports = async (req: Request, res: Response) => {
   try {
     const page = Math.max(1, parseInt(String(req.query.page || "1"), 10));
-    const limit = Math.min(50, Math.max(1, parseInt(String(req.query.limit || "20"), 10)));
+    const limit = Math.min(
+      50,
+      Math.max(1, parseInt(String(req.query.limit || "20"), 10))
+    );
     const status = String(req.query.status || "").trim();
     const targetType = String(req.query.targetType || "").trim();
     const priority = String(req.query.priority || "").trim();
@@ -589,7 +1002,8 @@ export const getAdminReports = async (req: Request, res: Response) => {
 export const updateAdminReport = async (req: Request, res: Response) => {
   try {
     const item = await Report.findById(req.params.id);
-    if (!item) return res.status(404).json({ success: false, message: "Not found" });
+    if (!item)
+      return res.status(404).json({ success: false, message: "Not found" });
     const admin = (req as any).user;
 
     if (req.body.status) item.status = req.body.status;
@@ -604,6 +1018,25 @@ export const updateAdminReport = async (req: Request, res: Response) => {
     }
     await item.save();
     res.json({ success: true, data: item });
+  } catch (error: any) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+export const pingPresence = async (req: Request, res: Response) => {
+  try {
+    const platform = ["web", "app", "admin"].includes(String(req.body?.platform))
+      ? String(req.body.platform)
+      : "web";
+    const id = (req as any).user?._id;
+    if (!id) {
+      return res.status(401).json({ success: false, message: "Unauthorized" });
+    }
+    await User.findByIdAndUpdate(id, {
+      lastSeenAt: new Date(),
+      lastSeenPlatform: platform,
+    });
+    res.json({ success: true });
   } catch (error: any) {
     res.status(500).json({ success: false, message: error.message });
   }

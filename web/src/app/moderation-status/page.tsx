@@ -17,62 +17,48 @@ function copyFor(kind: string, context: ModContext) {
   switch (kind) {
     case "review":
       return {
-        title: seller ? "Seller World under review" : "Account under review",
-        body: "We're reviewing activity on this side of Plazore. Access is paused until the check is complete.",
+        title: seller ? "Seller World is under review" : "Your account is under review",
+        body: seller
+          ? "We're checking activity on Seller World. Store tools stay paused until that review is finished."
+          : "We're checking activity on this account. Marketplace access stays paused until the review is finished.",
         cta: "Understood",
       };
     case "suspended":
       return {
-        title: seller
-          ? "Seller World is suspended"
-          : "Plazore access is suspended",
+        title: seller ? "Seller World is paused" : "Plazore access is paused",
         body: seller
-          ? "You can't manage products, orders, or store settings right now. Shopping as a buyer may still work."
-          : "Marketplace access is temporarily limited.",
+          ? "You can't manage products, orders, or store settings right now. This lasts until the pause period ends. Shopping as a buyer may still work."
+          : "Marketplace access is limited until this pause period ends. You don't need to do anything on your side.",
         cta: "Got it",
       };
     case "blocked":
       return {
-        title: seller
-          ? "Seller World is blocked"
-          : "Plazore account is blocked",
+        title: seller ? "Seller World is blocked" : "This account is blocked",
         body: seller
-          ? "Seller tools are locked. This does not automatically block you as a buyer."
-          : "Access to this side of Plazore is blocked until further notice.",
+          ? "Seller tools stay locked until Plazore lifts the block. This does not automatically block you as a buyer."
+          : "Access to this side of Plazore stays blocked until it is lifted.",
         cta: "Close",
       };
     case "pardoned":
       return {
         title: "You're clear",
-        body: "Review is complete. No further action is required on your account.",
-        cta: "Proceed",
+        body: "The review is complete. No further action is required on your account.",
+        cta: "Continue",
       };
     case "restored":
       return {
         title: "Access restored",
         body: seller
-          ? "Seller World is available again."
+          ? "Seller World is available again. You can continue managing your store."
           : "Your Plazore access is available again.",
-        cta: "Proceed",
+        cta: "Continue",
       };
     default:
       return {
         title: "All clear",
-        body: "No moderation restriction on this side.",
+        body: "There's no restriction on this side of your account.",
         cta: "Continue",
       };
-  }
-}
-
-function formatEnds(endsAt?: string | null) {
-  if (!endsAt) return null;
-  try {
-    const d = new Date(endsAt);
-    if (Number.isNaN(d.getTime())) return null;
-    if (d.getTime() <= Date.now()) return "Ending soon / expired";
-    return `Until ${d.toLocaleString()}`;
-  } catch {
-    return null;
   }
 }
 
@@ -86,25 +72,22 @@ function ModerationStatusInner() {
 
   const paramStatus = search.get("status");
   const paramReason = search.get("publicReason") || "";
-  const paramEnds = search.get("endsAt");
 
-  // Seed from URL so first paint is final content — no spinner flash
   const seed: ModSide | null = paramStatus
     ? {
         status: paramStatus,
         publicReason: paramReason || undefined,
-        endsAt: paramEnds,
       }
     : null;
 
   const [side, setSide] = useState<ModSide | null>(seed);
   const [booting, setBooting] = useState(!seed);
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
 
   const fetchedOnce = useRef(false);
   const navigating = useRef(false);
 
-  // Fetch once. Never re-run when getToken / isSignedIn identity changes.
   useEffect(() => {
     if (fetchedOnce.current) return;
     fetchedOnce.current = true;
@@ -126,7 +109,7 @@ function ModerationStatusInner() {
         if (cancelled) return;
         if (m?.[context]) setSide(m[context]);
       } catch {
-        // keep seed
+        /* keep seed */
       } finally {
         if (!cancelled) setBooting(false);
       }
@@ -145,8 +128,8 @@ function ModerationStatusInner() {
 
   const copy = copyFor(kind, context);
   const publicReason = side?.publicReason || paramReason || "";
-  const endsLabel = formatEnds(side?.endsAt || paramEnds);
   const artSrc = MOD_ART[kind as keyof typeof MOD_ART] || MOD_ART.pardoned;
+  const locked = kind === "review" || kind === "suspended" || kind === "blocked";
 
   const goHome = () => {
     if (navigating.current) return;
@@ -157,17 +140,26 @@ function ModerationStatusInner() {
   const onProceed = async () => {
     if (busy || navigating.current) return;
     setBusy(true);
-    try {
-      const token = await getToken();
+    setError("");
 
-      // Clear outcome BEFORE navigating into seller — stops redirect loop
-      if (token && (kind === "pardoned" || kind === "restored")) {
+    try {
+      if (!locked) {
+        const token = await getToken();
+        if (!token) {
+          setError("Couldn't confirm your session. Please try again.");
+          navigating.current = false;
+          setBusy(false);
+          return;
+        }
         await clearLastOutcome(token, context);
+        setSide((prev) =>
+          prev ? { ...prev, lastOutcome: null, publicReason: "" } : prev
+        );
       }
 
       navigating.current = true;
 
-      if (kind === "review" || kind === "suspended" || kind === "blocked") {
+      if (locked) {
         router.replace("/");
         return;
       }
@@ -175,6 +167,7 @@ function ModerationStatusInner() {
       router.replace(context === "seller" ? "/seller" : "/");
     } catch {
       navigating.current = false;
+      setError("Couldn't finish this step. Please try again.");
     } finally {
       setBusy(false);
     }
@@ -197,11 +190,7 @@ function ModerationStatusInner() {
         <div className="mx-auto flex w-full max-w-md flex-1 flex-col items-center justify-center pb-16 text-center">
           <div className="relative mb-8 h-52 w-52">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={artSrc}
-              alt=""
-              className="h-full w-full object-contain"
-            />
+            <img src={artSrc} alt="" className="h-full w-full object-contain" />
           </div>
 
           <h1 className="text-2xl font-bold tracking-tight">{copy.title}</h1>
@@ -218,8 +207,8 @@ function ModerationStatusInner() {
             </div>
           ) : null}
 
-          {endsLabel && (kind === "suspended" || kind === "blocked") ? (
-            <p className="mt-4 text-sm text-[#737A86]">{endsLabel}</p>
+          {error ? (
+            <p className="mt-4 text-sm text-red-300">{error}</p>
           ) : null}
 
           <button
@@ -231,18 +220,15 @@ function ModerationStatusInner() {
             {busy ? "…" : copy.cta}
           </button>
 
-          {(kind === "review" ||
-            kind === "suspended" ||
-            kind === "blocked") &&
-            context === "seller" && (
-              <button
-                type="button"
-                onClick={goHome}
-                className="mt-4 text-sm font-semibold text-[#737A86] hover:text-[#F5F7FA]"
-              >
-                Continue as buyer
-              </button>
-            )}
+          {locked && context === "seller" && (
+            <button
+              type="button"
+              onClick={goHome}
+              className="mt-4 text-sm font-semibold text-[#737A86] hover:text-[#F5F7FA]"
+            >
+              Continue as buyer
+            </button>
+          )}
         </div>
       )}
     </div>
