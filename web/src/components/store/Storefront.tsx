@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { AppFeaturePrompt, type AppFeature } from "@/components/app/AppFeaturePrompt";
 import { useEffect, useState } from "react";
+import { useAuth } from "@clerk/nextjs";
 import {
   Bookmark,
   CheckCircle,
@@ -11,6 +12,8 @@ import {
   Copy,
   Link2,
   MapPin,
+  Flag,
+  MessageCircle,
   Share2,
   Store,
   X,
@@ -107,6 +110,8 @@ export function Storefront({
   const [shareBusy, setShareBusy] = useState(false);
   const [copied, setCopied] = useState(false);
   const [prompt, setPrompt] = useState<AppFeature | null>(null);
+  const { isSignedIn, isLoaded } = useAuth();
+const [authOpen, setAuthOpen] = useState(false);
 
   const id = storeKey(store);
   const locationLabel = [store.location?.state, store.location?.country]
@@ -375,6 +380,77 @@ export function Storefront({
               ))}
             </div>
           )}
+
+{/* Support — Contact Store through Plazore + Report Store */}
+<section className="mt-10">
+  <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#737A86]">
+    Support
+  </p>
+
+  <button
+    type="button"
+    onClick={() => {
+      if (!isLoaded) return;
+      if (!isSignedIn) {
+        setAuthOpen(true);
+        return;
+      }
+      const q = new URLSearchParams({
+        mode: "contact",
+        contextType: "store",
+        storeId: String(id || ""),
+        storeName: String(store.storeName || ""),
+      });
+      router.push(`/contact?${q.toString()}`);
+    }}
+    className="mt-3 flex w-full items-center gap-3 rounded-[18px] border border-[#10B981]/25 bg-[#10B981]/[0.06] px-3.5 py-3.5 text-left transition hover:border-[#10B981]/40"
+  >
+    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#10B981]/15">
+      <MessageCircle className="h-4 w-4 text-[#10B981]" />
+    </span>
+    <span className="min-w-0 flex-1">
+      <span className="block text-[14.5px] font-bold tracking-tight">
+        Contact Store through Plazore
+      </span>
+      <span className="mt-0.5 block text-xs text-[#737A86]">
+        Routed through Plazore · not direct seller chat
+      </span>
+    </span>
+    <ChevronLeft className="h-4 w-4 shrink-0 rotate-180 text-[#737A86]" />
+  </button>
+
+  <button
+    type="button"
+    onClick={() => {
+      if (!isLoaded) return;
+      if (!isSignedIn) {
+        setAuthOpen(true);
+        return;
+      }
+      const q = new URLSearchParams({
+        mode: "report",
+        contextType: "store",
+        storeId: String(id || ""),
+        storeName: String(store.storeName || ""),
+      });
+      router.push(`/contact?${q.toString()}`);
+    }}
+    className="mt-2.5 flex w-full items-center gap-3 rounded-[18px] border border-[#252A33] bg-[#11141A] px-3.5 py-3.5 text-left transition hover:border-white/15"
+  >
+    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-[#EF4444]/25 bg-[#EF4444]/15">
+    <Flag className="h-4 w-4 text-[#EF4444]" />
+  </span>
+  <span className="min-w-0 flex-1">
+    <span className="block text-[14.5px] font-bold tracking-tight text-[#F87171]">
+      Report Store
+    </span>
+    <span className="mt-0.5 block text-xs text-[#F87171]/70">
+      Structured report to Plazore moderation
+    </span>
+  </span>
+  <ChevronLeft className="h-4 w-4 shrink-0 rotate-180 text-[#F87171]/80" />
+</button>
+</section>
         </section>
 
         <footer className="mb-2 mt-10 flex flex-col items-center">
@@ -447,6 +523,43 @@ export function Storefront({
           </div>
         </div>
       ) : null}
+
+      {authOpen ? (
+  <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/75 sm:items-center sm:p-6">
+    <div className="w-full max-w-md border border-white/10 bg-[#11141A] sm:rounded-2xl">
+      <div className="flex items-start justify-between gap-3 px-5 pt-5">
+        <div>
+          <p className="text-[16px] font-extrabold">Continue on Plazore</p>
+          <p className="mt-1.5 text-[13px] leading-5 text-white/55">
+            Sign in to contact this store or send a report. You’ll return here after.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setAuthOpen(false)}
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/6"
+          aria-label="Close"
+        >
+          <X className="h-4 w-4 text-white/50" />
+        </button>
+      </div>
+      <div className="space-y-2.5 px-5 py-5">
+        <Link
+          href={`/sign-in?redirect_url=${encodeURIComponent(`/store/${id}`)}`}
+          className="flex h-12 w-full items-center justify-center rounded-xl bg-white text-[14px] font-bold text-[#1F1F1F]"
+        >
+          Sign in
+        </Link>
+        <Link
+          href={`/sign-in?mode=signup&redirect_url=${encodeURIComponent(`/store/${id}`)}`}
+          className="flex h-12 w-full items-center justify-center rounded-xl text-[14px] font-bold text-[#00E575]"
+        >
+          Create a Plazore account
+        </Link>
+      </div>
+    </div>
+  </div>
+) : null}
 
       {/* App necessity — Save store */}
       <AppFeaturePrompt feature={prompt} onClose={() => setPrompt(null)} />

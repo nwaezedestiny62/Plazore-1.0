@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useAuth } from "@clerk/nextjs";
 import { Poppins } from "next/font/google";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LayoutGrid, List, RefreshCw, WifiOff, X } from "lucide-react";
 import { adminFetch } from "@/lib/api";
@@ -116,7 +117,6 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   );
 }
 
-/** All product images — hero + responsive thumb grid */
 function ProductImageGallery({
   images,
   name,
@@ -167,15 +167,11 @@ function ProductImageGallery({
                 "aspect-square overflow-hidden border bg-[#171B22] transition",
                 i === active
                   ? "border-[#00E575] ring-1 ring-[#00E575]/40"
-                  : "border-[#252A33] hover:border-[#00E575]/35"
+                  : "border-[#252A33] hover:border-[#00E575]/35",
               )}
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={src}
-                alt=""
-                className="h-full w-full object-cover"
-              />
+              <img src={src} alt="" className="h-full w-full object-cover" />
             </button>
           ))}
         </div>
@@ -186,6 +182,12 @@ function ProductImageGallery({
 
 export default function ProductsPage() {
   const { getToken } = useAuth();
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
+
+  const deepProductId = (searchParams.get("productId") || "").trim();
+  const deepOpenedRef = useRef<string | null>(null);
 
   const [mounted, setMounted] = useState(false);
   const [offline, setOffline] = useState(false);
@@ -214,6 +216,8 @@ export default function ProductsPage() {
 
   const [openId, setOpenId] = useState<string | null>(null);
   const [paneOpen, setPaneOpen] = useState(false);
+  const [detailOverride, setDetailOverride] = useState<ProductRow | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
 
   const cacheRef = useRef<{
     items: ProductRow[];
@@ -228,7 +232,7 @@ export default function ProductsPage() {
   const cities = useMemo(() => {
     if (!country) {
       return FULFILLMENT_COUNTRIES.flatMap((c) =>
-        c.states.flatMap((s: any) => s.cities || [])
+        c.states.flatMap((s: any) => s.cities || []),
       );
     }
     return getStatesForCountry(country).flatMap((s: any) => s.cities || []);
@@ -259,7 +263,7 @@ export default function ProductsPage() {
           setPage(cacheRef.current.page);
           setStale(true);
           setError(
-            "You’re offline. Showing the last loaded catalog — reconnect to refresh."
+            "You’re offline. Showing the last loaded catalog — reconnect to refresh.",
           );
           setLoading(false);
           return;
@@ -325,7 +329,7 @@ export default function ProductsPage() {
           setError(
             e?.message
               ? `${e.message} — showing last successful load.`
-              : "Request failed — showing last successful load."
+              : "Request failed — showing last successful load.",
           );
         } else {
           setError(e?.message || "Failed to load products");
@@ -335,7 +339,7 @@ export default function ProductsPage() {
         setLoading(false);
       }
     },
-    [getToken, q, active, region, city, sort]
+    [getToken, q, active, region, city, sort],
   );
 
   useEffect(() => {
@@ -344,17 +348,95 @@ export default function ProductsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mounted, active, region, city, sort]);
 
-  const openPane = (id: string) => {
-    setOpenId(id);
-    setPaneOpen(true);
-  };
+  const fetchProductById = useCallback(
+    async (id: string) => {
+      try {
+        setDetailLoading(true);
+        const token = await getToken();
+        if (!token) return null;
 
-  const closePane = () => {
+        // Prefer dedicated detail if available
+        try {
+          const one = await adminFetch<{ data?: ProductRow }>(
+            `/admin/products/${id}`,
+            token,
+          );
+          if (one?.data?._id) return one.data;
+        } catch {
+          /* fall through */
+        }
+
+        // Fallback: search list endpoints may still return the row
+        const params = new URLSearchParams({
+          page: "1",
+          limit: "5",
+          q: id,
+        });
+        const json = await adminFetch<{ data?: ProductRow[] }>(
+          `/admin/products?${params}`,
+          token,
+        );
+        const hit = (json.data || []).find((p) => p._id === id);
+        return hit || null;
+      } catch {
+        return null;
+      } finally {
+        setDetailLoading(false);
+      }
+    },
+    [getToken],
+  );
+
+  const openPane = useCallback(
+    async (id: string) => {
+      setOpenId(id);
+      setPaneOpen(true);
+
+      const inList =
+        items.find((p) => p._id === id) ||
+        cacheRef.current?.items.find((p) => p._id === id);
+
+      if (inList) {
+        setDetailOverride(null);
+        return;
+      }
+
+      setDetailOverride(null);
+      const fetched = await fetchProductById(id);
+      if (fetched) setDetailOverride(fetched);
+    },
+    [items, fetchProductById],
+  );
+
+  const closePane = useCallback(() => {
     setPaneOpen(false);
-    window.setTimeout(() => setOpenId(null), 280);
-  };
+    deepOpenedRef.current = null;
+    if (deepProductId) {
+      router.replace(pathname);
+    }
+    window.setTimeout(() => {
+      setOpenId(null);
+      setDetailOverride(null);
+    }, 280);
+  }, [deepProductId, pathname, router]);
 
-  const selected = items.find((p) => p._id === openId) || null;
+  // Auto-open from Reports (or any deep link): /products?productId=xxx
+  useEffect(() => {
+    if (!mounted || !deepProductId) return;
+    if (deepOpenedRef.current === deepProductId) return;
+    deepOpenedRef.current = deepProductId;
+    void openPane(deepProductId);
+  }, [mounted, deepProductId, openPane]);
+
+  // When list finishes loading, prefer list row over override
+  useEffect(() => {
+    if (!openId || !paneOpen) return;
+    const inList = items.find((p) => p._id === openId);
+    if (inList) setDetailOverride(null);
+  }, [items, openId, paneOpen]);
+
+  const selected =
+    items.find((p) => p._id === openId) || detailOverride || null;
 
   const toggleActive = async (product: ProductRow) => {
     if (showOffline) {
@@ -369,6 +451,12 @@ export default function ProductsPage() {
         body: JSON.stringify({ active: !product.isActive }),
       });
       await load(page);
+      if (detailOverride?._id === product._id) {
+        setDetailOverride({
+          ...detailOverride,
+          isActive: !product.isActive,
+        });
+      }
     } catch (e: any) {
       setError(e.message || "Update failed");
     } finally {
@@ -404,7 +492,7 @@ export default function ProductsPage() {
     <div
       className={cn(
         poppins.className,
-        "relative min-h-[70vh] pb-28 text-[#F5F7FA]"
+        "relative min-h-[70vh] pb-28 text-[#F5F7FA]",
       )}
     >
       {showOffline && (
@@ -432,13 +520,13 @@ export default function ProductsPage() {
               "inline-flex items-center gap-1.5 border px-2 py-0.5 text-[10px] font-medium",
               showOffline
                 ? "border-amber-500/30 bg-amber-500/10 text-amber-200"
-                : "border-[#00E575]/25 bg-[#00E575]/10 text-[#00E575]"
+                : "border-[#00E575]/25 bg-[#00E575]/10 text-[#00E575]",
             )}
           >
             <span
               className={cn(
                 "h-1.5 w-1.5 rounded-full",
-                showOffline ? "bg-amber-400" : "bg-[#00E575]"
+                showOffline ? "bg-amber-400" : "bg-[#00E575]",
               )}
             />
             {showOffline ? "Offline" : "Live"}
@@ -450,8 +538,8 @@ export default function ProductsPage() {
               Products
             </h1>
             <p className="mt-2 max-w-xl text-sm leading-relaxed text-[#A7ADB8]">
-              Search, filter, and inspect listings. All images show in the
-              detail pane.
+              Search, filter, and inspect listings. Deep links from Reports open
+              the product pane automatically.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -494,7 +582,7 @@ export default function ProductsPage() {
             className={cn(
               "bg-[#11141A] px-3 py-3.5 text-left transition sm:px-4",
               active === value &&
-                "bg-[#041412] ring-1 ring-inset ring-[#00E575]/30"
+                "bg-[#041412] ring-1 ring-inset ring-[#00E575]/30",
             )}
           >
             <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#737A86]">
@@ -544,7 +632,7 @@ export default function ProductsPage() {
                   "flex h-10 w-10 items-center justify-center transition",
                   view === "list"
                     ? "bg-[#00E575] text-[#041412]"
-                    : "text-[#A7ADB8] hover:text-[#F5F7FA]"
+                    : "text-[#A7ADB8] hover:text-[#F5F7FA]",
                 )}
               >
                 <List className="h-4 w-4" />
@@ -557,7 +645,7 @@ export default function ProductsPage() {
                   "flex h-10 w-10 items-center justify-center transition",
                   view === "grid"
                     ? "bg-[#00E575] text-[#041412]"
-                    : "text-[#A7ADB8] hover:text-[#F5F7FA]"
+                    : "text-[#A7ADB8] hover:text-[#F5F7FA]",
                 )}
               >
                 <LayoutGrid className="h-4 w-4" />
@@ -651,7 +739,7 @@ export default function ProductsPage() {
         <div className="border border-[#252A33] bg-[#11141A]">
           <OrbLoader label="Loading catalog" />
         </div>
-      ) : items.length === 0 ? (
+      ) : items.length === 0 && !deepProductId ? (
         <EmptyState
           title="No products found"
           body={
@@ -668,12 +756,12 @@ export default function ProductsPage() {
               <button
                 key={p._id}
                 type="button"
-                onClick={() => openPane(p._id)}
+                onClick={() => void openPane(p._id)}
                 className={cn(
                   "border border-[#252A33] bg-[#11141A] p-4 text-left transition hover:border-[#00E575]/35",
                   openId === p._id &&
                     paneOpen &&
-                    "border-[#00E575]/45 bg-[#00E575]/5"
+                    "border-[#00E575]/45 bg-[#00E575]/5",
                 )}
               >
                 <div className="flex gap-3">
@@ -716,7 +804,7 @@ export default function ProductsPage() {
             );
           })}
         </div>
-      ) : (
+      ) : items.length > 0 ? (
         <Panel className="overflow-x-auto">
           <table className="w-full min-w-[1080px] text-left text-sm">
             <thead className="border-b border-[#252A33] text-[11px] uppercase tracking-[0.12em] text-[#737A86]">
@@ -738,10 +826,10 @@ export default function ProductsPage() {
                 return (
                   <tr
                     key={p._id}
-                    onClick={() => openPane(p._id)}
+                    onClick={() => void openPane(p._id)}
                     className={cn(
                       "cursor-pointer border-b border-[#252A33]/70 transition-colors hover:bg-[#171B22]/80",
-                      openId === p._id && paneOpen && "bg-[#00E575]/[0.06]"
+                      openId === p._id && paneOpen && "bg-[#00E575]/[0.06]",
                     )}
                   >
                     <td className="px-4 py-3">
@@ -810,7 +898,7 @@ export default function ProductsPage() {
             </tbody>
           </table>
         </Panel>
-      )}
+      ) : null}
 
       {pages > 1 && (
         <div className="mt-4 flex flex-wrap items-center gap-2">
@@ -839,7 +927,7 @@ export default function ProductsPage() {
           "fixed inset-0 z-40 bg-black/50 transition-opacity duration-300",
           paneOpen
             ? "pointer-events-auto opacity-100"
-            : "pointer-events-none opacity-0"
+            : "pointer-events-none opacity-0",
         )}
         onClick={closePane}
         aria-hidden
@@ -849,7 +937,7 @@ export default function ProductsPage() {
         className={cn(
           poppins.className,
           "fixed top-0 right-0 z-50 flex h-full w-full max-w-[440px] flex-col border-l border-[#252A33] bg-[#0C0F14] shadow-2xl transition-transform duration-300 ease-out",
-          paneOpen ? "translate-x-0" : "translate-x-full"
+          paneOpen ? "translate-x-0" : "translate-x-full",
         )}
       >
         <div className="flex h-14 shrink-0 items-center justify-between border-b border-[#252A33] px-4">
@@ -863,13 +951,16 @@ export default function ProductsPage() {
             type="button"
             onClick={closePane}
             className="flex h-9 w-9 items-center justify-center border border-[#252A33] bg-[#171B22] text-[#A7ADB8] transition hover:text-white"
+            aria-label="Close"
           >
             <X className="h-4 w-4" />
           </button>
         </div>
 
         <div className="flex-1 overflow-y-auto px-4 py-5">
-          {selected && (
+          {detailLoading && !selected ? (
+            <OrbLoader label="Loading product" />
+          ) : selected ? (
             <div className="space-y-6">
               <div>
                 <h2 className="text-lg font-semibold leading-snug">
@@ -887,9 +978,7 @@ export default function ProductsPage() {
                   <Badge tone="neutral">
                     {selected.region || "No region"}
                   </Badge>
-                  <Badge
-                    tone={(selected.stock ?? 0) > 0 ? "green" : "warn"}
-                  >
+                  <Badge tone={(selected.stock ?? 0) > 0 ? "green" : "warn"}>
                     Stock {selected.stock ?? 0}
                   </Badge>
                 </div>
@@ -1015,6 +1104,15 @@ export default function ProductsPage() {
                     : "Activate product"}
                 </Button>
               </div>
+            </div>
+          ) : (
+            <div className="py-16 text-center">
+              <p className="text-sm text-[#A7ADB8]">
+                Product not found in catalog.
+              </p>
+              <p className="mt-1 font-mono text-[11px] text-[#737A86]">
+                {openId}
+              </p>
             </div>
           )}
         </div>

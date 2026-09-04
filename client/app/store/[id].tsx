@@ -907,6 +907,80 @@ export default function PublicStorefront() {
             </View>
           )}
         </Animated.View>
+{/* Contact + Report — bottom of storefront */}
+<Animated.View
+  style={{
+    opacity: content,
+    paddingHorizontal: H_PAD,
+    marginTop: 28,
+  }}
+>
+  <Text style={styles.sectionEyebrow}>Support</Text>
+
+  <TouchableOpacity
+    activeOpacity={0.88}
+    onPress={() => {
+      if (!authLoaded) return;
+      if (!isSignedIn) {
+        setAuthOpen(true);
+        return;
+      }
+      router.push({
+        pathname: "/contact" as any,
+        params: {
+          mode: "contact",
+          contextType: "store",
+          storeId: String(storeId || ""),
+          storeName: String(store.storeName || ""),
+        },
+      });
+    }}
+    style={styles.supportPrimary}
+  >
+    <View style={styles.supportIconPrimary}>
+      <Ionicons name="chatbubbles-outline" size={18} color={AI_GREEN} />
+    </View>
+    <View style={{ flex: 1, minWidth: 0 }}>
+      <Text style={styles.supportTitle}>Contact Store through Plazore</Text>
+      <Text style={styles.supportSub} numberOfLines={1}>
+        Routed through Plazore · not direct seller chat
+      </Text>
+    </View>
+    <Ionicons name="chevron-forward" size={16} color={MUTED} />
+  </TouchableOpacity>
+
+  <TouchableOpacity
+    activeOpacity={0.88}
+    onPress={() => {
+      if (!authLoaded) return;
+      if (!isSignedIn) {
+        setAuthOpen(true);
+        return;
+      }
+      router.push({
+        pathname: "/contact" as any,
+        params: {
+          mode: "report",
+          contextType: "store",
+          storeId: String(storeId || ""),
+          storeName: String(store.storeName || ""),
+        },
+      });
+    }}
+    style={styles.supportSecondary}
+  >
+    <View style={styles.supportIconSecondary}>
+      <Ionicons name="flag-outline" size={17} color={SECONDARY} />
+    </View>
+    <View style={{ flex: 1, minWidth: 0 }}>
+      <Text style={styles.supportTitleMuted}>Report Store</Text>
+      <Text style={styles.supportSub} numberOfLines={1}>
+        Structured report to Plazore moderation
+      </Text>
+    </View>
+    <Ionicons name="chevron-forward" size={16} color={MUTED} />
+  </TouchableOpacity>
+</Animated.View>
 
         <View style={styles.footer}>
           <View style={styles.footerLine} />
@@ -1435,6 +1509,68 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: "rgba(255,255,255,0.06)",
   },
+  supportBlock: {
+  marginTop: 8,
+  marginBottom: 28,
+},
+supportPrimary: {
+  flexDirection: "row",
+  alignItems: "center",
+  borderRadius: 18,
+  borderWidth: StyleSheet.hairlineWidth,
+  borderColor: "rgba(16,185,129,0.22)",
+  backgroundColor: "rgba(16,185,129,0.06)",
+  paddingVertical: 14,
+  paddingHorizontal: 14,
+  marginBottom: 10,
+},
+supportSecondary: {
+  flexDirection: "row",
+  alignItems: "center",
+  borderRadius: 18,
+  borderWidth: StyleSheet.hairlineWidth,
+  borderColor: "rgba(239,68,68,0.35)",
+  backgroundColor: "rgba(239,68,68,0.08)",
+  paddingVertical: 14,
+  paddingHorizontal: 14,
+},
+supportIconPrimary: {
+  width: 40,
+  height: 40,
+  borderRadius: 12,
+  backgroundColor: "rgba(16,185,129,0.12)",
+  alignItems: "center",
+  justifyContent: "center",
+  marginRight: 12,
+},
+supportIconSecondary: {
+  width: 40,
+  height: 40,
+  borderRadius: 12,
+  backgroundColor: "rgba(239,68,68,0.12)",
+  alignItems: "center",
+  justifyContent: "center",
+  marginRight: 12,
+  borderWidth: StyleSheet.hairlineWidth,
+  borderColor: "rgba(239,68,68,0.25)",
+},
+supportTitle: {
+  color: TEXT,
+  fontWeight: "700",
+  fontSize: 14.5,
+  letterSpacing: -0.2,
+},
+supportTitleMuted: {
+  color: "#F87171",
+  fontWeight: "700",
+  fontSize: 14.5,
+  letterSpacing: -0.2,
+},
+supportSub: {
+  color: "rgba(248,113,113,0.75)",
+  fontSize: 12,
+  marginTop: 2,
+},
   gridInfo: {
     paddingHorizontal: 12,
     paddingTop: 10,

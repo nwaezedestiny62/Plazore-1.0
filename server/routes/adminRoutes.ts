@@ -17,6 +17,14 @@ import {
   updateAdminReport,
   pingPresence,
 } from "../controllers/adminController.js";
+import {
+  getAdminShowroom,
+  refreshAdminShowroom,
+  getAdminIntelligence,
+  getAdminIntelligenceDetail,
+  regenerateAdminIntelligence,
+  getAdminAnalytics,
+} from "../controllers/adminObservabilityController.js";
 
 const AdminRouter = express.Router();
 
@@ -41,6 +49,15 @@ AdminRouter.patch("/contacts/:id", ...adminOnly, updateAdminContact);
 
 AdminRouter.get("/reports", ...adminOnly, getAdminReports);
 AdminRouter.patch("/reports/:id", ...adminOnly, updateAdminReport);
+
+AdminRouter.get("/showroom", ...adminOnly, getAdminShowroom);
+AdminRouter.post("/showroom/refresh", ...adminOnly, refreshAdminShowroom);
+
+AdminRouter.get("/intelligence", ...adminOnly, getAdminIntelligence);
+AdminRouter.get("/intelligence/:productId", ...adminOnly, getAdminIntelligenceDetail);
+AdminRouter.post("/intelligence/:productId/regenerate", ...adminOnly, regenerateAdminIntelligence);
+
+AdminRouter.get("/analytics", ...adminOnly, getAdminAnalytics);
 
 // Any logged-in user (not admin-only) — used by web + mobile to record last seen
 AdminRouter.post("/me/presence", protect, pingPresence);

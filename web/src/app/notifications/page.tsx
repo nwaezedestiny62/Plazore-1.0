@@ -27,7 +27,12 @@ type NotifType =
   | "order_cancelled"
   | "order_reminder"
   | "order_shipped_reminder"
-  | "general";
+  | "general"
+  | "contact_reply"
+  | "contact_need_info"
+  | "report_received"
+  | "report_update"
+  | "announcement";
 
 type Notif = {
   _id: string;
@@ -35,8 +40,12 @@ type Notif = {
   message?: string;
   type?: string;
   isRead?: boolean;
-  order?: string;
+  order?: string | { _id?: string };
   orderNumber?: string;
+  contact?: string | { _id?: string };
+  report?: string | { _id?: string };
+  announcement?: string | { _id?: string };
+  link?: string;
   createdAt?: string;
 };
 
@@ -74,7 +83,47 @@ function saveClearedIds(ids: Set<string>) {
   }
 }
 
-function IconForType({ type, className }: { type?: string; className?: string }) {
+function idOf(v: unknown): string {
+  if (!v) return "";
+  if (typeof v === "string") return v;
+  if (typeof v === "object" && v && "_id" in v) {
+    return String((v as { _id?: string })._id || "");
+  }
+  return String(v);
+}
+
+function isPlazoreMessage(type?: string) {
+  return (
+    type === "contact_reply" ||
+    type === "contact_need_info" ||
+    type === "report_received" ||
+    type === "report_update" ||
+    type === "announcement" ||
+    type === "general"
+  );
+}
+
+function IconForType({
+  type,
+  className,
+}: {
+  type?: string;
+  className?: string;
+}) {
+  if (isPlazoreMessage(type)) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src="/logo.png"
+        alt="Plazore"
+        className={
+          className
+            ? `${className} object-contain`
+            : "h-5 w-5 object-contain"
+        }
+      />
+    );
+  }
   switch (type as NotifType) {
     case "new_order":
       return <Package className={className} />;
@@ -94,6 +143,9 @@ function IconForType({ type, className }: { type?: string; className?: string })
 
 function accentForType(type?: string, isRead?: boolean) {
   if (isRead) return { bg: "bg-[#171B22]", icon: "text-[#6B7280]" };
+  if (isPlazoreMessage(type)) {
+    return { bg: "bg-[rgba(0,229,117,0.12)]", icon: "text-[#00E575]" };
+  }
   switch (type as NotifType) {
     case "order_cancelled":
       return { bg: "bg-[rgba(239,68,68,0.18)]", icon: "text-[#EF4444]" };
@@ -154,11 +206,18 @@ function TopOverlay({
             <div className="min-w-0 flex-1">
               <p className="text-sm font-bold tracking-tight">{state.title}</p>
               {state.message ? (
-                <p className="mt-1 text-[12.5px] leading-[18px] text-[#A7ADB8]">{state.message}</p>
+                <p className="mt-1 text-[12.5px] leading-[18px] text-[#A7ADB8]">
+                  {state.message}
+                </p>
               ) : null}
             </div>
             {!state.actions?.length ? (
-              <button type="button" onClick={onDismiss} className="p-0.5" aria-label="Dismiss">
+              <button
+                type="button"
+                onClick={onDismiss}
+                className="p-0.5"
+                aria-label="Dismiss"
+              >
                 <X className="h-4 w-4 text-[#6B7280]" />
               </button>
             ) : null}
@@ -256,16 +315,45 @@ export default function NotificationsPage() {
 
   const handlePress = async (item: Notif) => {
     if (!item.isRead) await markAsRead(item._id);
-    if (!item.order) return;
+
+    if (item.link) {
+      router.push(item.link);
+      return;
+    }
+
+    if (item.type === "contact_reply" || item.type === "contact_need_info") {
+      const contactId = idOf(item.contact);
+      if (contactId) {
+        router.push(`/contact/conversation/${contactId}`);
+        return;
+      }
+    }
+
+    if (item.type === "report_received" || item.type === "report_update") {
+      return;
+    }
+
+    if (item.type === "announcement") {
+      const annId = idOf(item.announcement);
+      if (annId) {
+        router.push(`/announcements/${annId}`);
+        return;
+      }
+    }
+
+    const orderId = idOf(item.order);
+    if (!orderId) return;
+
     if (
       item.type === "new_order" ||
       item.type === "order_reminder" ||
       item.type === "order_shipped_reminder"
     ) {
-      router.push(`/seller/orders/${item.order}`);
+      router.push(`/seller/orders/${orderId}`);
       return;
     }
-    router.push(`/orders/${item.order}`);
+
+    router.push(`/orders/${orderId}`);
   };
 
   const markAllRead = async () => {
@@ -338,7 +426,9 @@ export default function NotificationsPage() {
     }
     setOverlay({
       title: "Clear read notifications?",
-      message: `Remove ${readCount} read notification${readCount !== 1 ? "s" : ""} from this list?`,
+      message: `Remove ${readCount} read notification${
+        readCount !== 1 ? "s" : ""
+      } from this list?`,
       tone: "danger",
       actions: [
         { label: "Cancel", onPress: () => {} },
@@ -370,7 +460,9 @@ export default function NotificationsPage() {
             <ChevronLeft className="h-[22px] w-[22px]" />
           </button>
           <div className="min-w-0">
-            <h1 className="text-lg font-extrabold tracking-tight">Notifications</h1>
+            <h1 className="text-lg font-extrabold tracking-tight">
+              Notifications
+            </h1>
             <p className="text-[11px] text-[#6B7280]">
               {unreadCount > 0
                 ? `${unreadCount} unread`
@@ -428,12 +520,17 @@ export default function NotificationsPage() {
                     <span
                       className={`mr-3 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${colors.bg}`}
                     >
-                      <IconForType type={item.type} className={`h-[18px] w-[18px] ${colors.icon}`} />
+                      <IconForType
+                        type={item.type}
+                        className={`h-[18px] w-[18px] ${colors.icon}`}
+                      />
                     </span>
                     <span className="min-w-0 flex-1">
                       <span
                         className={`block text-sm leading-[19px] ${
-                          item.isRead ? "font-semibold text-[#A7ADB8]" : "font-bold text-[#F5F7FA]"
+                          item.isRead
+                            ? "font-semibold text-[#A7ADB8]"
+                            : "font-bold text-[#F5F7FA]"
                         }`}
                       >
                         {item.title}
@@ -447,7 +544,9 @@ export default function NotificationsPage() {
                         </span>
                       ) : null}
                       <span className="mt-1 block text-[11px] text-[#6B7280]">
-                        {item.createdAt ? new Date(item.createdAt).toLocaleString() : ""}
+                        {item.createdAt
+                          ? new Date(item.createdAt).toLocaleString()
+                          : ""}
                       </span>
                     </span>
                     {!item.isRead ? (
@@ -489,7 +588,9 @@ export default function NotificationsPage() {
               className="flex w-full items-center gap-3 border-t border-white/[0.07] px-5 py-3.5 text-left text-[#EF4444]"
             >
               <Trash2 className="h-4 w-4" />
-              <span className="text-sm font-semibold">Clear Read Notifications</span>
+              <span className="text-sm font-semibold">
+                Clear Read Notifications
+              </span>
             </button>
           </div>
         </div>

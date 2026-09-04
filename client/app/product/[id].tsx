@@ -1273,6 +1273,43 @@ export default function ProductDetails() {
                 </TouchableOpacity>
               </>
             )}
+
+            {/* Report Product — bottom support, not commerce hierarchy */}
+{/* Report Product — bottom support */}
+{!isOwnProduct && (
+  <View style={{ marginTop: 4, marginBottom: 28 }}>
+    <Text style={styles.sectionEyebrow}>Support</Text>
+    <TouchableOpacity
+      activeOpacity={0.88}
+      onPress={() => {
+        if (!requireAuth("message")) return;
+        router.push({
+          pathname: "/contact" as any,
+          params: {
+            mode: "report",
+            contextType: "product",
+            productId: String(product._id || ""),
+            productName: String(product.name || ""),
+            storeId: sellerId || "",
+            storeName: String(seller.storeName || seller.name || ""),
+          },
+        });
+      }}
+      style={styles.reportCard}
+    >
+      <View style={styles.reportIcon}>
+        <Ionicons name="flag-outline" size={17} color="#EF4444" />
+      </View>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text style={styles.reportTitle}>Report Product</Text>
+        <Text style={styles.reportSub} numberOfLines={1}>
+          Structured report to Plazore moderation
+        </Text>
+      </View>
+      <Ionicons name="chevron-forward" size={16} color="#F87171" />
+    </TouchableOpacity>
+  </View>
+)}
           </View>
         </Animated.ScrollView>
 
@@ -1978,6 +2015,38 @@ confidenceBody: {
     paddingHorizontal: 16,
     overflow: "hidden",
   },
+  reportCard: {
+  flexDirection: "row",
+  alignItems: "center",
+  borderRadius: 18,
+  borderWidth: StyleSheet.hairlineWidth,
+  borderColor: "rgba(239,68,68,0.35)",
+  backgroundColor: "rgba(239,68,68,0.08)",
+  paddingVertical: 14,
+  paddingHorizontal: 14,
+},
+reportIcon: {
+  width: 40,
+  height: 40,
+  borderRadius: 12,
+  backgroundColor: "rgba(239,68,68,0.12)",
+  alignItems: "center",
+  justifyContent: "center",
+  marginRight: 12,
+  borderWidth: StyleSheet.hairlineWidth,
+  borderColor: "rgba(239,68,68,0.25)",
+},
+reportTitle: {
+  color: "#F87171",
+  fontWeight: "700",
+  fontSize: 14.5,
+  letterSpacing: -0.2,
+},
+reportSub: {
+  color: "rgba(248,113,113,0.75)",
+  fontSize: 12,
+  marginTop: 2,
+},
   commIcon: {
     width: 44,
     height: 44,

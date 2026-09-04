@@ -41,6 +41,11 @@ type NotifType =
   | 'order_reminder'
   | 'order_shipped_reminder'
   | 'general'
+  | 'contact_reply'
+  | 'contact_need_info'
+  | 'report_received'
+  | 'report_update'
+  | 'announcement'
 
 type OverlayAction = {
   label: string
@@ -76,6 +81,17 @@ async function saveClearedIds(ids: Set<string>) {
   }
 }
 
+function isPlazoreMessage(type?: string) {
+  return (
+    type === 'contact_reply' ||
+    type === 'contact_need_info' ||
+    type === 'report_received' ||
+    type === 'report_update' ||
+    type === 'announcement' ||
+    type === 'general'
+  )
+}
+
 function iconForType(type: string): keyof typeof Ionicons.glyphMap {
   switch (type as NotifType) {
     case 'new_order':
@@ -94,25 +110,31 @@ function iconForType(type: string): keyof typeof Ionicons.glyphMap {
   }
 }
 
-function accentForType(type: string, isRead: boolean) {
-  if (isRead) return { bg: SURFACE_2, icon: MUTED }
+function accentForType(
+  type: string,
+  isRead: boolean
+): { bg: string; iconColor: string } {
+  if (isRead) return { bg: SURFACE_2, iconColor: MUTED }
+
+  if (isPlazoreMessage(type)) {
+    return { bg: 'rgba(0,229,117,0.12)', iconColor: GREEN }
+  }
+
   switch (type as NotifType) {
     case 'order_cancelled':
-      return { bg: 'rgba(239,68,68,0.18)', icon: DANGER }
+      return { bg: 'rgba(239,68,68,0.18)', iconColor: DANGER }
     case 'order_delivered':
-      return { bg: 'rgba(0,229,117,0.15)', icon: GREEN }
+      return { bg: 'rgba(0,229,117,0.15)', iconColor: GREEN }
     case 'order_shipped':
-      return { bg: 'rgba(59,130,246,0.15)', icon: BLUE }
+      return { bg: 'rgba(59,130,246,0.15)', iconColor: BLUE }
     case 'new_order':
-      return { bg: 'rgba(0,229,117,0.12)', icon: GREEN }
+      return { bg: 'rgba(0,229,117,0.12)', iconColor: GREEN }
     default:
-      return { bg: SURFACE_2, icon: TEXT }
+      return { bg: SURFACE_2, iconColor: TEXT }
   }
 }
 
-function toneColor(
-  tone?: NonNullable<OverlayState>['tone']
-) {
+function toneColor(tone?: NonNullable<OverlayState>['tone']) {
   if (tone === 'danger') return DANGER
   if (tone === 'success') return GREEN
   return BLUE
@@ -327,7 +349,6 @@ export default function Notifications() {
 
   const fetchNotifications = async () => {
     try {
-      // Always load local dismiss list first
       clearedRef.current = await loadClearedIds()
 
       const token = await getToken()
@@ -353,7 +374,6 @@ export default function Notifications() {
   )
 
   const markAsRead = async (id: string) => {
-    // Optimistic local
     setNotifications((prev) =>
       prev.map((n) => (n._id === id ? { ...n, isRead: true } : n))
     )
@@ -373,7 +393,27 @@ export default function Notifications() {
     if (!item.isRead) {
       await markAsRead(item._id)
     }
+
+    if (item.link) {
+      router.push(item.link as any)
+      return
+    }
+
+    if (item.type === 'contact_reply' || item.type === 'contact_need_info') {
+      const id = item.contact ? String(item.contact) : ''
+      if (id) {
+        router.push(`/contact/conversation/${id}` as any)
+        return
+      }
+    }
+
+    if (item.type === 'announcement' && item.announcement) {
+      router.push(`/announcements/${item.announcement}` as any)
+      return
+    }
+
     if (!item.order) return
+
     if (
       item.type === 'new_order' ||
       item.type === 'order_reminder' ||
@@ -382,11 +422,11 @@ export default function Notifications() {
       router.push(`/seller/orders/${item.order}` as any)
       return
     }
+
     router.push(`/orders/${item.order}` as any)
   }
 
   const markAllRead = async () => {
-    // Local first — always works
     setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })))
     setOverlay({
       title: 'All caught up',
@@ -406,7 +446,6 @@ export default function Notifications() {
     }
   }
 
-  /** Wipe read items from UI + remember ids so refetch won't bring them back */
   const runClearRead = async () => {
     if (clearing) return
     setClearing(true)
@@ -414,10 +453,8 @@ export default function Notifications() {
     const toClear = notifications.filter((n) => n.isRead)
     const ids = toClear.map((n) => String(n._id))
 
-    // 1) Vanish immediately in UI
     setNotifications((prev) => prev.filter((n) => !n.isRead))
 
-    // 2) Persist so they stay gone after pull-to-refresh / focus
     const next = new Set(clearedRef.current)
     ids.forEach((id) => next.add(id))
     clearedRef.current = next
@@ -430,7 +467,6 @@ export default function Notifications() {
       durationMs: 5000,
     })
 
-    // 3) Best-effort server (optional — local already done)
     try {
       const token = await getToken()
       try {
@@ -445,7 +481,7 @@ export default function Notifications() {
             { headers: { Authorization: `Bearer ${token}` } }
           )
         } catch {
-          // fine — local clear is the source of truth
+          // local clear is the source of truth
         }
       }
     } catch {
@@ -469,7 +505,9 @@ export default function Notifications() {
 
     setOverlay({
       title: 'Clear read notifications?',
-      message: `Remove ${readCount} read notification${readCount !== 1 ? 's' : ''} from this list?`,
+      message: `Remove ${readCount} read notification${
+        readCount !== 1 ? 's' : ''
+      } from this list?`,
       tone: 'danger',
       actions: [
         { label: 'Cancel', onPress: () => {} },
@@ -552,7 +590,11 @@ export default function Notifications() {
           </View>
         }
         renderItem={({ item }) => {
-          const colors = accentForType(item.type, item.isRead)
+          const colors = accentForType(
+            String(item.type || 'general'),
+            !!item.isRead
+          )
+
           return (
             <TouchableOpacity
               activeOpacity={0.85}
@@ -561,14 +603,26 @@ export default function Notifications() {
             >
               <View style={styles.cardRow}>
                 <View
-                  style={[styles.iconWrap, { backgroundColor: colors.bg }]}
+                  style={[
+                    styles.iconWrap,
+                    { backgroundColor: colors.bg },
+                  ]}
                 >
-                  <Ionicons
-                    name={iconForType(item.type)}
-                    size={18}
-                    color={colors.icon}
-                  />
+                  {isPlazoreMessage(item.type) ? (
+                    <Image
+                      source={require('@/assets/logo-1.png')}
+                      style={{ width: 22, height: 22 }}
+                      resizeMode="contain"
+                    />
+                  ) : (
+                    <Ionicons
+                      name={iconForType(String(item.type || 'general'))}
+                      size={20}
+                      color={colors.iconColor}
+                    />
+                  )}
                 </View>
+
                 <View style={styles.cardBody}>
                   <Text
                     style={[
@@ -591,6 +645,7 @@ export default function Notifications() {
                       : ''}
                   </Text>
                 </View>
+
                 {!item.isRead && <View style={styles.unreadDot} />}
               </View>
             </TouchableOpacity>

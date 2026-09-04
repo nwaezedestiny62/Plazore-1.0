@@ -2,8 +2,8 @@ import mongoose, { Schema } from "mongoose";
 
 const announcementSchema = new Schema(
   {
-    headline: { type: String, required: true, trim: true, maxlength: 300 },
-    body: { type: String, required: true, trim: true, maxlength: 20000 },
+    headline: { type: String, required: true, trim: true, maxlength: 180 },
+    body: { type: String, required: true, trim: true },
     mediaType: {
       type: String,
       enum: ["none", "image", "video"],
@@ -16,23 +16,24 @@ const announcementSchema = new Schema(
       required: true,
       index: true,
     },
-    action: {
-      label: { type: String, default: "" },
-      href: { type: String, default: "" },
-    },
     status: {
       type: String,
-      enum: ["Draft", "Published", "Archived"],
-      default: "Draft",
+      enum: ["draft", "published", "archived"],
+      default: "draft",
       index: true,
     },
+    actionLabel: { type: String, default: "", trim: true, maxlength: 40 },
+    actionRoute: { type: String, default: "", trim: true }, // internal routes only
     createdBy: { type: Schema.Types.ObjectId, ref: "User", required: true },
     publishedAt: { type: Date },
-    deliveryCount: { type: Number, default: 0 },
-    openCount: { type: Number, default: 0 },
+    // delivery stats (updated async)
+    deliveredCount: { type: Number, default: 0 },
+    openedCount: { type: Number, default: 0 },
     readCount: { type: Number, default: 0 },
   },
   { timestamps: true }
 );
+
+announcementSchema.index({ status: 1, publishedAt: -1 });
 
 export default mongoose.model("Announcement", announcementSchema);

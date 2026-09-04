@@ -24,7 +24,6 @@ const TEXT = '#F5F7FA'
 const SECONDARY = '#A7ADB8'
 const MUTED = '#737A86'
 const GREEN = '#00E575'
-const BLUE = '#3B82F6'
 
 type RowProps = {
   icon: keyof typeof Ionicons.glyphMap
@@ -50,11 +49,7 @@ function SettingsRow({
       style={[styles.row, !last && styles.rowBorder]}
     >
       <View style={[styles.rowIcon, accent && styles.rowIconAccent]}>
-        <Ionicons
-          name={icon}
-          size={18}
-          color={accent ? GREEN : TEXT}
-        />
+        <Ionicons name={icon} size={18} color={accent ? GREEN : TEXT} />
       </View>
       <View style={styles.rowBody}>
         <Text style={styles.rowTitle}>{title}</Text>
@@ -102,7 +97,7 @@ export default function SettingsScreen() {
         </TouchableOpacity>
         <View style={styles.headerCenter}>
           <Text style={styles.headerTitle}>Settings</Text>
-          <Text style={styles.headerSub}>Account & preferences</Text>
+          <Text style={styles.headerSub}>Account & marketplace</Text>
         </View>
         <View style={styles.headerRight} />
       </View>
@@ -112,7 +107,6 @@ export default function SettingsScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {/* Intro */}
         <View style={styles.introCard}>
           <LinearGradient
             colors={['rgba(0,229,117,0.12)', 'rgba(59,130,246,0.08)']}
@@ -123,41 +117,60 @@ export default function SettingsScreen() {
             <Ionicons name="options-outline" size={18} color={GREEN} />
           </LinearGradient>
           <Text style={styles.introText}>
-            Manage your account, marketplace, and privacy — calm, clear, one
+            Manage your account, marketplace, and support — calm, clear, one
             place.
           </Text>
         </View>
 
+        {/* Account */}
         <SettingsSection title="Account">
           <SettingsRow
             icon="person-outline"
             title="Profile"
-            subtitle="Personal information and account details"
+            subtitle="Name, photo, account details"
             onPress={() => router.push('/settings/profile' as any)}
             accent
           />
           <SettingsRow
             icon="globe-outline"
-            title="Marketplace Region"
-            subtitle="Choose the marketplace you shop in"
+            title="Marketplace region"
+            subtitle="Currency & catalog for your market"
             onPress={() => router.push('/settings/region' as any)}
           />
           <SettingsRow
             icon="location-outline"
             title="Addresses"
-            subtitle="Delivery locations for your orders"
+            subtitle="Delivery locations for orders"
             onPress={() => router.push('/addresses' as any)}
           />
           <SettingsRow
             icon="card-outline"
-            title="Payment Methods"
+            title="Payment methods"
             subtitle="Saved cards for checkout"
             onPress={() => router.push('/payment-methods' as any)}
+          />
+          <SettingsRow
+            icon="bag-handle-outline"
+            title="Orders"
+            subtitle="Purchases & delivery"
+            onPress={() => router.push('/orders' as any)}
             last
           />
         </SettingsSection>
 
-        <SettingsSection title="Privacy & Security">
+        {/* Preferences */}
+        <SettingsSection title="Preferences">
+          <SettingsRow
+            icon="musical-notes-outline"
+            title="Ambient soundtrack"
+            subtitle="Immerse yourself in the Plazore atmosphere"
+            onPress={() => router.push('/settings/music' as any)}
+            last
+          />
+        </SettingsSection>
+
+        {/* Privacy */}
+        <SettingsSection title="Privacy & security">
           <SettingsRow
             icon="lock-closed-outline"
             title="Privacy"
@@ -167,26 +180,19 @@ export default function SettingsScreen() {
           />
         </SettingsSection>
 
-        <SettingsSection title="Preferences">
+        {/* Plazore */}
+        <SettingsSection title="Plazore">
           <SettingsRow
-            icon="language-outline"
-            title="Language"
-            subtitle="App display language"
-            onPress={() => router.push('/settings/language' as any)}
+            icon="chatbubble-ellipses-outline"
+            title="Contact Plazore"
+            subtitle="Support, feedback, and help"
+            onPress={() => router.push('/contact' as any)}
+            accent
           />
-          <SettingsRow
-  icon="musical-notes-outline"
-  title="Ambient Soundtrack"
-  subtitle="Immerse yourself in the Plazore atmosphere."
-  onPress={() => router.push('/settings/music' as any)}
-/>
-        </SettingsSection>
-
-        <SettingsSection title="About">
           <SettingsRow
             icon="information-circle-outline"
             title="About Plazore"
-            subtitle="Version and application information"
+            subtitle="What Plazore is and app info"
             onPress={() => router.push('/settings/about' as any)}
             last
           />

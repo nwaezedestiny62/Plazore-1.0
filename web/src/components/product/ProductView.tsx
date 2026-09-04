@@ -20,6 +20,7 @@ import {
   ShoppingBag,
   Store,
   Truck,
+  Flag,
   X,
 } from "lucide-react";
 import { AppFeaturePrompt, type AppFeature } from "@/components/app/AppFeaturePrompt";
@@ -717,7 +718,6 @@ export function ProductView({ product }: { product: Product }) {
 
   return (
     <div className="flex h-[100dvh] min-h-0 flex-col overflow-hidden bg-bg text-text">
-      {/* Always-on chrome — never scrolls away */}
       <header className="z-40 flex h-12 shrink-0 items-center justify-between border-b border-white/8 bg-bg/95 px-3 pt-[env(safe-area-inset-top)] backdrop-blur sm:px-4 lg:h-14 lg:px-6">
         <ChromeBtn onClick={() => router.back()} label="Back">
           <ChevronLeft className="h-[18px] w-[18px]" />
@@ -740,7 +740,6 @@ export function ProductView({ product }: { product: Product }) {
         </div>
       </header>
 
-      {/* Split: locked gallery + scrolling details */}
       <div className="grid min-h-0 min-w-0 flex-1 grid-rows-[minmax(210px,38dvh)_minmax(0,1fr)] overflow-hidden lg:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)] lg:grid-rows-1">
         <section className="min-h-0 min-w-0 overflow-hidden border-b border-white/6 bg-[#07080C] lg:border-b-0 lg:border-r">
           <Gallery images={images} name={product.name} />
@@ -789,63 +788,76 @@ export function ProductView({ product }: { product: Product }) {
             </div>
           )}
 
+          {/* Plazore AI — butter smooth fade */}
           <div className="relative mt-5 overflow-hidden rounded-[20px] border border-ai-green/20 bg-[#11141A]/80">
-            {!aiReady ? (
-              <div className="flex h-[108px] items-center justify-center">
-                <div className="relative flex h-14 w-14 items-center justify-center">
-                  <span
-                    className="absolute inset-0 animate-spin rounded-full border-2 border-transparent"
-                    style={{
-                      borderTopColor: "#10B981",
-                      borderRightColor: "#3B82F6",
-                      borderLeftColor: "#10B981",
-                    }}
-                  />
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src="/plazore-ai-logo.png"
-                    alt=""
-                    className="relative z-[1] h-6 w-6 object-contain"
-                  />
-                </div>
-              </div>
-            ) : (
-              <div className="p-4 sm:p-[18px]">
-                <div className="mb-1 flex items-center gap-2">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src="/plazore-ai-logo.png" alt="" className="h-[22px] w-[22px] object-contain" />
-                  <p className="font-display text-[17px]">Plazore AI</p>
-                </div>
-                <p className="font-display text-sm text-white/88">Quick AI Insights</p>
-                <ExpandableText
-                  className="mt-3 text-[15px] leading-6"
-                  text={
-                    ai?.status === "ready"
-                      ? String(ai.summary || "")
-                      : "Plazore AI is preparing a thoughtful reading of this listing."
-                  }
+            <div
+              className={`flex h-[108px] items-center justify-center transition-opacity duration-700 ease-out ${
+                aiReady ? "pointer-events-none absolute inset-0 opacity-0" : "opacity-100"
+              }`}
+            >
+              <div className="relative flex h-14 w-14 items-center justify-center">
+                <span
+                  className="absolute inset-0 animate-spin rounded-full border-2 border-transparent"
+                  style={{
+                    borderTopColor: "#10B981",
+                    borderRightColor: "#3B82F6",
+                    borderLeftColor: "#10B981",
+                  }}
                 />
-                {ai?.status === "ready" && ai.highlights?.[0] && (
-                  <div className="mt-3.5">
-                    <p className="mb-2 text-sm font-bold">Key Points</p>
-                    <p className="flex gap-2.5 text-[14.5px] text-secondary">
-                      <span
-                        className="mt-2 h-[4.5px] w-[4.5px] shrink-0 rounded-full"
-                        style={{ backgroundImage: GRAD }}
-                      />
-                      {ai.highlights[0]}
-                    </p>
-                  </div>
-                )}
-                <button
-                  type="button"
-                  onClick={() => setPrompt("ai_deeper")}
-                  className="mt-3 flex w-full items-center justify-center gap-1 rounded-full border border-white/13 bg-white/4 py-2.5 text-[13.5px]"
-                >
-                  See more <ChevronDown className="h-3.5 w-3.5 text-secondary" />
-                </button>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src="/plazore-ai-logo.png"
+                  alt=""
+                  className="relative z-[1] h-6 w-6 object-contain"
+                />
               </div>
-            )}
+            </div>
+
+            <div
+              className={`transition-all duration-700 ease-out ${
+                aiReady
+                  ? "translate-y-0 p-4 opacity-100 sm:p-[18px]"
+                  : "pointer-events-none h-0 translate-y-2 overflow-hidden p-0 opacity-0"
+              }`}
+            >
+              <div className="mb-1 flex items-center gap-2">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src="/plazore-ai-logo.png"
+                  alt=""
+                  className="h-[22px] w-[22px] object-contain"
+                />
+                <p className="font-display text-[17px]">Plazore AI</p>
+              </div>
+              <p className="font-display text-sm text-white/88">Quick AI Insights</p>
+              <ExpandableText
+                className="mt-3 text-[15px] leading-6"
+                text={
+                  ai?.status === "ready"
+                    ? String(ai.summary || "")
+                    : "Plazore AI is preparing a thoughtful reading of this listing."
+                }
+              />
+              {ai?.status === "ready" && ai.highlights?.[0] && (
+                <div className="mt-3.5">
+                  <p className="mb-2 text-sm font-bold">Key Points</p>
+                  <p className="flex gap-2.5 text-[14.5px] text-secondary">
+                    <span
+                      className="mt-2 h-[4.5px] w-[4.5px] shrink-0 rounded-full"
+                      style={{ backgroundImage: GRAD }}
+                    />
+                    {ai.highlights[0]}
+                  </p>
+                </div>
+              )}
+              <button
+  type="button"
+  onClick={() => router.push(`/product/${product._id}/ai`)}
+  className="mt-3 flex w-full items-center justify-center gap-1 rounded-full border border-white/13 bg-white/4 py-2.5 text-[13.5px]"
+>
+  See more <ChevronDown className="h-3.5 w-3.5 text-secondary" />
+</button>
+            </div>
           </div>
 
           <div className="relative mt-4 overflow-hidden rounded-2xl border border-ai-green/20 bg-[#11141A]/70 p-3.5">
@@ -1018,6 +1030,49 @@ export function ProductView({ product }: { product: Product }) {
               </div>
             )}
           </div>
+
+          {/* Report Product — OUTSIDE Sold By, reddish */}
+          {!isOwnListing ? (
+            <div className="mb-4 mt-2">
+              <p className="mb-2 text-sm font-semibold uppercase tracking-[0.14em] text-[#FFFF]/90">
+                Support
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!isLoaded) return;
+                  if (!isSignedIn) {
+                    setPending("message");
+                    setAuthOpen(true);
+                    return;
+                  }
+                  const q = new URLSearchParams({
+                    mode: "report",
+                    contextType: "product",
+                    productId: String(product._id || ""),
+                    productName: String(product.name || ""),
+                    storeId: sellerId || "",
+                    storeName: String(seller?.storeName || seller?.name || ""),
+                  });
+                  router.push(`/contact?${q.toString()}`);
+                }}
+                className="flex w-full items-center gap-3 rounded-[18px] border border-[#EF4444]/35 bg-[#EF4444]/[0.08] px-3.5 py-3.5 text-left transition hover:border-[#EF4444]/50 hover:bg-[#EF4444]/12"
+              >
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-[#EF4444]/25 bg-[#EF4444]/15">
+                  <Flag className="h-4 w-4 text-[#EF4444]" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-[14.5px] font-bold tracking-tight text-[#F87171]">
+                    Report Product
+                  </span>
+                  <span className="mt-0.5 block text-xs text-[#F87171]/70">
+                    Structured report to Plazore moderation
+                  </span>
+                </span>
+                <ChevronRight className="h-4 w-4 shrink-0 text-[#F87171]/80" />
+              </button>
+            </div>
+          ) : null}
         </section>
       </div>
 
@@ -1083,7 +1138,7 @@ export function ProductView({ product }: { product: Product }) {
                   { id: "x" as const, label: "X" },
                   { id: "telegram" as const, label: "Telegram" },
                   { id: "facebook" as const, label: "Facebook" },
-                ]
+                ] as const
               ).map((item) => (
                 <button
                   key={item.id}

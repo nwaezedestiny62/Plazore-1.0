@@ -23,18 +23,41 @@ function assertWords(text: string, max = 300) {
   }
 }
 
+type NotificationType =
+  | "new_order"
+  | "order_shipped"
+  | "order_delivered"
+  | "order_cancelled"
+  | "order_reminder"
+  | "order_shipped_reminder"
+  | "general"
+  | "contact_reply"
+  | "contact_need_info"
+  | "report_received"
+  | "report_update"
+  | "announcement";
+
 async function safeNotify(payload: {
   user: any;
   title: string;
   message: string;
+  type?: NotificationType;
+  contact?: any;
+  report?: any;
+  announcement?: any;
+  link?: string;
 }) {
+  if (!payload.user) return;
   try {
-    // Notification.type enum on main only allows order types + "general"
     await Notification.create({
       user: payload.user,
-      type: "general",
+      type: payload.type || "general",
       title: payload.title,
       message: payload.message,
+      contact: payload.contact,
+      report: payload.report,
+      announcement: payload.announcement,
+      link: payload.link || "",
     });
   } catch (e) {
     console.error("Notification create skipped:", (e as any)?.message);
@@ -123,7 +146,6 @@ export const createContact = async (req: Request, res: Response) => {
       if (ctx === "general") ctx = "order";
     }
 
-    // Map UI categories onto schema-safe values
     const categoryMap: Record<string, string> = {
       buying: "buying",
       selling: "selling",
@@ -133,20 +155,18 @@ export const createContact = async (req: Request, res: Response) => {
       technical: "technical",
       account: "account",
       other: "other",
-      // legacy aliases
       order: "order_payment",
       payment: "order_payment",
       seller: "selling",
     };
     const cat = categoryMap[String(category)] || "other";
 
-       const body = String(message).trim();
+    const body = String(message).trim();
     const now = new Date();
 
     const doc = await ContactMessage.create({
       user: user._id,
       contactAs: role,
-      // cast so TS accepts dynamic context / category enums
       contextType: ctx as any,
       category: cat as any,
       subject: String(subject || "").slice(0, 200),
@@ -247,8 +267,7 @@ export const createReport = async (req: Request, res: Response) => {
       seller = storeId;
     }
 
-    // Prefer new statuses; fall back to "new" if schema rejects "Submitted"
-      let report: any;
+    let report: any;
     try {
       report = await Report.create({
         reporter: user._id,
@@ -285,6 +304,8 @@ export const createReport = async (req: Request, res: Response) => {
       user: user._id,
       title: "Report received",
       message: "We've received your report and will review it.",
+      type: "report_received",
+      report: report._id,
     });
 
     res.status(201).json({
@@ -377,7 +398,7 @@ export const replyMyContact = async (req: Request, res: Response) => {
     if (!Array.isArray((item as any).messages)) {
       (item as any).messages = [];
     }
-       (item as any).messages.push({
+    (item as any).messages.push({
       senderType: "user",
       sender: user._id,
       body,

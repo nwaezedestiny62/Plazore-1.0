@@ -10,8 +10,8 @@ import ShowroomSession from "../models/ShowroomSession.js";
 import ShowroomEvent from "../models/ShowroomEvent.js";
 import crypto from "crypto";
 
-const ROOM_CAPACITY = { 1: 50, 2: 14, 3: 16, 4: 33 } as const;
-const SESSION_TTL_MS = 1000 * 60 * 60 * 6; // 6 hours
+export const ROOM_CAPACITY = { 1: 50, 2: 14, 3: 16, 4: 33 } as const;
+export const SESSION_TTL_MS = 1000 * 60 * 60 * 6;
 
 const SELLER_PUBLIC_FIELDS =
   "name storeName storeLogo storeDescription isSellerVerified marketplaceRegion shippingDefaults";
