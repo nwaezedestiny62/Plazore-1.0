@@ -12,6 +12,7 @@ import {
   AlertTriangle,
   Store,
   Package,
+  Receipt,
 } from "lucide-react";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000/api";
@@ -27,13 +28,34 @@ const CONTACT_CATEGORIES = [
   { value: "other", label: "Something else" },
 ];
 
+/** Buyer tapped Issues? on a delivered order */
+const DELIVERY_ISSUE_CATEGORIES = [
+  { value: "order_not_received", label: "Order not received" },
+  {
+    value: "marked_delivered_not_received",
+    label: "Package marked delivered but not received",
+  },
+  { value: "wrong_product", label: "Wrong product received" },
+  { value: "product_damaged", label: "Product damaged" },
+  { value: "missing_item", label: "Missing item" },
+  { value: "delivery_problem", label: "Delivery problem" },
+  {
+    value: "seller_marked_incorrectly",
+    label: "Seller marked delivered incorrectly",
+  },
+  { value: "other_order", label: "Other order issue" },
+];
+
 const PRODUCT_REPORT_REASONS = [
   { value: "counterfeit", label: "Counterfeit or suspected fake product" },
   { value: "misleading_info", label: "Misleading product information" },
   { value: "photos_mismatch", label: "Product photos do not match" },
   { value: "incorrect_specs", label: "Incorrect specifications" },
   { value: "misleading_price", label: "Incorrect or misleading price" },
-  { value: "unavailable", label: "Product unavailable despite being listed" },
+  {
+    value: "unavailable",
+    label: "Product unavailable despite being listed",
+  },
   { value: "unsafe_prohibited", label: "Unsafe or prohibited product" },
   { value: "ip_concern", label: "Intellectual property concern" },
   { value: "suspicious_listing", label: "Suspicious listing/activity" },
@@ -65,15 +87,25 @@ export default function ContactPage() {
   const { isSignedIn, getToken } = useAuth();
   const { user } = useUser();
 
-  const mode = (search.get("mode") || "contact").toLowerCase(); // contact | report
-  const contextType = (search.get("context") || "general").toLowerCase();
+  const mode = (search.get("mode") || "contact").toLowerCase();
+  const contextTypeParam = (
+    search.get("contextType") ||
+    search.get("context") ||
+    "general"
+  ).toLowerCase();
   const productId = search.get("productId") || "";
   const storeId = search.get("storeId") || "";
   const orderId = search.get("orderId") || "";
+  const subjectParam = search.get("subject") || "";
+  const categoryParam = (search.get("category") || "").toLowerCase();
 
   const isReport = mode === "report";
-  const isStoreContext = contextType === "store" || !!storeId;
-  const isProductContext = contextType === "product" || !!productId;
+  const isOrderContext =
+    contextTypeParam === "order" || !!orderId || categoryParam === "delivery";
+  const isStoreContext =
+    !isOrderContext && (contextTypeParam === "store" || !!storeId);
+  const isProductContext =
+    !isOrderContext && (contextTypeParam === "product" || !!productId);
 
   const roleMeta = (user?.publicMetadata?.role as string) || "buyer";
   const canSeller = roleMeta === "seller" || roleMeta === "admin";
@@ -81,7 +113,13 @@ export default function ContactPage() {
   const [contactAs, setContactAs] = useState<"buyer" | "seller">(
     canSeller ? "seller" : "buyer"
   );
-  const [category, setCategory] = useState("other");
+  const [category, setCategory] = useState(() => {
+    if (isOrderContext) return "delivery";
+    if (categoryParam && CONTACT_CATEGORIES.some((c) => c.value === categoryParam))
+      return categoryParam;
+    return "other";
+  });
+  const [deliveryIssue, setDeliveryIssue] = useState("");
   const [reason, setReason] = useState("");
   const [message, setMessage] = useState("");
   const [email, setEmail] = useState(
@@ -95,6 +133,9 @@ export default function ContactPage() {
   const [contextLabel, setContextLabel] = useState<string | null>(null);
   const [storeName, setStoreName] = useState<string | null>(null);
   const [productName, setProductName] = useState<string | null>(null);
+  const [orderLabel, setOrderLabel] = useState<string | null>(
+    subjectParam || (orderId ? `Order ${orderId.slice(-8)}` : null)
+  );
 
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
@@ -108,7 +149,10 @@ export default function ContactPage() {
     }
   }, [user]);
 
-  // Resolve context labels
+  useEffect(() => {
+    if (isOrderContext) setCategory("delivery");
+  }, [isOrderContext]);
+
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -131,6 +175,26 @@ export default function ContactPage() {
             if (alive) setStoreName(s?.storeName || s?.name || null);
           }
         }
+        if (orderId && isSignedIn) {
+          try {
+            const token = await getToken();
+            const res = await fetch(`${API}/orders/${orderId}`, {
+              headers: token ? { Authorization: `Bearer ${token}` } : {},
+            });
+            if (res.ok) {
+              const json = await res.json();
+              const o = json?.data || json;
+              if (alive && o?.orderNumber) {
+                setOrderLabel(
+                  subjectParam || `Delivery issue · ${o.orderNumber}`
+                );
+                if (o.seller?.storeName) setStoreName(o.seller.storeName);
+              }
+            }
+          } catch {
+            /* ignore */
+          }
+        }
       } catch {
         /* ignore */
       }
@@ -138,21 +202,29 @@ export default function ContactPage() {
     return () => {
       alive = false;
     };
-  }, [productId, storeId]);
+  }, [productId, storeId, orderId, isSignedIn, getToken, subjectParam]);
 
   useEffect(() => {
     if (isReport) {
       setContextLabel(
-        isProductContext ? "Reporting product" : isStoreContext ? "Reporting store" : "Report to Plazore"
+        isProductContext
+          ? "Reporting product"
+          : isStoreContext
+            ? "Reporting store"
+            : "Report to Plazore"
       );
+    } else if (isOrderContext) {
+      setContextLabel("Delivery / order issue");
     } else if (isStoreContext || isProductContext) {
       setContextLabel("Contact Store through Plazore");
     } else {
       setContextLabel("Talk to Plazore");
     }
-  }, [isReport, isStoreContext, isProductContext]);
+  }, [isReport, isStoreContext, isProductContext, isOrderContext]);
 
-  const reasons = isProductContext ? PRODUCT_REPORT_REASONS : STORE_REPORT_REASONS;
+  const reasons = isProductContext
+    ? PRODUCT_REPORT_REASONS
+    : STORE_REPORT_REASONS;
 
   const onMessageChange = (val: string) => {
     if (wordCount(val) <= 300) setMessage(val);
@@ -184,6 +256,10 @@ export default function ContactPage() {
       setError("Please choose a category.");
       return;
     }
+    if (isOrderContext && !isReport && !deliveryIssue) {
+      setError("Please choose what kind of delivery issue this is.");
+      return;
+    }
 
     setSubmitting(true);
     try {
@@ -212,17 +288,33 @@ export default function ContactPage() {
           body: JSON.stringify(body),
         });
         const json = await res.json();
-        if (!res.ok) throw new Error(json?.message || "Failed to submit report");
+        if (!res.ok)
+          throw new Error(json?.message || "Failed to submit report");
       } else {
+        const issueLine =
+          isOrderContext && deliveryIssue
+            ? DELIVERY_ISSUE_CATEGORIES.find((d) => d.value === deliveryIssue)
+                ?.label || deliveryIssue
+            : "";
+        const composedMessage =
+          isOrderContext && issueLine
+            ? `[${issueLine}]\n\n${message.trim()}`
+            : message.trim();
+
         const body = {
-          contactAs,
-          contextType: isProductContext
-            ? "product"
-            : isStoreContext
-              ? "store"
-              : contextType || "general",
-          category,
-          message: message.trim(),
+          contactAs: isOrderContext ? "buyer" : contactAs,
+          contextType: isOrderContext
+            ? "order"
+            : isProductContext
+              ? "product"
+              : isStoreContext
+                ? "store"
+                : contextTypeParam || "general",
+          category: isOrderContext ? "delivery" : category,
+          subject:
+            subjectParam ||
+            (isOrderContext && orderLabel ? orderLabel : undefined),
+          message: composedMessage,
           email: email.trim(),
           country: country.trim(),
           state: state.trim(),
@@ -241,7 +333,8 @@ export default function ContactPage() {
           body: JSON.stringify(body),
         });
         const json = await res.json();
-        if (!res.ok) throw new Error(json?.message || "Failed to send message");
+        if (!res.ok)
+          throw new Error(json?.message || "Failed to send message");
       }
       setDone(true);
     } catch (e: any) {
@@ -259,12 +352,18 @@ export default function ContactPage() {
             <CheckCircle2 className="h-8 w-8 text-[#00E575]" />
           </div>
           <h1 className="text-2xl font-extrabold tracking-tight">
-            {isReport ? "Report received" : "Message sent"}
+            {isReport
+              ? "Report received"
+              : isOrderContext
+                ? "Issue submitted"
+                : "Message sent"}
           </h1>
           <p className="mt-3 max-w-sm text-[15px] leading-relaxed text-[#A7ADB8]">
             {isReport
               ? "We've received your report and will review it carefully."
-              : "Plazore has your message. We'll get back to you soon."}
+              : isOrderContext
+                ? "Plazore has your delivery issue. Seller payout stays pending while we review. We'll follow up here and in notifications."
+                : "Plazore has your message. We'll get back to you soon."}
           </p>
           <div className="mt-8 flex w-full flex-col gap-3 sm:flex-row sm:justify-center">
             <Link
@@ -288,7 +387,6 @@ export default function ContactPage() {
 
   return (
     <div className="min-h-dvh bg-[#090B0F] text-[#F5F7FA]">
-      {/* Header */}
       <header className="sticky top-0 z-30 border-b border-white/[0.06] bg-[#090B0F]/90 backdrop-blur-xl">
         <div className="mx-auto flex h-14 max-w-2xl items-center gap-2 px-3 sm:px-5">
           <button
@@ -312,9 +410,11 @@ export default function ContactPage() {
                 {contextLabel}
               </p>
               <p className="truncate text-[11px] text-[#737A86]">
-                {isReport
-                  ? "Structured · calm · private"
-                  : "Calm support · no sales pressure"}
+                {isOrderContext
+                  ? "Order linked · payout held until resolved"
+                  : isReport
+                    ? "Structured · calm · private"
+                    : "Calm support · no sales pressure"}
               </p>
             </div>
           </div>
@@ -322,9 +422,14 @@ export default function ContactPage() {
       </header>
 
       <main className="mx-auto w-full max-w-2xl px-4 py-6 sm:px-6 sm:py-8">
-        {/* Context chips */}
-        {(storeName || productName) && (
+        {(storeName || productName || orderLabel) && (
           <div className="mb-6 flex flex-wrap gap-2">
+            {orderLabel && (
+              <span className="inline-flex items-center gap-1.5 border border-white/[0.08] bg-[#11141A] px-3 py-1.5 text-[12px] font-semibold text-[#A7ADB8]">
+                <Receipt className="h-3.5 w-3.5" />
+                {orderLabel}
+              </span>
+            )}
             {storeName && (
               <span className="inline-flex items-center gap-1.5 border border-white/[0.08] bg-[#11141A] px-3 py-1.5 text-[12px] font-semibold text-[#A7ADB8]">
                 <Store className="h-3.5 w-3.5" />
@@ -340,10 +445,9 @@ export default function ContactPage() {
           </div>
         )}
 
-        {/* Intro */}
         <div className="mb-8">
           <div className="mb-3 flex h-11 w-11 items-center justify-center border border-white/[0.08] bg-[#11141A]">
-            {isReport ? (
+            {isReport || isOrderContext ? (
               <AlertTriangle className="h-5 w-5 text-[#F59E0B]" />
             ) : (
               <MessageCircle className="h-5 w-5 text-[#00E575]" />
@@ -352,21 +456,23 @@ export default function ContactPage() {
           <h1 className="text-xl font-extrabold tracking-tight sm:text-2xl">
             {isReport
               ? "Tell us what doesn’t feel right"
-              : isStoreContext || isProductContext
-                ? "Reach the store through Plazore"
-                : "We’re here with you"}
+              : isOrderContext
+                ? "Something wrong with this delivery?"
+                : isStoreContext || isProductContext
+                  ? "Reach the store through Plazore"
+                  : "We’re here with you"}
           </h1>
           <p className="mt-2 max-w-md text-[14px] leading-relaxed text-[#A7ADB8]">
             {isReport
               ? "Your report stays private. It goes straight into our moderation workflow."
-              : "No bots. No hard sell. Just a clear line to the Plazore team."}
+              : isOrderContext
+                ? "This order stays attached to your message. Seller payout remains pending until Plazore resolves the issue."
+                : "No bots. No hard sell. Just a clear line to the Plazore team."}
           </p>
         </div>
 
-        {/* Form */}
         <div className="space-y-5">
-          {/* Contact as */}
-          {!isReport && canSeller && (
+          {!isReport && !isOrderContext && canSeller && (
             <Field label="Contacting Plazore as">
               <div className="grid grid-cols-2 gap-2">
                 {(["buyer", "seller"] as const).map((r) => (
@@ -387,27 +493,50 @@ export default function ContactPage() {
             </Field>
           )}
 
-          {/* Category / Reason */}
-          <Field label={isReport ? "What’s the issue?" : "What can we help with?"}>
-            <select
-              value={isReport ? reason : category}
-              onChange={(e) =>
-                isReport ? setReason(e.target.value) : setCategory(e.target.value)
-              }
-              className="h-12 w-full appearance-none border border-white/[0.08] bg-[#11141A] px-4 text-[14px] outline-none focus:border-[#00E575]/40"
+          {isOrderContext && !isReport ? (
+            <Field label="What kind of delivery issue?">
+              <select
+                value={deliveryIssue}
+                onChange={(e) => setDeliveryIssue(e.target.value)}
+                className="h-12 w-full appearance-none border border-white/[0.08] bg-[#11141A] px-4 text-[14px] outline-none focus:border-[#00E575]/40"
+              >
+                <option value="">Select…</option>
+                {DELIVERY_ISSUE_CATEGORIES.map((c) => (
+                  <option key={c.value} value={c.value}>
+                    {c.label}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          ) : (
+            <Field
+              label={isReport ? "What’s the issue?" : "What can we help with?"}
             >
-              <option value="">Select…</option>
-              {(isReport ? reasons : CONTACT_CATEGORIES).map((c) => (
-                <option key={c.value} value={c.value}>
-                  {c.label}
-                </option>
-              ))}
-            </select>
-          </Field>
+              <select
+                value={isReport ? reason : category}
+                onChange={(e) =>
+                  isReport
+                    ? setReason(e.target.value)
+                    : setCategory(e.target.value)
+                }
+                className="h-12 w-full appearance-none border border-white/[0.08] bg-[#11141A] px-4 text-[14px] outline-none focus:border-[#00E575]/40"
+              >
+                <option value="">Select…</option>
+                {(isReport ? reasons : CONTACT_CATEGORIES).map((c) => (
+                  <option key={c.value} value={c.value}>
+                    {c.label}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          )}
 
-          {/* Message */}
           <Field
-            label={isReport ? "Explain the issue" : "Your message"}
+            label={
+              isReport || isOrderContext
+                ? "Explain the issue"
+                : "Your message"
+            }
             hint={`${words} / 300 words`}
           >
             <textarea
@@ -415,7 +544,7 @@ export default function ContactPage() {
               onChange={(e) => onMessageChange(e.target.value)}
               rows={6}
               placeholder={
-                isReport
+                isReport || isOrderContext
                   ? "What happened? Be as clear as you can…"
                   : "Tell us what’s on your mind…"
               }
@@ -423,7 +552,6 @@ export default function ContactPage() {
             />
           </Field>
 
-          {/* Email */}
           <Field label="Email">
             <input
               type="email"
@@ -433,7 +561,6 @@ export default function ContactPage() {
             />
           </Field>
 
-          {/* Location */}
           <div className="grid gap-4 sm:grid-cols-3">
             <Field label="Country *">
               <input
@@ -482,7 +609,9 @@ export default function ContactPage() {
               ? "Sending…"
               : isReport
                 ? "Submit report"
-                : "Send to Plazore"}
+                : isOrderContext
+                  ? "Submit delivery issue"
+                  : "Send to Plazore"}
           </button>
 
           <p className="text-center text-[12px] text-[#5C6370]">
@@ -507,7 +636,9 @@ function Field({
     <label className="block">
       <span className="mb-2 flex items-center justify-between text-[11px] font-extrabold tracking-[0.12em] text-[#6B7280]">
         <span>{label.toUpperCase()}</span>
-        {hint && <span className="font-semibold tracking-normal">{hint}</span>}
+        {hint && (
+          <span className="font-semibold tracking-normal">{hint}</span>
+        )}
       </span>
       {children}
     </label>

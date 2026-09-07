@@ -86,7 +86,6 @@ const orderSchema = new mongoose.Schema(
       shippedAt: { type: Date },
     },
 
-    // ── Cancellation (seller or future buyer/admin) ──
     cancellation: {
       cancelledBy: {
         type: String,
@@ -106,7 +105,6 @@ const orderSchema = new mongoose.Schema(
       reasonLabel: { type: String, default: "" },
       note: { type: String, maxlength: 200, default: "" },
       cancelledAt: { type: Date },
-      // Reserved for later: refunds / admin
       refundStatus: {
         type: String,
         enum: ["not_applicable", "pending", "processed", "failed"],
@@ -130,6 +128,41 @@ const orderSchema = new mongoose.Schema(
     },
 
     deliveredAt: { type: Date },
+
+    // After seller marks Delivered — buyer must confirm or report issue
+    buyerConfirmation: {
+      status: {
+        type: String,
+        enum: ["none", "pending", "confirmed", "issue_reported"],
+        default: "none",
+      },
+      confirmedAt: { type: Date },
+      issueReportedAt: { type: Date },
+      issueContactId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "ContactMessage",
+        default: null,
+      },
+    },
+
+    // Payout gate (Paystack transfer comes later)
+    payout: {
+      status: {
+        type: String,
+        enum: [
+          "not_eligible",
+          "awaiting_buyer",
+          "eligible",
+          "blocked_issue",
+          "initiated",
+          "completed",
+          "refunded",
+        ],
+        default: "not_eligible",
+      },
+      eligibleAt: { type: Date },
+      blockedReason: { type: String, default: "" },
+    },
   },
   { timestamps: true }
 );
@@ -137,6 +170,8 @@ const orderSchema = new mongoose.Schema(
 orderSchema.index({ buyer: 1, createdAt: -1 });
 orderSchema.index({ seller: 1, createdAt: -1 });
 orderSchema.index({ orderStatus: 1 });
+orderSchema.index({ "buyerConfirmation.status": 1 });
+orderSchema.index({ "payout.status": 1 });
 
 const Order = mongoose.model("Order", orderSchema);
 export default Order;

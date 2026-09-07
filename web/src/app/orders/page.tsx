@@ -4,16 +4,23 @@ import { useAuth } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useMarketplace } from "@/context/MarketplaceContext";
-import { DEFAULT_REGION, formatMoney as formatMoneyRegion, formatProductPrice } from "@/lib/regions";
+import {
+  DEFAULT_REGION,
+  formatMoney as formatMoneyRegion,
+  formatProductPrice,
+} from "@/lib/regions";
 import {
   ArrowDown,
   ArrowUp,
   Check,
+  CheckCircle2,
   ChevronLeft,
+  Hand,
   Layers,
   Receipt,
   SlidersHorizontal,
   Trash2,
+  TriangleAlert,
   X,
 } from "lucide-react";
 
@@ -37,10 +44,28 @@ type Order = {
   orderStatus?: string;
   totalAmount?: number;
   createdAt?: string;
+  region?: string;
   items?: unknown[];
-  seller?: { storeName?: string; name?: string };
+  seller?: { storeName?: string; name?: string; marketplaceRegion?: string };
+  buyerConfirmation?: {
+    status?: "none" | "pending" | "confirmed" | "issue_reported" | string;
+  };
 };
 
+function confirmationHint(order: Order): { label: string; color: string } | null {
+  if (order.orderStatus !== "Delivered") return null;
+  const status =
+    order.buyerConfirmation?.status ||
+    (order.orderStatus === "Delivered" ? "pending" : "none");
+
+  if (status === "issue_reported") {
+    return { label: "Issue under review", color: "#F59E0B" };
+  }
+  if (status === "confirmed") {
+    return { label: "Delivery confirmed", color: "#00E575" };
+  }
+  return { label: "Confirm delivery", color: "#00E575" };
+}
 
 function OrbLoader() {
   return (
@@ -59,6 +84,8 @@ function OrbLoader() {
 export default function OrdersPage() {
   const { getToken, isSignedIn, isLoaded } = useAuth();
   const router = useRouter();
+  const { region: marketplaceRegion } = useMarketplace();
+  const displayRegion = marketplaceRegion || DEFAULT_REGION;
 
   const [orders, setOrders] = useState<Order[]>([]);
   const [hiddenIds, setHiddenIds] = useState<string[]>([]);
@@ -79,19 +106,19 @@ export default function OrdersPage() {
     }
   }, []);
 
-  const { region: marketplaceRegion } = useMarketplace();
-const displayRegion = marketplaceRegion || DEFAULT_REGION;
-
-const formatOrderTotal = (amount: number, order?: Order & { region?: string; seller?: { marketplaceRegion?: string } }) => {
-  const from =
-    order?.region ||
-    (order?.seller as { marketplaceRegion?: string } | undefined)?.marketplaceRegion ||
-    displayRegion;
-  if (from && from !== displayRegion) {
-    return formatProductPrice(Number(amount) || 0, from, displayRegion);
-  }
-  return formatMoneyRegion(Number(amount) || 0, displayRegion);
-};
+  const formatOrderTotal = useCallback(
+    (amount: number, order?: Order) => {
+      const from =
+        order?.region ||
+        order?.seller?.marketplaceRegion ||
+        displayRegion;
+      if (from && from !== displayRegion) {
+        return formatProductPrice(Number(amount) || 0, from, displayRegion);
+      }
+      return formatMoneyRegion(Number(amount) || 0, displayRegion);
+    },
+    [displayRegion]
+  );
 
   const fetchOrders = useCallback(async () => {
     try {
@@ -116,7 +143,7 @@ const formatOrderTotal = (amount: number, order?: Order & { region?: string; sel
       return;
     }
     loadHidden();
-    fetchOrders();
+    void fetchOrders();
   }, [isLoaded, isSignedIn, loadHidden, fetchOrders, router]);
 
   const visibleOrders = useMemo(() => {
@@ -129,30 +156,55 @@ const formatOrderTotal = (amount: number, order?: Order & { region?: string; sel
     if (sort === "newest") {
       list.sort(
         (a, b) =>
-          new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime(),
+          new Date(b.createdAt || 0).getTime() -
+          new Date(a.createdAt || 0).getTime()
       );
     } else if (sort === "oldest") {
       list.sort(
         (a, b) =>
-          new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime(),
+          new Date(a.createdAt || 0).getTime() -
+          new Date(b.createdAt || 0).getTime()
       );
     } else {
-      list.sort(
-        (a, b) =>
+      list.sort((a, b) => {
+        const ha = confirmationHint(a);
+        const hb = confirmationHint(b);
+        const aNeeds =
+          ha?.label === "Confirm delivery" ||
+          ha?.label === "Issue under review"
+            ? 0
+            : 1;
+        const bNeeds =
+          hb?.label === "Confirm delivery" ||
+          hb?.label === "Issue under review"
+            ? 0
+            : 1;
+        if (aNeeds !== bNeeds) return aNeeds - bNeeds;
+        return (
           STATUS_ORDER.indexOf(a.orderStatus || "") -
-          STATUS_ORDER.indexOf(b.orderStatus || ""),
-      );
+          STATUS_ORDER.indexOf(b.orderStatus || "")
+        );
+      });
     }
     return list;
   }, [visibleOrders, sort]);
 
-  const completed = orders.filter(
-    (o) => o.orderStatus === "Delivered" || o.orderStatus === "Cancelled",
+  /** Only Cancelled or Delivered + confirmed — not pending confirmation / open issue */
+  const completed = useMemo(
+    () =>
+      orders.filter((o) => {
+        if (o.orderStatus === "Cancelled") return true;
+        if (o.orderStatus !== "Delivered") return false;
+        return o.buyerConfirmation?.status === "confirmed";
+      }),
+    [orders]
   );
 
   const clearCompleted = () => {
     if (completed.length === 0) {
-      setNotice("No Delivered or Cancelled orders to hide.");
+      setNotice(
+        "No fully completed orders to hide. Orders waiting for your confirmation stay visible."
+      );
       setConfirmClear(false);
       setConfigOpen(false);
       return;
@@ -164,6 +216,7 @@ const formatOrderTotal = (amount: number, order?: Order & { region?: string; sel
       localStorage.setItem(HIDDEN_KEY, JSON.stringify(next));
       setConfirmClear(false);
       setConfigOpen(false);
+      setNotice(null);
     } catch {
       setNotice("Could not save preference. Try again.");
     }
@@ -221,13 +274,16 @@ const formatOrderTotal = (amount: number, order?: Order & { region?: string; sel
           <ul className="grid grid-cols-1 gap-3 md:grid-cols-2">
             {sorted.map((item) => {
               const count = item.items?.length || 0;
-              const color = statusColor[item.orderStatus || ""] || "#6B7280";
+              const color =
+                statusColor[item.orderStatus || ""] || "#6B7280";
+              const hint = confirmationHint(item);
+
               return (
                 <li key={item._id}>
                   <button
                     type="button"
                     onClick={() => router.push(`/orders/${item._id}`)}
-                    className="w-full rounded-2xl border border-white/[0.07] bg-[#11141A] p-4 text-left"
+                    className="w-full rounded-2xl border border-white/[0.07] bg-[#11141A] p-4 text-left transition hover:border-white/[0.12]"
                   >
                     <div className="mb-2 flex items-center justify-between gap-2.5">
                       <p className="min-w-0 flex-1 truncate text-[15px] font-bold">
@@ -237,7 +293,10 @@ const formatOrderTotal = (amount: number, order?: Order & { region?: string; sel
                         className="inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1"
                         style={{ backgroundColor: `${color}18` }}
                       >
-                        <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: color }} />
+                        <span
+                          className="h-1.5 w-1.5 rounded-full"
+                          style={{ backgroundColor: color }}
+                        />
                         <span
                           className="text-[11px] font-bold uppercase tracking-wide"
                           style={{ color }}
@@ -246,15 +305,43 @@ const formatOrderTotal = (amount: number, order?: Order & { region?: string; sel
                         </span>
                       </span>
                     </div>
-                    <p className="mb-2.5 truncate text-[13px] text-[#A7ADB8]">
-                      {item.seller?.storeName || item.seller?.name || "Seller"}
+                    <p className="mb-2 truncate text-[13px] text-[#A7ADB8]">
+                      {item.seller?.storeName ||
+                        item.seller?.name ||
+                        "Seller"}
                     </p>
+
+                    {hint ? (
+                      <div
+                        className="mb-2.5 inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[12px] font-bold"
+                        style={{
+                          backgroundColor: `${hint.color}14`,
+                          color: hint.color,
+                        }}
+                      >
+                        {hint.label === "Issue under review" ? (
+                          <TriangleAlert className="h-3.5 w-3.5" />
+                        ) : hint.label === "Delivery confirmed" ? (
+                          <CheckCircle2 className="h-3.5 w-3.5" />
+                        ) : (
+                          <Hand className="h-3.5 w-3.5" />
+                        )}
+                        {hint.label}
+                      </div>
+                    ) : null}
+
                     <div className="flex items-center justify-between">
                       <p className="text-[13px] font-semibold">
-                       {count} item{count !== 1 ? "s" : ""} · {formatOrderTotal(Number(item.totalAmount) || 0, item)}
+                        {count} item{count !== 1 ? "s" : ""} ·{" "}
+                        {formatOrderTotal(
+                          Number(item.totalAmount) || 0,
+                          item
+                        )}
                       </p>
                       <p className="text-[11px] text-[#6B7280]">
-                        {item.createdAt ? new Date(item.createdAt).toLocaleDateString() : ""}
+                        {item.createdAt
+                          ? new Date(item.createdAt).toLocaleDateString()
+                          : ""}
                       </p>
                     </div>
                   </button>
@@ -281,9 +368,21 @@ const formatOrderTotal = (amount: number, order?: Order & { region?: string; sel
             </div>
             {(
               [
-                { id: "newest" as const, label: "Sort by Newest", Icon: ArrowDown },
-                { id: "oldest" as const, label: "Sort by Oldest", Icon: ArrowUp },
-                { id: "status" as const, label: "Sort by Status", Icon: Layers },
+                {
+                  id: "newest" as const,
+                  label: "Sort by Newest",
+                  Icon: ArrowDown,
+                },
+                {
+                  id: "oldest" as const,
+                  label: "Sort by Oldest",
+                  Icon: ArrowUp,
+                },
+                {
+                  id: "status" as const,
+                  label: "Sort by Status",
+                  Icon: Layers,
+                },
               ] as const
             ).map((opt) => (
               <button
@@ -296,8 +395,12 @@ const formatOrderTotal = (amount: number, order?: Order & { region?: string; sel
                 className="flex w-full items-center gap-3 border-t border-white/[0.07] px-5 py-3.5 text-left"
               >
                 <opt.Icon className="h-4 w-4 text-[#A7ADB8]" />
-                <span className="flex-1 text-sm font-semibold">{opt.label}</span>
-                {sort === opt.id ? <Check className="h-4 w-4 text-[#00E575]" /> : null}
+                <span className="flex-1 text-sm font-semibold">
+                  {opt.label}
+                </span>
+                {sort === opt.id ? (
+                  <Check className="h-4 w-4 text-[#00E575]" />
+                ) : null}
               </button>
             ))}
             <button
@@ -305,7 +408,9 @@ const formatOrderTotal = (amount: number, order?: Order & { region?: string; sel
               onClick={() => {
                 setConfigOpen(false);
                 if (completed.length === 0) {
-                  setNotice("No Delivered or Cancelled orders to hide.");
+                  setNotice(
+                    "No fully completed orders to hide. Orders waiting for your confirmation stay visible."
+                  );
                   return;
                 }
                 setConfirmClear(true);
@@ -313,7 +418,9 @@ const formatOrderTotal = (amount: number, order?: Order & { region?: string; sel
               className="flex w-full items-center gap-3 border-t border-white/[0.07] px-5 py-3.5 text-left text-[#EF4444]"
             >
               <Trash2 className="h-4 w-4" />
-              <span className="text-sm font-semibold">Clear Completed Orders</span>
+              <span className="text-sm font-semibold">
+                Clear Completed Orders
+              </span>
             </button>
           </div>
         </div>
@@ -324,8 +431,9 @@ const formatOrderTotal = (amount: number, order?: Order & { region?: string; sel
           <div className="w-full max-w-sm border border-white/[0.07] bg-[#11141A] p-5">
             <h3 className="text-base font-bold">Clear completed</h3>
             <p className="mt-2 text-sm leading-5 text-[#A7ADB8]">
-              Hide {completed.length} completed order{completed.length !== 1 ? "s" : ""} from this
-              list permanently? They remain in your history on the server.
+              Hide {completed.length} completed order
+              {completed.length !== 1 ? "s" : ""} from this list? They remain
+              on the server. Orders still needing confirmation are not hidden.
             </p>
             <div className="mt-5 flex gap-2">
               <button
@@ -340,7 +448,7 @@ const formatOrderTotal = (amount: number, order?: Order & { region?: string; sel
                 onClick={clearCompleted}
                 className="flex-1 bg-[#EF4444] py-3 text-sm font-extrabold text-white"
               >
-                Hide permanently
+                Hide
               </button>
             </div>
           </div>

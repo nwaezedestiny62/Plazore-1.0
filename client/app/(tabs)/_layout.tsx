@@ -30,6 +30,14 @@ const MUTED = 'rgba(255,255,255,0.42)'
 const GREEN = '#00E575'
 const TEXT = '#F5F7FA'
 
+const FILL = {
+  position: 'absolute' as const,
+  top: 0,
+  right: 0,
+  bottom: 0,
+  left: 0,
+}
+
 const NAV_VISIBLE_ROUTES = new Set(['index', 'search'])
 
 function PlazoreTabsBar({ state, navigation }: BottomTabBarProps) {
@@ -98,7 +106,6 @@ function PlazoreTabsBar({ state, navigation }: BottomTabBarProps) {
 
   return (
     <>
-      {/* Bottom nav — Mall + Browse only */}
       <Animated.View
         pointerEvents={pointerOff ? 'none' : 'box-none'}
         style={[
@@ -112,13 +119,9 @@ function PlazoreTabsBar({ state, navigation }: BottomTabBarProps) {
       >
         <View style={styles.pill}>
           {Platform.OS === 'ios' ? (
-            <BlurView
-              intensity={52}
-              tint="dark"
-              style={StyleSheet.absoluteFillObject}
-            />
+            <BlurView intensity={52} tint="dark" style={FILL} />
           ) : (
-            <View style={[StyleSheet.absoluteFillObject, styles.pillFill]} />
+            <View style={[FILL, styles.pillFill]} />
           )}
           <LinearGradient
             pointerEvents="none"
@@ -153,21 +156,19 @@ function PlazoreTabsBar({ state, navigation }: BottomTabBarProps) {
         </View>
       </Animated.View>
 
-      {/* Cart only — Browse + Wishlist (no arrow) */}
-            {showFloatingCart && (
+      {showFloatingCart ? (
         <View
           pointerEvents="box-none"
           style={[
             styles.cartDock,
             {
-              // Same as ShowroomRoomNav default: bottomOffset 72 + safe area
               bottom: 94 + Math.max(insets.bottom - 4, 0),
             },
           ]}
         >
           <FloatingCartButton />
         </View>
-      )}
+      ) : null}
     </>
   )
 }
@@ -248,7 +249,6 @@ export default function TabLayout() {
           <Tabs.Screen name="cart" options={{ title: 'Cart' }} />
           <Tabs.Screen name="profile" options={{ href: null }} />
           <Tabs.Screen name="checkout" options={{ href: null }} />
-          <Tabs.Screen name="lounge" options={{ href: null }} />
         </Tabs>
         <PlazoreNavigationHub visible={hubOpen} onClose={closeHub} />
       </View>

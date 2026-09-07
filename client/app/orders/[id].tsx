@@ -13,6 +13,7 @@ import { LinearGradient } from 'expo-linear-gradient'
 import { useLocalSearchParams, useRouter } from 'expo-router'
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
+  ActivityIndicator,
   Animated,
   Easing,
   Image,
@@ -34,6 +35,7 @@ const MUTED = '#6B7280'
 const GREEN = '#00E575'
 const BLUE = '#3B82F6'
 const DANGER = '#EF4444'
+const AMBER = '#F59E0B'
 
 const steps = ['Preparing', 'Shipped', 'Delivered']
 
@@ -99,6 +101,8 @@ export default function BuyerOrderDetails() {
   const [order, setOrder] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [toastVisible, setToastVisible] = useState(false)
+  const [actionBusy, setActionBusy] = useState(false)
+  const [actionError, setActionError] = useState('')
 
   const toastAnim = useRef(new Animated.Value(0)).current
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -126,27 +130,28 @@ export default function BuyerOrderDetails() {
     [format, formatProduct, displayRegion]
   )
 
-  useEffect(() => {
-    const load = async () => {
-      if (!id) {
-        setLoading(false)
-        return
-      }
-      try {
-        await refreshRegion()
-        const token = await getToken()
-        const res = await api.get(`/orders/${id}`, {
-          headers: { Authorization: `Bearer ${token}` },
-        })
-        if (res.data.success) setOrder(res.data.data)
-      } catch {
-        // ignore
-      } finally {
-        setLoading(false)
-      }
+  const loadOrder = useCallback(async () => {
+    if (!id) {
+      setLoading(false)
+      return
     }
-    load()
-  }, [id])
+    try {
+      await refreshRegion()
+      const token = await getToken()
+      const res = await api.get(`/orders/${id}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (res.data.success) setOrder(res.data.data)
+    } catch {
+      /* ignore */
+    } finally {
+      setLoading(false)
+    }
+  }, [id, getToken, refreshRegion])
+
+  useEffect(() => {
+    void loadOrder()
+  }, [loadOrder])
 
   useEffect(() => {
     return () => {
@@ -159,18 +164,81 @@ export default function BuyerOrderDetails() {
     return resolveOrderRegion(order, order.items?.[0])
   }, [order])
 
+  const confStatus =
+    order?.buyerConfirmation?.status ||
+    (order?.orderStatus === 'Delivered' ? 'pending' : 'none')
+  const needsConfirm =
+    order?.orderStatus === 'Delivered' &&
+    confStatus !== 'confirmed' &&
+    confStatus !== 'issue_reported'
+  const issueOpen = confStatus === 'issue_reported'
+  const confirmed = confStatus === 'confirmed'
+
+  const onConfirmDelivery = async () => {
+    if (!order?._id || actionBusy) return
+    setActionError('')
+    setActionBusy(true)
+    try {
+      const token = await getToken()
+      const res = await api.put(
+        `/orders/${order._id}/confirm-delivery`,
+        {},
+        { headers: { Authorization: `Bearer ${token}` } }
+      )
+      if (res.data?.success && res.data?.data) {
+        setOrder(res.data.data)
+      } else {
+        await loadOrder()
+      }
+    } catch (e: any) {
+      setActionError(
+        e?.response?.data?.message || e?.message || 'Could not confirm delivery'
+      )
+    } finally {
+      setActionBusy(false)
+    }
+  }
+
+  const onIssues = async () => {
+    if (!order?._id || actionBusy) return
+    setActionError('')
+    setActionBusy(true)
+    try {
+      const token = await getToken()
+      await api.put(
+        `/orders/${order._id}/report-delivery-issue`,
+        {},
+        { headers: { Authorization: `Bearer ${token}` } }
+      )
+      await loadOrder()
+      router.push({
+        pathname: '/contact',
+        params: {
+          contextType: 'order',
+          category: 'delivery',
+          orderId: String(order._id),
+          subject: `Delivery issue · ${order.orderNumber || ''}`,
+        },
+      })
+    } catch (e: any) {
+      setActionError(
+        e?.response?.data?.message || e?.message || 'Could not open issue'
+      )
+    } finally {
+      setActionBusy(false)
+    }
+  }
+
   const showToast = () => {
     if (toastTimer.current) clearTimeout(toastTimer.current)
     setToastVisible(true)
     toastAnim.setValue(0)
-
     Animated.spring(toastAnim, {
       toValue: 1,
       useNativeDriver: true,
       friction: 8,
       tension: 80,
     }).start()
-
     toastTimer.current = setTimeout(() => {
       Animated.timing(toastAnim, {
         toValue: 0,
@@ -187,13 +255,11 @@ export default function BuyerOrderDetails() {
       await Clipboard.setStringAsync(value)
       showToast()
     } catch {
-      // silent
+      /* silent */
     }
   }
 
-  if (loading) {
-    return <PlazoreOrbPreloader />
-  }
+  if (loading) return <PlazoreOrbPreloader />
 
   if (!order) {
     return (
@@ -216,7 +282,6 @@ export default function BuyerOrderDetails() {
     shipping.shippingMethod ||
     order.productShipping?.method ||
     (shipping.deliveryCompany ? 'courier' : undefined)
-
   const isSelf = method === 'self'
   const sellerNote = (shipping.selfDeliveryNote || '').trim()
   const tracking = (shipping.trackingNumber || '').trim()
@@ -228,7 +293,6 @@ export default function BuyerOrderDetails() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
-      {/* Top toast */}
       {toastVisible && (
         <Animated.View
           pointerEvents="none"
@@ -254,7 +318,6 @@ export default function BuyerOrderDetails() {
         </Animated.View>
       )}
 
-      {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity
           onPress={() => router.back()}
@@ -278,6 +341,77 @@ export default function BuyerOrderDetails() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
+        {needsConfirm && (
+          <View style={styles.confirmCard}>
+            <Text style={styles.confirmKicker}>DELIVERY CONFIRMATION</Text>
+            <Text style={styles.confirmTitle}>
+              Your seller marked this order as delivered.
+            </Text>
+            <Text style={styles.confirmBody}>
+              Confirm that you received it, or tell Plazore if something is
+              wrong. Seller payout stays pending until you confirm or an issue
+              is resolved.
+            </Text>
+            {!!actionError && (
+              <Text style={styles.actionError}>{actionError}</Text>
+            )}
+            <TouchableOpacity
+              style={styles.confirmBtn}
+              disabled={actionBusy}
+              onPress={onConfirmDelivery}
+              activeOpacity={0.85}
+            >
+              {actionBusy ? (
+                <ActivityIndicator color="#041412" />
+              ) : (
+                <Text style={styles.confirmBtnText}>Confirm delivery</Text>
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.issuesBtn}
+              disabled={actionBusy}
+              onPress={onIssues}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.issuesBtnText}>Issues?</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {issueOpen && (
+          <View style={styles.issueCard}>
+            <Text style={styles.issueTitle}>Issue under review</Text>
+            <Text style={styles.issueBody}>
+              Seller payout is pending while Plazore reviews this. Continue in
+              Contact if needed.
+            </Text>
+            <TouchableOpacity
+              onPress={() =>
+                router.push({
+                  pathname: '/contact',
+                  params: {
+                    contextType: 'order',
+                    category: 'delivery',
+                    orderId: String(order._id),
+                  },
+                })
+              }
+            >
+              <Text style={styles.issueLink}>Open Contact</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {confirmed && (
+          <View style={styles.confirmedCard}>
+            <Text style={styles.confirmedTitle}>Delivery confirmed</Text>
+            <Text style={styles.confirmedBody}>
+              Thank you. Your confirmation helps Plazore complete this order
+              properly.
+            </Text>
+          </View>
+        )}
+
         {isCancelled ? (
           <View style={styles.cancelCard}>
             <View style={styles.cancelTop}>
@@ -307,7 +441,7 @@ export default function BuyerOrderDetails() {
         ) : (
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Order Progress</Text>
-            <View style={styles.stepsWrap}>
+            <View>
               {steps.map((step, index) => {
                 const isActive = index <= currentStep
                 const isCurrent = index === currentStep
@@ -400,23 +534,18 @@ export default function BuyerOrderDetails() {
         {hasShippingBlock && (
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Shipping Details</Text>
-
             <View style={styles.detailBlock}>
               <Text style={styles.metaLabel}>Method</Text>
               <Text style={styles.detailValue}>
                 {isSelf ? 'Self Delivery' : 'Courier'}
               </Text>
             </View>
-
             {!!shipping.deliveryCompany && (
               <View style={styles.detailBlock}>
                 <Text style={styles.metaLabel}>Courier Company</Text>
-                <Text style={styles.detailValue}>
-                  {shipping.deliveryCompany}
-                </Text>
+                <Text style={styles.detailValue}>{shipping.deliveryCompany}</Text>
               </View>
             )}
-
             {!!tracking && (
               <View style={styles.detailBlock}>
                 <Text style={styles.metaLabel}>Tracking Number</Text>
@@ -435,14 +564,12 @@ export default function BuyerOrderDetails() {
                 </TouchableOpacity>
               </View>
             )}
-
             {!!sellerNote && (
               <View style={styles.sellerNoteBox}>
                 <Text style={styles.metaLabel}>Note from seller</Text>
                 <Text style={styles.detailValue}>{sellerNote}</Text>
               </View>
             )}
-
             {!!shipping.estimatedDelivery && (
               <View style={styles.detailBlock}>
                 <Text style={styles.metaLabel}>Estimated Delivery</Text>
@@ -616,6 +743,104 @@ const styles = StyleSheet.create({
 
   scrollContent: { padding: 16, paddingBottom: 40 },
 
+  confirmCard: {
+    backgroundColor: 'rgba(0,229,117,0.06)',
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(0,229,117,0.25)',
+    padding: 16,
+    marginBottom: 12,
+  },
+  confirmKicker: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: GREEN,
+    letterSpacing: 1.2,
+    marginBottom: 8,
+  },
+  confirmTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: TEXT,
+    marginBottom: 6,
+  },
+  confirmBody: {
+    fontSize: 13,
+    color: SECONDARY,
+    lineHeight: 20,
+    marginBottom: 14,
+  },
+  actionError: {
+    color: DANGER,
+    fontSize: 12,
+    marginBottom: 10,
+  },
+  confirmBtn: {
+    height: 48,
+    backgroundColor: GREEN,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 10,
+  },
+  confirmBtnText: {
+    color: '#041412',
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  issuesBtn: {
+    height: 48,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: LINE,
+    backgroundColor: SURFACE_2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  issuesBtnText: {
+    color: SECONDARY,
+    fontSize: 15,
+    fontWeight: '700',
+  },
+
+  issueCard: {
+    backgroundColor: 'rgba(245,158,11,0.1)',
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(245,158,11,0.3)',
+    padding: 16,
+    marginBottom: 12,
+  },
+  issueTitle: { fontSize: 14, fontWeight: '700', color: '#FEF3C7' },
+  issueBody: {
+    fontSize: 13,
+    color: 'rgba(254,243,199,0.85)',
+    lineHeight: 20,
+    marginTop: 6,
+  },
+  issueLink: {
+    marginTop: 12,
+    fontSize: 13,
+    fontWeight: '700',
+    color: GREEN,
+  },
+
+  confirmedCard: {
+    backgroundColor: 'rgba(0,229,117,0.05)',
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(0,229,117,0.2)',
+    padding: 16,
+    marginBottom: 12,
+  },
+  confirmedTitle: { fontSize: 14, fontWeight: '700', color: TEXT },
+  confirmedBody: {
+    fontSize: 13,
+    color: SECONDARY,
+    marginTop: 6,
+    lineHeight: 20,
+  },
+
   card: {
     backgroundColor: SURFACE,
     borderRadius: 16,
@@ -664,17 +889,12 @@ const styles = StyleSheet.create({
   cancelReasonLabel: { fontSize: 11, color: MUTED, marginBottom: 4 },
   cancelReasonText: { fontSize: 14, color: TEXT, lineHeight: 20 },
 
-  stepsWrap: {},
   stepRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     minHeight: 48,
   },
-  stepLeft: {
-    alignItems: 'center',
-    width: 30,
-    marginRight: 12,
-  },
+  stepLeft: { alignItems: 'center', width: 30, marginRight: 12 },
   stepDot: {
     width: 30,
     height: 30,

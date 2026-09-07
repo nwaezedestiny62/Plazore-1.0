@@ -183,16 +183,16 @@ export const createOrder = async (req: Request, res: Response) => {
         totalAmount: subtotal + shippingCost,
         paymentStatus: "pending",
         paymentMethod: "pending",
+        buyerConfirmation: { status: "none" },
+        payout: { status: "not_eligible" },
       });
 
-      // Stock decrease
       for (const row of sellerItems) {
         await Product.findByIdAndUpdate(row.product, {
           $inc: { stock: -row.quantity },
         });
       }
 
-      // ★ PERFORMANCE: successful checkout = +15 × quantity per product
       for (const row of sellerItems) {
         trackProductPerformance({
           productId: String(row.product),
@@ -214,7 +214,6 @@ export const createOrder = async (req: Request, res: Response) => {
       createdOrders.push(order);
     }
 
-    // Clear cart after successful order (optional but usual)
     try {
       const cart = await Cart.findOne({ user: user._id });
       if (cart) {
@@ -223,7 +222,7 @@ export const createOrder = async (req: Request, res: Response) => {
         await cart.save();
       }
     } catch {
-      // non-fatal
+      /* non-fatal */
     }
 
     res.status(201).json({
@@ -268,10 +267,7 @@ export const getOrder = async (req: Request, res: Response) => {
     const order = await Order.findById(id)
       .populate("seller", "name storeName storeLogo shippingDefaults")
       .populate("buyer", "name phone")
-      .populate(
-        "items.product",
-        "name images shipping fulfillmentLocation"
-      );
+      .populate("items.product", "name images shipping fulfillmentLocation");
 
     if (!order) {
       return res
@@ -438,13 +434,27 @@ export const deliverOrder = async (req: Request, res: Response) => {
 
     order.orderStatus = "Delivered";
     order.deliveredAt = new Date();
+
+    // Open buyer confirmation gate (does not change seller flow)
+    (order as any).buyerConfirmation = {
+      status: "pending",
+      confirmedAt: undefined,
+      issueReportedAt: undefined,
+      issueContactId: null,
+    };
+    (order as any).payout = {
+      status: "awaiting_buyer",
+      eligibleAt: undefined,
+      blockedReason: "",
+    };
+
     await order.save();
 
     await sendNotification({
       userId: order.buyer.toString(),
       type: "order_delivered",
       title: "Order Delivered",
-      message: `Order ${order.orderNumber} has been delivered.`,
+      message: `Order ${order.orderNumber} has been delivered. Please confirm you received it.`,
       orderId: order._id.toString(),
       orderNumber: order.orderNumber,
     });
@@ -482,6 +492,164 @@ export const getAllOrders = async (req: Request, res: Response) => {
         pages: Math.ceil(total / Number(limit)),
       },
     });
+  } catch (error: any) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// ====================== BUYER: Confirm delivery ======================
+export const confirmDelivery = async (req: Request, res: Response) => {
+  try {
+    const user = getUser(req);
+    const { id } = req.params;
+
+    if (!id || !mongoose.isValidObjectId(String(id))) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Order not found" });
+    }
+
+    const order = await Order.findById(id);
+    if (!order) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Order not found" });
+    }
+
+    if (order.buyer.toString() !== user._id.toString()) {
+      return res
+        .status(403)
+        .json({ success: false, message: "Not authorized" });
+    }
+
+    if (order.orderStatus !== "Delivered") {
+      return res.status(400).json({
+        success: false,
+        message: "Only delivered orders can be confirmed",
+      });
+    }
+
+    if ((order as any).buyerConfirmation?.status === "confirmed") {
+      return res.json({ success: true, data: order, alreadyConfirmed: true });
+    }
+
+    if ((order as any).buyerConfirmation?.status === "issue_reported") {
+      return res.status(400).json({
+        success: false,
+        message:
+          "This order has an open delivery issue. Plazore is reviewing it.",
+      });
+    }
+
+    if (
+      (order as any).payout?.status === "initiated" ||
+      (order as any).payout?.status === "completed"
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Payout already in progress or completed",
+      });
+    }
+
+    if (order.paymentStatus === "refunded") {
+      return res.status(400).json({
+        success: false,
+        message: "This order was refunded",
+      });
+    }
+
+    (order as any).buyerConfirmation = {
+      status: "confirmed",
+      confirmedAt: new Date(),
+      issueReportedAt: (order as any).buyerConfirmation?.issueReportedAt,
+      issueContactId:
+        (order as any).buyerConfirmation?.issueContactId || null,
+    };
+    (order as any).payout = {
+      status: "eligible",
+      eligibleAt: new Date(),
+      blockedReason: "",
+    };
+
+    await order.save();
+
+    await sendNotification({
+      userId: order.seller.toString(),
+      type: "order_delivered",
+      title: "Delivery confirmed",
+      message: `Buyer confirmed delivery for ${order.orderNumber}.`,
+      orderId: order._id.toString(),
+      orderNumber: order.orderNumber,
+    });
+
+    res.json({ success: true, data: order });
+  } catch (error: any) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// ====================== BUYER: Report delivery issue ======================
+export const reportDeliveryIssue = async (req: Request, res: Response) => {
+  try {
+    const user = getUser(req);
+    const { id } = req.params;
+    const contactId = req.body?.contactId;
+
+    if (!id || !mongoose.isValidObjectId(String(id))) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Order not found" });
+    }
+
+    const order = await Order.findById(id);
+    if (!order) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Order not found" });
+    }
+
+    if (order.buyer.toString() !== user._id.toString()) {
+      return res
+        .status(403)
+        .json({ success: false, message: "Not authorized" });
+    }
+
+    if (order.orderStatus !== "Delivered") {
+      return res.status(400).json({
+        success: false,
+        message: "Issues can only be reported on delivered orders",
+      });
+    }
+
+    if ((order as any).buyerConfirmation?.status === "confirmed") {
+      return res.status(400).json({
+        success: false,
+        message: "Delivery already confirmed",
+      });
+    }
+
+    if ((order as any).buyerConfirmation?.status === "issue_reported") {
+      return res.json({ success: true, data: order, alreadyReported: true });
+    }
+
+    (order as any).buyerConfirmation = {
+      status: "issue_reported",
+      confirmedAt: undefined,
+      issueReportedAt: new Date(),
+      issueContactId:
+        contactId && mongoose.isValidObjectId(String(contactId))
+          ? contactId
+          : (order as any).buyerConfirmation?.issueContactId || null,
+    };
+    (order as any).payout = {
+      status: "blocked_issue",
+      eligibleAt: undefined,
+      blockedReason: "Buyer reported a delivery issue",
+    };
+
+    await order.save();
+
+    res.json({ success: true, data: order });
   } catch (error: any) {
     res.status(500).json({ success: false, message: error.message });
   }

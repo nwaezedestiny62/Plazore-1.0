@@ -1,5 +1,4 @@
 import '../global.css'
-// if file is globals.css → import '../globals.css'
 import { CartProvider } from '@/context/CartContext'
 import { MarketplaceProvider } from '@/context/MarketplaceContext'
 import { PlazoreChromeProvider } from '@/context/PlazoreChromeContext'
@@ -39,7 +38,14 @@ const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window')
 const OPENER_MS = 3300
 const EASE = Easing.bezier(0.22, 1, 0.36, 1)
 
-/** Force dark status bar on every platform */
+const FILL = {
+  position: 'absolute' as const,
+  top: 0,
+  right: 0,
+  bottom: 0,
+  left: 0,
+}
+
 function applyDarkStatusBar() {
   StatusBar.setBarStyle('light-content', true)
   if (Platform.OS === 'android') {
@@ -48,21 +54,18 @@ function applyDarkStatusBar() {
   }
 }
 
-/** Opener + intro gate — must sit inside SoundtrackProvider */
 function AppShell() {
   const { holdIntroGate, releaseIntroGate } = useSoundtrack()
   const [showOpener, setShowOpener] = useState(true)
   const openerOpacity = useRef(new Animated.Value(1)).current
   const heldRef = useRef(false)
 
-  // Hold music for the entire opener
   useEffect(() => {
     if (heldRef.current) return
     heldRef.current = true
     holdIntroGate()
   }, [holdIntroGate])
 
-  // Opener sequence
   useEffect(() => {
     StatusBar.setHidden(true, 'fade')
     if (Platform.OS === 'android') {
@@ -80,7 +83,6 @@ function AppShell() {
         if (!finished) return
         setShowOpener(false)
         StatusBar.setHidden(false, 'fade')
-        // Restore + lock dark status bar
         applyDarkStatusBar()
         releaseIntroGate()
       })
@@ -89,7 +91,6 @@ function AppShell() {
     return () => clearTimeout(timer)
   }, [openerOpacity, releaseIntroGate])
 
-  // Keep forcing dark status bar while app is running (handles any later overrides)
   useEffect(() => {
     if (showOpener) return
     applyDarkStatusBar()
@@ -97,30 +98,28 @@ function AppShell() {
 
   return (
     <>
-      {/* Always light icons on dark bg */}
       <ExpoStatusBar style="light" backgroundColor={BG} translucent={false} />
 
-      {Platform.OS === 'android' && (
+      {Platform.OS === 'android' ? (
         <StatusBar
           barStyle="light-content"
           backgroundColor={BG}
           translucent={false}
           animated
         />
-      )}
+      ) : null}
 
       <Stack
         screenOptions={{
           headerShown: false,
           contentStyle: { backgroundColor: BG },
-          // Extra safety for native stack screens
           statusBarStyle: 'light',
           statusBarBackgroundColor: BG,
           statusBarTranslucent: false,
         }}
       />
 
-      {showOpener && (
+      {showOpener ? (
         <Animated.View
           pointerEvents="none"
           style={[styles.opener, { opacity: openerOpacity }]}
@@ -131,7 +130,7 @@ function AppShell() {
             resizeMode="cover"
           />
         </Animated.View>
-      )}
+      ) : null}
     </>
   )
 }
@@ -144,7 +143,6 @@ export default function RootLayout() {
     Manrope_700Bold,
   })
 
-  // Force dark status bar as early as possible
   useEffect(() => {
     applyDarkStatusBar()
   }, [])
@@ -193,7 +191,7 @@ export default function RootLayout() {
 
 const styles = StyleSheet.create({
   opener: {
-    ...StyleSheet.absoluteFillObject,
+    ...FILL,
     zIndex: 9999,
     backgroundColor: '#000',
   },

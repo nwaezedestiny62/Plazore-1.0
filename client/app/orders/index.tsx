@@ -20,7 +20,6 @@ import {
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 
-/* ── Plazore tokens ── */
 const BG = '#090B0F'
 const SURFACE = '#11141A'
 const SURFACE_2 = '#171B22'
@@ -31,6 +30,7 @@ const MUTED = '#6B7280'
 const GREEN = '#00E575'
 const BLUE = '#3B82F6'
 const DANGER = '#EF4444'
+const AMBER = '#F59E0B'
 
 const HIDDEN_KEY = '@plazore_hidden_completed_orders'
 
@@ -44,6 +44,25 @@ const statusColor: Record<string, string> = {
 const STATUS_ORDER = ['Preparing', 'Shipped', 'Delivered', 'Cancelled']
 
 type SortMode = 'newest' | 'oldest' | 'status'
+
+function confirmationHint(order: any): {
+  label: string
+  color: string
+} | null {
+  if (order?.orderStatus !== 'Delivered') return null
+  const status =
+    order?.buyerConfirmation?.status ||
+    (order?.orderStatus === 'Delivered' ? 'pending' : 'none')
+
+  if (status === 'issue_reported') {
+    return { label: 'Issue under review', color: AMBER }
+  }
+  if (status === 'confirmed') {
+    return { label: 'Delivery confirmed', color: GREEN }
+  }
+  // pending / none after Delivered
+  return { label: 'Confirm delivery', color: GREEN }
+}
 
 function PlazoreOrbPreloader() {
   const rotation = useRef(new Animated.Value(0)).current
@@ -102,11 +121,11 @@ export default function BuyerOrders() {
         if (Array.isArray(parsed)) setHiddenIds(parsed.map(String))
       }
     } catch {
-      // ignore
+      /* ignore */
     }
   }, [])
 
-  const fetchOrders = async () => {
+  const fetchOrders = useCallback(async () => {
     try {
       const token = await getToken()
       const res = await api.get('/orders', {
@@ -114,18 +133,18 @@ export default function BuyerOrders() {
       })
       if (res.data.success) setOrders(res.data.data || [])
     } catch {
-      // keep existing list
+      /* keep existing list */
     } finally {
       setLoading(false)
       setRefreshing(false)
     }
-  }
+  }, [getToken])
 
   useFocusEffect(
     useCallback(() => {
       loadHidden()
       fetchOrders()
-    }, [loadHidden])
+    }, [loadHidden, fetchOrders])
   )
 
   const visibleOrders = useMemo(() => {
@@ -148,33 +167,54 @@ export default function BuyerOrders() {
           new Date(b.createdAt || 0).getTime()
       )
     } else {
-      list.sort(
-        (a, b) =>
+      list.sort((a, b) => {
+        // Pending confirmation first among Delivered
+        const ha = confirmationHint(a)
+        const hb = confirmationHint(b)
+        const aNeeds =
+          ha?.label === 'Confirm delivery' || ha?.label === 'Issue under review'
+            ? 0
+            : 1
+        const bNeeds =
+          hb?.label === 'Confirm delivery' || hb?.label === 'Issue under review'
+            ? 0
+            : 1
+        if (sort === 'status' && aNeeds !== bNeeds) return aNeeds - bNeeds
+        return (
           STATUS_ORDER.indexOf(a.orderStatus) -
           STATUS_ORDER.indexOf(b.orderStatus)
-      )
+        )
+      })
     }
     return list
   }, [visibleOrders, sort])
 
   const clearCompleted = () => {
-    const completed = orders.filter(
-      (o) =>
-        o.orderStatus === 'Delivered' || o.orderStatus === 'Cancelled'
-    )
+    // Only hide fully done: Cancelled, or Delivered + confirmed (not pending / issue)
+    const completed = orders.filter((o) => {
+      if (o.orderStatus === 'Cancelled') return true
+      if (o.orderStatus !== 'Delivered') return false
+      const s = o?.buyerConfirmation?.status
+      return s === 'confirmed'
+    })
 
     if (completed.length === 0) {
-      Alert.alert('Nothing to clear', 'No Delivered or Cancelled orders to hide.')
+      Alert.alert(
+        'Nothing to clear',
+        'No fully completed orders to hide. Orders waiting for your confirmation stay visible.'
+      )
       return
     }
 
     Alert.alert(
       'Clear completed',
-      `Hide ${completed.length} completed order${completed.length !== 1 ? 's' : ''} from this list permanently? They remain in your history on the server.`,
+      `Hide ${completed.length} completed order${
+        completed.length !== 1 ? 's' : ''
+      } from this list? They remain on the server.`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Hide permanently',
+          text: 'Hide',
           style: 'destructive',
           onPress: async () => {
             try {
@@ -197,7 +237,6 @@ export default function BuyerOrders() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
-      {/* Header */}
       <View style={styles.header}>
         <View style={styles.headerLeft}>
           <TouchableOpacity
@@ -252,6 +291,7 @@ export default function BuyerOrders() {
         renderItem={({ item }) => {
           const count = item.items?.length || 0
           const color = statusColor[item.orderStatus] || MUTED
+          const hint = confirmationHint(item)
 
           return (
             <TouchableOpacity
@@ -264,14 +304,9 @@ export default function BuyerOrders() {
                   {item.orderNumber}
                 </Text>
                 <View
-                  style={[
-                    styles.statusPill,
-                    { backgroundColor: color + '18' },
-                  ]}
+                  style={[styles.statusPill, { backgroundColor: color + '18' }]}
                 >
-                  <View
-                    style={[styles.statusDot, { backgroundColor: color }]}
-                  />
+                  <View style={[styles.statusDot, { backgroundColor: color }]} />
                   <Text style={[styles.statusText, { color }]}>
                     {item.orderStatus}
                   </Text>
@@ -281,6 +316,30 @@ export default function BuyerOrders() {
               <Text style={styles.seller} numberOfLines={1}>
                 {item.seller?.storeName || item.seller?.name || 'Seller'}
               </Text>
+
+              {hint ? (
+                <View
+                  style={[
+                    styles.hintRow,
+                    { backgroundColor: hint.color + '14' },
+                  ]}
+                >
+                  <Ionicons
+                    name={
+                      hint.label === 'Issue under review'
+                        ? 'alert-circle-outline'
+                        : hint.label === 'Delivery confirmed'
+                          ? 'checkmark-circle-outline'
+                          : 'hand-left-outline'
+                    }
+                    size={14}
+                    color={hint.color}
+                  />
+                  <Text style={[styles.hintText, { color: hint.color }]}>
+                    {hint.label}
+                  </Text>
+                </View>
+              ) : null}
 
               <View style={styles.cardBottom}>
                 <Text style={styles.meta}>
@@ -343,7 +402,6 @@ const styles = StyleSheet.create({
     backgroundColor: BG,
   },
 
-  /* Orb preloader */
   loaderRoot: {
     flex: 1,
     backgroundColor: BG,
@@ -501,7 +559,21 @@ const styles = StyleSheet.create({
   seller: {
     fontSize: 13,
     color: SECONDARY,
+    marginBottom: 8,
+  },
+  hintRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    alignSelf: 'flex-start',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
     marginBottom: 10,
+  },
+  hintText: {
+    fontSize: 12,
+    fontWeight: '700',
   },
   cardBottom: {
     flexDirection: 'row',

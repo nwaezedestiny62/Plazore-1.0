@@ -1,5 +1,5 @@
 /**
- * Seller register — video-4.mp4 bg + robust play + image fallback
+ * Seller register — still-image bg (no expo-av)
  * Route: /seller-register
  */
 
@@ -7,10 +7,9 @@ import api from '@/constants/api'
 import { REGION_LIST } from '@/constants/regions'
 import { useAuth, useUser } from '@clerk/clerk-expo'
 import { Ionicons } from '@expo/vector-icons'
-import { Video, ResizeMode, AVPlaybackStatus } from 'expo-av'
 import { LinearGradient } from 'expo-linear-gradient'
 import { useRouter } from 'expo-router'
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
@@ -33,16 +32,21 @@ const TEXT = '#FFFFFF'
 const TEXT_DIM = 'rgba(255,255,255,0.78)'
 const MUTED = 'rgba(255,255,255,0.55)'
 
-const FALLBACK_BG =
+const BG_IMAGE =
   'https://images.unsplash.com/photo-1441986300917-64674bd600d8?auto=format&fit=crop&w=1400&q=80'
 
-const VIDEO_SOURCE = require('@/assets/video-4.mp4')
+const FILL = {
+  position: 'absolute' as const,
+  top: 0,
+  right: 0,
+  bottom: 0,
+  left: 0,
+}
 
 export default function SellerRegister() {
   const { getToken } = useAuth()
   const { user } = useUser()
   const router = useRouter()
-  const videoRef = useRef<Video>(null)
 
   const [storeName, setStoreName] = useState('')
   const [storeDescription, setStoreDescription] = useState('')
@@ -54,7 +58,6 @@ export default function SellerRegister() {
   const [marketplaceRegion, setMarketplaceRegion] = useState('NG')
   const [showRegions, setShowRegions] = useState(false)
   const [loading, setLoading] = useState(false)
-  const [useFallback, setUseFallback] = useState(false)
   const [focus, setFocus] = useState<string | null>(null)
 
   useEffect(() => {
@@ -70,47 +73,12 @@ export default function SellerRegister() {
         if (res.data.success && res.data.data?.marketplaceRegion) {
           setMarketplaceRegion(res.data.data.marketplaceRegion)
         }
-      } catch (e) {
-        console.log(e)
-      }
-    }
-    load()
-  }, [getToken])
-
-  /** Force play when loaded — Android often ignores shouldPlay alone */
-  const onVideoStatus = useCallback(async (status: AVPlaybackStatus) => {
-    if (!status.isLoaded) {
-      if ('error' in status && status.error) {
-        setUseFallback(true)
-      }
-      return
-    }
-    try {
-      if (!status.isPlaying) {
-        await videoRef.current?.playAsync()
-      }
-    } catch {
-      setUseFallback(true)
-    }
-  }, [])
-
-  useEffect(() => {
-    let cancelled = false
-    ;(async () => {
-      try {
-        // Small delay so the native view is mounted
-        await new Promise((r) => setTimeout(r, 120))
-        if (cancelled) return
-        await videoRef.current?.playAsync()
       } catch {
-        if (!cancelled) setUseFallback(true)
+        /* offline — form still usable */
       }
-    })()
-    return () => {
-      cancelled = true
-      videoRef.current?.stopAsync().catch(() => {})
     }
-  }, [])
+    void load()
+  }, [getToken])
 
   const handleRegister = async () => {
     if (!storeName.trim()) {
@@ -171,7 +139,6 @@ export default function SellerRegister() {
         )
       }
     } catch (error: any) {
-      console.log('Full error:', error.response?.data || error.message)
       Alert.alert(
         'Registration Failed',
         error.response?.data?.message ||
@@ -192,29 +159,12 @@ export default function SellerRegister() {
 
   return (
     <View style={styles.root}>
-      {/* Background media */}
       <View style={styles.bgLayer} pointerEvents="none">
-        {!useFallback ? (
-          <Video
-            ref={videoRef}
-            source={VIDEO_SOURCE}
-            style={styles.bgMedia}
-            resizeMode={ResizeMode.COVER}
-            shouldPlay
-            isLooping
-            isMuted
-            volume={0}
-            useNativeControls={false}
-            onPlaybackStatusUpdate={onVideoStatus}
-            onError={() => setUseFallback(true)}
-          />
-        ) : (
-          <ImageBackground
-            source={{ uri: FALLBACK_BG }}
-            style={styles.bgMedia}
-            resizeMode="cover"
-          />
-        )}
+        <ImageBackground
+          source={{ uri: BG_IMAGE }}
+          style={styles.bgMedia}
+          resizeMode="cover"
+        />
       </View>
 
       <LinearGradient
@@ -225,7 +175,7 @@ export default function SellerRegister() {
           'rgba(9,11,15,0.97)',
         ]}
         locations={[0, 0.25, 0.6, 1]}
-        style={StyleSheet.absoluteFill}
+        style={FILL}
         pointerEvents="none"
       />
 
@@ -352,7 +302,7 @@ export default function SellerRegister() {
               />
             </Pressable>
 
-            {showRegions && (
+            {showRegions ? (
               <View style={styles.regionList}>
                 {REGION_LIST.map((r) => {
                   const on = marketplaceRegion === r.code
@@ -367,16 +317,15 @@ export default function SellerRegister() {
                     >
                       <Text style={styles.flag}>{r.flag}</Text>
                       <Text style={styles.regionRowText}>{r.name}</Text>
-                      {on && (
+                      {on ? (
                         <Ionicons name="checkmark" size={18} color={GREEN} />
-                      )}
+                      ) : null}
                     </Pressable>
                   )
                 })}
               </View>
-            )}
+            ) : null}
 
-            {/* Payout */}
             <Text style={[styles.section, { marginTop: 28 }]}>
               Payout / bank details
             </Text>
@@ -479,12 +428,12 @@ const styles = StyleSheet.create({
   safe: { flex: 1 },
 
   bgLayer: {
-    ...StyleSheet.absoluteFillObject,
+    ...FILL,
     width: '100%',
     height: '100%',
   },
   bgMedia: {
-    ...StyleSheet.absoluteFillObject,
+    ...FILL,
     width: '100%',
     height: '100%',
   },

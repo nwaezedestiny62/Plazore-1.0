@@ -1,5 +1,4 @@
 import { Tabs, useRouter, usePathname } from "expo-router";
-import { useNavigation } from "@react-navigation/native";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   View,
@@ -32,7 +31,6 @@ const PENDING_STATUSES = new Set(["Preparing"]);
 
 function HeaderBack() {
   const router = useRouter();
-  const navigation = useNavigation();
   const pathname = usePathname() || "";
 
   const fallbackParent = () => {
@@ -71,21 +69,8 @@ function HeaderBack() {
   return (
     <TouchableOpacity
       onPress={() => {
-        if (navigation.canGoBack()) {
-          navigation.goBack();
-          return;
-        }
         if (router.canGoBack()) {
           router.back();
-          return;
-        }
-        const parent = navigation.getParent?.();
-        if (
-          parent &&
-          typeof parent.canGoBack === "function" &&
-          parent.canGoBack()
-        ) {
-          parent.goBack();
           return;
         }
         fallbackParent();

@@ -7,6 +7,8 @@ import {
   getSellerOrders,
   shipOrder,
   deliverOrder,
+  confirmDelivery,
+  reportDeliveryIssue,
   getAllOrders,
   cancelOrderBySeller, // ← import this from ordersController
 } from "../controllers/ordersController.js";
@@ -33,6 +35,10 @@ OrderRouter.put(
   authorize("seller", "admin"),
   shipOrder
 );
+
+// after deliver route:
+OrderRouter.put("/:id/confirm-delivery", protect, confirmDelivery);
+OrderRouter.put("/:id/report-delivery-issue", protect, reportDeliveryIssue);
 
 OrderRouter.put(
   "/:id/deliver",

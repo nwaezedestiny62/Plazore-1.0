@@ -2,9 +2,10 @@
  * Complete profile — after email verify or Google sign-up
  * Route: /complete-profile
  *
- * - If backend already has name + phone → auto-enter tabs
- * - Save shows inline errors (works even without Toast)
- * - “Enter Plazore” escape if API is offline
+ * - No expo-av / no video (Expo Go crash). Still image only.
+ * - After a valid first fill, never show again — even offline
+ *   (AsyncStorage gate, checked before the network).
+ * - If backend already has name + phone → persist local complete + enter tabs
  */
 
 import api from '@/constants/api'
@@ -12,8 +13,8 @@ import { DEFAULT_REGION, REGION_LIST, RegionCode } from '@/constants/regions'
 import { useMarketplace } from '@/context/MarketplaceContext'
 import { Ionicons } from '@expo/vector-icons'
 import { useAuth, useUser } from '@clerk/clerk-expo'
+import AsyncStorage from '@react-native-async-storage/async-storage'
 import { LinearGradient } from 'expo-linear-gradient'
-import { Video, ResizeMode, AVPlaybackStatus } from 'expo-av'
 import { useRouter } from 'expo-router'
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
@@ -39,13 +40,61 @@ const TEXT = '#FFFFFF'
 const TEXT_DIM = 'rgba(255,255,255,0.78)'
 const MUTED = 'rgba(255,255,255,0.55)'
 
-const FALLBACK_BG =
+const COMPLETE_KEY = '@plazore/profile_complete_v1'
+
+const BG_IMAGE =
   'https://images.unsplash.com/photo-1441986300917-64674bd600d8?auto=format&fit=crop&w=1400&q=80'
+
+const FILL = {
+  position: 'absolute' as const,
+  top: 0,
+  right: 0,
+  bottom: 0,
+  left: 0,
+}
 
 function isValidPhone(raw: string) {
   const p = raw.trim().replace(/[\s\-()]/g, '')
-  // 7–15 digits, optional leading +
   return /^\+?\d{7,15}$/.test(p)
+}
+
+type CompleteRecord = {
+  complete: true
+  name: string
+  phone: string
+  region: string
+  at: number
+}
+
+async function readComplete(): Promise<CompleteRecord | null> {
+  try {
+    const raw = await AsyncStorage.getItem(COMPLETE_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    if (parsed?.complete === true) return parsed as CompleteRecord
+  } catch {
+    /* ignore */
+  }
+  return null
+}
+
+async function writeComplete(data: {
+  name: string
+  phone: string
+  region: string
+}) {
+  const rec: CompleteRecord = {
+    complete: true,
+    name: data.name,
+    phone: data.phone,
+    region: data.region,
+    at: Date.now(),
+  }
+  try {
+    await AsyncStorage.setItem(COMPLETE_KEY, JSON.stringify(rec))
+  } catch {
+    /* ignore */
+  }
 }
 
 export default function CompleteProfileScreen() {
@@ -53,8 +102,7 @@ export default function CompleteProfileScreen() {
   const { getToken, isSignedIn } = useAuth()
   const { setRegionLocal } = useMarketplace()
   const router = useRouter()
-  const videoRef = useRef<Video>(null)
-  const checkedRef = useRef(false)
+  const gatedRef = useRef(false)
 
   const prefillName = useMemo(() => {
     const n = [user?.firstName, user?.lastName].filter(Boolean).join(' ').trim()
@@ -68,19 +116,42 @@ export default function CompleteProfileScreen() {
   const [checking, setChecking] = useState(true)
   const [nameFocused, setNameFocused] = useState(false)
   const [phoneFocused, setPhoneFocused] = useState(false)
-  const [useFallback, setUseFallback] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
 
   useEffect(() => {
-    if (prefillName) setName(prefillName)
+    if (prefillName) setName((prev) => prev || prefillName)
   }, [prefillName])
 
-  // If profile is already complete on server → leave this screen
+  const goTabs = useCallback(() => {
+    router.replace('/(tabs)')
+  }, [router])
+
+  const enterDone = useCallback(
+    (region?: string) => {
+      if (region) {
+        try {
+          setRegionLocal(String(region))
+        } catch {
+          /* ignore */
+        }
+      }
+      goTabs()
+    },
+    [setRegionLocal, goTabs]
+  )
+
+  // Local complete flag first — never wait on network to skip this screen
   useEffect(() => {
-    if (!userLoaded || checkedRef.current) return
-    checkedRef.current = true
+    if (!userLoaded || gatedRef.current) return
+    gatedRef.current = true
 
     ;(async () => {
+      const local = await readComplete()
+      if (local?.complete) {
+        enterDone(local.region)
+        return
+      }
+
       try {
         if (!isSignedIn) {
           setChecking(false)
@@ -99,38 +170,27 @@ export default function CompleteProfileScreen() {
         const hasPhone = !!(u?.phone && String(u.phone).trim())
 
         if (hasName && hasPhone) {
-          if (u.marketplaceRegion) {
-            try {
-              setRegionLocal(String(u.marketplaceRegion))
-            } catch {}
-          }
-          router.replace('/(tabs)')
+          await writeComplete({
+            name: String(u.name).trim(),
+            phone: String(u.phone).trim(),
+            region: String(u.marketplaceRegion || DEFAULT_REGION),
+          })
+          enterDone(u.marketplaceRegion)
           return
         }
 
-        // Prefill what we have
         if (hasName) setName(String(u.name).trim())
         if (hasPhone) setPhone(String(u.phone).trim())
         if (u?.marketplaceRegion) setCountry(u.marketplaceRegion as RegionCode)
       } catch {
-        // API down — stay on form, user can still enter
+        // Offline + not completed locally → stay on form
       } finally {
         setChecking(false)
       }
     })()
-  }, [userLoaded, isSignedIn, getToken, router, setRegionLocal])
+  }, [userLoaded, isSignedIn, getToken, enterDone])
 
   const avatar = user?.imageUrl
-
-  const onVideoStatus = (status: AVPlaybackStatus) => {
-    if (!status.isLoaded && 'error' in status && status.error) {
-      setUseFallback(true)
-    }
-  }
-
-  const goTabs = useCallback(() => {
-    router.replace('/(tabs)')
-  }, [router])
 
   const onSave = async () => {
     const cleanedName = name.trim()
@@ -167,50 +227,50 @@ export default function CompleteProfileScreen() {
           lastName: parts.slice(1).join(' ') || undefined,
         })
       } catch {
-        // optional
+        /* optional */
       }
 
       const token = await getToken()
-      if (!token) {
-        setFormError('Session expired — sign in again')
-        Toast.show({
-          type: 'error',
-          text1: 'Session expired',
-          text2: 'Sign in again',
-        })
-        router.replace('/(auth)/sign-in')
-        return
+      if (token) {
+        try {
+          await api.patch(
+            '/users/me',
+            {
+              name: cleanedName,
+              phone: cleanedPhone,
+              marketplaceRegion: country,
+              ...(avatar ? { image: avatar } : {}),
+            },
+            { headers: { Authorization: `Bearer ${token}` } }
+          )
+        } catch {
+          // Still mark complete locally so this screen never returns
+        }
       }
 
-      await api.patch(
-        '/users/me',
-        {
-          name: cleanedName,
-          phone: cleanedPhone,
-          marketplaceRegion: country,
-          ...(avatar ? { image: avatar } : {}),
-        },
-        { headers: { Authorization: `Bearer ${token}` } }
-      )
+      await writeComplete({
+        name: cleanedName,
+        phone: cleanedPhone,
+        region: country,
+      })
 
       try {
         setRegionLocal(country)
-      } catch {}
+      } catch {
+        /* ignore */
+      }
 
       Toast.show({ type: 'success', text1: 'Welcome to Plazore' })
-      router.replace('/(tabs)')
+      goTabs()
     } catch (e: any) {
       const msg =
-        e?.response?.data?.message ||
-        e?.message ||
-        'Could not reach server'
+        e?.response?.data?.message || e?.message || 'Could not save'
       setFormError(msg)
       Toast.show({
         type: 'error',
         text1: 'Could not save',
         text2: msg,
       })
-      // Do NOT auto-navigate on error — user can tap “Enter anyway”
     } finally {
       setLoading(false)
     }
@@ -227,25 +287,11 @@ export default function CompleteProfileScreen() {
 
   return (
     <View style={styles.root}>
-      {!useFallback ? (
-        <Video
-          ref={videoRef}
-          source={require('@/assets/video-3.mp4')}
-          style={StyleSheet.absoluteFill}
-          resizeMode={ResizeMode.COVER}
-          shouldPlay
-          isLooping
-          isMuted
-          onPlaybackStatusUpdate={onVideoStatus}
-          onError={() => setUseFallback(true)}
-        />
-      ) : (
-        <ImageBackground
-          source={{ uri: FALLBACK_BG }}
-          style={StyleSheet.absoluteFill}
-          resizeMode="cover"
-        />
-      )}
+      <ImageBackground
+        source={{ uri: BG_IMAGE }}
+        style={FILL}
+        resizeMode="cover"
+      />
 
       <LinearGradient
         colors={[
@@ -255,7 +301,7 @@ export default function CompleteProfileScreen() {
           'rgba(9,11,15,0.96)',
         ]}
         locations={[0, 0.28, 0.65, 1]}
-        style={StyleSheet.absoluteFill}
+        style={FILL}
       />
 
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
@@ -375,14 +421,14 @@ export default function CompleteProfileScreen() {
                     >
                       {r.name}
                     </Text>
-                    {on && (
+                    {on ? (
                       <Ionicons
                         name="checkmark-circle"
                         size={16}
                         color={GREEN}
                         style={{ marginLeft: 4 }}
                       />
-                    )}
+                    ) : null}
                   </Pressable>
                 )
               })}
@@ -410,11 +456,6 @@ export default function CompleteProfileScreen() {
                 )}
               </LinearGradient>
             </TouchableOpacity>
-
-            {/* Escape hatch — gets you out when API is down */}
-            <Pressable onPress={goTabs} style={styles.skipBtn} hitSlop={8}>
-              <Text style={styles.skipText}>Enter Plazore anyway</Text>
-            </Pressable>
 
             <Text style={styles.footerNote}>
               You can update these later in settings
@@ -597,19 +638,8 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
 
-  skipBtn: {
-    marginTop: 16,
-    alignItems: 'center',
-    paddingVertical: 10,
-  },
-  skipText: {
-    color: GREEN,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-
   footerNote: {
-    marginTop: 12,
+    marginTop: 16,
     textAlign: 'center',
     color: MUTED,
     fontSize: 12,
