@@ -17,6 +17,8 @@ import {
   updateAdminReport,
   pingPresence,
 } from "../controllers/adminController.js";
+import { uploadBannerImage } from "../controllers/contentController.js";
+import upload from "../middleware/upload.js";
 import {
   getAdminShowroom,
   refreshAdminShowroom,
@@ -25,6 +27,14 @@ import {
   regenerateAdminIntelligence,
   getAdminAnalytics,
 } from "../controllers/adminObservabilityController.js";
+import {
+  getAdminContent,
+  getAdminBannerSlot,
+  saveAdminBannerDraft,
+  publishAdminBanner,
+  setAdminBannerActive,
+  getAdminPersonalDiagnostics,
+} from "../controllers/contentController.js";
 
 const AdminRouter = express.Router();
 
@@ -36,6 +46,13 @@ AdminRouter.get("/users", ...adminOnly, getAdminUsers);
 AdminRouter.get("/users/:id", ...adminOnly, getAdminUserDetail);
 AdminRouter.patch("/sellers/:id/suspend", ...adminOnly, setSellerSuspended);
 AdminRouter.patch("/sellers/:id/verify", ...adminOnly, setSellerVerified);
+
+AdminRouter.post(
+  "/content/upload-banner",
+  ...adminOnly,
+  upload.single("image"),
+  uploadBannerImage
+);
 
 AdminRouter.get("/products", ...adminOnly, getAdminProducts);
 AdminRouter.patch("/products/:id/active", ...adminOnly, setProductActive);
@@ -54,12 +71,44 @@ AdminRouter.get("/showroom", ...adminOnly, getAdminShowroom);
 AdminRouter.post("/showroom/refresh", ...adminOnly, refreshAdminShowroom);
 
 AdminRouter.get("/intelligence", ...adminOnly, getAdminIntelligence);
-AdminRouter.get("/intelligence/:productId", ...adminOnly, getAdminIntelligenceDetail);
-AdminRouter.post("/intelligence/:productId/regenerate", ...adminOnly, regenerateAdminIntelligence);
+AdminRouter.get(
+  "/intelligence/:productId",
+  ...adminOnly,
+  getAdminIntelligenceDetail
+);
+AdminRouter.post(
+  "/intelligence/:productId/regenerate",
+  ...adminOnly,
+  regenerateAdminIntelligence
+);
 
 AdminRouter.get("/analytics", ...adminOnly, getAdminAnalytics);
 
-// Any logged-in user (not admin-only) — used by web + mobile to record last seen
+/** ─── Content / Hero Banners ─── */
+AdminRouter.get("/content", ...adminOnly, getAdminContent);
+AdminRouter.get("/content/slots/:position", ...adminOnly, getAdminBannerSlot);
+AdminRouter.put(
+  "/content/slots/:position/draft",
+  ...adminOnly,
+  saveAdminBannerDraft
+);
+AdminRouter.post(
+  "/content/slots/:position/publish",
+  ...adminOnly,
+  publishAdminBanner
+);
+AdminRouter.patch(
+  "/content/slots/:position/active",
+  ...adminOnly,
+  setAdminBannerActive
+);
+AdminRouter.get(
+  "/content/diagnostics",
+  ...adminOnly,
+  getAdminPersonalDiagnostics
+);
+
+// Any logged-in user — presence heartbeat
 AdminRouter.post("/me/presence", protect, pingPresence);
 
 export default AdminRouter;

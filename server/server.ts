@@ -8,6 +8,7 @@ import makeAdmin from "./scripts/makeAdmin.js";
 
 import ProductRouter from "./routes/productsRoutes.js";
 import CartRouter from "./routes/cartRoutes.js";
+import ContentRouter from "./routes/contentRoutes.js";
 import OrderRouter from "./routes/ordersRoutes.js";
 import AddressRouter from "./routes/addressRoutes.js";
 import AdminRouter from "./routes/adminRoutes.js";
@@ -40,7 +41,8 @@ app.use(
     credentials: true,
   })
 );
-app.use(express.json());
+app.use(express.json({ limit: "15mb" }));
+app.use(express.urlencoded({ extended: true, limit: "15mb" }));
 app.use(clerkMiddleware());
 
 const port = process.env.PORT || 3000;
@@ -73,6 +75,7 @@ app.use("/api/chat", ChatRouter);
 app.use("/api/saved-stores", SavedStoreRouter);
 app.use("/api/payment-methods", PaymentMethodRouter);
 app.use("/api/contact", ContactRouter);
+app.use("/api/content", ContentRouter);
 
 // Single moderation mount (covers /me + admin actions)
 app.use("/api/moderation", ModerationRouter);

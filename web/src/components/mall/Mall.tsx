@@ -12,7 +12,8 @@ import {
 } from "lucide-react";
 import { AppFeaturePrompt, type AppFeature } from "@/components/app/AppFeaturePrompt";
 import { useAuth } from "@clerk/nextjs";
-import { HERO_SLIDES } from "@/lib/heroCampaigns";
+import { HERO_SLIDES, type HeroSlide } from "@/lib/heroCampaigns";
+import { fetchHeroBanners, prefetchHeroImages } from "@/lib/fetchHeroBanners";
 import { cartCount } from "@/lib/cart";
 import { useMarketplace } from "@/context/MarketplaceContext";
 import { DEFAULT_REGION, formatProductPrice } from "@/lib/regions";
@@ -62,6 +63,23 @@ type SplitRooms = {
   titles: RoomTitles;
 };
 
+/** Shrink headline when personalized copy is long — stays cinematic, never overflows */
+function heroHeadlineSize(text: string): string {
+  const n = (text || "").trim().length;
+  if (n > 52) return "clamp(1.25rem, 2.8vw, 2.15rem)";
+  if (n > 40) return "clamp(1.4rem, 3.2vw, 2.55rem)";
+  if (n > 28) return "clamp(1.55rem, 3.8vw, 3.1rem)";
+  if (n > 18) return "clamp(1.7rem, 4.2vw, 3.65rem)";
+  return "clamp(1.85rem, 4.6vw, 4.25rem)";
+}
+
+function heroSubSize(text: string): string {
+  const n = (text || "").trim().length;
+  if (n > 90) return "text-[13px] sm:text-[14px]";
+  if (n > 60) return "text-[13px] sm:text-[15px]";
+  return "text-[14px] sm:text-[16px]";
+}
+
 function uniqueCount(rooms?: ShowroomRooms | null, products?: Product[]) {
   const ids = new Set<string>();
   const add = (list?: Product[]) => {
@@ -87,7 +105,6 @@ function buildRooms(
       (serverRooms[3]?.length || 0) > 0 ||
       (serverRooms[4]?.length || 0) > 0);
 
-  // Tiny catalog → reuse the same products across rooms
   if (count > 0 && count <= 4) {
     const pool =
       (serverRooms?.[1]?.length ? serverRooms[1] : products).slice(0, 4);
@@ -100,7 +117,6 @@ function buildRooms(
     };
   }
 
-  // Preferred path: use ranked rooms from server
   if (hasServerRooms && serverRooms) {
     return {
       one: serverRooms[1] || [],
@@ -111,7 +127,6 @@ function buildRooms(
     };
   }
 
-  // Fallback: naive split from flat list
   return {
     one: products.slice(0, 50),
     two: products.slice(50, 64),
@@ -157,14 +172,17 @@ function MallChrome({
     const el = bagRefDesktop.current || bagRefMobile.current;
     if (!el) return;
     el.animate(
-      [{ transform: "scale(1)" }, { transform: "scale(1.22)" }, { transform: "scale(1)" }],
+      [
+        { transform: "scale(1)" },
+        { transform: "scale(1.22)" },
+        { transform: "scale(1)" },
+      ],
       { duration: 420, easing: "cubic-bezier(0.22, 1, 0.36, 1)" }
     );
   }, [fly?.bagPulse]);
 
   return (
     <>
-      {/* Desktop */}
       <header
         className={`fixed inset-x-0 top-0 z-50 hidden h-16 items-center justify-between px-6 transition-all duration-500 md:flex lg:px-10 ${
           solid ? "bg-[#090B0F]/80 backdrop-blur-xl" : "bg-transparent"
@@ -256,7 +274,6 @@ function MallChrome({
         </div>
       </header>
 
-      {/* Mobile */}
       <header
         className={`fixed inset-x-0 top-0 z-50 flex h-14 items-center justify-between px-3.5 transition-all duration-400 md:hidden ${
           solid ? "bg-[#090B0F]/88 backdrop-blur-xl" : "bg-transparent"
@@ -352,7 +369,8 @@ function RoomThreeStage({ products }: { products: Product[] }) {
     (raw: number) => {
       if (busy.current || products.length < 2) return;
       const from = currentRef.current;
-      const target = ((raw % products.length) + products.length) % products.length;
+      const target =
+        ((raw % products.length) + products.length) % products.length;
       if (target === from) return;
       busy.current = true;
       clearHold();
@@ -513,7 +531,10 @@ function MallInner({
     initialRooms || null
   );
   const [loading, setLoading] = useState(initialLoading);
+
+  const [heroSlides, setHeroSlides] = useState<HeroSlide[]>(HERO_SLIDES);
   const [slide, setSlide] = useState(0);
+
   const [progress, setProgress] = useState(0);
   const [activeRoom, setActiveRoom] = useState(1);
   const [bagN, setBagN] = useState(0);
@@ -521,8 +542,36 @@ function MallInner({
   const showroomRef = useRef<HTMLElement>(null);
   const roomRefs = useRef<Record<number, HTMLElement | null>>({});
   const fetchedRef = useRef(false);
+  const heroFetchedRef = useRef(false);
 
-  // Client adaptive fetch with session + region (same idea as mobile)
+  useEffect(() => {
+    if (heroFetchedRef.current) return;
+    heroFetchedRef.current = true;
+
+    (async () => {
+      try {
+        let token: string | null = null;
+        try {
+          if (isSignedIn) token = (await getToken()) || null;
+        } catch {
+          token = null;
+        }
+        const slides = await fetchHeroBanners({
+          region,
+          token,
+          forceRefresh: false,
+        });
+        if (slides?.length) {
+          setHeroSlides(slides);
+          setSlide(0);
+          prefetchHeroImages(slides);
+        }
+      } catch {
+        /* keep HERO_SLIDES */
+      }
+    })();
+  }, [region, isSignedIn, getToken]);
+
   useEffect(() => {
     if (fetchedRef.current) return;
     fetchedRef.current = true;
@@ -586,11 +635,12 @@ function MallInner({
   }, [isSignedIn, getToken]);
 
   useEffect(() => {
+    if (heroSlides.length < 2) return;
     const id = setInterval(() => {
-      setSlide((s) => (s + 1) % HERO_SLIDES.length);
-    }, 11000);
+      setSlide((s) => (s + 1) % heroSlides.length);
+    }, 12000);
     return () => clearInterval(id);
-  }, []);
+  }, [heroSlides.length]);
 
   useEffect(() => {
     const onScroll = () => {
@@ -621,69 +671,107 @@ function MallInner({
     roomRefs.current[n]?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
-  const current = HERO_SLIDES[slide % HERO_SLIDES.length];
+  const current =
+    heroSlides[slide % Math.max(heroSlides.length, 1)] || HERO_SLIDES[0];
   const roomNavOn = progress > 0.42;
+  const headlineFs = heroHeadlineSize(current?.headline || "");
+  const subClass = heroSubSize(current?.subheadline || "");
 
   return (
     <div className="min-h-dvh bg-bg text-text">
       <MallChrome progress={progress} bagN={bagN} notifN={notifN} />
 
-      <section className="relative h-dvh min-h-[560px] overflow-hidden">
-        {HERO_SLIDES.map((s, i) => (
-          <div
-            key={s.id}
-            className="absolute inset-0 transition-opacity duration-[3200ms] ease-in-out"
-            style={{ opacity: i === slide ? 1 : 0 }}
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={s.image}
-              alt=""
-              className="h-full w-full origin-center object-cover"
+      <section className="relative h-dvh min-h-[560px] overflow-hidden bg-[#090B0F]">
+        {heroSlides.map((s, i) => {
+          const active = i === slide;
+          return (
+            <div
+              key={s.id}
+              className="absolute inset-0"
               style={{
-                transform: i === slide ? "scale(1.045)" : "scale(1)",
-                transition: i === slide ? "transform 11s linear" : "none",
+                opacity: active ? 1 : 0,
+                transition: "opacity 2800ms cubic-bezier(0.4, 0, 0.2, 1)",
+                pointerEvents: active ? "auto" : "none",
               }}
-            />
-            <div className="absolute inset-0 bg-gradient-to-t from-[#090B0F] via-[#090B0F]/45 to-black/25" />
-            <div className="absolute inset-0 bg-gradient-to-r from-[#090B0F]/35 via-transparent to-transparent" />
-          </div>
-        ))}
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={s.image}
+                alt=""
+                className="h-full w-full origin-center object-cover will-change-transform"
+                style={{
+                  transform: active ? "scale(1.06)" : "scale(1)",
+                  transition: active
+                    ? "transform 12s linear"
+                    : "transform 0ms linear",
+                }}
+              />
+            </div>
+          );
+        })}
 
-        <div className="pointer-events-none absolute inset-x-0 top-0 z-[5] h-28 bg-gradient-to-b from-black/35 to-transparent md:hidden" />
+        <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-[#090B0F] via-[#090B0F]/55 to-transparent" />
+        <div className="pointer-events-none absolute inset-0 bg-gradient-to-r from-[#090B0F]/55 via-[#090B0F]/15 to-transparent" />
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-28 bg-gradient-to-b from-black/40 to-transparent" />
 
         <div className="relative z-10 flex h-full flex-col justify-end px-5 pb-28 pt-24 sm:px-8 md:px-16 md:pb-32 lg:px-24">
-          <p className="text-[11px] font-semibold tracking-[0.32em] text-white/55">
-            {current.kicker}
-          </p>
-          <h1 className="mt-3 max-w-3xl font-display text-[2.35rem] font-medium leading-[1.05] tracking-tight text-white sm:text-5xl md:text-6xl lg:text-7xl">
-            {current.headline}
-          </h1>
-          <p className="mt-4 max-w-xl text-[15px] leading-relaxed text-white/65 sm:text-lg">
-            {current.subheadline}
-          </p>
-          <button
-            type="button"
-            onClick={enterShowroom}
-            className="mt-8 w-fit border border-white/35 px-6 py-2.5 text-[11px] font-semibold tracking-[0.2em] uppercase text-white transition hover:border-white hover:bg-white/5"
-          >
-            {current.ctaLabel}
-          </button>
+          <div className="max-w-[min(100%,26rem)] md:max-w-[min(100%,32rem)]">
+            <p className="text-[10px] font-semibold tracking-[0.36em] text-[#00E575]/90 sm:text-[11px]">
+              {current.kicker}
+            </p>
+            <h1
+              className="mt-3 font-display font-medium leading-[1.12] tracking-tight text-white"
+              style={{ fontSize: headlineFs }}
+            >
+              <span className="line-clamp-3">{current.headline}</span>
+            </h1>
+            <p
+              className={`mt-3 max-w-lg leading-relaxed text-white/65 line-clamp-3 ${subClass}`}
+            >
+              {current.subheadline}
+            </p>
+            <button
+              type="button"
+              onClick={enterShowroom}
+              className="mt-7 w-fit border border-white/35 px-6 py-2.5 text-[11px] font-semibold tracking-[0.2em] uppercase text-white transition duration-300 hover:border-white hover:bg-white/5"
+            >
+              {current.ctaLabel}
+            </button>
+          </div>
+
+          {heroSlides.length > 1 && (
+            <div className="mt-8 flex items-center gap-1.5">
+              {heroSlides.map((_, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  aria-label={`Slide ${i + 1}`}
+                  onClick={() => setSlide(i)}
+                  className={`h-1 rounded-full transition-all duration-500 ${
+                    i === slide
+                      ? "w-5 bg-white/90"
+                      : "w-1.5 bg-white/25 hover:bg-white/40"
+                  }`}
+                />
+              ))}
+            </div>
+          )}
         </div>
 
         <button
           type="button"
           onClick={enterShowroom}
-          className="absolute bottom-6 left-1/2 z-10 flex -translate-x-1/2 flex-col items-center gap-1 text-white/55 transition hover:text-white"
+          className="absolute bottom-6 left-1/2 z-10 flex -translate-x-1/2 flex-col items-center gap-1 text-white/50 transition hover:text-white/90"
           aria-label="Enter showroom"
         >
-          <span className="text-[9px] font-semibold tracking-[0.24em] uppercase">
+          <span className="text-[9px] font-semibold tracking-[0.28em] uppercase">
             Showroom
           </span>
           <ChevronDown className="h-5 w-5 animate-bounce" strokeWidth={1.5} />
         </button>
       </section>
 
+      {/* room nav + showroom sections unchanged below */}
       <div
         className={`fixed right-4 top-1/2 z-40 hidden -translate-y-1/2 flex-col gap-2.5 md:flex ${
           roomNavOn ? "opacity-100" : "pointer-events-none opacity-0"
@@ -695,7 +783,9 @@ function MallInner({
             type="button"
             onClick={() => goRoom(n)}
             className={`h-2 rounded-full transition-all ${
-              activeRoom === n ? "w-7 bg-[#00E575]" : "w-2 bg-white/30 hover:bg-white/50"
+              activeRoom === n
+                ? "w-7 bg-[#00E575]"
+                : "w-2 bg-white/30 hover:bg-white/50"
             }`}
             aria-label={`Room ${n}`}
           />
@@ -767,14 +857,14 @@ function MallInner({
                   </p>
                   <div className="flex gap-2 overflow-x-auto px-5 pb-2 sm:gap-3 sm:px-8 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                     {rooms.one.map((p) => (
-                      <ProductCard key={`r1a-${p._id}`} product={p} compact />
+                      <ProductCard key={`r1a-${p._id}`} product={p} compact room={1} />
                     ))}
                   </div>
                 </div>
                 <div className="pt-7">
                   <div className="flex gap-2 overflow-x-auto px-5 pb-2 sm:gap-3 sm:px-8 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                     {[...rooms.one].reverse().map((p) => (
-                      <ProductCard key={`r1b-${p._id}`} product={p} compact />
+                      <ProductCard key={`r1b-${p._id}`} product={p} compact room={1} />
                     ))}
                   </div>
                 </div>
@@ -802,7 +892,7 @@ function MallInner({
                       key={p._id}
                       className="mx-auto w-full max-w-[340px] min-w-0 [&_.group]:!max-w-none [&_.group]:!w-full [&_.group]:!min-w-0"
                     >
-                      <ProductCard product={p} tone="light" />
+                      <ProductCard product={p} tone="light" room={2} />
                     </div>
                   ))}
                 </div>
@@ -814,7 +904,7 @@ function MallInner({
                         key={p._id}
                         className="mx-auto w-full max-w-[340px] min-w-0 [&_.group]:!max-w-none [&_.group]:!w-full [&_.group]:!min-w-0"
                       >
-                        <ProductCard product={p} tone="light" />
+                        <ProductCard product={p} tone="light" room={2} />
                       </div>
                     ))}
                   </div>
@@ -861,7 +951,13 @@ function MallInner({
                 </div>
                 <div className="mt-10 flex gap-1 overflow-x-auto px-5 pb-4 sm:px-8 md:px-16 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                   {rooms.four.map((p) => (
-                    <ProductCard key={`r4-${p._id}`} product={p} compact tone="light" />
+                    <ProductCard
+                      key={`r4-${p._id}`}
+                      product={p}
+                      compact
+                      tone="light"
+                      room={4}
+                    />
                   ))}
                 </div>
               </section>

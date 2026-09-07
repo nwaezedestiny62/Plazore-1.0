@@ -3,11 +3,12 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { useAuth } from "@clerk/nextjs";
-import { ShoppingBag, ShoppingCart, X } from "lucide-react";
+import { ShoppingCart, X } from "lucide-react";
 import { useShowroomFlyCart } from "./ShowroomFlyCart";
 import { useMarketplace } from "@/context/MarketplaceContext";
 import { DEFAULT_REGION, formatProductPrice } from "@/lib/regions";
 import type { Product } from "@/lib/types";
+import { trackShowroomEvent } from "@/lib/showroomEvents";
 
 const PENDING_KEY = "plazore_pending_action";
 const GOOGLE_G =
@@ -43,10 +44,14 @@ export function ProductCard({
   product,
   tone = "dark",
   compact,
+  room,
+  position,
 }: {
   product: Product;
   tone?: "dark" | "light";
   compact?: boolean;
+  room?: number;
+  position?: number;
 }) {
   const { isSignedIn, isLoaded } = useAuth();
   const fly = useShowroomFlyCart();
@@ -54,17 +59,32 @@ export function ProductCard({
   const displayRegion = marketplace?.region || DEFAULT_REGION;
 
   const btnRef = useRef<HTMLButtonElement>(null);
+  const impressed = useRef(false);
   const [authOpen, setAuthOpen] = useState(false);
   const [imgIdx, setImgIdx] = useState(0);
-const images = product.images?.length ? product.images : [];
+  const images = product.images?.length ? product.images : [];
 
-useEffect(() => {
-  if (images.length < 2) return;
-  const id = window.setInterval(() => {
-    setImgIdx((i) => (i + 1) % images.length);
-  }, 4200);
-  return () => clearInterval(id);
-}, [images.length]);
+  // Impression once when card mounts
+  useEffect(() => {
+    if (impressed.current || !product?._id) return;
+    impressed.current = true;
+    void trackShowroomEvent({
+      productId: String(product._id),
+      type: "impression",
+      room,
+      position,
+      region: product.region || displayRegion || "NG",
+    });
+  }, [product?._id, product?.region, room, position, displayRegion]);
+
+  useEffect(() => {
+    if (images.length < 2) return;
+    const id = window.setInterval(() => {
+      setImgIdx((i) => (i + 1) % images.length);
+    }, 4200);
+    return () => clearInterval(id);
+  }, [images.length]);
+
   const image = images[imgIdx] || images[0];
   const light = tone === "light";
 
@@ -74,10 +94,28 @@ useEffect(() => {
 
   const returnPath =
     typeof window !== "undefined" ? window.location.pathname : "/";
-
   const authQs = `redirect_url=${encodeURIComponent(returnPath)}`;
 
+  const trackOpen = () => {
+    if (!product?._id) return;
+    void trackShowroomEvent({
+      productId: String(product._id),
+      type: "open",
+      room,
+      position,
+      region: product.region || displayRegion || "NG",
+    });
+  };
+
   const doAdd = () => {
+    void trackShowroomEvent({
+      productId: String(product._id),
+      type: "cart",
+      room,
+      position,
+      region: product.region || displayRegion || "NG",
+    });
+
     const el = btnRef.current;
     if (el && fly) {
       const r = el.getBoundingClientRect();
@@ -118,30 +156,34 @@ useEffect(() => {
           light ? "text-chamber-ink" : "text-text"
         }`}
       >
-        <Link href={`/product/${product._id}`} className="block">
+        <Link
+          href={`/product/${product._id}`}
+          className="block"
+          onClick={trackOpen}
+        >
           <div className="relative aspect-[3/4] overflow-hidden bg-surface-2">
-  {images.length > 0 ? (
-    images.map((src, i) => (
-      // eslint-disable-next-line @next/next/no-img-element
-      <img
-        key={`${product._id}-${i}`}
-        src={src}
-        alt={product.name}
-        className="absolute inset-0 h-full w-full object-cover transition-opacity duration-[1600ms] ease-in-out"
-        style={{
-          opacity: i === imgIdx ? 1 : 0,
-          transform: i === imgIdx ? "scale(1.03)" : "scale(1)",
-          transition:
-            i === imgIdx
-              ? "opacity 1.6s ease-in-out, transform 4.2s linear"
-              : "opacity 1.6s ease-in-out",
-        }}
-      />
-    ))
-  ) : (
-    <div className="h-full w-full bg-surface" />
-  )}
-</div>
+            {images.length > 0 ? (
+              images.map((src, i) => (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  key={`${product._id}-${i}`}
+                  src={src}
+                  alt={product.name}
+                  className="absolute inset-0 h-full w-full object-cover transition-opacity duration-[1600ms] ease-in-out"
+                  style={{
+                    opacity: i === imgIdx ? 1 : 0,
+                    transform: i === imgIdx ? "scale(1.03)" : "scale(1)",
+                    transition:
+                      i === imgIdx
+                        ? "opacity 1.6s ease-in-out, transform 4.2s linear"
+                        : "opacity 1.6s ease-in-out",
+                  }}
+                />
+              ))
+            ) : (
+              <div className="h-full w-full bg-surface" />
+            )}
+          </div>
 
           <p
             className={`mt-2.5 text-[10px] font-semibold uppercase tracking-[0.16em] ${
