@@ -240,7 +240,7 @@ export default function PlazoreFloatingNav({
                 locations={[0, 0.45, 1]}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
-                style={StyleSheet.absoluteFillObject}
+                style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 }}
               />
               <LinearGradient
                 colors={["rgba(255,255,255,0.32)", "transparent"]}

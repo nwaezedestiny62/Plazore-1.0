@@ -427,7 +427,7 @@ const styles = StyleSheet.create({
 
   // Preloader
   preloaderWrap: {
-    ...StyleSheet.absoluteFillObject,
+    ...{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 },
     backgroundColor: BG,
     alignItems: "center",
     justifyContent: "center",

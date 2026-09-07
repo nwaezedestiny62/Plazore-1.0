@@ -180,7 +180,7 @@ function TopToast({
           colors={["rgba(16,185,129,0.12)", "rgba(59,130,246,0.08)"]}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
-          style={StyleSheet.absoluteFillObject}
+          style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 }}
         />
         <View style={styles.toastIcon}>
           <Ionicons name="storefront-outline" size={16} color={AI_GREEN} />
@@ -556,7 +556,7 @@ export default function PublicStorefront() {
                 "transparent",
                 "rgba(9,11,15,0.85)",
               ]}
-              style={StyleSheet.absoluteFillObject}
+              style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 }}
             />
 
             <SafeAreaView
@@ -572,7 +572,7 @@ export default function PublicStorefront() {
                 <BlurView
                   intensity={40}
                   tint="dark"
-                  style={StyleSheet.absoluteFillObject}
+                  style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 }}
                 />
                 <Ionicons name="chevron-back" size={20} color={TEXT} />
               </TouchableOpacity>
@@ -585,7 +585,7 @@ export default function PublicStorefront() {
                 <BlurView
                   intensity={40}
                   tint="dark"
-                  style={StyleSheet.absoluteFillObject}
+                  style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 }}
                 />
                 <Ionicons name="share-outline" size={18} color={TEXT} />
               </TouchableOpacity>
@@ -604,7 +604,7 @@ export default function PublicStorefront() {
           <View style={styles.identityCard}>
             <LinearGradient
               colors={["rgba(17,20,26,0.98)", "rgba(17,20,26,0.92)"]}
-              style={StyleSheet.absoluteFillObject}
+              style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 }}
             />
 
             <View style={styles.identityTop}>

@@ -603,11 +603,11 @@ const styles = StyleSheet.create({
   bannerBlock: { marginBottom: 22 },
   banner: { height: 224, overflow: "hidden", backgroundColor: SURFACE },
   bannerImage: {
-    ...StyleSheet.absoluteFillObject,
+    ...{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 },
     width: "100%",
     height: "100%",
   },
-  bannerShade: { ...StyleSheet.absoluteFillObject },
+  bannerShade: { ...{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 } },
   bannerCopy: { position: "absolute", left: 16, right: 16, bottom: 16 },
   bannerCategory: {
     color: "#E2E8F0",
@@ -687,10 +687,10 @@ const styles = StyleSheet.create({
   emptyBody: { marginTop: 8, color: MUTED, fontSize: 13 },
   modalRoot: { flex: 1, justifyContent: "flex-end" },
   modalBackdrop: {
-    ...StyleSheet.absoluteFillObject,
+    ...{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 },
     backgroundColor: "rgba(15,23,42,0.42)",
   },
-  modalBackdropHit: { ...StyleSheet.absoluteFillObject },
+  modalBackdropHit: { ...{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 } },
   popup: { maxHeight: "88%", backgroundColor: BG },
   popupHandle: {
     alignSelf: "center",
@@ -702,11 +702,11 @@ const styles = StyleSheet.create({
   },
   popupImageWrap: { height: 218, position: "relative", overflow: "hidden" },
   popupImage: {
-    ...StyleSheet.absoluteFillObject,
+    ...{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 },
     width: "100%",
     height: "100%",
   },
-  popupImageShade: { ...StyleSheet.absoluteFillObject },
+  popupImageShade: { ...{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 } },
   popupClose: {
     position: "absolute",
     right: 16,

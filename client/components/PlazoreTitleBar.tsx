@@ -1,8 +1,7 @@
 /**
  * PlazoreTitleBar
- * - Always visible (no fade out / slide away)
- * - Background darkens smoothly with scrollProgress
- * - Menu + logo + wishlist (count) + notifications (count)
+ * Sits BELOW the system status bar (dark, light icons).
+ * Does not go translucent — time / battery stay visible.
  */
 
 import api from '@/constants/api'
@@ -28,6 +27,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 const ACCENT = '#C9A962'
 const ICON = '#FFFFFF'
+const BAR_BG = '#090B0F'
 const EASE_SMOOTH = Easing.bezier(0.22, 0.61, 0.36, 1)
 
 export const CHROME_IN_START = 0.02
@@ -178,7 +178,6 @@ export default function PlazoreTitleBar({
   const router = useRouter()
   const { getToken, isSignedIn } = useAuth()
 
-  // Wishlist count from shared context (live when items toggle)
   let wishlistCount = 0
   try {
     const wl = useWishlist() as { wishlist?: unknown[] } | undefined
@@ -233,10 +232,10 @@ export default function PlazoreTitleBar({
 
   useEffect(() => {
     StatusBar.setBarStyle('light-content', true)
+    StatusBar.setHidden(false, 'fade')
     if (Platform.OS === 'android') {
-      StatusBar.setTranslucent(true)
-      StatusBar.setBackgroundColor('transparent', true)
-      StatusBar.setHidden(false)
+      StatusBar.setTranslucent(false)
+      StatusBar.setBackgroundColor(BAR_BG, true)
     }
   }, [])
 
@@ -273,94 +272,64 @@ export default function PlazoreTitleBar({
     }).start()
   }, [scrollProgress, anim])
 
-  // transparent until ~6% scroll, then lock to solid glass
-const glassOpacity = anim.interpolate({
-  inputRange: [0, 0.04, 0.08, 1],
-  outputRange: [0, 0, 0.88, 0.92],
-  extrapolate: 'clamp',
-})
+  const glassOpacity = anim.interpolate({
+    inputRange: [0, 0.04, 0.08, 1],
+    outputRange: [0, 0, 0.88, 0.94],
+    extrapolate: 'clamp',
+  })
 
-const veilOpacity = anim.interpolate({
-  inputRange: [0, 0.04, 0.08, 1],
-  outputRange: [0, 0, 0.55, 0.72],
-  extrapolate: 'clamp',
-})
+  const veilOpacity = anim.interpolate({
+    inputRange: [0, 0.04, 0.08, 1],
+    outputRange: [0, 0, 0.55, 0.78],
+    extrapolate: 'clamp',
+  })
 
-const borderOpacity = anim.interpolate({
-  inputRange: [0, 0.05, 0.1, 1],
-  outputRange: [0, 0, 1, 1],
-  extrapolate: 'clamp',
-})
+  const borderOpacity = anim.interpolate({
+    inputRange: [0, 0.05, 0.1, 1],
+    outputRange: [0, 0, 1, 1],
+    extrapolate: 'clamp',
+  })
 
   const handleNotifications = () => {
-    if (onNotificationsPress) {
-      onNotificationsPress()
-      return
-    }
-    router.push('/notifications' as any)
+    if (onNotificationsPress) onNotificationsPress()
+    else router.push('/notifications' as any)
   }
 
   const handleWishlist = () => {
-    if (onWishlistPress) {
-      onWishlistPress()
-      return
-    }
-    router.push('/favorites' as any)
+    if (onWishlistPress) onWishlistPress()
+    else router.push('/favorites' as any)
   }
 
-  const statusTop = Math.max(
-    insets.top,
-    Platform.OS === 'android' ? StatusBar.currentHeight ?? 24 : 20,
-    20
-  )
+  // Only pad when the OS actually insets into the window (translucent / notch).
+  // Non-translucent Android already sits below the status bar — insets.top is 0.
+  const padTop = insets.top
 
   return (
-    <View
-      pointerEvents="box-none"
-      style={[styles.wrap, { paddingTop: statusTop }]}
-    >
+    <View pointerEvents="box-none" style={[styles.wrap, { paddingTop: padTop }]}>
+      <StatusBar
+        barStyle="light-content"
+        backgroundColor={BAR_BG}
+        translucent={false}
+        hidden={false}
+      />
+
       <View style={styles.band}>
         <Animated.View
           pointerEvents="none"
-          style={[styles.glass, { opacity: glassOpacity }]}
+          style={[styles.fill, { opacity: glassOpacity }]}
         >
           {Platform.OS === 'ios' ? (
-  <BlurView intensity={48} tint="dark" style={StyleSheet.absoluteFill} />
-) : (
-  <View
-    style={[
-      StyleSheet.absoluteFill,
-      { backgroundColor: 'rgba(9,11,15,0.88)' }, // was 8,8,10
-    ]}
-  />
-)}
+            <BlurView intensity={48} tint="dark" style={styles.fill} />
+          ) : (
+            <View style={[styles.fill, { backgroundColor: 'rgba(9,11,15,0.92)' }]} />
+          )}
         </Animated.View>
 
         <Animated.View
-  pointerEvents="none"
-  style={[
-    StyleSheet.absoluteFill,
-    { backgroundColor: '#090B0F', opacity: veilOpacity },
-  ]}
-/>
-<Animated.View
-  style={[styles.bottomRule, { opacity: borderOpacity }]}
-  pointerEvents="none"
->
-  <LinearGradient
-    colors={[
-      'transparent',
-      'rgba(255,255,255,0.2)',
-      'rgba(255,255,255,0.35)',
-      'rgba(255,255,255,0.2)',
-      'transparent',
-    ]}
-    locations={[0, 0.18, 0.5, 0.82, 1]}
-    start={{ x: 0, y: 0 }}
-    end={{ x: 1, y: 0 }}
-    style={styles.bottomLine}
-  />
-</Animated.View>
+          pointerEvents="none"
+          style={[styles.fill, { backgroundColor: BAR_BG, opacity: veilOpacity }]}
+        />
+
         <View style={styles.row}>
           <View style={styles.sideLeft}>
             <MenuToggle onPress={onMenuPress} />
@@ -422,13 +391,16 @@ const borderOpacity = anim.interpolate({
           </View>
         </View>
 
-        <View style={styles.bottomRule} pointerEvents="none">
+        <Animated.View
+          style={[styles.bottomRule, { opacity: borderOpacity }]}
+          pointerEvents="none"
+        >
           <LinearGradient
             colors={[
               'transparent',
-              'rgba(255,255,255,0.45)',
-              'rgba(255,255,255,0.9)',
-              'rgba(255,255,255,0.45)',
+              'rgba(255,255,255,0.18)',
+              'rgba(255,255,255,0.4)',
+              'rgba(255,255,255,0.18)',
               'transparent',
             ]}
             locations={[0, 0.18, 0.5, 0.82, 1]}
@@ -436,7 +408,7 @@ const borderOpacity = anim.interpolate({
             end={{ x: 1, y: 0 }}
             style={styles.bottomLine}
           />
-        </View>
+        </Animated.View>
       </View>
     </View>
   )
@@ -449,13 +421,18 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     zIndex: 40,
+    backgroundColor: 'transparent',
   },
   band: {
     height: BAR_H,
     justifyContent: 'flex-end',
   },
-  glass: {
-    ...StyleSheet.absoluteFillObject,
+  fill: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
   },
   row: {
     flex: 1,
@@ -474,7 +451,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'flex-end',
-    gap: 0,
   },
   center: {
     flex: 1,
@@ -483,7 +459,11 @@ const styles = StyleSheet.create({
     height: BAR_H,
   },
   logoLayer: {
-    ...StyleSheet.absoluteFillObject,
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -494,8 +474,8 @@ const styles = StyleSheet.create({
     letterSpacing: 4,
   },
   logo: {
-    height: 52,
-    width: 140,
+    height: 36,
+    width: 128,
   },
   iconHit: {
     width: 40,
@@ -515,7 +495,7 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
   },
   line: {
-    height: 2.6,
+    height: 2.4,
     backgroundColor: ICON,
   },
   badge: {
@@ -548,14 +528,5 @@ const styles = StyleSheet.create({
   },
   bottomLine: {
     height: 1,
-    ...Platform.select({
-      ios: {
-        shadowColor: '#FFFFFF',
-        shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.35,
-        shadowRadius: 2,
-      },
-      android: { elevation: 1 },
-    }),
   },
 })

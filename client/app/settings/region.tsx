@@ -108,7 +108,7 @@ function PlazoreOrb({ size = 42 }: { size?: number }) {
         locations={[0, 0.48, 1]}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
-        style={StyleSheet.absoluteFillObject}
+        style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 }}
       />
       <View
         style={{
@@ -149,7 +149,7 @@ function ActiveHero({
           locations={[0, 0.45, 1]}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
-          style={StyleSheet.absoluteFillObject}
+          style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 }}
         />
 
         <View style={styles.heroRow}>
@@ -173,7 +173,7 @@ function ActiveHero({
               locations={[0, 0.5, 1]}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
-              style={StyleSheet.absoluteFillObject}
+              style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 }}
             />
             <Ionicons name="checkmark" size={16} color="#041412" />
           </View>
@@ -233,7 +233,7 @@ function RegionTile({
             locations={[0, 0.5, 1]}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
-            style={StyleSheet.absoluteFillObject}
+            style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 }}
           />
         )}
 
@@ -273,7 +273,7 @@ function RegionTile({
               locations={[0, 0.5, 1]}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
-              style={StyleSheet.absoluteFillObject}
+              style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 }}
             />
             <Ionicons name="checkmark" size={12} color="#041412" />
           </View>
@@ -639,7 +639,7 @@ const styles = StyleSheet.create({
     transform: [{ scale: 0.975 }],
   },
   tileStroke: {
-    ...StyleSheet.absoluteFillObject,
+    ...{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 },
     borderRadius: 20,
   },
   tileBody: {

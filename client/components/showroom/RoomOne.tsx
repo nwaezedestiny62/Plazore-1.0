@@ -44,14 +44,14 @@ export default function RoomOne({
           {featureImage ? (
             <Image
               source={{ uri: featureImage }}
-              style={StyleSheet.absoluteFillObject}
+              style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 }}
               contentFit="cover"
               transition={500}
             />
           ) : (
             <View
               style={[
-                StyleSheet.absoluteFillObject,
+                {position:'absolute',top:0,right:0,bottom:0,left:0},
                 { backgroundColor: '#151A22' },
               ]}
             />
@@ -146,7 +146,7 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   bannerOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 },
     backgroundColor: 'rgba(6,8,12,0.58)',
   },
   bannerContent: {

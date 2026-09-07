@@ -205,7 +205,7 @@ export default function PlazoreAIScreen() {
               colors={["rgba(16,185,129,0.07)", "rgba(59,130,246,0.05)"]}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
-              style={StyleSheet.absoluteFillObject}
+              style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 }}
             />
             <View style={styles.orbWrapper}>
               <Animated.View
@@ -400,7 +400,7 @@ function InsightSection({
         colors={["rgba(16,185,129,0.05)", "rgba(59,130,246,0.04)"]}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
-        style={StyleSheet.absoluteFillObject}
+        style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 }}
       />
       <GradientText style={styles.sectionEyebrow}>{eyebrow}</GradientText>
       <Text style={styles.sectionTitle}>{title}</Text>

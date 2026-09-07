@@ -1,39 +1,27 @@
-/**
- * ShowroomProductCard — 2030 Premium Edition
- * Completely flicker-free auto image rotation
- * Supports dark mode for text colours
- * Cart button triggers fly-to-cart (never navigates)
- * Tracks impression / open / cart for showroom ranking
- */
-
 import { Product } from '@/constants/types'
 import { useCart } from '@/context/CartContext'
 import { useMarketplace } from '@/context/MarketplaceContext'
 import { trackShowroomEvent } from '@/services/showroomEvents'
 import { Ionicons } from '@expo/vector-icons'
-import { Image } from 'expo-image'
 import { Link } from 'expo-router'
 import React, { useCallback, useEffect, useMemo, useRef } from 'react'
 import {
   Animated,
-  Dimensions,
   Easing,
+  Image,
   Pressable,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from 'react-native'
 import { useShowroomFlyCart } from './ShowroomFlyCart'
 
-const SCREEN_W = Dimensions.get('window').width
 const H_PADDING = 16
 const GAP = 4
-const CARD_WIDTH = (SCREEN_W - H_PADDING * 2 - GAP) / 2
-
 const IMAGE_ASPECT = 1.35
-
-const HOLD_MS = 4800
-const CROSSFADE_MS = 1600
+const HOLD_MS = 5200
+const CROSSFADE_MS = 1800
 const EASE = Easing.bezier(0.4, 0.0, 0.2, 1.0)
 
 type Props = {
@@ -62,6 +50,32 @@ function resolveBrand(product: Product): string {
   return 'plazore'
 }
 
+function imageUri(img: any): string {
+  if (!img) return ''
+  if (typeof img === 'string') return img.trim()
+  if (typeof img.url === 'string') return img.url
+  if (typeof img.uri === 'string') return img.uri
+  if (typeof img.secure_url === 'string') return img.secure_url
+  if (typeof img.src === 'string') return img.src
+  return ''
+}
+
+function resolvePrice(product: Product): number {
+  const p = product as any
+  const candidates = [
+    p.price,
+    p.salePrice,
+    p.displayPrice,
+    p.amount,
+    p.unitPrice,
+  ]
+  for (const c of candidates) {
+    const n = typeof c === 'string' ? parseFloat(c) : Number(c)
+    if (Number.isFinite(n) && n > 0) return n
+  }
+  return 0
+}
+
 export default function ShowroomProductCard({
   product,
   style,
@@ -72,25 +86,101 @@ export default function ShowroomProductCard({
   const { formatProduct } = useMarketplace()
   const { addToCart } = useCart()
   const flyCart = useShowroomFlyCart()
+  const { width: screenW } = useWindowDimensions()
+
+  const defaultW = (screenW - H_PADDING * 2 - GAP) / 2
+  const cardW = Number(style?.width) > 0 ? Number(style.width) : defaultW
+  const imageHeight = cardW * IMAGE_ASPECT
 
   const location = useMemo(() => resolveShipLocation(product), [product])
   const brand = useMemo(() => resolveBrand(product), [product])
+  const priceLabel = useMemo(
+    () => formatProduct(resolvePrice(product), product.region),
+    [formatProduct, product]
+  )
 
-  const images = product.images?.length ? product.images : []
-  const hasMultiple = images.length > 1
+  const images = useMemo(() => {
+    const raw = Array.isArray(product.images) ? product.images : []
+    const list = raw.map(imageUri).filter(Boolean)
+    return Array.from(new Set(list))
+  }, [product.images])
 
   const cartBtnRef = useRef<View>(null)
   const impressed = useRef(false)
-
-  const opacities = useRef(
-    images.map((_, i) => new Animated.Value(i === 0 ? 1 : 0.01))
-  ).current
-
   const currentRef = useRef(0)
   const busy = useRef(false)
   const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // Impression once when the card mounts
+  const opacities = useRef<Animated.Value[]>([]).current
+
+  if (opacities.length !== images.length) {
+    opacities.splice(0, opacities.length)
+    images.forEach((_, i) => {
+      opacities.push(new Animated.Value(i === 0 ? 1 : 0))
+    })
+    currentRef.current = 0
+  }
+
+  const clearHold = useCallback(() => {
+    if (holdTimer.current) {
+      clearTimeout(holdTimer.current)
+      holdTimer.current = null
+    }
+  }, [])
+
+  const goTo = useCallback(
+    (raw: number) => {
+      if (busy.current || images.length < 2) return
+      const from = currentRef.current
+      const target = ((raw % images.length) + images.length) % images.length
+      if (target === from) return
+      if (!opacities[from] || !opacities[target]) return
+
+      busy.current = true
+      clearHold()
+
+      Animated.parallel([
+        Animated.timing(opacities[from], {
+          toValue: 0,
+          duration: CROSSFADE_MS,
+          easing: EASE,
+          useNativeDriver: true,
+        }),
+        Animated.timing(opacities[target], {
+          toValue: 1,
+          duration: CROSSFADE_MS,
+          easing: EASE,
+          useNativeDriver: true,
+        }),
+      ]).start(({ finished }) => {
+        if (finished) {
+          images.forEach((_, i) => {
+            opacities[i]?.setValue(i === target ? 1 : 0)
+          })
+          currentRef.current = target
+        }
+        busy.current = false
+        if (finished) {
+          holdTimer.current = setTimeout(() => goTo(target + 1), HOLD_MS)
+        }
+      })
+    },
+    [images, opacities, clearHold]
+  )
+
+  useEffect(() => {
+    images.forEach((uri) => {
+      Image.prefetch(uri).catch(() => {})
+    })
+  }, [images])
+
+  useEffect(() => {
+    clearHold()
+    if (images.length < 2) return
+    holdTimer.current = setTimeout(() => goTo(1), HOLD_MS)
+    return () => clearHold()
+  }, [images, goTo, clearHold])
+
   useEffect(() => {
     if (impressed.current || !product?._id) return
     impressed.current = true
@@ -114,66 +204,6 @@ export default function ShowroomProductCard({
     })
   }, [product?._id, product?.region, room, position])
 
-  const clearHold = useCallback(() => {
-    if (holdTimer.current) {
-      clearTimeout(holdTimer.current)
-      holdTimer.current = null
-    }
-  }, [])
-
-  const scheduleHold = useCallback(() => {
-    clearHold()
-    if (!hasMultiple) return
-    holdTimer.current = setTimeout(() => goTo(currentRef.current + 1), HOLD_MS)
-  }, [hasMultiple])
-
-  const goTo = useCallback(
-    (raw: number) => {
-      if (busy.current || !hasMultiple) return
-      const from = currentRef.current
-      const target = ((raw % images.length) + images.length) % images.length
-      if (target === from) return
-
-      busy.current = true
-      clearHold()
-
-      Animated.parallel([
-        Animated.timing(opacities[from], {
-          toValue: 0.01,
-          duration: CROSSFADE_MS,
-          easing: EASE,
-          useNativeDriver: true,
-        }),
-        Animated.timing(opacities[target], {
-          toValue: 1,
-          duration: CROSSFADE_MS,
-          easing: EASE,
-          useNativeDriver: true,
-        }),
-      ]).start(({ finished }) => {
-        if (!finished) {
-          busy.current = false
-          return
-        }
-
-        images.forEach((_, i) => {
-          opacities[i].setValue(i === target ? 1 : 0.01)
-        })
-
-        currentRef.current = target
-        busy.current = false
-        scheduleHold()
-      })
-    },
-    [hasMultiple, images, opacities, scheduleHold]
-  )
-
-  useEffect(() => {
-    if (!hasMultiple) return
-    scheduleHold()
-    return () => clearHold()
-  }, [hasMultiple])
-
   const handleAddToCart = useCallback(() => {
     trackShowroomEvent({
       productId: String(product._id),
@@ -182,52 +212,37 @@ export default function ShowroomProductCard({
       position,
       region: product.region,
     })
-
     cartBtnRef.current?.measureInWindow((x, y, width, height) => {
       if (width <= 0 || height <= 0) {
         addToCart(product)
         return
       }
-      if (flyCart) {
-        flyCart.flyAdd(product, { x, y, width, height })
-      } else {
-        addToCart(product)
-      }
+      if (flyCart) flyCart.flyAdd(product, { x, y, width, height })
+      else addToCart(product)
     })
   }, [product, flyCart, addToCart, room, position])
-
-  const imageHeight = CARD_WIDTH * IMAGE_ASPECT
 
   const textPrimary = dark ? '#FFFFFF' : '#111111'
   const textSecondary = dark ? 'rgba(255,255,255,0.65)' : '#6B7280'
   const textMuted = dark ? 'rgba(255,255,255,0.42)' : '#9CA3AF'
 
   return (
-    <View style={[styles.card, { width: CARD_WIDTH }, style]}>
+    <View style={[styles.card, { width: cardW }, style]}>
       <View style={[styles.imageWrap, { height: imageHeight }]}>
         <Link href={`/product/${product._id}` as any} asChild>
-          <Pressable
-            style={StyleSheet.absoluteFillObject}
-            onPress={trackOpen}
-          >
+          <Pressable style={styles.fill} onPress={trackOpen}>
             {images.length > 0 ? (
               images.map((uri, i) => (
-                <Animated.View
-                  key={`${product._id}-img-${i}`}
-                  pointerEvents="none"
+                <Animated.Image
+                  key={`${product._id}-${i}`}
+                  source={{ uri }}
+                  resizeMode="cover"
                   style={[
-                    StyleSheet.absoluteFillObject,
-                    { opacity: opacities[i] },
+                    styles.image,
+                    styles.fill,
+                    { opacity: opacities[i] ?? 1 },
                   ]}
-                >
-                  <Image
-                    source={{ uri }}
-                    style={styles.image}
-                    contentFit="cover"
-                    cachePolicy="memory-disk"
-                    transition={0}
-                  />
-                </Animated.View>
+                />
               ))
             ) : (
               <View style={[styles.image, styles.placeholder]} />
@@ -250,7 +265,6 @@ export default function ShowroomProductCard({
           <Text style={[styles.name, { color: textPrimary }]} numberOfLines={1}>
             {product.name}
           </Text>
-
           <View style={styles.metaRow}>
             <Text
               style={[styles.brand, { color: textSecondary }]}
@@ -258,12 +272,11 @@ export default function ShowroomProductCard({
             >
               {brand.toLowerCase()}
             </Text>
-            <Text style={[styles.divider, { color: textSecondary }]}> | </Text>
-            <Text style={[styles.price, { color: textPrimary }]}>
-              {formatProduct(product.price, product.region)}
+            <Text style={[styles.divider, { color: textMuted }]}> · </Text>
+            <Text style={[styles.price, { color: textSecondary }]}>
+              {priceLabel}
             </Text>
           </View>
-
           {!!location && (
             <Text
               style={[styles.location, { color: textMuted }]}
@@ -279,22 +292,22 @@ export default function ShowroomProductCard({
 }
 
 const styles = StyleSheet.create({
-  card: {
-    backgroundColor: 'transparent',
+  card: { backgroundColor: 'transparent' },
+  fill: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
   },
   imageWrap: {
     width: '100%',
     overflow: 'hidden',
     position: 'relative',
-    backgroundColor: '#F1F1F1',
+    backgroundColor: '#E8E2D8',
   },
-  image: {
-    width: '100%',
-    height: '100%',
-  },
-  placeholder: {
-    backgroundColor: '#E5E7EB',
-  },
+  image: { width: '100%', height: '100%' },
+  placeholder: { backgroundColor: '#DDD6CC' },
   cartButton: {
     position: 'absolute',
     bottom: 11,
@@ -304,39 +317,19 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.13,
-    shadowRadius: 3,
-    elevation: 3,
     zIndex: 10,
   },
-  info: {
-    paddingTop: 11,
-    paddingHorizontal: 2,
-  },
+  info: { paddingTop: 11, paddingHorizontal: 2 },
   name: {
     fontFamily: 'Manrope_500Medium',
     fontSize: 13.5,
     letterSpacing: 0.15,
     marginBottom: 3,
   },
-  metaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  brand: {
-    fontFamily: 'Manrope_400Regular',
-    fontSize: 12,
-  },
-  divider: {
-    fontFamily: 'Manrope_400Regular',
-    fontSize: 12,
-  },
-  price: {
-    fontFamily: 'Manrope_500Medium',
-    fontSize: 12,
-  },
+  metaRow: { flexDirection: 'row', alignItems: 'center' },
+  brand: { fontFamily: 'Manrope_400Regular', fontSize: 12, flexShrink: 1 },
+  divider: { fontFamily: 'Manrope_400Regular', fontSize: 12 },
+  price: { fontFamily: 'Manrope_500Medium', fontSize: 12 },
   location: {
     fontFamily: 'Manrope_400Regular',
     fontSize: 11,

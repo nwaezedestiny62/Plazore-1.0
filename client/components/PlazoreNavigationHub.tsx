@@ -375,7 +375,7 @@ function CartImageRail({
         colors={['rgba(13,23,42,0.95)', 'transparent']}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 0 }}
-        style={StyleSheet.absoluteFillObject}
+        style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 }}
       />
       {uris.length > 1 && (
         <View style={styles.cartDots}>
@@ -1014,7 +1014,7 @@ export default function PlazoreNavigationHub({
       <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)' }}>
         <Animated.View
           style={{
-            ...StyleSheet.absoluteFillObject,
+            ...{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 },
             backgroundColor: BG,
             transform: [{ translateX }],
             paddingTop: topInset,

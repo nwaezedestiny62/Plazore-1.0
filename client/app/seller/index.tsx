@@ -641,7 +641,7 @@ export default function SellerDashboard() {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: BG },
   loaderRoot: {
-    ...StyleSheet.absoluteFillObject,
+    ...{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 },
     backgroundColor: BG,
     alignItems: 'center',
     justifyContent: 'center',

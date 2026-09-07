@@ -476,7 +476,7 @@ function LiveStorefrontPreview({
                   'transparent',
                   'rgba(9,11,15,0.85)',
                 ]}
-                style={StyleSheet.absoluteFillObject}
+                style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 }}
               />
               <View style={styles.previewBack}>
                 <Ionicons name="chevron-back" size={16} color={TEXT} />
@@ -495,7 +495,7 @@ function LiveStorefrontPreview({
             <View style={styles.identityCard}>
               <LinearGradient
                 colors={['rgba(17,20,26,0.98)', 'rgba(17,20,26,0.92)']}
-                style={StyleSheet.absoluteFillObject}
+                style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 }}
               />
               <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                 <View style={styles.logoWrap}>

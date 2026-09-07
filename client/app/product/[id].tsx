@@ -814,7 +814,7 @@ export default function ProductDetails() {
             <Animated.View
               pointerEvents="none"
               style={[
-                StyleSheet.absoluteFillObject,
+                {position:'absolute',top:0,right:0,bottom:0,left:0},
                 { backgroundColor: "#090B0F", opacity: heroDarkOpacity },
               ]}
             />
@@ -947,7 +947,7 @@ export default function ProductDetails() {
                 colors={["rgba(20,24,32,0.85)", "rgba(17,20,26,0.9)"]}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
-                style={StyleSheet.absoluteFillObject}
+                style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 }}
               />
 
               {!aiReady ? (
@@ -1046,7 +1046,7 @@ export default function ProductDetails() {
                 colors={["rgba(16,185,129,0.08)", "rgba(59,130,246,0.06)"]}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
-                style={StyleSheet.absoluteFillObject}
+                style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 }}
               />
               <View style={styles.confidenceHeader}>
                 <LinearGradient
@@ -1243,7 +1243,7 @@ export default function ProductDetails() {
                     colors={["#13201A", "#111820"]}
                     start={{ x: 0, y: 0 }}
                     end={{ x: 1, y: 1 }}
-                    style={StyleSheet.absoluteFillObject}
+                    style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 }}
                   />
 
                   {messaging ? (

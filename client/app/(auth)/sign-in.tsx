@@ -172,7 +172,7 @@ function PlazorePreloader({ label = 'Taking you in…' }: { label?: string }) {
 
 const preloaderStyles = StyleSheet.create({
   wrap: {
-    ...StyleSheet.absoluteFillObject,
+    ...{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 },
     backgroundColor: '#090B0F',
     alignItems: 'center',
     justifyContent: 'center',

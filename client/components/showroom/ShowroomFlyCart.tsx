@@ -211,7 +211,7 @@ function FlyingClone({
 
 const styles = StyleSheet.create({
   layer: {
-    ...StyleSheet.absoluteFillObject,
+    ...{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 },
     zIndex: 99999,
     elevation: 99999,
   },

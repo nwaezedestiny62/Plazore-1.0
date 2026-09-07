@@ -1,25 +1,19 @@
-/**
- * RoomFour — THE LOCALE
- * Regional marketplace room.
- * Bright, open, grounded — “The Walk”
- * Official capacity: 33 products.
- */
 import { Product } from '@/constants/types'
 import React, { useMemo } from 'react'
 import {
-  Dimensions,
+  Image,
   ScrollView,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from 'react-native'
 import ShowroomProductCard from './ShowroomProductCard'
 import ScrollFadeUp from './ScrollFadeUp'
 
-const { width: SCREEN_W } = Dimensions.get('window')
-const CARD_W = Math.min(SCREEN_W * 0.58, 220)
-const CARD_GAP = 4
+const CARD_GAP = 10
 const ROOM_CAPACITY = 33
+const SIDE = 20
 
 interface RoomFourProps {
   products: Product[]
@@ -28,66 +22,80 @@ interface RoomFourProps {
   regionLabel?: string
 }
 
+function firstUri(p?: Product) {
+  const img = p?.images?.[0] as any
+  if (!img) return ''
+  if (typeof img === 'string') return img
+  return img.url || img.uri || img.secure_url || ''
+}
+
 export default function RoomFour({
   products: incoming,
   title = 'THE LOCALE',
   subtitle = 'From Your Region',
   regionLabel = "A look at what's around you",
 }: RoomFourProps) {
+  const { width } = useWindowDimensions()
+  const cardW = Math.min(Math.round(width * 0.62), 236)
+  const bannerH = Math.round(width * 0.52)
+
   const products = useMemo(
     () => (incoming || []).slice(0, ROOM_CAPACITY),
     [incoming]
   )
 
+  const heroUri = firstUri(products[0])
+
   return (
-    <View style={styles.room}>
-      <View style={styles.header}>
-        <ScrollFadeUp delay={40} duration={550} distance={14}>
+    <View style={[styles.room, { width }]}>
+      <View style={[styles.banner, { height: bannerH }]}>
+        {heroUri ? (
+          <Image
+            source={{ uri: heroUri }}
+            style={styles.bannerImg}
+            resizeMode="cover"
+          />
+        ) : (
+          <View style={[styles.bannerImg, { backgroundColor: '#E6DCCE' }]} />
+        )}
+        <View style={styles.bannerVeil} />
+        <View style={styles.bannerCopy}>
           <Text style={styles.kicker}>{title}</Text>
-        </ScrollFadeUp>
-        <ScrollFadeUp delay={100} duration={600} distance={16}>
           <Text style={styles.title}>{subtitle}</Text>
-        </ScrollFadeUp>
-        <ScrollFadeUp delay={150} duration={500} distance={10}>
           <Text style={styles.region}>{regionLabel}</Text>
-        </ScrollFadeUp>
+        </View>
       </View>
 
-      {products.length > 0 && (
-        <ScrollFadeUp delay={200} duration={650} distance={24}>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.rail}
-            decelerationRate="fast"
-            snapToInterval={CARD_W + CARD_GAP}
-            snapToAlignment="start"
-          >
-            {products.map((product, index) => (
-              <View
-                key={`${product._id}-locale-${index}`}
-                style={[
-                  styles.cardWrap,
-                  { width: CARD_W, marginRight: CARD_GAP },
-                ]}
-              >
-                <ShowroomProductCard
-                  product={product}
-                  room={4}
-                  position={index}
-                  style={{ width: CARD_W }}
-                />
-              </View>
-            ))}
-          </ScrollView>
-        </ScrollFadeUp>
-      )}
+      {products.length > 0 ? (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.rail}
+          decelerationRate="fast"
+          snapToInterval={cardW + CARD_GAP}
+          snapToAlignment="start"
+          nestedScrollEnabled
+        >
+          {products.map((product, index) => (
+            <View
+              key={`${product._id}-locale-${index}`}
+              style={{ width: cardW, marginRight: CARD_GAP }}
+            >
+              <ShowroomProductCard
+                product={product}
+                room={4}
+                position={index}
+                dark={false}
+                style={{ width: cardW }}
+              />
+            </View>
+          ))}
+        </ScrollView>
+      ) : null}
 
-      <ScrollFadeUp delay={320} duration={500} distance={12}>
-        <Text style={styles.note}>
-          A closer look at what's moving around you.
-        </Text>
-      </ScrollFadeUp>
+      <Text style={styles.note}>
+        A closer look at what&apos;s moving around you.
+      </Text>
     </View>
   )
 }
@@ -95,46 +103,67 @@ export default function RoomFour({
 const styles = StyleSheet.create({
   room: {
     backgroundColor: '#F7F1E9',
-    paddingTop: 52,
-    paddingBottom: 100,
-    width: SCREEN_W,
+    paddingBottom: 88,
   },
-  header: {
-    paddingHorizontal: 24,
-    marginBottom: 32,
+  banner: {
+    width: '100%',
+    overflow: 'hidden',
+    marginBottom: 28,
+    backgroundColor: '#E6DCCE',
+  },
+  bannerImg: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    width: '100%',
+    height: '100%',
+  },
+  bannerVeil: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    backgroundColor: 'rgba(44,36,27,0.38)',
+  },
+  bannerCopy: {
+    position: 'absolute',
+    left: SIDE,
+    right: SIDE,
+    bottom: 28,
   },
   kicker: {
     fontFamily: 'Manrope_600SemiBold',
     fontSize: 11,
     letterSpacing: 3.6,
     textTransform: 'uppercase',
-    color: '#9C8B7A',
+    color: 'rgba(255,255,255,0.72)',
     marginBottom: 6,
   },
   title: {
     fontFamily: 'Manrope_700Bold',
     fontSize: 26,
     letterSpacing: -0.4,
-    color: '#2C241B',
+    color: '#FFFFFF',
     marginBottom: 8,
   },
   region: {
     fontFamily: 'Manrope_400Regular',
     fontSize: 13,
-    color: '#8C7B6B',
+    color: 'rgba(255,255,255,0.78)',
   },
   rail: {
-    paddingHorizontal: 24,
-    paddingRight: 40,
+    paddingLeft: SIDE,
+    paddingRight: SIDE + 16,
   },
-  cardWrap: {},
   note: {
     fontFamily: 'Manrope_400Regular',
     fontSize: 12,
     color: '#A89888',
     textAlign: 'center',
-    marginTop: 28,
-    marginBottom: 24,
-    paddingHorizontal: 24,
+    marginTop: 24,
+    paddingHorizontal: SIDE,
   },
 })

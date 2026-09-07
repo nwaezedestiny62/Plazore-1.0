@@ -238,7 +238,7 @@ function FloorImage({ images }: { images: [string, string, string] }) {
   return (
     <Image
       source={{ uri: images[idx] }}
-      style={StyleSheet.absoluteFillObject}
+      style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 }}
       contentFit="cover"
       transition={0}
       cachePolicy="memory-disk"

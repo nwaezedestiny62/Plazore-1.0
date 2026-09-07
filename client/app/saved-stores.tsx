@@ -397,13 +397,13 @@ export default function SavedStoresScreen() {
                         {store.storeBanner ? (
                           <Image
                             source={{ uri: store.storeBanner }}
-                            style={StyleSheet.absoluteFillObject}
+                            style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 }}
                             resizeMode="cover"
                           />
                         ) : (
                           <LinearGradient
                             colors={["#0F172A", "#090B0F", "#111827"]}
-                            style={StyleSheet.absoluteFillObject}
+                            style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 }}
                           />
                         )}
                         <LinearGradient

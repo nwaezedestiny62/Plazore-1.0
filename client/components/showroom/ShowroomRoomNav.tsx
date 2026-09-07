@@ -277,14 +277,15 @@ const styles = StyleSheet.create({
   pressed: {
     opacity: 0.88,
   },
-  tile: {
-    width: 44,
-    height: 44,
+   tile: {
+    width: 48,
+    height: 48,
     overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: '#1C212B',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.2)',
+    borderColor: 'rgba(255,255,255,0.28)',
     ...Platform.select({
       ios: {
         shadowColor: '#000',
@@ -292,12 +293,16 @@ const styles = StyleSheet.create({
         shadowRadius: 14,
         shadowOffset: { width: 0, height: 8 },
       },
-      android: { elevation: 14 },
+      android: { elevation: 16 },
     }),
   },
   tileFill: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(14,16,22,0.96)',
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    backgroundColor: '#1C212B',
   },
   tileSheen: {
     position: 'absolute',

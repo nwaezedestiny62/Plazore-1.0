@@ -236,7 +236,7 @@ const styles = StyleSheet.create({
   },
   chartCol: { flex: 1, height: 132 },
   grid: {
-    ...StyleSheet.absoluteFillObject,
+    ...{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 },
     justifyContent: 'space-between',
     paddingBottom: 22,
     paddingTop: 2,

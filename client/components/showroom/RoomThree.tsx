@@ -193,7 +193,7 @@ export default function RoomThree({
             key={product._id}
             pointerEvents={i === current ? 'auto' : 'none'}
             style={[
-              StyleSheet.absoluteFillObject,
+              {position:'absolute',top:0,right:0,bottom:0,left:0},
               { opacity: opacities[i] },
             ]}
           >
