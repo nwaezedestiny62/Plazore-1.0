@@ -84,6 +84,7 @@ const contactMessageSchema = new Schema(
       default: "normal",
       index: true,
     },
+    allowsReply: { type: Boolean, default: true, index: true },
     assignedAdmin: { type: Schema.Types.ObjectId, ref: "User", default: null },
     unreadByAdmin: { type: Boolean, default: true, index: true },
     unreadByUser: { type: Boolean, default: false, index: true },

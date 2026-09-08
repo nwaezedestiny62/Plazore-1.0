@@ -13,6 +13,7 @@ import {
   getAdminContacts,
   getAdminContactDetail,
   updateAdminContact,
+  adminReachOut,
   getAdminReports,
   updateAdminReport,
   pingPresence,
@@ -46,6 +47,7 @@ AdminRouter.get("/users", ...adminOnly, getAdminUsers);
 AdminRouter.get("/users/:id", ...adminOnly, getAdminUserDetail);
 AdminRouter.patch("/sellers/:id/suspend", ...adminOnly, setSellerSuspended);
 AdminRouter.patch("/sellers/:id/verify", ...adminOnly, setSellerVerified);
+AdminRouter.post("/contacts/reach-out", ...adminOnly, adminReachOut);
 
 AdminRouter.post(
   "/content/upload-banner",

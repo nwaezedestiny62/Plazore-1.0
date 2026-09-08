@@ -5,7 +5,14 @@ import { useAuth } from "@clerk/nextjs";
 import { Poppins } from "next/font/google";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { LayoutGrid, List, RefreshCw, WifiOff, X } from "lucide-react";
+import {
+  LayoutGrid,
+  List,
+  MessageSquare,
+  RefreshCw,
+  WifiOff,
+  X,
+} from "lucide-react";
 import { adminFetch } from "@/lib/api";
 import { OrbLoader } from "@/components/OrbLoader";
 import {
@@ -232,6 +239,14 @@ export default function UsersPage() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [paneOpen, setPaneOpen] = useState(false);
 
+  // Contact through Plazore
+  const [contactOpen, setContactOpen] = useState(false);
+  const [contactSubject, setContactSubject] = useState("");
+  const [contactMessage, setContactMessage] = useState("");
+  const [contactBusy, setContactBusy] = useState(false);
+  const [contactError, setContactError] = useState("");
+  const [contactSuccess, setContactSuccess] = useState(false);
+
   const cacheRef = useRef<{
     items: UserRow[];
     counts: Counts;
@@ -257,7 +272,6 @@ export default function UsersPage() {
     };
   }, []);
 
-  // Sync role from URL (Orders / Products deep link)
   useEffect(() => {
     if (
       deepRole === "buyer" ||
@@ -399,6 +413,11 @@ export default function UsersPage() {
       setOpenId(id);
       setDetail(null);
       setPaneOpen(true);
+      setContactOpen(false);
+      setContactSubject("");
+      setContactMessage("");
+      setContactError("");
+      setContactSuccess(false);
       await loadDetail(id);
     },
     [loadDetail]
@@ -406,9 +425,9 @@ export default function UsersPage() {
 
   const closePane = useCallback(() => {
     setPaneOpen(false);
+    setContactOpen(false);
     deepOpenedRef.current = null;
     if (deepUserId) {
-      // Drop ?userId so refresh doesn't reopen the same pane
       router.replace(pathname);
     }
     window.setTimeout(() => {
@@ -417,7 +436,6 @@ export default function UsersPage() {
     }, 280);
   }, [deepUserId, pathname, router]);
 
-  // Auto-open from Orders / Products: /users?userId=xxx&role=buyer|seller
   useEffect(() => {
     if (!mounted || !deepUserId) return;
     if (deepOpenedRef.current === deepUserId) return;
@@ -439,6 +457,59 @@ export default function UsersPage() {
     setSort("newest");
     setSpot("");
     setQ("");
+  };
+
+  /** PART 9 — Contact User through Plazore (mediated, context auto-attached) */
+  const startContactThroughPlazore = async () => {
+    if (!detail?.user || contactBusy || showOffline) return;
+
+    const u = detail.user;
+    const msg = contactMessage.trim();
+    if (!msg) {
+      setContactError("Write a short message.");
+      return;
+    }
+    const wordCount = msg.split(/\s+/).filter(Boolean).length;
+    if (wordCount > 300) {
+      setContactError(`Message must be 300 words or fewer (you wrote ${wordCount}).`);
+      return;
+    }
+
+    try {
+      setContactBusy(true);
+      setContactError("");
+      setContactSuccess(false);
+
+      const token = await getToken();
+      if (!token) {
+        setContactError("Session expired. Sign in again.");
+        return;
+      }
+
+      await adminFetch(`/admin/contacts/reach-out`, token, {
+        method: "POST",
+        body: JSON.stringify({
+          targetUserId: u._id,
+          contactAs: u.role === "seller" ? "seller" : "buyer",
+          contextType: u.role === "seller" ? "seller" : "buyer",
+          category: "account",
+          subject:
+            contactSubject.trim() ||
+            `Message from Plazore · ${u.storeName || u.name || "Account"}`,
+          message: msg,
+          // Auto-attach identity so the user never has to explain who they are
+          storeId: u.role === "seller" ? u._id : undefined,
+        }),
+      });
+
+      setContactSuccess(true);
+      setContactMessage("");
+      // Keep subject for possible follow-up, or clear if you prefer
+    } catch (e: any) {
+      setContactError(e?.message || "Could not start conversation");
+    } finally {
+      setContactBusy(false);
+    }
   };
 
   const u = detail?.user;
@@ -503,7 +574,8 @@ export default function UsersPage() {
             </h1>
             <p className="mt-2 max-w-xl text-sm leading-relaxed text-[#A7ADB8]">
               Search, filter, and inspect accounts. Open from Orders or Products
-              to jump straight into a profile.
+              to jump straight into a profile. Contact is always mediated by
+              Plazore.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -897,6 +969,7 @@ export default function UsersPage() {
         </div>
       )}
 
+      {/* Overlay */}
       <div
         className={cn(
           "fixed inset-0 z-40 bg-black/50 transition-opacity duration-300",
@@ -908,6 +981,7 @@ export default function UsersPage() {
         aria-hidden
       />
 
+      {/* Detail pane */}
       <aside
         className={cn(
           poppins.className,
@@ -1079,12 +1153,103 @@ export default function UsersPage() {
                 </div>
               )}
 
+              {/* ─── PART 9: Contact User through Plazore ─── */}
+              <div className="space-y-3 border-t border-[#252A33] pt-4">
+                <SectionLabel>Contact through Plazore</SectionLabel>
+                <p className="text-xs leading-relaxed text-[#A7ADB8]">
+                  Message is mediated by Plazore. The user sees it in their
+                  Contact history. No direct buyer–seller chat is created.
+                </p>
+
+                {contactSuccess ? (
+                  <div className="border border-[#00E575]/30 bg-[#00E575]/5 px-3 py-3">
+                    <p className="text-sm font-medium text-[#00E575]">
+                      Message sent via Plazore
+                    </p>
+                    <p className="mt-1 text-xs text-[#A7ADB8]">
+                      The user will see this conversation in their Contact
+                      inbox.
+                    </p>
+                    <Button
+                      tone="ghost"
+                      className="mt-3 h-8 text-xs"
+                      onClick={() => {
+                        setContactSuccess(false);
+                        setContactOpen(false);
+                      }}
+                    >
+                      Close
+                    </Button>
+                  </div>
+                ) : !contactOpen ? (
+                  <Button
+                    className="w-full gap-2"
+                    onClick={() => {
+                      setContactOpen(true);
+                      setContactSubject(
+                        `Message from Plazore · ${u.storeName || u.name || "Account"}`
+                      );
+                      setContactError("");
+                    }}
+                    disabled={showOffline}
+                  >
+                    <MessageSquare className="h-4 w-4" />
+                    Contact user through Plazore
+                  </Button>
+                ) : (
+                  <div className="space-y-3 border border-[#252A33] bg-[#11141A] p-3">
+                    <Input
+                      placeholder="Subject"
+                      value={contactSubject}
+                      onChange={(e) => setContactSubject(e.target.value)}
+                      disabled={contactBusy}
+                    />
+                    <textarea
+                      value={contactMessage}
+                      onChange={(e) => setContactMessage(e.target.value)}
+                      rows={4}
+                      placeholder="Write the message the user will receive…"
+                      className="w-full border border-[#252A33] bg-[#0C0F14] px-3 py-2 text-sm text-[#F5F7FA] outline-none focus:border-[#00E575]/40"
+                      disabled={contactBusy}
+                    />
+                    {contactError && (
+                      <p className="text-xs text-red-400">{contactError}</p>
+                    )}
+                    <div className="flex gap-2">
+                      <Button
+                        className="flex-1"
+                        disabled={contactBusy || showOffline}
+                        onClick={startContactThroughPlazore}
+                      >
+                        {contactBusy ? "Sending…" : "Send via Plazore"}
+                      </Button>
+                      <Button
+                        tone="ghost"
+                        disabled={contactBusy}
+                        onClick={() => {
+                          setContactOpen(false);
+                          setContactError("");
+                        }}
+                      >
+                        Cancel
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
               <div className="flex flex-col gap-2 border-t border-[#252A33] pt-4">
                 <Link
                   href={`/moderation?userId=${u._id}`}
                   className="inline-flex h-10 items-center justify-center bg-[#00E575] px-4 text-sm font-semibold text-[#041412] transition hover:brightness-105"
                 >
                   Open in Moderation
+                </Link>
+                <Link
+                  href={`/contact?userId=${u._id}`}
+                  className="inline-flex h-10 items-center justify-center border border-[#252A33] px-4 text-sm font-medium text-[#A7ADB8] transition hover:border-[#00E575]/40 hover:text-[#F5F7FA]"
+                >
+                  View their Contact threads
                 </Link>
               </div>
             </div>

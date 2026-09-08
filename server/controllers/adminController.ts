@@ -1,4 +1,5 @@
 import { Request, Response } from "express";
+import mongoose from "mongoose";
 import User from "../models/User.js";
 import Product from "../models/Products.js";
 import Order from "../models/Order.js";
@@ -1060,7 +1061,15 @@ export const getAdminContactDetail = async (req: Request, res: Response) => {
       .populate("user", "name email role storeName marketplaceRegion phone")
       .populate("relatedProduct", "name price isActive images")
       .populate("relatedSeller", "name storeName email marketplaceRegion")
-      .populate("relatedOrder")
+      .populate({
+        path: "relatedOrder",
+        select:
+          "orderNumber orderStatus paymentStatus totalAmount deliveredAt buyerConfirmation payout buyer seller items",
+        populate: [
+          { path: "buyer", select: "name email phone" },
+          { path: "seller", select: "name storeName email" },
+        ],
+      })
       .populate("assignedAdmin", "name email")
       .populate("messages.sender", "name email")
       .populate("internalNotes.admin", "name email")
@@ -1074,6 +1083,165 @@ export const getAdminContactDetail = async (req: Request, res: Response) => {
     res.json({ success: true, data: item });
   } catch (error: any) {
     res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// ─────────────────────────────────────────────────────────────
+// CONTACT — Admin reach-out (PART 9)
+// Mediated conversation. Never creates direct buyer↔seller chat.
+// ─────────────────────────────────────────────────────────────
+
+export const adminReachOut = async (req: Request, res: Response) => {
+  try {
+    const admin = (req as any).user;
+    if (!admin?._id) {
+      return res.status(401).json({ success: false, message: "Unauthorized" });
+    }
+
+    const {
+      targetUserId,
+      contactAs = "buyer",
+      contextType = "general",
+      category = "account",
+      subject = "",
+      message,
+      storeId,
+      productId,
+      orderId,
+    } = req.body || {};
+
+    if (!targetUserId || !mongoose.isValidObjectId(String(targetUserId))) {
+      return res.status(400).json({
+        success: false,
+        message: "Valid targetUserId is required",
+      });
+    }
+
+    const body = String(message || "").trim();
+    if (!body) {
+      return res.status(400).json({
+        success: false,
+        message: "Message is required",
+      });
+    }
+    const words = body.split(/\s+/).filter(Boolean).length;
+    if (words > 300) {
+      return res.status(400).json({
+        success: false,
+        message: `Message must be 300 words or fewer (you wrote ${words})`,
+      });
+    }
+
+    const target = await User.findById(targetUserId)
+      .select("name email role storeName phone marketplaceRegion")
+      .lean();
+    if (!target) {
+      return res.status(404).json({
+        success: false,
+        message: "Target user not found",
+      });
+    }
+
+    const role: "buyer" | "seller" =
+      contactAs === "seller" || (target as any).role === "seller"
+        ? "seller"
+        : "buyer";
+
+    const allowedCtx = [
+      "general",
+      "store",
+      "product",
+      "order",
+      "seller",
+      "buyer",
+    ];
+    let ctx = allowedCtx.includes(String(contextType))
+      ? String(contextType)
+      : role === "seller"
+        ? "seller"
+        : "buyer";
+
+    let relatedProduct: any = null;
+    let relatedSeller: any = null;
+    let relatedOrder: any = null;
+
+    if (productId && mongoose.isValidObjectId(String(productId))) {
+      const p = await Product.findById(productId).select("name seller").lean();
+      if (p) {
+        relatedProduct = p._id;
+        relatedSeller = (p as any).seller || null;
+        if (ctx === "general") ctx = "product";
+      }
+    }
+
+    if (storeId && mongoose.isValidObjectId(String(storeId))) {
+      relatedSeller = storeId;
+      if (ctx === "general") ctx = "store";
+    } else if (role === "seller") {
+      relatedSeller = target._id;
+    }
+
+    if (orderId && mongoose.isValidObjectId(String(orderId))) {
+      relatedOrder = orderId;
+      if (ctx === "general") ctx = "order";
+    }
+
+    const now = new Date();
+    const email =
+      String((target as any).email || "").trim().toLowerCase() ||
+      "unknown@plazore.local";
+
+    const doc = await ContactMessage.create({
+      user: target._id,
+      contactAs: role,
+      contextType: ctx as any,
+      category: (category || "account") as any,
+      subject: String(subject || `Message from Plazore`).slice(0, 200),
+      email,
+      location: {
+        country: "—",
+        state: "—",
+        city: "—",
+        street: "",
+      },
+      relatedProduct,
+      relatedSeller,
+      relatedOrder,
+      message: body,
+      messages: [
+        {
+          senderType: "admin",
+          sender: admin._id,
+          body,
+          createdAt: now,
+        },
+      ],
+      status: "awaiting_user",
+      priority: "normal",
+      assignedAdmin: admin._id,
+      unreadByAdmin: false,
+      unreadByUser: true,
+      lastMessageAt: now,
+    });
+
+    await safeNotify({
+      user: target._id,
+      title: "Message from Plazore",
+      message: body.slice(0, 120) + (body.length > 120 ? "…" : ""),
+      type: "contact_reply",
+      contact: doc._id,
+    });
+
+    res.status(201).json({
+      success: true,
+      data: { _id: String(doc._id) },
+    });
+  } catch (error: any) {
+    console.error("adminReachOut:", error);
+    res.status(500).json({
+      success: false,
+      message: error?.message || "Failed to start conversation",
+    });
   }
 };
 
@@ -1096,6 +1264,144 @@ export const updateAdminContact = async (req: Request, res: Response) => {
       item.assignedAdmin = admin._id;
     }
 
+    // ─── Delivery issue resolution (PART 8) ───
+    const resolveAction = String(req.body.resolveDeliveryIssue || "").trim();
+    if (
+      ["refund_buyer", "seller_favour", "authorize_payout"].includes(
+        resolveAction
+      )
+    ) {
+      if (!item.relatedOrder) {
+        return res.status(400).json({
+          success: false,
+          message: "This conversation is not linked to an order",
+        });
+      }
+
+      const order = await Order.findById(item.relatedOrder);
+      if (!order) {
+        return res.status(404).json({
+          success: false,
+          message: "Linked order not found",
+        });
+      }
+
+      if (order.orderStatus !== "Delivered") {
+        return res.status(400).json({
+          success: false,
+          message: "Only delivered orders can be resolved this way",
+        });
+      }
+
+      // Idempotency guards
+      if (
+        (order as any).payout?.status === "initiated" ||
+        (order as any).payout?.status === "completed"
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: "Payout already in progress or completed",
+        });
+      }
+      if (order.paymentStatus === "refunded") {
+        return res.status(400).json({
+          success: false,
+          message: "Order was already refunded",
+        });
+      }
+
+      if (resolveAction === "refund_buyer") {
+        // Mark for refund (actual Paystack call comes in later step)
+        order.paymentStatus = "refunded";
+        (order as any).buyerConfirmation = {
+          status: "issue_reported",
+          confirmedAt: (order as any).buyerConfirmation?.confirmedAt,
+          issueReportedAt:
+            (order as any).buyerConfirmation?.issueReportedAt || now,
+          issueContactId: item._id,
+        };
+        (order as any).payout = {
+          status: "refunded",
+          eligibleAt: undefined,
+          blockedReason: "Admin initiated refund after delivery issue",
+        };
+      } else if (resolveAction === "seller_favour") {
+        // Clear the issue so buyer can still confirm, or move toward eligible
+        (order as any).buyerConfirmation = {
+          status: "pending",
+          confirmedAt: undefined,
+          issueReportedAt: undefined,
+          issueContactId: null,
+        };
+        (order as any).payout = {
+          status: "awaiting_buyer",
+          eligibleAt: undefined,
+          blockedReason: "",
+        };
+      } else if (resolveAction === "authorize_payout") {
+        // Admin force-authorizes payout (buyer cannot/will not confirm)
+        (order as any).buyerConfirmation = {
+          status: "confirmed",
+          confirmedAt: now,
+          issueReportedAt: (order as any).buyerConfirmation?.issueReportedAt,
+          issueContactId:
+            (order as any).buyerConfirmation?.issueContactId || item._id,
+        };
+        (order as any).payout = {
+          status: "eligible",
+          eligibleAt: now,
+          blockedReason: "",
+        };
+      }
+
+      await order.save();
+
+      // Force conversation to resolved
+      item.status = "resolved";
+      item.resolvedAt = now;
+
+      // System note so the thread has a record
+      if (!Array.isArray((item as any).internalNotes)) {
+        (item as any).internalNotes = [];
+      }
+      (item as any).internalNotes.push({
+        admin: admin._id,
+        body: `Delivery issue resolved: ${resolveAction.replace(/_/g, " ")}`,
+        createdAt: now,
+      });
+
+      // Notify buyer
+      await safeNotify({
+        user: order.buyer,
+        title: "Delivery issue update",
+        message:
+          resolveAction === "refund_buyer"
+            ? `Your delivery issue on order ${order.orderNumber} has been resolved with a refund.`
+            : resolveAction === "authorize_payout"
+              ? `Your delivery issue on order ${order.orderNumber} has been resolved. The seller has been authorized for payout.`
+              : `Your delivery issue on order ${order.orderNumber} has been reviewed. Please confirm delivery if you have received the order.`,
+        type: "contact_reply",
+        contact: item._id,
+      });
+
+      // Notify seller when payout is unlocked
+      if (
+        resolveAction === "authorize_payout" ||
+        resolveAction === "seller_favour"
+      ) {
+        await safeNotify({
+          user: order.seller,
+          title: "Delivery issue resolved",
+          message:
+            resolveAction === "authorize_payout"
+              ? `Admin authorized payout for order ${order.orderNumber}.`
+              : `Delivery issue on order ${order.orderNumber} was resolved in your favour. Awaiting buyer confirmation.`,
+          type: "general",
+        });
+      }
+    }
+
+    // ─── Normal reply / note / markRead ───
     const replyBody = String(
       req.body.response || req.body.reply || ""
     ).trim();
@@ -1118,7 +1424,7 @@ export const updateAdminContact = async (req: Request, res: Response) => {
         createdAt: now,
       } as any);
 
-      if (!req.body.status) {
+      if (!req.body.status && !resolveAction) {
         item.status = "awaiting_user";
       }
 
@@ -1162,6 +1468,11 @@ export const updateAdminContact = async (req: Request, res: Response) => {
       .populate("user", "name email role storeName")
       .populate("relatedProduct", "name")
       .populate("relatedSeller", "name storeName")
+      .populate({
+        path: "relatedOrder",
+        select:
+          "orderNumber orderStatus paymentStatus totalAmount deliveredAt buyerConfirmation payout",
+      })
       .populate("assignedAdmin", "name email")
       .populate("messages.sender", "name")
       .populate("internalNotes.admin", "name")

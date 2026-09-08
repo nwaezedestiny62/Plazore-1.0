@@ -4,7 +4,14 @@ import Link from "next/link";
 import { useAuth } from "@clerk/nextjs";
 import { Poppins } from "next/font/google";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { LayoutGrid, List, RefreshCw, WifiOff, X } from "lucide-react";
+import {
+  LayoutGrid,
+  List,
+  RefreshCw,
+  WifiOff,
+  X,
+  AlertTriangle,
+} from "lucide-react";
 import { adminFetch } from "@/lib/api";
 import { OrbLoader } from "@/components/OrbLoader";
 import {
@@ -59,7 +66,24 @@ type ContactRow = {
     storeName?: string;
     email?: string;
   };
-  relatedOrder?: { _id?: string; orderNumber?: string };
+  relatedOrder?: {
+    _id?: string;
+    orderNumber?: string;
+    orderStatus?: string;
+    totalAmount?: number;
+    paymentStatus?: string;
+    deliveredAt?: string;
+    buyerConfirmation?: {
+      status?: "none" | "pending" | "confirmed" | "issue_reported";
+      confirmedAt?: string;
+      issueReportedAt?: string;
+    };
+    payout?: {
+      status?: string;
+      eligibleAt?: string;
+      blockedReason?: string;
+    };
+  };
   assignedAdmin?: { _id?: string; name?: string; email?: string };
   messages?: Array<{
     _id?: string;
@@ -111,6 +135,14 @@ function statusTone(
   if (s === "awaiting_plazore") return "blue";
   if (s === "open" || s === "in_progress") return "warn";
   return "neutral";
+}
+
+function isDeliveryIssue(row: ContactRow) {
+  return (
+    row.contextType === "order" ||
+    row.category === "delivery" ||
+    !!row.relatedOrder
+  );
 }
 
 function Field({
@@ -181,6 +213,7 @@ export default function ContactsPage() {
   const [reply, setReply] = useState("");
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
+  const [resolveBusy, setResolveBusy] = useState(false);
 
   const cacheRef = useRef<{
     items: ContactRow[];
@@ -248,10 +281,7 @@ export default function ContactsPage() {
         if (unreadOnly) params.set("unread", "1");
         if (q.trim()) params.set("q", q.trim());
 
-        const json = await adminFetch<any>(
-          `/admin/contacts?${params}`,
-          token
-        );
+        const json = await adminFetch<any>(`/admin/contacts?${params}`, token);
         const nextItems = json.data || [];
         const nextCounts = json.counts || counts;
         const nextTotal = json.pagination?.total || 0;
@@ -315,7 +345,6 @@ export default function ContactsPage() {
         token
       );
       setSelected(json.data);
-      // mark read
       await adminFetch(`/admin/contacts/${row._id}`, token, {
         method: "PATCH",
         body: JSON.stringify({ markRead: true }),
@@ -356,6 +385,35 @@ export default function ContactsPage() {
     }
   };
 
+  /** Delivery issue resolution — updates Order.buyerConfirmation + payout */
+  const resolveDeliveryIssue = async (
+    action: "refund_buyer" | "seller_favour" | "authorize_payout"
+  ) => {
+    if (!selected || showOffline || resolveBusy) return;
+    try {
+      setResolveBusy(true);
+      setError("");
+      const token = await getToken();
+      const json = await adminFetch<{ data: ContactRow }>(
+        `/admin/contacts/${selected._id}`,
+        token,
+        {
+          method: "PATCH",
+          body: JSON.stringify({
+            resolveDeliveryIssue: action,
+            status: "resolved",
+          }),
+        }
+      );
+      setSelected(json.data);
+      await load(page);
+    } catch (e: any) {
+      setError(e?.message || "Resolution failed");
+    } finally {
+      setResolveBusy(false);
+    }
+  };
+
   const clearFilters = () => {
     setStatus("");
     setContactAs("");
@@ -377,12 +435,13 @@ export default function ContactsPage() {
   );
 
   const thread = (() => {
-    if (!selected) return [] as Array<{
-      who: string;
-      body: string;
-      at?: string;
-      side: "user" | "admin";
-    }>;
+    if (!selected)
+      return [] as Array<{
+        who: string;
+        body: string;
+        at?: string;
+        side: "user" | "admin";
+      }>;
     if (selected.messages?.length) {
       return selected.messages.map((m) => ({
         who:
@@ -396,7 +455,6 @@ export default function ContactsPage() {
           | "admin",
       }));
     }
-    // legacy
     const out: Array<{
       who: string;
       body: string;
@@ -421,6 +479,12 @@ export default function ContactsPage() {
     }
     return out;
   })();
+
+  const order = selected?.relatedOrder;
+  const confStatus = order?.buyerConfirmation?.status;
+  const payoutStatus = order?.payout?.status;
+  const isIssueOpen =
+    confStatus === "issue_reported" || payoutStatus === "blocked_issue";
 
   return (
     <div
@@ -453,7 +517,7 @@ export default function ContactsPage() {
             </h1>
             <p className="mt-2 max-w-xl text-sm leading-relaxed text-[#A7ADB8]">
               Conversations from Plazore users — general, store, product, and
-              order context. Enforcement stays in Moderation.
+              order context. Delivery issues control seller payout here.
             </p>
           </div>
           <Button
@@ -470,6 +534,7 @@ export default function ContactsPage() {
         </div>
       </header>
 
+      {/* Status counts */}
       <div className="mb-4 grid grid-cols-2 gap-px overflow-hidden border border-[#252A33] bg-[#252A33] sm:grid-cols-4 lg:grid-cols-8">
         {(
           [
@@ -512,6 +577,7 @@ export default function ContactsPage() {
         ))}
       </div>
 
+      {/* Filters */}
       <Panel className="mb-4 overflow-hidden">
         <div className="flex flex-col gap-3 border-b border-[#252A33] px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#737A86]">
@@ -584,6 +650,8 @@ export default function ContactsPage() {
               <option value="store">Store</option>
               <option value="product">Product</option>
               <option value="order">Order</option>
+              <option value="seller">Seller</option>
+              <option value="buyer">Buyer</option>
             </Select>
             <Select
               value={category}
@@ -646,6 +714,9 @@ export default function ContactsPage() {
                   {row.status || "—"}
                 </Badge>
                 {row.unreadByAdmin && <Badge tone="blue">Unread</Badge>}
+                {isDeliveryIssue(row) && (
+                  <Badge tone="warn">Delivery issue</Badge>
+                )}
                 <Badge tone="neutral">{row.contactAs || "—"}</Badge>
               </div>
               <p className="mt-2 truncate font-medium">
@@ -700,13 +771,18 @@ export default function ContactsPage() {
                     </p>
                   </td>
                   <td className="px-4 py-3 text-[#A7ADB8]">
-                    {row.contextType || "general"}
-                    {row.relatedProduct?.name
-                      ? ` · ${row.relatedProduct.name}`
-                      : ""}
-                    {row.relatedSeller?.storeName
-                      ? ` · ${row.relatedSeller.storeName}`
-                      : ""}
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span>{row.contextType || "general"}</span>
+                      {isDeliveryIssue(row) && (
+                        <Badge tone="warn">Delivery</Badge>
+                      )}
+                      {row.relatedProduct?.name
+                        ? ` · ${row.relatedProduct.name}`
+                        : ""}
+                      {row.relatedSeller?.storeName
+                        ? ` · ${row.relatedSeller.storeName}`
+                        : ""}
+                    </div>
                   </td>
                   <td className="px-4 py-3 text-[#A7ADB8]">
                     {row.category || "—"}
@@ -761,6 +837,7 @@ export default function ContactsPage() {
         </div>
       )}
 
+      {/* Overlay */}
       <div
         className={cn(
           "fixed inset-0 z-40 bg-black/50 transition-opacity duration-300",
@@ -772,6 +849,7 @@ export default function ContactsPage() {
         aria-hidden
       />
 
+      {/* Detail pane */}
       <aside
         className={cn(
           poppins.className,
@@ -806,7 +884,12 @@ export default function ContactsPage() {
                   {selected.status}
                 </Badge>
                 <Badge tone="neutral">{selected.contactAs}</Badge>
-                <Badge tone="neutral">{selected.contextType || "general"}</Badge>
+                <Badge tone="neutral">
+                  {selected.contextType || "general"}
+                </Badge>
+                {isDeliveryIssue(selected) && (
+                  <Badge tone="warn">Delivery issue</Badge>
+                )}
                 {selected.priority && (
                   <Badge
                     tone={
@@ -880,8 +963,127 @@ export default function ContactsPage() {
                       {selected.relatedOrder.orderNumber ||
                         selected.relatedOrder._id ||
                         "—"}
+                      {selected.relatedOrder._id && (
+                        <div>
+                          <Link
+                            href={`/orders?q=${encodeURIComponent(selected.relatedOrder.orderNumber || selected.relatedOrder._id)}`}
+                            className="text-xs text-[#00E575] hover:underline"
+                          >
+                            Open order
+                          </Link>
+                        </div>
+                      )}
                     </Field>
                   )}
+                </div>
+              )}
+
+              {/* ─── Delivery confirmation & payout control ─── */}
+              {isDeliveryIssue(selected) && (
+                <div className="space-y-3 border-t border-[#252A33] pt-4">
+                  <SectionLabel>Delivery confirmation & payout</SectionLabel>
+
+                  {order ? (
+                    <div className="space-y-2 border border-[#252A33] bg-[#11141A] p-3 text-xs">
+                      <div className="flex flex-wrap gap-2">
+                        <Badge tone="neutral">
+                          Status: {order.orderStatus || "—"}
+                        </Badge>
+                        <Badge
+                          tone={
+                            confStatus === "confirmed"
+                              ? "green"
+                              : confStatus === "issue_reported"
+                                ? "error"
+                                : confStatus === "pending"
+                                  ? "warn"
+                                  : "neutral"
+                          }
+                        >
+                          Confirm: {confStatus || "none"}
+                        </Badge>
+                        <Badge
+                          tone={
+                            payoutStatus === "eligible" ||
+                            payoutStatus === "completed"
+                              ? "green"
+                              : payoutStatus === "blocked_issue"
+                                ? "error"
+                                : "warn"
+                          }
+                        >
+                          Payout: {payoutStatus || "—"}
+                        </Badge>
+                      </div>
+                      <p className="text-[#A7ADB8]">
+                        Total:{" "}
+                        {Number(order.totalAmount || 0).toLocaleString()} ·
+                        Delivered: {fmt(order.deliveredAt)}
+                      </p>
+                      {order.payout?.blockedReason && (
+                        <p className="text-amber-200/90">
+                          {order.payout.blockedReason}
+                        </p>
+                      )}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-[#737A86]">
+                      Order context is linked. Open the order for full details.
+                    </p>
+                  )}
+
+                  {isIssueOpen && selected.status !== "resolved" && (
+                    <div className="flex items-start gap-2 border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-100">
+                      <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                      <span>
+                        Seller payout is blocked while this issue is open.
+                      </span>
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-1 gap-2">
+                    <Button
+                      tone="ghost"
+                      className="justify-start border border-amber-500/30 text-amber-200"
+                      disabled={
+                        resolveBusy ||
+                        showOffline ||
+                        selected.status === "resolved"
+                      }
+                      onClick={() => resolveDeliveryIssue("seller_favour")}
+                    >
+                      Resolve in seller’s favour
+                    </Button>
+                    <Button
+                      tone="ghost"
+                      className="justify-start border border-[#00E575]/30 text-[#00E575]"
+                      disabled={
+                        resolveBusy ||
+                        showOffline ||
+                        selected.status === "resolved"
+                      }
+                      onClick={() => resolveDeliveryIssue("authorize_payout")}
+                    >
+                      Authorize seller payout
+                    </Button>
+                    <Button
+                      tone="ghost"
+                      className="justify-start border border-red-500/30 text-red-300"
+                      disabled={
+                        resolveBusy ||
+                        showOffline ||
+                        selected.status === "resolved"
+                      }
+                      onClick={() => resolveDeliveryIssue("refund_buyer")}
+                    >
+                      Refund buyer
+                    </Button>
+                  </div>
+                  <p className="text-[11px] leading-relaxed text-[#737A86]">
+                    These actions update the linked order’s confirmation and
+                    payout state on the server. Refunds will later call
+                    Paystack; for now the ledger is updated and audited.
+                  </p>
                 </div>
               )}
 
