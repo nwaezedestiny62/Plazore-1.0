@@ -25,7 +25,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native'
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 const BG = '#090B0F'
 const SURFACE = '#11141A'
@@ -47,6 +47,8 @@ const CANCEL_OPTIONS = [
   { code: 'temporary_closure', label: 'Temporary business closure' },
   { code: 'other', label: 'Other' },
 ] as const
+
+const WEEKDAYS = ['S', 'M', 'T', 'W', 'T', 'F', 'S']
 
 type OverlayAction = {
   label: string
@@ -73,6 +75,65 @@ function resolveOrderRegion(order: any, item?: any): string {
   return DEFAULT_REGION
 }
 
+function resolveNote(note: unknown): string {
+  if (typeof note !== 'string') return ''
+  const t = note.trim()
+  if (!t) return ''
+  const lower = t.toLowerCase()
+  if (lower === 'null' || lower === 'undefined' || lower === 'n/a') return ''
+  return t
+}
+
+function toYMD(d: Date): string {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+function startOfToday(): Date {
+  const d = new Date()
+  d.setHours(0, 0, 0, 0)
+  return d
+}
+
+function formatDisplayDate(d: Date): string {
+  return d.toLocaleDateString(undefined, {
+    weekday: 'short',
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  })
+}
+
+function sameDay(a: Date, b: Date) {
+  return (
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate()
+  )
+}
+
+function buildMonthGrid(year: number, month: number): (Date | null)[] {
+  const first = new Date(year, month, 1)
+  const startPad = first.getDay()
+  const daysInMonth = new Date(year, month + 1, 0).getDate()
+  const cells: (Date | null)[] = []
+  for (let i = 0; i < startPad; i++) cells.push(null)
+  for (let d = 1; d <= daysInMonth; d++) {
+    cells.push(new Date(year, month, d))
+  }
+  while (cells.length % 7 !== 0) cells.push(null)
+  return cells
+}
+
+function statusTone(status: string) {
+  if (status === 'Cancelled') return DANGER
+  if (status === 'Delivered') return GREEN
+  if (status === 'Shipped') return BLUE
+  return WARN
+}
+
 function PlazoreOrb({ size = 110 }: { size?: number }) {
   const rotation = useRef(new Animated.Value(0)).current
   useEffect(() => {
@@ -82,11 +143,11 @@ function PlazoreOrb({ size = 110 }: { size?: number }) {
         duration: 2600,
         easing: Easing.linear,
         useNativeDriver: true,
-      })
+      }),
     )
     loop.start()
     return () => loop.stop()
-  }, [])
+  }, [rotation])
   const rotate = rotation.interpolate({
     inputRange: [0, 1],
     outputRange: ['0deg', '360deg'],
@@ -94,7 +155,14 @@ function PlazoreOrb({ size = 110 }: { size?: number }) {
   const logoBox = size * 0.51
   const logoImg = size * 0.29
   return (
-    <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
+    <View
+      style={{
+        width: size,
+        height: size,
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+    >
       <Animated.View
         style={{
           position: 'absolute',
@@ -146,14 +214,31 @@ function TopOverlay({
     if (timer.current) clearTimeout(timer.current)
     if (!state) {
       Animated.parallel([
-        Animated.timing(translateY, { toValue: -140, duration: 220, useNativeDriver: true }),
-        Animated.timing(opacity, { toValue: 0, duration: 180, useNativeDriver: true }),
+        Animated.timing(translateY, {
+          toValue: -140,
+          duration: 220,
+          useNativeDriver: true,
+        }),
+        Animated.timing(opacity, {
+          toValue: 0,
+          duration: 180,
+          useNativeDriver: true,
+        }),
       ]).start()
       return
     }
     Animated.parallel([
-      Animated.spring(translateY, { toValue: 0, friction: 9, tension: 80, useNativeDriver: true }),
-      Animated.timing(opacity, { toValue: 1, duration: 200, useNativeDriver: true }),
+      Animated.spring(translateY, {
+        toValue: 0,
+        friction: 9,
+        tension: 80,
+        useNativeDriver: true,
+      }),
+      Animated.timing(opacity, {
+        toValue: 1,
+        duration: 200,
+        useNativeDriver: true,
+      }),
     ]).start()
     if (!state.actions?.length) {
       timer.current = setTimeout(() => onDismiss(), state.durationMs ?? 3800)
@@ -161,7 +246,7 @@ function TopOverlay({
     return () => {
       if (timer.current) clearTimeout(timer.current)
     }
-  }, [state])
+  }, [state, onDismiss, translateY, opacity])
 
   if (!state) return null
   const accent =
@@ -233,8 +318,13 @@ function TopOverlay({
   )
 }
 
-/** Short, calm “Delivered” celebration — not noisy */
-function DeliveredBurst({ visible, onDone }: { visible: boolean; onDone: () => void }) {
+function DeliveredBurst({
+  visible,
+  onDone,
+}: {
+  visible: boolean
+  onDone: () => void
+}) {
   const scale = useRef(new Animated.Value(0.6)).current
   const opacity = useRef(new Animated.Value(0)).current
   const check = useRef(new Animated.Value(0)).current
@@ -246,20 +336,40 @@ function DeliveredBurst({ visible, onDone }: { visible: boolean; onDone: () => v
     check.setValue(0)
     Animated.sequence([
       Animated.parallel([
-        Animated.spring(scale, { toValue: 1, friction: 6, tension: 90, useNativeDriver: true }),
-        Animated.timing(opacity, { toValue: 1, duration: 220, useNativeDriver: true }),
+        Animated.spring(scale, {
+          toValue: 1,
+          friction: 6,
+          tension: 90,
+          useNativeDriver: true,
+        }),
+        Animated.timing(opacity, {
+          toValue: 1,
+          duration: 220,
+          useNativeDriver: true,
+        }),
       ]),
-      Animated.timing(check, { toValue: 1, duration: 280, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+      Animated.timing(check, {
+        toValue: 1,
+        duration: 280,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
       Animated.delay(900),
-      Animated.timing(opacity, { toValue: 0, duration: 280, useNativeDriver: true }),
+      Animated.timing(opacity, {
+        toValue: 0,
+        duration: 280,
+        useNativeDriver: true,
+      }),
     ]).start(() => onDone())
-  }, [visible])
+  }, [visible, scale, opacity, check, onDone])
 
   if (!visible) return null
 
   return (
     <View style={styles.burstRoot} pointerEvents="none">
-      <Animated.View style={[styles.burstCard, { opacity, transform: [{ scale }] }]}>
+      <Animated.View
+        style={[styles.burstCard, { opacity, transform: [{ scale }] }]}
+      >
         <LinearGradient
           colors={[GREEN, BLUE]}
           start={{ x: 0, y: 0 }}
@@ -267,23 +377,18 @@ function DeliveredBurst({ visible, onDone }: { visible: boolean; onDone: () => v
           style={styles.burstRing}
         >
           <View style={styles.burstInner}>
-            <Animated.View style={{ opacity: check, transform: [{ scale: check }] }}>
+            <Animated.View
+              style={{ opacity: check, transform: [{ scale: check }] }}
+            >
               <Ionicons name="checkmark" size={36} color={GREEN} />
             </Animated.View>
           </View>
         </LinearGradient>
         <Text style={styles.burstTitle}>Delivered</Text>
-        <Text style={styles.burstSub}>Buyer will see the update</Text>
+        <Text style={styles.burstSub}>Waiting for buyer confirmation</Text>
       </Animated.View>
     </View>
   )
-}
-
-function statusTone(status: string, cancelledBySeller?: boolean) {
-  if (status === 'Cancelled') return DANGER
-  if (status === 'Delivered') return GREEN
-  if (status === 'Shipped') return BLUE
-  return WARN
 }
 
 export default function SellerOrderDetails() {
@@ -302,8 +407,19 @@ export default function SellerOrderDetails() {
   const [submitting, setSubmitting] = useState(false)
 
   const [trackingNumber, setTrackingNumber] = useState('')
-  const [estimatedDelivery, setEstimatedDelivery] = useState('')
-  const [sellerNote, setSellerNote] = useState('')
+  const [estimatedDeliveryDate, setEstimatedDeliveryDate] =
+    useState<Date | null>(null)
+  const [showDatePicker, setShowDatePicker] = useState(false)
+  const [calMonth, setCalMonth] = useState(() => {
+    const t = startOfToday()
+    return { year: t.getFullYear(), month: t.getMonth() }
+  })
+
+  const [sellerNoteInput, setSellerNoteInput] = useState('')
+  const [fieldErrors, setFieldErrors] = useState<{
+    date?: string
+    tracking?: string
+  }>({})
 
   const [showCancel, setShowCancel] = useState(false)
   const [cancelCode, setCancelCode] = useState('')
@@ -314,14 +430,15 @@ export default function SellerOrderDetails() {
   const [showDeliveredBurst, setShowDeliveredBurst] = useState(false)
 
   const displayRegion = viewerRegion || DEFAULT_REGION
+  const minDate = useMemo(() => startOfToday(), [])
 
   const toast = useCallback(
     (
       title: string,
       message?: string,
-      tone: 'info' | 'success' | 'danger' = 'info'
-    ) => setOverlay({ title, message, tone, durationMs: 3800 }),
-    []
+      tone: 'info' | 'success' | 'danger' = 'info',
+    ) => setOverlay({ title, message, tone, durationMs: 4200 }),
+    [],
   )
 
   const fmt = useCallback(
@@ -337,32 +454,32 @@ export default function SellerOrderDetails() {
         const converted = convertPrice(
           amount,
           fromRegion || displayRegion,
-          displayRegion
+          displayRegion,
         )
         return formatMoney(converted, displayRegion)
       }
     },
-    [format, formatProduct, displayRegion]
+    [format, formatProduct, displayRegion],
   )
 
-  const loadOrder = async () => {
+  const loadOrder = useCallback(async () => {
     try {
       setLoading(true)
       const token = await getToken()
       const res = await api.get(`/orders/${id}`, {
         headers: { Authorization: `Bearer ${token}` },
       })
-      if (res.data.success) setOrder(res.data.data)
+      if (res.data?.success) setOrder(res.data.data)
     } catch {
       toast('Error', 'Could not load order', 'danger')
     } finally {
       setLoading(false)
     }
-  }
+  }, [id, getToken, toast])
 
   useEffect(() => {
-    refreshRegion()
-    loadOrder()
+    refreshRegion?.()
+    void loadOrder()
   }, [id])
 
   const orderMoneyRegion = useMemo(() => {
@@ -374,59 +491,149 @@ export default function SellerOrderDetails() {
     order?.productShipping?.method === 'self' ? 'self' : 'courier'
   const courierName = order?.productShipping?.courierCompany || ''
 
-  const handleShip = async () => {
-    if (!estimatedDelivery.trim()) {
-      toast('Required', 'Enter an estimated delivery date (YYYY-MM-DD)', 'danger')
-      return
+  const confStatus =
+    order?.buyerConfirmation?.status ||
+    (order?.orderStatus === 'Delivered' ? 'pending' : 'none')
+  const buyerPending =
+    order?.orderStatus === 'Delivered' &&
+    confStatus !== 'confirmed' &&
+    confStatus !== 'issue_reported'
+  const buyerConfirmed = confStatus === 'confirmed'
+  const buyerIssue = confStatus === 'issue_reported'
+
+  const openDatePicker = () => {
+    const base = estimatedDeliveryDate || minDate
+    setCalMonth({ year: base.getFullYear(), month: base.getMonth() })
+    setShowDatePicker(true)
+  }
+
+  const selectDate = (d: Date) => {
+    if (d < minDate) return
+    const clean = new Date(d)
+    clean.setHours(0, 0, 0, 0)
+    setEstimatedDeliveryDate(clean)
+    setFieldErrors((e) => ({ ...e, date: undefined }))
+    setShowDatePicker(false)
+  }
+
+  const shiftMonth = (delta: number) => {
+    setCalMonth((prev) => {
+      const d = new Date(prev.year, prev.month + delta, 1)
+      return { year: d.getFullYear(), month: d.getMonth() }
+    })
+  }
+
+  const validateShip = (): boolean => {
+    const errors: { date?: string; tracking?: string } = {}
+    const messages: string[] = []
+
+    if (!estimatedDeliveryDate) {
+      errors.date = 'Required — select a delivery date'
+      messages.push('• Estimated delivery date is required')
+    } else {
+      const clean = new Date(estimatedDeliveryDate)
+      clean.setHours(0, 0, 0, 0)
+      if (clean < minDate) {
+        errors.date = 'Date cannot be in the past'
+        messages.push('• Estimated delivery date cannot be in the past')
+      }
     }
+
+    // Courier tracking: if filled, must look valid (not junk)
+    if (impliedMethod === 'courier') {
+      const tn = trackingNumber.trim()
+      if (tn) {
+        if (tn.length < 4) {
+          errors.tracking = 'Tracking number looks too short'
+          messages.push('• Tracking number is too short (min 4 characters)')
+        } else if (!/^[A-Za-z0-9\-_\s]+$/.test(tn)) {
+          errors.tracking = 'Use letters, numbers, dashes only'
+          messages.push(
+            '• Tracking number has invalid characters — use letters, numbers, or dashes',
+          )
+        }
+      }
+    }
+
+    setFieldErrors(errors)
+
+    if (messages.length > 0) {
+      toast(
+        'Fix shipping details',
+        messages.join('\n'),
+        'danger',
+      )
+      return false
+    }
+    return true
+  }
+
+  const handleShip = async () => {
+    if (!validateShip()) return
+    if (!estimatedDeliveryDate) return
+
     try {
       setSubmitting(true)
       const token = await getToken()
+      const note = resolveNote(sellerNoteInput)
       const body: any = {
-        estimatedDelivery: estimatedDelivery.trim(),
-        selfDeliveryNote: sellerNote.trim().slice(0, 120),
+        estimatedDelivery: toYMD(estimatedDeliveryDate),
       }
+      if (note) body.selfDeliveryNote = note.slice(0, 120)
       if (impliedMethod === 'courier') {
-        body.trackingNumber = trackingNumber.trim()
-        body.deliveryCompany = courierName
+        const tn = trackingNumber.trim()
+        if (tn) body.trackingNumber = tn
+        if (courierName) body.deliveryCompany = courierName
       }
       const res = await api.put(`/orders/${id}/ship`, body, {
         headers: { Authorization: `Bearer ${token}` },
       })
-      if (res.data.success) {
+      if (res.data?.success) {
         setOrder(res.data.data)
-        toast('Shipped', 'Order marked as shipped. Buyer has been notified.', 'success')
+        setFieldErrors({})
+        toast(
+          'Shipped',
+          'Order marked as shipped. Buyer has been notified.',
+          'success',
+        )
+      } else {
+        throw new Error(res.data?.message || 'Failed to ship order')
       }
     } catch (error: any) {
-      toast('Error', error.response?.data?.message || 'Failed to ship order', 'danger')
+      toast(
+        'Could not ship',
+        error?.response?.data?.message ||
+          error?.message ||
+          'Failed to ship order. Check your details and try again.',
+        'danger',
+      )
     } finally {
       setSubmitting(false)
     }
   }
 
-  /** Confirm first — Cancel does nothing; Confirm runs deliver + burst */
   const requestDeliver = () => {
+    if (submitting) return
     setOverlay({
       title: 'Confirm delivery',
       message:
         'Only confirm if the buyer has received this order.\n\n' +
         '• Status will change to Delivered\n' +
-        '• The buyer will be notified\n' +
+        '• The buyer will be notified to confirm receipt\n' +
+        '• Your payout stays pending until the buyer confirms\n' +
         '• This cannot be undone from here\n\n' +
         'Is this order really delivered?',
       tone: 'info',
       actions: [
         {
           label: 'Not yet',
-          onPress: () => {
-            // intentional no-op
-          },
+          onPress: () => {},
         },
         {
           label: 'Yes, delivered',
           primary: true,
           onPress: () => {
-            performDeliver()
+            void performDeliver()
           },
         },
       ],
@@ -440,17 +647,21 @@ export default function SellerOrderDetails() {
       const res = await api.put(
         `/orders/${id}/deliver`,
         {},
-        { headers: { Authorization: `Bearer ${token}` } }
+        { headers: { Authorization: `Bearer ${token}` } },
       )
-      if (res.data.success) {
+      if (res.data?.success) {
         setOrder(res.data.data)
         setShowDeliveredBurst(true)
+      } else {
+        throw new Error(res.data?.message || 'Failed to update status')
       }
     } catch (error: any) {
       toast(
         'Error',
-        error.response?.data?.message || 'Failed to update status',
-        'danger'
+        error?.response?.data?.message ||
+          error?.message ||
+          'Failed to update status',
+        'danger',
       )
     } finally {
       setSubmitting(false)
@@ -463,7 +674,7 @@ export default function SellerOrderDetails() {
       return
     }
     if (cancelCode === 'other' && !cancelNote.trim()) {
-      toast('Required', 'Add a short explanation', 'danger')
+      toast('Required', 'Add a short explanation for “Other”', 'danger')
       return
     }
     try {
@@ -475,20 +686,24 @@ export default function SellerOrderDetails() {
           reasonCode: cancelCode,
           note: cancelNote.trim().slice(0, 200),
         },
-        { headers: { Authorization: `Bearer ${token}` } }
+        { headers: { Authorization: `Bearer ${token}` } },
       )
-      if (res.data.success) {
+      if (res.data?.success) {
         setOrder(res.data.data)
         setShowCancel(false)
         setCancelCode('')
         setCancelNote('')
-        toast('Order cancelled', 'The buyer has been notified with your reason.', 'success')
+        toast(
+          'Order cancelled',
+          'The buyer has been notified with your reason.',
+          'success',
+        )
       }
     } catch (error: any) {
       toast(
         'Error',
-        error.response?.data?.message || 'Could not cancel order',
-        'danger'
+        error?.response?.data?.message || 'Could not cancel order',
+        'danger',
       )
     } finally {
       setCancelling(false)
@@ -508,7 +723,10 @@ export default function SellerOrderDetails() {
     return (
       <View style={styles.loaderRoot}>
         <Text style={{ color: MUTED }}>Order not found</Text>
-        <TouchableOpacity onPress={() => router.back()} style={{ marginTop: 16 }}>
+        <TouchableOpacity
+          onPress={() => router.back()}
+          style={{ marginTop: 16 }}
+        >
           <Text style={{ color: GREEN, fontWeight: '700' }}>Go back</Text>
         </TouchableOpacity>
       </View>
@@ -520,6 +738,7 @@ export default function SellerOrderDetails() {
   const isDelivered = order.orderStatus === 'Delivered'
   const isCancelled = order.orderStatus === 'Cancelled'
   const tone = statusTone(order.orderStatus)
+  const storedSellerNote = resolveNote(order.shipping?.selfDeliveryNote)
 
   return (
     <View style={styles.root}>
@@ -528,7 +747,11 @@ export default function SellerOrderDetails() {
         visible={showDeliveredBurst}
         onDone={() => {
           setShowDeliveredBurst(false)
-          toast('Delivered', 'Order marked as delivered.', 'success')
+          toast(
+            'Delivered',
+            'Buyer has been asked to confirm receipt. Payout stays pending until they confirm.',
+            'success',
+          )
         }}
       />
 
@@ -548,7 +771,6 @@ export default function SellerOrderDetails() {
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
-        {/* Status */}
         <View style={styles.card}>
           <Text style={styles.eyebrow}>Current status</Text>
           <Text style={[styles.statusBig, { color: tone }]}>
@@ -557,6 +779,35 @@ export default function SellerOrderDetails() {
               : order.orderStatus}
           </Text>
         </View>
+
+        {isDelivered && buyerPending && (
+          <View style={styles.pendingCard}>
+            <Text style={styles.pendingKicker}>BUYER CONFIRMATION</Text>
+            <Text style={styles.pendingTitle}>Waiting for buyer</Text>
+            <Text style={styles.pendingBody}>
+              You marked this as delivered. The buyer still needs to confirm
+              receipt. Your payout stays pending until they confirm or an issue
+              is resolved.
+            </Text>
+          </View>
+        )}
+        {isDelivered && buyerConfirmed && (
+          <View style={styles.confirmedCard}>
+            <Text style={styles.confirmedTitle}>Buyer confirmed delivery</Text>
+            <Text style={styles.confirmedBody}>
+              The buyer confirmed they received this order.
+            </Text>
+          </View>
+        )}
+        {isDelivered && buyerIssue && (
+          <View style={styles.issueCard}>
+            <Text style={styles.issueTitle}>Issue under review</Text>
+            <Text style={styles.issueBody}>
+              The buyer reported a problem. Payout stays pending while Plazore
+              reviews.
+            </Text>
+          </View>
+        )}
 
         {isCancelled && order.cancellation && (
           <View style={[styles.card, styles.cancelCard]}>
@@ -577,7 +828,6 @@ export default function SellerOrderDetails() {
           </View>
         )}
 
-        {/* Buyer */}
         <View style={styles.card}>
           <Text style={styles.sectionTitle}>Buyer</Text>
           <Text style={styles.eyebrow}>Name</Text>
@@ -589,7 +839,13 @@ export default function SellerOrderDetails() {
             {order.buyerContact?.phone || order.buyer?.phone || 'Not provided'}
           </Text>
           <View style={styles.addressBox}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+            <View
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                marginBottom: 8,
+              }}
+            >
               <Ionicons name="location" size={16} color={BLUE} />
               <Text style={[styles.bodyStrong, { marginLeft: 8 }]}>
                 Delivery address
@@ -606,11 +862,12 @@ export default function SellerOrderDetails() {
           </View>
         </View>
 
-        {/* Products */}
         <Text style={styles.blockLabel}>Products</Text>
         {order.items?.map((item: any, index: number) => {
           const itemRegion = resolveOrderRegion(order, item)
           const unit = Number(item.price) || 0
+          const buyerNote = resolveNote(item.note)
+
           return (
             <View key={index} style={styles.card}>
               <View style={{ flexDirection: 'row' }}>
@@ -619,7 +876,13 @@ export default function SellerOrderDetails() {
                 ) : (
                   <View style={[styles.thumb, styles.thumbEmpty]} />
                 )}
-                <View style={{ marginLeft: 12, flex: 1, justifyContent: 'center' }}>
+                <View
+                  style={{
+                    marginLeft: 12,
+                    flex: 1,
+                    justifyContent: 'center',
+                  }}
+                >
                   <Text style={styles.bodyStrong} numberOfLines={2}>
                     {item.name}
                   </Text>
@@ -631,14 +894,13 @@ export default function SellerOrderDetails() {
               <View style={styles.noteBox}>
                 <Text style={styles.eyebrow}>Buyer note</Text>
                 <Text style={styles.body}>
-                  {item.note?.trim() ? item.note : 'No buyer note.'}
+                  {buyerNote ? buyerNote : 'No note added.'}
                 </Text>
               </View>
             </View>
           )
         })}
 
-        {/* Preparing actions */}
         {isPreparing && (
           <>
             <View style={styles.actionRow}>
@@ -652,7 +914,11 @@ export default function SellerOrderDetails() {
                 activeOpacity={0.85}
                 style={[styles.actionHint, styles.actionCancel, { flex: 1 }]}
               >
-                <Ionicons name="close-circle-outline" size={20} color={DANGER} />
+                <Ionicons
+                  name="close-circle-outline"
+                  size={20}
+                  color={DANGER}
+                />
                 <Text style={[styles.actionHintTitle, { color: DANGER }]}>
                   Cancel
                 </Text>
@@ -667,7 +933,9 @@ export default function SellerOrderDetails() {
 
               <View style={styles.methodPill}>
                 <Ionicons
-                  name={impliedMethod === 'self' ? 'walk-outline' : 'car-outline'}
+                  name={
+                    impliedMethod === 'self' ? 'walk-outline' : 'car-outline'
+                  }
                   size={18}
                   color={BLUE}
                 />
@@ -679,37 +947,81 @@ export default function SellerOrderDetails() {
               </View>
 
               <Text style={styles.label}>Estimated delivery date *</Text>
-              <TextInput
-                value={estimatedDelivery}
-                onChangeText={setEstimatedDelivery}
-                placeholder="YYYY-MM-DD"
-                placeholderTextColor="#3D5268"
-                style={styles.input}
-              />
+              <TouchableOpacity
+                onPress={openDatePicker}
+                activeOpacity={0.85}
+                style={[
+                  styles.dateField,
+                  !!fieldErrors.date && styles.fieldErrorBorder,
+                ]}
+              >
+                <Ionicons
+                  name="calendar-outline"
+                  size={18}
+                  color={
+                    fieldErrors.date
+                      ? DANGER
+                      : estimatedDeliveryDate
+                        ? GREEN
+                        : MUTED
+                  }
+                />
+                <Text
+                  style={[
+                    styles.dateFieldText,
+                    !estimatedDeliveryDate && styles.dateFieldPlaceholder,
+                  ]}
+                >
+                  {estimatedDeliveryDate
+                    ? formatDisplayDate(estimatedDeliveryDate)
+                    : 'Tap to choose a date'}
+                </Text>
+                <Ionicons name="chevron-down" size={16} color={MUTED} />
+              </TouchableOpacity>
+              {!!fieldErrors.date && (
+                <Text style={styles.fieldErrorText}>{fieldErrors.date}</Text>
+              )}
 
               {impliedMethod === 'courier' && (
                 <>
                   <Text style={styles.label}>Tracking number</Text>
                   <TextInput
                     value={trackingNumber}
-                    onChangeText={setTrackingNumber}
+                    onChangeText={(t) => {
+                      setTrackingNumber(t)
+                      if (fieldErrors.tracking) {
+                        setFieldErrors((e) => ({ ...e, tracking: undefined }))
+                      }
+                    }}
                     placeholder="Optional"
                     placeholderTextColor="#3D5268"
-                    style={styles.input}
+                    autoCapitalize="characters"
+                    style={[
+                      styles.input,
+                      !!fieldErrors.tracking && styles.fieldErrorBorder,
+                    ]}
                   />
+                  {!!fieldErrors.tracking && (
+                    <Text style={styles.fieldErrorText}>
+                      {fieldErrors.tracking}
+                    </Text>
+                  )}
                 </>
               )}
 
               <Text style={styles.label}>Note to buyer</Text>
               <TextInput
-                value={sellerNote}
-                onChangeText={(t) => setSellerNote(t.slice(0, 120))}
-                placeholder="Optional note"
+                value={sellerNoteInput}
+                onChangeText={(t) => setSellerNoteInput(t.slice(0, 120))}
+                placeholder="Optional — leave blank if none"
                 placeholderTextColor="#3D5268"
                 multiline
-                style={[styles.input, { minHeight: 80, textAlignVertical: 'top' }]}
+                style={[
+                  styles.input,
+                  { minHeight: 80, textAlignVertical: 'top' },
+                ]}
               />
-              <Text style={styles.counter}>{sellerNote.length}/120</Text>
+              <Text style={styles.counter}>{sellerNoteInput.length}/120</Text>
 
               <TouchableOpacity
                 onPress={handleShip}
@@ -739,7 +1051,9 @@ export default function SellerOrderDetails() {
             <Text style={styles.sectionTitle}>Shipping info</Text>
             <Text style={styles.eyebrow}>Method</Text>
             <Text style={styles.body}>
-              {order.shipping.shippingMethod === 'self' ? 'Self delivery' : 'Courier'}
+              {order.shipping.shippingMethod === 'self'
+                ? 'Self delivery'
+                : 'Courier'}
             </Text>
             {!!order.shipping.deliveryCompany && (
               <>
@@ -759,14 +1073,18 @@ export default function SellerOrderDetails() {
                   Estimated delivery
                 </Text>
                 <Text style={styles.body}>
-                  {new Date(order.shipping.estimatedDelivery).toLocaleDateString()}
+                  {new Date(
+                    order.shipping.estimatedDelivery,
+                  ).toLocaleDateString()}
                 </Text>
               </>
             )}
-            {!!order.shipping.selfDeliveryNote && (
+            {!!storedSellerNote && (
               <>
-                <Text style={[styles.eyebrow, { marginTop: 10 }]}>Note</Text>
-                <Text style={styles.body}>{order.shipping.selfDeliveryNote}</Text>
+                <Text style={[styles.eyebrow, { marginTop: 10 }]}>
+                  Note to buyer
+                </Text>
+                <Text style={styles.body}>{storedSellerNote}</Text>
               </>
             )}
           </View>
@@ -794,7 +1112,6 @@ export default function SellerOrderDetails() {
           </TouchableOpacity>
         )}
 
-        {/* Totals */}
         <View style={styles.card}>
           <View style={styles.totalRow}>
             <Text style={styles.meta}>Subtotal</Text>
@@ -817,7 +1134,99 @@ export default function SellerOrderDetails() {
         </View>
       </ScrollView>
 
-      {/* Cancel sheet */}
+      {/* Pure JS calendar — no native module */}
+      <Modal
+        visible={showDatePicker}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setShowDatePicker(false)}
+      >
+        <View style={styles.modalRoot}>
+          <Pressable
+            style={styles.modalScrim}
+            onPress={() => setShowDatePicker(false)}
+          />
+          <View style={styles.dateSheet}>
+            <View style={styles.sheetHandle} />
+            <View style={styles.sheetHead}>
+              <Text style={styles.sectionTitle}>Estimated delivery</Text>
+              <TouchableOpacity
+                onPress={() => setShowDatePicker(false)}
+                hitSlop={12}
+              >
+                <Ionicons name="close" size={22} color={MUTED} />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.calNav}>
+              <TouchableOpacity
+                onPress={() => shiftMonth(-1)}
+                hitSlop={12}
+                style={styles.calNavBtn}
+              >
+                <Ionicons name="chevron-back" size={20} color={TEXT} />
+              </TouchableOpacity>
+              <Text style={styles.calMonthLabel}>
+                {new Date(calMonth.year, calMonth.month, 1).toLocaleDateString(
+                  undefined,
+                  { month: 'long', year: 'numeric' },
+                )}
+              </Text>
+              <TouchableOpacity
+                onPress={() => shiftMonth(1)}
+                hitSlop={12}
+                style={styles.calNavBtn}
+              >
+                <Ionicons name="chevron-forward" size={20} color={TEXT} />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.calWeekRow}>
+              {WEEKDAYS.map((w, i) => (
+                <Text key={`${w}-${i}`} style={styles.calWeekday}>
+                  {w}
+                </Text>
+              ))}
+            </View>
+
+            <View style={styles.calGrid}>
+              {buildMonthGrid(calMonth.year, calMonth.month).map((cell, i) => {
+                if (!cell) {
+                  return <View key={`e-${i}`} style={styles.calCell} />
+                }
+                const disabled = cell < minDate
+                const selected =
+                  !!estimatedDeliveryDate && sameDay(cell, estimatedDeliveryDate)
+                const isToday = sameDay(cell, minDate)
+                return (
+                  <TouchableOpacity
+                    key={toYMD(cell)}
+                    disabled={disabled}
+                    onPress={() => selectDate(cell)}
+                    style={[
+                      styles.calCell,
+                      selected && styles.calCellSelected,
+                      isToday && !selected && styles.calCellToday,
+                    ]}
+                    activeOpacity={0.75}
+                  >
+                    <Text
+                      style={[
+                        styles.calDayText,
+                        disabled && styles.calDayDisabled,
+                        selected && styles.calDaySelected,
+                      ]}
+                    >
+                      {cell.getDate()}
+                    </Text>
+                  </TouchableOpacity>
+                )
+              })}
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       <Modal
         visible={showCancel}
         animationType="slide"
@@ -825,12 +1234,18 @@ export default function SellerOrderDetails() {
         onRequestClose={() => setShowCancel(false)}
       >
         <View style={styles.modalRoot}>
-          <Pressable style={styles.modalScrim} onPress={() => setShowCancel(false)} />
+          <Pressable
+            style={styles.modalScrim}
+            onPress={() => setShowCancel(false)}
+          />
           <View style={styles.sheet}>
             <View style={styles.sheetHandle} />
             <View style={styles.sheetHead}>
               <Text style={styles.sectionTitle}>Cancel order</Text>
-              <TouchableOpacity onPress={() => setShowCancel(false)} hitSlop={12}>
+              <TouchableOpacity
+                onPress={() => setShowCancel(false)}
+                hitSlop={12}
+              >
                 <Ionicons name="close" size={22} color={MUTED} />
               </TouchableOpacity>
             </View>
@@ -850,7 +1265,12 @@ export default function SellerOrderDetails() {
                     <View style={[styles.radio, selected && styles.radioOn]}>
                       {selected && <View style={styles.radioDot} />}
                     </View>
-                    <Text style={[styles.reasonText, selected && { color: TEXT, fontWeight: '600' }]}>
+                    <Text
+                      style={[
+                        styles.reasonText,
+                        selected && { color: TEXT, fontWeight: '600' },
+                      ]}
+                    >
                       {opt.label}
                     </Text>
                   </TouchableOpacity>
@@ -863,7 +1283,14 @@ export default function SellerOrderDetails() {
                   placeholder="Short explanation…"
                   placeholderTextColor="#3D5268"
                   multiline
-                  style={[styles.input, { minHeight: 88, textAlignVertical: 'top', marginTop: 8 }]}
+                  style={[
+                    styles.input,
+                    {
+                      minHeight: 88,
+                      textAlignVertical: 'top',
+                      marginTop: 8,
+                    },
+                  ]}
                 />
               )}
               <TouchableOpacity
@@ -902,7 +1329,12 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: LINE,
   },
-  orderNo: { color: TEXT, fontSize: 20, fontWeight: '800', letterSpacing: -0.3 },
+  orderNo: {
+    color: TEXT,
+    fontSize: 20,
+    fontWeight: '800',
+    letterSpacing: -0.3,
+  },
   orderDate: { color: MUTED, fontSize: 12, marginTop: 3 },
 
   scroll: { padding: 16, paddingBottom: 48 },
@@ -917,6 +1349,59 @@ const styles = StyleSheet.create({
   cancelCard: {
     backgroundColor: 'rgba(239,68,68,0.06)',
     borderColor: 'rgba(239,68,68,0.25)',
+  },
+  pendingCard: {
+    backgroundColor: 'rgba(0,229,117,0.06)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(0,229,117,0.25)',
+    padding: 16,
+    marginBottom: 14,
+  },
+  pendingKicker: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: GREEN,
+    letterSpacing: 1.2,
+    marginBottom: 6,
+  },
+  pendingTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: TEXT,
+    marginBottom: 6,
+  },
+  pendingBody: {
+    fontSize: 13,
+    color: SECONDARY,
+    lineHeight: 20,
+  },
+  confirmedCard: {
+    backgroundColor: 'rgba(0,229,117,0.05)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(0,229,117,0.2)',
+    padding: 16,
+    marginBottom: 14,
+  },
+  confirmedTitle: { fontSize: 14, fontWeight: '700', color: TEXT },
+  confirmedBody: {
+    fontSize: 13,
+    color: SECONDARY,
+    marginTop: 6,
+    lineHeight: 20,
+  },
+  issueCard: {
+    backgroundColor: 'rgba(245,158,11,0.1)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(245,158,11,0.3)',
+    padding: 16,
+    marginBottom: 14,
+  },
+  issueTitle: { fontSize: 14, fontWeight: '700', color: '#FEF3C7' },
+  issueBody: {
+    fontSize: 13,
+    color: 'rgba(254,243,199,0.85)',
+    lineHeight: 20,
+    marginTop: 6,
   },
   eyebrow: {
     color: MUTED,
@@ -1013,7 +1498,44 @@ const styles = StyleSheet.create({
     fontSize: 15,
     marginBottom: 12,
   },
-  counter: { color: MUTED, fontSize: 11, textAlign: 'right', marginBottom: 8 },
+  dateField: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: '#0A121C',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: LINE,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    marginBottom: 6,
+  },
+  dateFieldText: {
+    flex: 1,
+    color: TEXT,
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  dateFieldPlaceholder: {
+    color: '#3D5268',
+    fontWeight: '500',
+  },
+  fieldErrorBorder: {
+    borderColor: 'rgba(239,68,68,0.55)',
+  },
+  fieldErrorText: {
+    color: DANGER,
+    fontSize: 12,
+    fontWeight: '600',
+    marginBottom: 10,
+    marginTop: -2,
+  },
+  counter: {
+    color: MUTED,
+    fontSize: 11,
+    textAlign: 'right',
+    marginBottom: 8,
+  },
 
   cta: {
     paddingVertical: 15,
@@ -1029,7 +1551,6 @@ const styles = StyleSheet.create({
   },
   totalValue: { color: TEXT, fontWeight: '800', fontSize: 18 },
 
-  // Overlay
   overlayCard: {
     flexDirection: 'row',
     backgroundColor: SURFACE,
@@ -1057,9 +1578,12 @@ const styles = StyleSheet.create({
   overlayBtnDanger: { backgroundColor: 'rgba(239,68,68,0.12)' },
   overlayBtnText: { fontWeight: '800', fontSize: 13, color: TEXT },
 
-  // Delivered burst
   burstRoot: {
-    ...{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 },
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
     zIndex: 400,
     alignItems: 'center',
     justifyContent: 'center',
@@ -1091,10 +1615,13 @@ const styles = StyleSheet.create({
   },
   burstSub: { marginTop: 4, color: SECONDARY, fontSize: 13 },
 
-  // Cancel modal
   modalRoot: { flex: 1, justifyContent: 'flex-end' },
   modalScrim: {
-    ...{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 },
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
     backgroundColor: 'rgba(0,0,0,0.65)',
   },
   sheet: {
@@ -1104,6 +1631,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     paddingBottom: 28,
     maxHeight: '88%',
+  },
+  dateSheet: {
+    backgroundColor: SURFACE,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: LINE,
+    paddingHorizontal: 18,
+    paddingBottom: 28,
   },
   sheetHandle: {
     alignSelf: 'center',
@@ -1120,6 +1654,68 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: 4,
   },
+
+  calNav: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+    marginTop: 4,
+  },
+  calNavBtn: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  calMonthLabel: {
+    color: TEXT,
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  calWeekRow: {
+    flexDirection: 'row',
+    marginBottom: 6,
+  },
+  calWeekday: {
+    flex: 1,
+    textAlign: 'center',
+    color: MUTED,
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  calGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+  },
+  calCell: {
+    width: '14.28%',
+    aspectRatio: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  calCellSelected: {
+    backgroundColor: GREEN,
+    borderRadius: 999,
+  },
+  calCellToday: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(0,229,117,0.45)',
+    borderRadius: 999,
+  },
+  calDayText: {
+    color: TEXT,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  calDayDisabled: {
+    color: 'rgba(115,122,134,0.45)',
+  },
+  calDaySelected: {
+    color: '#041412',
+    fontWeight: '800',
+  },
+
   reasonRow: {
     flexDirection: 'row',
     alignItems: 'center',

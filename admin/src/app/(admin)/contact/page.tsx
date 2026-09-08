@@ -41,6 +41,8 @@ type ContactRow = {
   message?: string;
   status?: string;
   priority?: string;
+  /** false = one-way from Plazore; user cannot reply */
+  allowsReply?: boolean;
   unreadByAdmin?: boolean;
   lastMessageAt?: string;
   createdAt?: string;
@@ -385,7 +387,6 @@ export default function ContactsPage() {
     }
   };
 
-  /** Delivery issue resolution — updates Order.buyerConfirmation + payout */
   const resolveDeliveryIssue = async (
     action: "refund_buyer" | "seller_favour" | "authorize_payout"
   ) => {
@@ -486,6 +487,9 @@ export default function ContactsPage() {
   const isIssueOpen =
     confStatus === "issue_reported" || payoutStatus === "blocked_issue";
 
+  /** Default true for legacy rows that never set the field */
+  const canReply = selected?.allowsReply !== false;
+
   return (
     <div
       className={cn(
@@ -517,7 +521,8 @@ export default function ContactsPage() {
             </h1>
             <p className="mt-2 max-w-xl text-sm leading-relaxed text-[#A7ADB8]">
               Conversations from Plazore users — general, store, product, and
-              order context. Delivery issues control seller payout here.
+              order context. One-way notices show as “No reply”. Delivery
+              issues control seller payout here.
             </p>
           </div>
           <Button
@@ -534,7 +539,6 @@ export default function ContactsPage() {
         </div>
       </header>
 
-      {/* Status counts */}
       <div className="mb-4 grid grid-cols-2 gap-px overflow-hidden border border-[#252A33] bg-[#252A33] sm:grid-cols-4 lg:grid-cols-8">
         {(
           [
@@ -577,7 +581,6 @@ export default function ContactsPage() {
         ))}
       </div>
 
-      {/* Filters */}
       <Panel className="mb-4 overflow-hidden">
         <div className="flex flex-col gap-3 border-b border-[#252A33] px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#737A86]">
@@ -714,6 +717,9 @@ export default function ContactsPage() {
                   {row.status || "—"}
                 </Badge>
                 {row.unreadByAdmin && <Badge tone="blue">Unread</Badge>}
+                {row.allowsReply === false && (
+                  <Badge tone="neutral">No reply</Badge>
+                )}
                 {isDeliveryIssue(row) && (
                   <Badge tone="warn">Delivery issue</Badge>
                 )}
@@ -773,6 +779,9 @@ export default function ContactsPage() {
                   <td className="px-4 py-3 text-[#A7ADB8]">
                     <div className="flex flex-wrap items-center gap-1.5">
                       <span>{row.contextType || "general"}</span>
+                      {row.allowsReply === false && (
+                        <Badge tone="neutral">No reply</Badge>
+                      )}
                       {isDeliveryIssue(row) && (
                         <Badge tone="warn">Delivery</Badge>
                       )}
@@ -837,7 +846,6 @@ export default function ContactsPage() {
         </div>
       )}
 
-      {/* Overlay */}
       <div
         className={cn(
           "fixed inset-0 z-40 bg-black/50 transition-opacity duration-300",
@@ -849,7 +857,6 @@ export default function ContactsPage() {
         aria-hidden
       />
 
-      {/* Detail pane */}
       <aside
         className={cn(
           poppins.className,
@@ -887,6 +894,9 @@ export default function ContactsPage() {
                 <Badge tone="neutral">
                   {selected.contextType || "general"}
                 </Badge>
+                {selected.allowsReply === false && (
+                  <Badge tone="neutral">No reply</Badge>
+                )}
                 {isDeliveryIssue(selected) && (
                   <Badge tone="warn">Delivery issue</Badge>
                 )}
@@ -904,6 +914,13 @@ export default function ContactsPage() {
                   </Badge>
                 )}
               </div>
+
+              {!canReply && (
+                <div className="border border-[#252A33] bg-[#11141A] px-3 py-2 text-xs text-[#A7ADB8]">
+                  One-way message from Plazore. The user can read this thread
+                  but cannot text back.
+                </div>
+              )}
 
               <div className="space-y-2">
                 <SectionLabel>User</SectionLabel>
@@ -978,7 +995,6 @@ export default function ContactsPage() {
                 </div>
               )}
 
-              {/* ─── Delivery confirmation & payout control ─── */}
               {isDeliveryIssue(selected) && (
                 <div className="space-y-3 border-t border-[#252A33] pt-4">
                   <SectionLabel>Delivery confirmation & payout</SectionLabel>
@@ -1144,23 +1160,33 @@ export default function ContactsPage() {
                 </div>
               )}
 
-              <div className="space-y-3 border-t border-[#252A33] pt-4">
-                <SectionLabel>Reply to user</SectionLabel>
-                <textarea
-                  value={reply}
-                  onChange={(e) => setReply(e.target.value)}
-                  rows={4}
-                  placeholder="Write a reply visible to the user…"
-                  className="w-full border border-[#252A33] bg-[#11141A] px-3 py-2 text-sm text-[#F5F7FA] outline-none focus:border-[#00E575]/40"
-                  disabled={busy || showOffline}
-                />
-                <Button
-                  disabled={busy || showOffline || !reply.trim()}
-                  onClick={() => patch({ reply: reply.trim() })}
-                >
-                  Send reply
-                </Button>
-              </div>
+              {/* Reply only when allowsReply is not false */}
+              {canReply ? (
+                <div className="space-y-3 border-t border-[#252A33] pt-4">
+                  <SectionLabel>Reply to user</SectionLabel>
+                  <textarea
+                    value={reply}
+                    onChange={(e) => setReply(e.target.value)}
+                    rows={4}
+                    placeholder="Write a reply visible to the user…"
+                    className="w-full border border-[#252A33] bg-[#11141A] px-3 py-2 text-sm text-[#F5F7FA] outline-none focus:border-[#00E575]/40"
+                    disabled={busy || showOffline}
+                  />
+                  <Button
+                    disabled={busy || showOffline || !reply.trim()}
+                    onClick={() => patch({ reply: reply.trim() })}
+                  >
+                    Send reply
+                  </Button>
+                </div>
+              ) : (
+                <div className="space-y-2 border-t border-[#252A33] pt-4">
+                  <SectionLabel>Reply to user</SectionLabel>
+                  <p className="text-xs text-[#737A86]">
+                    Disabled — this thread is one-way (no text back).
+                  </p>
+                </div>
+              )}
 
               <div className="space-y-3 border-t border-[#252A33] pt-4">
                 <SectionLabel>Internal note</SectionLabel>

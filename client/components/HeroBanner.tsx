@@ -1,24 +1,28 @@
 /**
- * PlazoreHeroBanner — window-sized hero, adaptive copy, no expo-av
- * Bottom-left copy, outline CTA, down arrow to showroom
+ * PlazoreHeroBanner — 5-slot carousel like web Mall.tsx
+ * GET /content/hero (auth, personalized 1+4) + /content/hero/public (admin 2,3,5)
+ * Rotation is ALWAYS 12s — never use server cycleMs (that value is a 30min cache TTL)
  */
 
 import {
   HERO_SLIDES,
-  HeroSlide,
+  type HeroSlide as StaticHeroSlide,
   resolveHeroSlides,
 } from '@/constants/heroCampaigns'
+import api from '@/constants/api'
 import { Ionicons } from '@expo/vector-icons'
 import { LinearGradient } from 'expo-linear-gradient'
+import { useRouter } from 'expo-router'
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Animated,
   Easing,
   Image,
+  type ImageSourcePropType,
+  Linking,
   PanResponder,
   Platform,
   Pressable,
-  StatusBar,
   StyleSheet,
   Text,
   useWindowDimensions,
@@ -26,11 +30,13 @@ import {
 } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
-const HOLD_MS = 11000
-const CROSSFADE_MS = 3200
-const SWIPE_THRESH = 52
+const SLOT_COUNT = 5
+const HOLD_MS = 12000
+const CROSSFADE_MS = 2800
+const SWIPE_THRESH = 48
 const TEXT_ENTER_MS = 900
-const TEXT_EXIT_MS = 500
+const TEXT_EXIT_MS = 420
+const KEN_BURNS_SCALE = 1.06
 
 const EASE_CROSSFADE = Easing.bezier(0.4, 0.0, 0.2, 1.0)
 const EASE_TEXT = Easing.bezier(0.25, 0.1, 0.25, 1.0)
@@ -43,33 +49,261 @@ const FILL = {
   left: 0,
 }
 
+const WEB_ORIGIN = String(
+  process.env.EXPO_PUBLIC_WEB_URL ||
+    process.env.EXPO_PUBLIC_SITE_URL ||
+    '',
+).replace(/\/$/, '')
+
+export type BannerSlide = {
+  id: string
+  position: number
+  kicker: string
+  headline: string
+  subheadline: string
+  ctaLabel: string
+  ctaAction: string
+  ctaTarget?: string
+  media: { kind: 'image'; source: ImageSourcePropType }
+}
+
+type ApiHeroBanner = {
+  position?: number
+  controlType?: 'system' | 'admin'
+  isActive?: boolean
+  imageUrl?: string
+  image?: string
+  headline?: string
+  subheadline?: string
+  ctaLabel?: string
+  ctaAction?: string
+  ctaTarget?: string
+  kicker?: string
+  published?: ApiHeroBanner
+  creative?: ApiHeroBanner
+}
+
 type Props = {
-  slides?: HeroSlide[]
+  slides?: BannerSlide[]
+  token?: string | null
+  region?: string
+  sessionId?: string
   topChrome?: number
-  onCtaPress?: (slide: HeroSlide) => void
+  onCtaPress?: (slide: BannerSlide) => void
   onScrollToShowroom?: () => void
+  offlineOnly?: boolean
 }
 
-function headlineStyle(text: string) {
+/** Fit copy to the phone width. Long text shrinks + wraps. Nothing is ellipsized. */
+function copyMetrics(screenW: number) {
+  const pad = screenW < 360 ? 16 : 20
+  const maxW = Math.max(220, screenW - pad * 2)
+  return { pad, maxW }
+}
+
+function kickerFit(text: string, maxW: number) {
   const n = (text || '').trim().length
-  if (n > 52) return { fontSize: 22, lineHeight: 28, maxWidth: 300 }
-  if (n > 38) return { fontSize: 26, lineHeight: 32, maxWidth: 320 }
-  if (n > 26) return { fontSize: 30, lineHeight: 36, maxWidth: 330 }
-  return { fontSize: 34, lineHeight: 40, maxWidth: 340 }
+  if (n > 42) return { fontSize: 8, lineHeight: 12, letterSpacing: 0.8, width: maxW }
+  if (n > 28) return { fontSize: 9, lineHeight: 13, letterSpacing: 1.2, width: maxW }
+  if (n > 18) return { fontSize: 9.5, lineHeight: 14, letterSpacing: 1.8, width: maxW }
+  if (n > 12) return { fontSize: 10, lineHeight: 14, letterSpacing: 2.4, width: maxW }
+  return { fontSize: 10, lineHeight: 14, letterSpacing: 3.2, width: maxW }
 }
 
-function subStyle(text: string) {
+function headlineFit(text: string, maxW: number) {
+  const t = (text || '').trim()
+  const n = t.length
+  const words = t.split(/\s+/).filter(Boolean).length
+  if (n > 80 || words > 12)
+    return { fontSize: 18, lineHeight: 24, letterSpacing: -0.2, width: maxW }
+  if (n > 56 || words > 9)
+    return { fontSize: 20, lineHeight: 26, letterSpacing: -0.25, width: maxW }
+  if (n > 40 || words > 6)
+    return { fontSize: 24, lineHeight: 30, letterSpacing: -0.3, width: maxW }
+  if (n > 26)
+    return { fontSize: 28, lineHeight: 34, letterSpacing: -0.3, width: maxW }
+  return { fontSize: 32, lineHeight: 38, letterSpacing: -0.35, width: maxW }
+}
+
+function subFit(text: string, maxW: number) {
   const n = (text || '').trim().length
-  if (n > 90) return { fontSize: 13, lineHeight: 18, maxWidth: 280 }
-  if (n > 60) return { fontSize: 14, lineHeight: 20, maxWidth: 300 }
-  return { fontSize: 15, lineHeight: 22, maxWidth: 320 }
+  if (n > 140) return { fontSize: 12, lineHeight: 17, width: maxW }
+  if (n > 90) return { fontSize: 13, lineHeight: 18, width: maxW }
+  if (n > 60) return { fontSize: 14, lineHeight: 20, width: maxW }
+  return { fontSize: 15, lineHeight: 22, width: maxW }
 }
 
-function prefetchHeroImages(slides: HeroSlide[]) {
-  slides.forEach((s) => {
-    const src = s.media.source as { uri?: string }
-    if (src?.uri) Image.prefetch(src.uri).catch(() => {})
+function ctaFit(text: string) {
+  const n = (text || '').trim().length
+  if (n > 28) return { fontSize: 9, letterSpacing: 1.1, paddingHorizontal: 14 }
+  if (n > 18) return { fontSize: 10, letterSpacing: 1.4, paddingHorizontal: 16 }
+  return { fontSize: 11, letterSpacing: 2, paddingHorizontal: 22 }
+}
+
+function localSource(index: number): ImageSourcePropType | undefined {
+  const n = HERO_SLIDES.length
+  if (!n) return undefined
+  return HERO_SLIDES[index % n]?.media?.source
+}
+
+function resolveImageSource(imageUrl: string, index: number): ImageSourcePropType {
+  const url = String(imageUrl || '').trim()
+  const fallback = localSource(index)
+  if (/^https?:\/\//i.test(url)) return { uri: url }
+  if (url.startsWith('/') && WEB_ORIGIN) return { uri: `${WEB_ORIGIN}${url}` }
+  if (fallback) return fallback
+  return { uri: url || 'data:image/gif;base64,R0lGODlhAQABAAAAACw=' }
+}
+
+function staticToBanner(s: StaticHeroSlide, index: number): BannerSlide {
+  const pos = index + 1
+  return {
+    id: `static-${pos}`,
+    position: pos,
+    kicker: String((s as any).kicker || 'PLAZORE').toUpperCase(),
+    headline: s.headline || 'Plazore',
+    subheadline: s.subheadline || '',
+    ctaLabel: s.ctaLabel || 'Explore',
+    ctaAction: String((s as any).ctaAction || 'scroll_showroom'),
+    ctaTarget: String((s as any).ctaTarget || ''),
+    media: s.media,
+  }
+}
+
+function flattenBanner(raw: any, index: number): ApiHeroBanner {
+  const nested = raw?.published || raw?.creative || raw?.slot || {}
+  return {
+    position: Number(raw?.position ?? nested?.position ?? index + 1),
+    controlType: raw?.controlType || nested?.controlType,
+    isActive: raw?.isActive !== false && nested?.isActive !== false,
+    imageUrl:
+      raw?.imageUrl ||
+      raw?.image ||
+      nested?.imageUrl ||
+      nested?.image ||
+      '',
+    headline: raw?.headline || nested?.headline || '',
+    subheadline: raw?.subheadline || nested?.subheadline || '',
+    ctaLabel: raw?.ctaLabel || nested?.ctaLabel || '',
+    ctaAction: raw?.ctaAction || nested?.ctaAction || '',
+    ctaTarget: raw?.ctaTarget || nested?.ctaTarget || '',
+    kicker: raw?.kicker || nested?.kicker || '',
+  }
+}
+
+function apiToBanner(raw: any, index: number): BannerSlide | null {
+  const b = flattenBanner(raw, index)
+  const pos = Math.min(SLOT_COUNT, Math.max(1, Number(b.position) || index + 1))
+  const fallback = HERO_SLIDES[(pos - 1) % Math.max(HERO_SLIDES.length, 1)]
+  const imageUrl = String(b.imageUrl || '').trim()
+  const headline = String(b.headline || '').trim()
+
+  if (b.isActive === false && !imageUrl && !headline) return null
+
+  return {
+    id: `slot-${pos}`,
+    position: pos,
+    kicker: String(b.kicker || 'PLAZORE').toUpperCase(),
+    headline: headline || fallback?.headline || 'Plazore',
+    subheadline: String(b.subheadline || '').trim() || fallback?.subheadline || '',
+    ctaLabel: String(b.ctaLabel || '').trim() || fallback?.ctaLabel || 'Explore',
+    ctaAction: String(b.ctaAction || 'scroll_showroom'),
+    ctaTarget: String(b.ctaTarget || ''),
+    media: {
+      kind: 'image',
+      source: resolveImageSource(imageUrl, pos - 1),
+    },
+  }
+}
+
+function fiveSlotDeck(remote: BannerSlide[], fallback: BannerSlide[]): BannerSlide[] {
+  const byPos = new Map<number, BannerSlide>()
+  remote.forEach((s) => {
+    const pos = Math.min(SLOT_COUNT, Math.max(1, Number(s.position) || 1))
+    byPos.set(pos, { ...s, position: pos, id: `slot-${pos}` })
   })
+
+  const deck: BannerSlide[] = []
+  for (let pos = 1; pos <= SLOT_COUNT; pos++) {
+    const base = fallback[pos - 1] || fallback[(pos - 1) % Math.max(fallback.length, 1)]
+    const slot = byPos.get(pos)
+    if (slot) {
+      deck.push({
+        ...base,
+        ...slot,
+        id: `slot-${pos}`,
+        position: pos,
+        media: slot.media || base.media,
+      })
+    } else if (base) {
+      deck.push({ ...base, id: `static-${pos}`, position: pos })
+    }
+  }
+  return deck
+}
+
+function extractBanners(json: any): any[] {
+  const bag = [
+    json?.data?.banners,
+    json?.data?.data?.banners,
+    json?.data?.slots,
+    json?.banners,
+    json?.slots,
+    json?.data,
+    json,
+  ]
+  for (const c of bag) {
+    if (Array.isArray(c) && c.length) return c
+  }
+  return []
+}
+
+async function fetchSlotList(opts: {
+  path: string
+  token?: string | null
+  region?: string
+  sessionId?: string
+}): Promise<BannerSlide[]> {
+  const params: Record<string, string> = {}
+  if (opts.sessionId) params.sessionId = opts.sessionId
+  if (opts.region) params.region = String(opts.region)
+
+  const res = await api.get(opts.path, {
+    params,
+    headers: opts.token
+      ? { Authorization: `Bearer ${opts.token}` }
+      : undefined,
+  })
+  const json = res?.data ?? res
+  return extractBanners(json)
+    .map((b, i) => apiToBanner(b, i))
+    .filter((x): x is BannerSlide => x != null)
+}
+
+async function loadHeroFromApi(opts: {
+  token?: string | null
+  region?: string
+  sessionId?: string
+}): Promise<BannerSlide[]> {
+  const pub = await fetchSlotList({
+    path: '/content/hero/public',
+    region: opts.region,
+    sessionId: opts.sessionId,
+  }).catch(() => [] as BannerSlide[])
+
+  let auth: BannerSlide[] = []
+  if (opts.token) {
+    auth = await fetchSlotList({
+      path: '/content/hero',
+      token: opts.token,
+      region: opts.region,
+      sessionId: opts.sessionId,
+    }).catch(() => [] as BannerSlide[])
+  }
+
+  const merged = new Map<number, BannerSlide>()
+  ;[...pub, ...auth].forEach((s) => merged.set(s.position, s))
+  return Array.from(merged.values())
 }
 
 function KenBurnsImage({
@@ -78,41 +312,42 @@ function KenBurnsImage({
   height,
   isActive,
 }: {
-  slide: HeroSlide
+  slide: BannerSlide
   width: number
   height: number
   isActive: boolean
 }) {
-  const scale = useRef(new Animated.Value(1.0)).current
+  const scale = useRef(new Animated.Value(1)).current
 
   useEffect(() => {
+    scale.stopAnimation()
     if (!isActive) {
-      scale.setValue(1.0)
+      scale.setValue(1)
       return
     }
     Animated.timing(scale, {
-      toValue: 1.045,
+      toValue: KEN_BURNS_SCALE,
       duration: HOLD_MS,
       easing: Easing.linear,
       useNativeDriver: true,
     }).start()
-  }, [isActive, scale])
+  }, [isActive, scale, slide.id])
 
   return (
     <View style={[styles.mediaClip, { width, height }]}>
       <Animated.View
         style={{
           position: 'absolute',
-          top: -height * 0.02,
-          left: -width * 0.02,
-          width: width * 1.04,
-          height: height * 1.04,
+          top: -height * 0.03,
+          left: -width * 0.03,
+          width: width * 1.06,
+          height: height * 1.06,
           transform: [{ scale }],
         }}
       >
         <Image
           source={slide.media.source}
-          style={{ width: width * 1.04, height: height * 1.04 }}
+          style={{ width: width * 1.06, height: height * 1.06 }}
           resizeMode="cover"
         />
       </Animated.View>
@@ -122,69 +357,79 @@ function KenBurnsImage({
 
 export default function HeroBanner({
   slides: slidesProp,
+  token = null,
+  region,
+  sessionId,
   topChrome = 0,
   onCtaPress,
   onScrollToShowroom,
+  offlineOnly = false,
 }: Props) {
+  const router = useRouter()
   const insets = useSafeAreaInsets()
   const { width: winW, height: winH } = useWindowDimensions()
 
-  // Window only — screen height is taller than the mall viewport
   const heroWidth = winW
   const heroHeight = Math.max(winH - topChrome, 480)
-
   const statusTop = Math.max(insets.top, Platform.OS === 'android' ? 24 : 20)
   const bottomPad = Math.max(insets.bottom, 12)
+  const { pad, maxW } = copyMetrics(winW)
 
-  const slides = useMemo(
-    () => resolveHeroSlides(slidesProp ?? HERO_SLIDES),
-    [slidesProp]
+  const staticFallback = useMemo(
+    () => resolveHeroSlides(HERO_SLIDES).map((s, i) => staticToBanner(s, i)),
+    [],
   )
 
-  useEffect(() => {
-    prefetchHeroImages(slides)
-  }, [slides])
-
-  const opacities = useRef(
-    slides.map((_, i) => new Animated.Value(i === 0 ? 1 : 0))
-  ).current
-
-  const textOpacity = useRef(new Animated.Value(0)).current
-  const textY = useRef(new Animated.Value(14)).current
-
+  const [slides, setSlides] = useState<BannerSlide[]>(() =>
+    fiveSlotDeck(slidesProp || [], staticFallback),
+  )
   const [current, setCurrent] = useState(0)
   const currentRef = useRef(0)
-  const busy = useRef(false)
-  const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const busyRef = useRef(false)
+  const opacities = useRef(
+    Array.from({ length: SLOT_COUNT }, (_, i) => new Animated.Value(i === 0 ? 1 : 0)),
+  ).current
+  const textOpacity = useRef(new Animated.Value(1)).current
+  const textY = useRef(new Animated.Value(0)).current
+  const slidesRef = useRef(slides)
+  slidesRef.current = slides
 
   useEffect(() => {
     currentRef.current = current
   }, [current])
 
-  const clearHold = useCallback(() => {
-    if (holdTimer.current) {
-      clearTimeout(holdTimer.current)
-      holdTimer.current = null
+  useEffect(() => {
+    if ((slidesProp && slidesProp.length > 0) || offlineOnly) {
+      if (slidesProp?.length) setSlides(fiveSlotDeck(slidesProp, staticFallback))
+      return
     }
-  }, [])
 
-  const scheduleHold = useCallback(() => {
-    clearHold()
-    if (slides.length < 2) return
-    holdTimer.current = setTimeout(() => {
-      goTo(currentRef.current + 1)
-    }, HOLD_MS)
-  }, [slides.length, clearHold])
+    let cancelled = false
+    ;(async () => {
+      try {
+        const remote = await loadHeroFromApi({ token, region, sessionId })
+        if (cancelled) return
+        setSlides(fiveSlotDeck(remote, staticFallback))
+      } catch {
+        if (!cancelled) setSlides(fiveSlotDeck([], staticFallback))
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [slidesProp, token, region, sessionId, offlineOnly, staticFallback])
 
   const goTo = useCallback(
     (raw: number) => {
-      if (busy.current || slides.length < 2) return
+      const deck = slidesRef.current
+      if (busyRef.current || deck.length < 2) return
       const from = currentRef.current
-      const target = ((raw % slides.length) + slides.length) % slides.length
+      const target = ((raw % deck.length) + deck.length) % deck.length
       if (target === from) return
+      if (!opacities[from] || !opacities[target]) return
 
-      busy.current = true
-      clearHold()
+      busyRef.current = true
 
       Animated.parallel([
         Animated.timing(textOpacity, {
@@ -194,7 +439,7 @@ export default function HeroBanner({
           useNativeDriver: true,
         }),
         Animated.timing(textY, {
-          toValue: 12,
+          toValue: 10,
           duration: TEXT_EXIT_MS,
           easing: EASE_CROSSFADE,
           useNativeDriver: true,
@@ -202,7 +447,7 @@ export default function HeroBanner({
       ]).start(() => {
         Animated.parallel([
           Animated.timing(opacities[from], {
-            toValue: 0.01,
+            toValue: 0,
             duration: CROSSFADE_MS,
             easing: EASE_CROSSFADE,
             useNativeDriver: true,
@@ -213,22 +458,12 @@ export default function HeroBanner({
             easing: EASE_CROSSFADE,
             useNativeDriver: true,
           }),
-        ]).start(({ finished }) => {
-          if (!finished) {
-            busy.current = false
-            return
-          }
-
-          slides.forEach((_, i) => {
-            opacities[i].setValue(i === target ? 1 : 0)
-          })
-
+        ]).start(() => {
+          opacities.forEach((v, i) => v.setValue(i === target ? 1 : 0))
           currentRef.current = target
           setCurrent(target)
-
-          textY.setValue(14)
+          textY.setValue(12)
           textOpacity.setValue(0)
-
           Animated.parallel([
             Animated.timing(textOpacity, {
               toValue: 1,
@@ -243,64 +478,73 @@ export default function HeroBanner({
               useNativeDriver: true,
             }),
           ]).start(() => {
-            busy.current = false
-            scheduleHold()
+            busyRef.current = false
           })
         })
       })
     },
-    [opacities, scheduleHold, slides, clearHold, textOpacity, textY]
+    [opacities, textOpacity, textY],
   )
 
-  useEffect(() => {
-    Animated.parallel([
-      Animated.timing(textOpacity, {
-        toValue: 1,
-        duration: 800,
-        easing: EASE_TEXT,
-        useNativeDriver: true,
-      }),
-      Animated.timing(textY, {
-        toValue: 0,
-        duration: 800,
-        easing: EASE_TEXT,
-        useNativeDriver: true,
-      }),
-    ]).start()
+  const goToRef = useRef(goTo)
+  goToRef.current = goTo
 
-    const mountTimer = setTimeout(() => scheduleHold(), HOLD_MS)
-    return () => {
-      clearTimeout(mountTimer)
-      clearHold()
-    }
-  }, [])
+  useEffect(() => {
+    if (slides.length < 2) return
+    const t = setInterval(() => {
+      goToRef.current(currentRef.current + 1)
+    }, HOLD_MS)
+    return () => clearInterval(t)
+  }, [slides.length])
 
   const pan = useRef(
     PanResponder.create({
       onMoveShouldSetPanResponder: (_, g) =>
-        Math.abs(g.dx) > 18 && Math.abs(g.dx) > Math.abs(g.dy) * 1.35,
+        Math.abs(g.dx) > 16 && Math.abs(g.dx) > Math.abs(g.dy) * 1.2,
       onPanResponderRelease: (_, g) => {
-        if (g.dx <= -SWIPE_THRESH) goTo(currentRef.current + 1)
-        else if (g.dx >= SWIPE_THRESH) goTo(currentRef.current - 1)
+        if (g.dx <= -SWIPE_THRESH) goToRef.current(currentRef.current + 1)
+        else if (g.dx >= SWIPE_THRESH) goToRef.current(currentRef.current - 1)
       },
-    })
+    }),
   ).current
 
-  const copy = slides[current]
+  const copy = slides[current] || slides[0]
   if (!copy) return null
 
   const handleCta = () => {
-    if (onCtaPress) onCtaPress(copy)
-    else if (onScrollToShowroom) onScrollToShowroom()
+    if (onCtaPress) {
+      onCtaPress(copy)
+      return
+    }
+    const action = (copy.ctaAction || 'scroll_showroom').toLowerCase()
+    const target = (copy.ctaTarget || '').trim()
+    switch (action) {
+      case 'store':
+      case 'storefront':
+        if (target) router.push(`/store/${target}`)
+        else onScrollToShowroom?.()
+        break
+      case 'product':
+        if (target) router.push(`/product/${target}`)
+        else onScrollToShowroom?.()
+        break
+      case 'category':
+        if (target) router.push(`/browse?category=${encodeURIComponent(target)}`)
+        else onScrollToShowroom?.()
+        break
+      case 'url':
+        if (target.startsWith('http')) Linking.openURL(target).catch(() => {})
+        else onScrollToShowroom?.()
+        break
+      default:
+        onScrollToShowroom?.()
+    }
   }
 
-  const kicker =
-    (copy as HeroSlide & { kicker?: string }).kicker ||
-    (copy as any).eyebrow ||
-    'PLAZORE'
-
-  const hStyle = headlineStyle(copy.headline || '')
-  const sStyle = subStyle(copy.subheadline || '')
+  const kStyle = kickerFit(copy.kicker || '', maxW)
+  const hStyle = headlineFit(copy.headline || '', maxW)
+  const sStyle = subFit(copy.subheadline || '', maxW)
+  const cStyle = ctaFit(copy.ctaLabel || '')
 
   return (
     <View
@@ -322,7 +566,7 @@ export default function HeroBanner({
             left: 0,
             width: heroWidth,
             height: heroHeight,
-            opacity: opacities[i],
+            opacity: opacities[i] ?? 0,
           }}
         >
           <KenBurnsImage
@@ -336,21 +580,27 @@ export default function HeroBanner({
 
       <LinearGradient
         pointerEvents="none"
-        colors={['rgba(0,0,0,0.45)', 'rgba(0,0,0,0.18)', 'transparent']}
-        locations={[0, 0.55, 1]}
+        colors={['rgba(0,0,0,0.4)', 'rgba(0,0,0,0.12)', 'transparent']}
+        locations={[0, 0.5, 1]}
         style={{
           position: 'absolute',
           top: 0,
           left: 0,
           right: 0,
-          height: statusTop + 36,
+          height: statusTop + 48,
           zIndex: 2,
         }}
       />
-
       <LinearGradient
         pointerEvents="none"
-        colors={['transparent', 'rgba(9,11,15,0.4)', 'rgba(9,11,15,0.94)']}
+        colors={['rgba(9,11,15,0.55)', 'rgba(9,11,15,0.15)', 'transparent']}
+        start={{ x: 0, y: 0.5 }}
+        end={{ x: 1, y: 0.5 }}
+        style={FILL}
+      />
+      <LinearGradient
+        pointerEvents="none"
+        colors={['transparent', 'rgba(9,11,15,0.55)', 'rgba(9,11,15,0.96)']}
         locations={[0.28, 0.62, 1]}
         style={FILL}
       />
@@ -360,44 +610,83 @@ export default function HeroBanner({
         style={[
           styles.copyBlock,
           {
+            paddingHorizontal: pad,
             paddingTop: statusTop + 56,
-            paddingBottom: bottomPad + 58,
+            paddingBottom: bottomPad + 78,
             opacity: textOpacity,
             transform: [{ translateY: textY }],
           },
         ]}
       >
-        <Text style={styles.kicker}>{String(kicker).toUpperCase()}</Text>
-        <Text style={[styles.headline, hStyle]} numberOfLines={3}>
+        <Text
+          style={[styles.kicker, kStyle]}
+          numberOfLines={2}
+          adjustsFontSizeToFit
+          minimumFontScale={0.65}
+        >
+          {copy.kicker}
+        </Text>
+
+        <Text
+          style={[styles.headline, hStyle]}
+          numberOfLines={4}
+          adjustsFontSizeToFit
+          minimumFontScale={0.62}
+        >
           {copy.headline}
         </Text>
-        <Text style={[styles.sub, sStyle]} numberOfLines={3}>
-          {copy.subheadline}
-        </Text>
+
+        {!!copy.subheadline && (
+          <Text
+            style={[styles.sub, sStyle]}
+            numberOfLines={5}
+            adjustsFontSizeToFit
+            minimumFontScale={0.7}
+          >
+            {copy.subheadline}
+          </Text>
+        )}
 
         <Pressable
           onPress={handleCta}
-          style={({ pressed }) => [styles.cta, pressed && styles.ctaPressed]}
+          style={({ pressed }) => [
+            styles.cta,
+            { paddingHorizontal: cStyle.paddingHorizontal, maxWidth: maxW },
+            pressed && styles.ctaPressed,
+          ]}
         >
-          <Text style={styles.ctaText}>{copy.ctaLabel}</Text>
+          <Text
+            style={[
+              styles.ctaText,
+              { fontSize: cStyle.fontSize, letterSpacing: cStyle.letterSpacing },
+            ]}
+            numberOfLines={2}
+            adjustsFontSizeToFit
+            minimumFontScale={0.7}
+          >
+            {copy.ctaLabel}
+          </Text>
         </Pressable>
+
+        <View style={styles.dotsRow}>
+          {slides.map((_, i) => (
+            <Pressable
+              key={`dot-${i}`}
+              onPress={() => goTo(i)}
+              hitSlop={12}
+              style={[styles.dot, i === current ? styles.dotActive : styles.dotIdle]}
+            />
+          ))}
+        </View>
       </Animated.View>
 
       <View
         pointerEvents="box-none"
         style={[styles.arrowBar, { paddingBottom: bottomPad + 8 }]}
       >
-        <Pressable
-          onPress={onScrollToShowroom}
-          hitSlop={20}
-          style={styles.arrowHit}
-        >
+        <Pressable onPress={onScrollToShowroom} hitSlop={20} style={styles.arrowHit}>
           <Text style={styles.arrowLabel}>SHOWROOM</Text>
-          <Ionicons
-            name="chevron-down"
-            size={26}
-            color="rgba(255,255,255,0.55)"
-          />
+          <Ionicons name="chevron-down" size={24} color="rgba(255,255,255,0.5)" />
         </Pressable>
       </View>
     </View>
@@ -405,56 +694,61 @@ export default function HeroBanner({
 }
 
 const styles = StyleSheet.create({
-  mediaClip: {
-    overflow: 'hidden',
-    backgroundColor: '#090B0F',
-  },
+  mediaClip: { overflow: 'hidden', backgroundColor: '#090B0F' },
   copyBlock: {
     ...FILL,
     justifyContent: 'flex-end',
     alignItems: 'flex-start',
-    paddingHorizontal: 22,
     zIndex: 3,
   },
   kicker: {
-    fontFamily: 'Manrope_600SemiBold',
-    color: 'rgba(255,255,255,0.55)',
-    fontSize: 11,
-    letterSpacing: 3.2,
+    fontFamily: 'Poppins_600SemiBold',
+    color: 'rgba(0,229,117,0.9)',
     marginBottom: 10,
+    flexShrink: 1,
   },
   headline: {
-    fontFamily: 'Manrope_700Bold',
+    fontFamily: 'Poppins_600SemiBold',
     color: '#FFFFFF',
-    letterSpacing: -0.4,
-    marginBottom: 12,
-    textShadowColor: 'rgba(0,0,0,0.45)',
+    marginBottom: 10,
+    textShadowColor: 'rgba(0,0,0,0.4)',
     textShadowOffset: { width: 0, height: 2 },
     textShadowRadius: 10,
+    flexShrink: 1,
   },
   sub: {
-    fontFamily: 'Manrope_400Regular',
+    fontFamily: 'Poppins_400Regular',
     color: 'rgba(255,255,255,0.65)',
-    marginBottom: 22,
+    marginBottom: 18,
+    flexShrink: 1,
   },
   cta: {
-    paddingHorizontal: 22,
-    paddingVertical: 12,
+    paddingVertical: 11,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(255,255,255,0.35)',
     backgroundColor: 'transparent',
+    alignSelf: 'flex-start',
   },
   ctaPressed: {
-    opacity: 0.8,
+    opacity: 0.85,
     backgroundColor: 'rgba(255,255,255,0.06)',
+    borderColor: 'rgba(255,255,255,0.55)',
   },
   ctaText: {
-    fontFamily: 'Manrope_600SemiBold',
+    fontFamily: 'Poppins_600SemiBold',
     color: '#FFFFFF',
-    fontSize: 11,
-    letterSpacing: 2,
     textTransform: 'uppercase',
   },
+  dotsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 18,
+  },
+  dot: { height: 4, borderRadius: 2 },
+  dotActive: { width: 20, backgroundColor: 'rgba(255,255,255,0.9)' },
+  dotIdle: { width: 6, backgroundColor: 'rgba(255,255,255,0.25)' },
   arrowBar: {
     position: 'absolute',
     left: 0,
@@ -463,14 +757,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     zIndex: 10,
   },
-  arrowHit: {
-    alignItems: 'center',
-    gap: 2,
-  },
+  arrowHit: { alignItems: 'center', gap: 2 },
   arrowLabel: {
-    fontFamily: 'Manrope_600SemiBold',
+    fontFamily: 'Poppins_600SemiBold',
     fontSize: 9,
-    letterSpacing: 2.4,
+    letterSpacing: 2.8,
     color: 'rgba(255,255,255,0.45)',
+    textTransform: 'uppercase',
   },
 })

@@ -24,9 +24,12 @@ import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { BlurView } from "expo-blur";
-import { useAuth } from "@clerk/clerk-expo";
+import { useAuth, useOAuth } from "@clerk/clerk-expo";
+import * as WebBrowser from "expo-web-browser";
 import api from "@/constants/api";
 import { useMarketplace } from "@/context/MarketplaceContext";
+
+WebBrowser.maybeCompleteAuthSession();
 
 const { width, height } = Dimensions.get("window");
 const H_PAD = 20;
@@ -36,7 +39,10 @@ const ENTRANCE_H = Math.min(height * 0.34, 280);
 const FEATURED_H = width * 0.78;
 const FEATURED_INTERVAL_MS = 7000;
 const TOAST_MS = 3200;
-const SITE = "https://plazore.com"; // set to your real web origin
+const SITE = "https://plazore.com";
+const PENDING_KEY = "plazore_store_pending";
+const GOOGLE_G =
+  "https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg";
 
 const BG = "#090B0F";
 const SURFACE = "#11141A";
@@ -47,6 +53,8 @@ const SECONDARY = "#A7ADB8";
 const MUTED = "#737A86";
 const AI_GREEN = "#10B981";
 const AI_BLUE = "#3B82F6";
+const REPORT = "#EF4444";
+const REPORT_SOFT = "#F87171";
 
 type StorePublic = {
   id?: string;
@@ -57,15 +65,66 @@ type StorePublic = {
   storeLogo: string;
   storeBanner: string;
   isVerified?: boolean;
-  location?: {
-    state?: string;
-    country?: string;
-  };
+  seller?: string | { _id?: string; id?: string };
+  userId?: string;
+  ownerId?: string;
+  location?: { state?: string; country?: string };
 };
+
+type PendingAction = "save" | "contact" | "report" | null;
+
+function isOwnStore(store: StorePublic | null, userId?: string | null) {
+  if (!store || !userId) return false;
+  const uid = String(userId);
+  const candidates = [
+    store.userId,
+    store.ownerId,
+    typeof store.seller === "string" ? store.seller : null,
+    typeof store.seller === "object" ? store.seller?._id : null,
+    typeof store.seller === "object" ? store.seller?.id : null,
+  ];
+  return candidates.some((c) => c && String(c) === uid);
+}
+
+async function savePending(payload: {
+  action: PendingAction;
+  storeId?: string;
+}) {
+  try {
+    const AsyncStorage =
+      require("@react-native-async-storage/async-storage").default;
+    await AsyncStorage.setItem(PENDING_KEY, JSON.stringify(payload));
+  } catch {
+    /* optional */
+  }
+}
+
+async function readPending(): Promise<{
+  action?: PendingAction;
+  storeId?: string;
+} | null> {
+  try {
+    const AsyncStorage =
+      require("@react-native-async-storage/async-storage").default;
+    const raw = await AsyncStorage.getItem(PENDING_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+async function clearPending() {
+  try {
+    const AsyncStorage =
+      require("@react-native-async-storage/async-storage").default;
+    await AsyncStorage.removeItem(PENDING_KEY);
+  } catch {
+    /* optional */
+  }
+}
 
 function StorePreloader() {
   const rotation = useRef(new Animated.Value(0)).current;
-
   useEffect(() => {
     const loop = Animated.loop(
       Animated.timing(rotation, {
@@ -77,13 +136,11 @@ function StorePreloader() {
     );
     loop.start();
     return () => loop.stop();
-  }, []);
-
+  }, [rotation]);
   const rotate = rotation.interpolate({
     inputRange: [0, 1],
     outputRange: ["0deg", "360deg"],
   });
-
   return (
     <View style={styles.loaderRoot}>
       <View style={styles.orbWrapper}>
@@ -116,12 +173,9 @@ function TopToast({
 
   useEffect(() => {
     if (!visible) return;
-
     if (timerRef.current) clearTimeout(timerRef.current);
-
     opacity.setValue(0);
     translateY.setValue(-18);
-
     Animated.parallel([
       Animated.timing(opacity, {
         toValue: 1,
@@ -136,7 +190,6 @@ function TopToast({
         useNativeDriver: true,
       }),
     ]).start();
-
     timerRef.current = setTimeout(() => {
       Animated.parallel([
         Animated.timing(opacity, {
@@ -155,14 +208,12 @@ function TopToast({
         if (finished) onHide();
       });
     }, TOAST_MS);
-
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
     };
-  }, [visible, message]);
+  }, [visible, message, onHide, opacity, translateY]);
 
   if (!visible) return null;
-
   return (
     <Animated.View
       pointerEvents="none"
@@ -180,7 +231,7 @@ function TopToast({
           colors={["rgba(16,185,129,0.12)", "rgba(59,130,246,0.08)"]}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
-          style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 }}
+          style={{ position: "absolute", top: 0, right: 0, bottom: 0, left: 0 }}
         />
         <View style={styles.toastIcon}>
           <Ionicons name="storefront-outline" size={16} color={AI_GREEN} />
@@ -196,7 +247,8 @@ export default function PublicStorefront() {
   const id = Array.isArray(rawId) ? rawId[0] : rawId;
   const router = useRouter();
   const { formatProduct } = useMarketplace();
-  const { getToken, isSignedIn, isLoaded: authLoaded } = useAuth();
+  const { getToken, isSignedIn, isLoaded: authLoaded, userId } = useAuth();
+  const { startOAuthFlow } = useOAuth({ strategy: "oauth_google" });
 
   const [store, setStore] = useState<StorePublic | null>(null);
   const [products, setProducts] = useState<any[]>([]);
@@ -207,11 +259,12 @@ export default function PublicStorefront() {
   const [descExpanded, setDescExpanded] = useState(false);
   const [goalExpanded, setGoalExpanded] = useState(false);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
-
   const [shareOpen, setShareOpen] = useState(false);
   const [authOpen, setAuthOpen] = useState(false);
+  const [pending, setPending] = useState<PendingAction>(null);
   const [copied, setCopied] = useState(false);
   const [shareBusy, setShareBusy] = useState(false);
+  const [googleBusy, setGoogleBusy] = useState(false);
 
   const door = useRef(new Animated.Value(0)).current;
   const content = useRef(new Animated.Value(0)).current;
@@ -220,8 +273,10 @@ export default function PublicStorefront() {
   const featuredIndexRef = useRef(0);
   const userTouching = useRef(false);
   const saveInFlight = useRef(false);
+  const ranPending = useRef(false);
 
   const storeId = store?._id || store?.id || id || "";
+  const ownerView = isOwnStore(store, userId);
 
   const storeUrl = useMemo(() => {
     const key = storeId || id || "";
@@ -232,6 +287,8 @@ export default function PublicStorefront() {
     const name = store?.storeName || "This storefront";
     return `Shop ${name} on Plazore\n${storeUrl}`;
   }, [store?.storeName, storeUrl]);
+
+  const returnPath = `/store/${storeId || id}`;
 
   useEffect(() => {
     const load = async () => {
@@ -267,11 +324,9 @@ export default function PublicStorefront() {
       try {
         const token = await getToken();
         if (!token) return;
-
         const res = await api.get("/saved-stores", {
           headers: { Authorization: `Bearer ${token}` },
         });
-
         if (res.data?.success && Array.isArray(res.data.data)) {
           const isSaved = res.data.data.some(
             (s: any) => String(s._id || s.id) === String(storeId),
@@ -282,13 +337,11 @@ export default function PublicStorefront() {
         console.log("Check saved store error:", e);
       }
     };
-
     checkSaved();
   }, [isSignedIn, storeId, getToken]);
 
   useEffect(() => {
     if (loading || !store) return;
-
     Animated.sequence([
       Animated.timing(door, {
         toValue: 1,
@@ -311,11 +364,10 @@ export default function PublicStorefront() {
         }),
       ]),
     ]).start();
-  }, [loading, store]);
+  }, [loading, store, door, content, identityLift]);
 
   useEffect(() => {
     if (products.length <= 1) return;
-
     const timer = setInterval(() => {
       if (userTouching.current) return;
       const next = (featuredIndexRef.current + 1) % products.length;
@@ -326,7 +378,6 @@ export default function PublicStorefront() {
         animated: true,
       });
     }, FEATURED_INTERVAL_MS);
-
     return () => clearInterval(timer);
   }, [products.length]);
 
@@ -348,57 +399,106 @@ export default function PublicStorefront() {
     );
   };
 
-  const requireAuthForSave = () => {
+  const goContact = useCallback(() => {
+    router.push({
+      pathname: "/contact" as any,
+      params: {
+        mode: "contact",
+        contextType: "store",
+        storeId: String(storeId || ""),
+        storeName: String(store?.storeName || ""),
+      },
+    });
+  }, [router, storeId, store?.storeName]);
+
+  const goReport = useCallback(() => {
+    router.push({
+      pathname: "/contact" as any,
+      params: {
+        mode: "report",
+        contextType: "store",
+        storeId: String(storeId || ""),
+        storeName: String(store?.storeName || ""),
+      },
+    });
+  }, [router, storeId, store?.storeName]);
+
+  const persistGate = (action: PendingAction) => {
+    setPending(action);
+    void savePending({ action, storeId: String(storeId || id || "") });
+  };
+
+  const requireAuth = (action: PendingAction) => {
     if (!authLoaded) return false;
     if (isSignedIn) return true;
+    persistGate(action);
     setAuthOpen(true);
     return false;
   };
 
   const goSignIn = () => {
+    persistGate(pending || "save");
     setAuthOpen(false);
     router.push({
       pathname: "/(auth)/sign-in" as any,
-      params: { redirect_url: `/store/${storeId || id}` },
+      params: { redirect_url: returnPath },
     });
   };
 
   const goSignUp = () => {
+    persistGate(pending || "save");
     setAuthOpen(false);
     router.push({
       pathname: "/(auth)/sign-up" as any,
-      params: { redirect_url: `/store/${storeId || id}` },
+      params: { redirect_url: returnPath },
     });
+  };
+
+  const continueGoogle = async () => {
+    persistGate(pending || "save");
+    setGoogleBusy(true);
+    try {
+      const { createdSessionId, setActive } = await startOAuthFlow();
+      if (createdSessionId && setActive) {
+        await setActive({ session: createdSessionId });
+        setAuthOpen(false);
+      } else {
+        goSignIn();
+      }
+    } catch {
+      goSignIn();
+    } finally {
+      setGoogleBusy(false);
+    }
   };
 
   const handleToggleSave = async () => {
     if (!storeId || saveInFlight.current) return;
-
-    if (!requireAuthForSave()) return;
+    if (ownerView) {
+      showOwnStoreToast();
+      return;
+    }
+    if (!requireAuth("save")) return;
 
     const previous = saved;
     setSaved(!previous);
     setSaveBusy(true);
     saveInFlight.current = true;
-
     try {
       const token = await getToken();
       if (!token) {
         setSaved(previous);
+        persistGate("save");
         setAuthOpen(true);
         return;
       }
-
       const res = await api.post(
         "/saved-stores/toggle",
         { storeId },
         { headers: { Authorization: `Bearer ${token}` } },
       );
-
       if (res.data?.success) {
-        if (typeof res.data.saved === "boolean") {
-          setSaved(res.data.saved);
-        }
+        if (typeof res.data.saved === "boolean") setSaved(res.data.saved);
       } else {
         setSaved(previous);
         const msg = String(res.data?.message || "").toLowerCase();
@@ -413,13 +513,10 @@ export default function PublicStorefront() {
         }
       }
     } catch (error: any) {
-      console.log("Toggle saved store error:", error?.response?.data || error);
       setSaved(previous);
-
       const msg = String(
         error?.response?.data?.message || error?.message || "",
       ).toLowerCase();
-
       if (
         msg.includes("own store") ||
         msg.includes("own storefront") ||
@@ -435,6 +532,40 @@ export default function PublicStorefront() {
       saveInFlight.current = false;
     }
   };
+
+  const onContact = () => {
+    if (ownerView) return;
+    if (!requireAuth("contact")) return;
+    goContact();
+  };
+
+  const onReport = () => {
+    if (ownerView) return;
+    if (!requireAuth("report")) return;
+    goReport();
+  };
+
+  useEffect(() => {
+    if (!authLoaded || !isSignedIn || ranPending.current || !store) return;
+    if (ownerView) {
+      void clearPending();
+      return;
+    }
+    (async () => {
+      const stored = await readPending();
+      const action = stored?.action || pending;
+      if (!action) return;
+      if (stored?.storeId && stored.storeId !== String(storeId)) return;
+      ranPending.current = true;
+      await clearPending();
+      setAuthOpen(false);
+      setPending(null);
+      if (action === "contact") goContact();
+      else if (action === "report") goReport();
+      else if (action === "save") void handleToggleSave();
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authLoaded, isSignedIn, store, storeId, ownerView]);
 
   const shareNative = async () => {
     try {
@@ -475,13 +606,11 @@ export default function PublicStorefront() {
       `https://wa.me/?text=${encodeURIComponent(shareMessage)}`,
     ).catch(() => {});
   };
-
   const openTwitter = () => {
     Linking.openURL(
       `https://twitter.com/intent/tweet?text=${encodeURIComponent(shareMessage)}`,
     ).catch(() => {});
   };
-
   const openFacebook = () => {
     Linking.openURL(
       `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(storeUrl)}`,
@@ -492,9 +621,22 @@ export default function PublicStorefront() {
     .filter(Boolean)
     .join(", ");
 
-  if (loading) {
-    return <StorePreloader />;
-  }
+  const authCopy = {
+    save: {
+      title: "Sign in to save this storefront",
+      body: "Saved stores live on your account so they follow you. You’ll land back here.",
+    },
+    contact: {
+      title: "Sign in to contact this store",
+      body: "Messages go through Plazore — not direct seller chat. You’ll return here after.",
+    },
+    report: {
+      title: "Sign in to report this store",
+      body: "Reports go to Plazore moderation. You’ll return here after.",
+    },
+  }[pending || "save"];
+
+  if (loading) return <StorePreloader />;
 
   if (!store) {
     return (
@@ -522,7 +664,6 @@ export default function PublicStorefront() {
   return (
     <View style={styles.root}>
       <StatusBar barStyle="light-content" />
-
       <TopToast
         visible={!!toastMsg}
         message={toastMsg || ""}
@@ -532,7 +673,6 @@ export default function PublicStorefront() {
       <ScrollView
         showsVerticalScrollIndicator={false}
         bounces={false}
-        decelerationRate="normal"
         contentContainerStyle={{ paddingBottom: 70 }}
       >
         <Animated.View style={{ opacity: door }}>
@@ -549,16 +689,20 @@ export default function PublicStorefront() {
                 style={{ width, height: ENTRANCE_H }}
               />
             )}
-
             <LinearGradient
               colors={[
                 "rgba(9,11,15,0.15)",
                 "transparent",
                 "rgba(9,11,15,0.85)",
               ]}
-              style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 }}
+              style={{
+                position: "absolute",
+                top: 0,
+                right: 0,
+                bottom: 0,
+                left: 0,
+              }}
             />
-
             <SafeAreaView
               edges={["top"]}
               style={styles.topBar}
@@ -572,11 +716,16 @@ export default function PublicStorefront() {
                 <BlurView
                   intensity={40}
                   tint="dark"
-                  style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 }}
+                  style={{
+                    position: "absolute",
+                    top: 0,
+                    right: 0,
+                    bottom: 0,
+                    left: 0,
+                  }}
                 />
                 <Ionicons name="chevron-back" size={20} color={TEXT} />
               </TouchableOpacity>
-
               <TouchableOpacity
                 onPress={() => setShareOpen(true)}
                 activeOpacity={0.85}
@@ -585,7 +734,13 @@ export default function PublicStorefront() {
                 <BlurView
                   intensity={40}
                   tint="dark"
-                  style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 }}
+                  style={{
+                    position: "absolute",
+                    top: 0,
+                    right: 0,
+                    bottom: 0,
+                    left: 0,
+                  }}
                 />
                 <Ionicons name="share-outline" size={18} color={TEXT} />
               </TouchableOpacity>
@@ -601,12 +756,10 @@ export default function PublicStorefront() {
             paddingHorizontal: H_PAD,
           }}
         >
-          <View style={styles.identityCard}>
-            <LinearGradient
-              colors={["rgba(17,20,26,0.98)", "rgba(17,20,26,0.92)"]}
-              style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 }}
-            />
-
+          <LinearGradient
+            colors={["#141820", "#11141A"]}
+            style={styles.identityCard}
+          >
             <View style={styles.identityTop}>
               <View style={styles.logoWrap}>
                 {store.storeLogo ? (
@@ -616,11 +769,10 @@ export default function PublicStorefront() {
                     resizeMode="cover"
                   />
                 ) : (
-                  <Ionicons name="storefront" size={32} color={MUTED} />
+                  <Ionicons name="storefront-outline" size={28} color={MUTED} />
                 )}
               </View>
-
-              <View style={{ flex: 1, marginLeft: 14 }}>
+              <View style={{ flex: 1, marginLeft: 14, minWidth: 0 }}>
                 <View style={styles.nameRow}>
                   <Text style={styles.storeName} numberOfLines={2}>
                     {store.storeName}
@@ -629,16 +781,16 @@ export default function PublicStorefront() {
                     <View style={styles.verifiedBadge}>
                       <Ionicons
                         name="checkmark-circle"
-                        size={13}
+                        size={12}
                         color={AI_GREEN}
                       />
                       <Text style={styles.verifiedText}>Verified</Text>
                     </View>
                   ) : null}
                 </View>
-
-                <Text style={styles.openLabel}>Explore this store</Text>
-
+                <Text style={styles.openLabel}>
+                  {ownerView ? "Your storefront" : "Explore this store"}
+                </Text>
                 {!!locationLabel && (
                   <View style={styles.locationRow}>
                     <Ionicons name="location-outline" size={13} color={MUTED} />
@@ -651,7 +803,7 @@ export default function PublicStorefront() {
             </View>
 
             {!!store.storeDescription && (
-              <View style={{ marginTop: 16 }}>
+              <View style={{ marginTop: 14 }}>
                 <Text
                   style={styles.desc}
                   numberOfLines={descExpanded ? undefined : 3}
@@ -661,8 +813,7 @@ export default function PublicStorefront() {
                 {store.storeDescription.length > 110 && (
                   <TouchableOpacity
                     onPress={() => setDescExpanded((v) => !v)}
-                    activeOpacity={0.7}
-                    style={{ marginTop: 6 }}
+                    hitSlop={8}
                   >
                     <Text style={styles.seeMore}>
                       {descExpanded ? "See less" : "See more"}
@@ -684,8 +835,7 @@ export default function PublicStorefront() {
                 {store.businessGoal.length > 80 && (
                   <TouchableOpacity
                     onPress={() => setGoalExpanded((v) => !v)}
-                    activeOpacity={0.7}
-                    style={{ marginTop: 6 }}
+                    hitSlop={8}
                   >
                     <Text style={styles.seeMore}>
                       {goalExpanded ? "See less" : "See more"}
@@ -696,121 +846,115 @@ export default function PublicStorefront() {
             )}
 
             <View style={styles.actionRow}>
-              <TouchableOpacity
-                onPress={handleToggleSave}
-                activeOpacity={0.88}
-                disabled={saveBusy}
-                style={[styles.saveBtn, saved && styles.saveBtnActive]}
-              >
-                {saveBusy ? (
-                  <ActivityIndicator
-                    size="small"
-                    color={saved ? BG : TEXT}
-                    style={{ marginRight: 7 }}
-                  />
-                ) : (
-                  <Ionicons
-                    name={saved ? "bookmark" : "bookmark-outline"}
-                    size={16}
-                    color={saved ? BG : TEXT}
-                    style={{ marginRight: 7 }}
-                  />
-                )}
-                <Text style={[styles.saveBtnText, saved && { color: BG }]}>
-                  {saved ? "Saved" : "Save store"}
-                </Text>
-              </TouchableOpacity>
-
+              {!ownerView && (
+                <TouchableOpacity
+                  onPress={handleToggleSave}
+                  disabled={saveBusy}
+                  activeOpacity={0.88}
+                  style={[styles.saveBtn, saved && styles.saveBtnActive]}
+                >
+                  {saveBusy ? (
+                    <ActivityIndicator
+                      color={saved ? BG : TEXT}
+                      size="small"
+                    />
+                  ) : (
+                    <>
+                      <Ionicons
+                        name={saved ? "bookmark" : "bookmark-outline"}
+                        size={16}
+                        color={saved ? BG : TEXT}
+                        style={{ marginRight: 8 }}
+                      />
+                      <Text
+                        style={[
+                          styles.saveBtnText,
+                          saved && { color: BG },
+                        ]}
+                      >
+                        {saved ? "Saved" : "Save store"}
+                      </Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              )}
               <View style={styles.countPill}>
                 <Text style={styles.countText}>
                   {products.length} products
                 </Text>
               </View>
             </View>
-          </View>
+          </LinearGradient>
         </Animated.View>
 
+        {/* Closer look — horizontal carousel (one focused slide) */}
         {products.length > 0 && (
-          <Animated.View style={{ opacity: content, marginTop: 36 }}>
-            <View style={{ paddingHorizontal: H_PAD, marginBottom: 16 }}>
-              <Text style={styles.sectionEyebrow}>Featured</Text>
-              <Text style={styles.sectionTitle}>A closer look</Text>
-            </View>
-
+          <Animated.View
+            style={{
+              opacity: content,
+              paddingHorizontal: H_PAD,
+              marginTop: 28,
+            }}
+          >
+            <Text style={styles.sectionEyebrow}>Featured</Text>
+            <Text style={styles.sectionTitle}>A closer look</Text>
             <ScrollView
               ref={featuredRef}
               horizontal
               pagingEnabled
-              decelerationRate="fast"
               showsHorizontalScrollIndicator={false}
-              snapToInterval={slideW}
-              snapToAlignment="start"
-              disableIntervalMomentum
-              contentContainerStyle={{ paddingHorizontal: H_PAD }}
+              decelerationRate="fast"
               onScrollBeginDrag={() => {
                 userTouching.current = true;
               }}
-              onScrollEndDrag={() => {
+              onMomentumScrollEnd={(e) => {
                 userTouching.current = false;
+                onFeaturedScrollEnd(e);
               }}
-              onMomentumScrollEnd={onFeaturedScrollEnd}
+              style={{ marginTop: 14 }}
             >
               {products.map((p) => (
                 <TouchableOpacity
-                  key={p._id}
+                  key={String(p._id)}
                   activeOpacity={0.92}
-                  onPress={() => router.push(`/product/${p._id}` as any)}
-                  style={{ width: slideW }}
+                  onPress={() =>
+                    router.push(`/product/${p._id}` as any)
+                  }
+                  style={[styles.featuredCard, { width: slideW }]}
                 >
-                  <View style={styles.featuredCard}>
+                  {p.images?.[0] ? (
+                    <Image
+                      source={{ uri: p.images[0] }}
+                      style={{ width: slideW, height: FEATURED_H }}
+                      resizeMode="cover"
+                    />
+                  ) : (
                     <View
                       style={{
+                        width: slideW,
                         height: FEATURED_H,
                         backgroundColor: SURFACE_2,
                       }}
-                    >
-                      {p.images?.[0] ? (
-                        <Image
-                          source={{ uri: p.images[0] }}
-                          style={{ width: "100%", height: "100%" }}
-                          resizeMode="cover"
-                        />
-                      ) : (
-                        <View style={styles.noImg}>
-                          <Ionicons
-                            name="image-outline"
-                            size={40}
-                            color="#3A3F4A"
-                          />
-                        </View>
+                    />
+                  )}
+                  <LinearGradient
+                    colors={["transparent", "rgba(9,11,15,0.92)"]}
+                    style={styles.featuredFade}
+                  />
+                  <View style={styles.featuredInfo}>
+                    <Text style={styles.featuredName} numberOfLines={2}>
+                      {p.name}
+                    </Text>
+                    <Text style={styles.featuredPrice}>
+                      {formatProduct(
+                        Number(p.price),
+                        p.region || store?.location?.country || "NG",
                       )}
-
-                      <LinearGradient
-                        colors={[
-                          "transparent",
-                          "rgba(9,11,15,0.55)",
-                          "rgba(9,11,15,0.92)",
-                        ]}
-                        style={styles.featuredFade}
-                      />
-
-                      <View style={styles.featuredInfo}>
-                        <Text style={styles.featuredName} numberOfLines={2}>
-                          {p.name}
-                        </Text>
-                        <Text style={styles.featuredPrice}>
-                          {formatProduct(
-                            Number(p.price),
-                            p.region || store?.location?.country || "NG",
-                          )}
-                        </Text>
-                      </View>
-                    </View>
+                    </Text>
                   </View>
                 </TouchableOpacity>
               ))}
             </ScrollView>
-
             {products.length > 1 && (
               <View style={styles.dotsRow}>
                 {products.map((_, i) => (
@@ -820,11 +964,11 @@ export default function PublicStorefront() {
                       width: i === featuredIndex ? 18 : 6,
                       height: 5,
                       borderRadius: 3,
+                      marginHorizontal: 3,
                       backgroundColor:
                         i === featuredIndex
                           ? AI_GREEN
                           : "rgba(255,255,255,0.2)",
-                      marginHorizontal: 3,
                     }}
                   />
                 ))}
@@ -833,26 +977,25 @@ export default function PublicStorefront() {
           </Animated.View>
         )}
 
+        {/* Grid */}
         <Animated.View
           style={{
             opacity: content,
             paddingHorizontal: H_PAD,
-            marginTop: 40,
+            marginTop: 28,
           }}
         >
-          <Text style={styles.sectionEyebrow}>THE STORE</Text>
+          <Text style={styles.sectionEyebrow}>The store</Text>
           <Text style={styles.sectionTitle}>Explore the collection</Text>
-
           <View style={styles.dividerRow}>
             <View style={styles.dividerLine} />
-            <Text style={styles.dividerText}>ALL PRODUCTS</Text>
+            <Text style={styles.dividerText}>All products</Text>
             <View style={styles.dividerLine} />
           </View>
-
           {products.length === 0 ? (
             <View style={styles.emptyFloor}>
               <View style={styles.emptyFloorIcon}>
-                <Ionicons name="cube-outline" size={26} color={MUTED} />
+                <Ionicons name="cube-outline" size={22} color={MUTED} />
               </View>
               <Text style={styles.emptyFloorText}>
                 This storefront is still being set up.{"\n"}Check back soon.
@@ -862,125 +1005,102 @@ export default function PublicStorefront() {
             <View style={styles.grid}>
               {products.map((p) => (
                 <TouchableOpacity
-                  key={p._id}
+                  key={String(p._id)}
                   activeOpacity={0.9}
                   onPress={() => router.push(`/product/${p._id}` as any)}
-                  style={{ width: CARD_W, marginBottom: 16 }}
+                  style={[styles.gridCard, { width: CARD_W }]}
                 >
-                  <View style={styles.gridCard}>
-                    <View
-                      style={{
-                        height: CARD_W * 1.15,
-                        backgroundColor: SURFACE_2,
-                      }}
-                    >
-                      {p.images?.[0] ? (
-                        <Image
-                          source={{ uri: p.images[0] }}
-                          style={{ width: "100%", height: "100%" }}
-                          resizeMode="cover"
+                  <View
+                    style={{
+                      width: CARD_W,
+                      height: CARD_W * 1.15,
+                      backgroundColor: SURFACE_2,
+                    }}
+                  >
+                    {p.images?.[0] ? (
+                      <Image
+                        source={{ uri: p.images[0] }}
+                        style={{ width: "100%", height: "100%" }}
+                        resizeMode="cover"
+                      />
+                    ) : (
+                      <View style={styles.noImg}>
+                        <Ionicons
+                          name="image-outline"
+                          size={22}
+                          color={MUTED}
                         />
-                      ) : (
-                        <View style={styles.noImg}>
-                          <Ionicons
-                            name="image-outline"
-                            size={24}
-                            color="#3A3F4A"
-                          />
-                        </View>
+                      </View>
+                    )}
+                  </View>
+                  <View style={styles.gridInfo}>
+                    <Text style={styles.gridName} numberOfLines={2}>
+                      {p.name}
+                    </Text>
+                    <Text style={styles.gridPrice}>
+                      {formatProduct(
+                        Number(p.price),
+                        p.region || store?.location?.country || "NG",
                       )}
-                    </View>
-                    <View style={styles.gridInfo}>
-                      <Text style={styles.gridName} numberOfLines={2}>
-                        {p.name}
-                      </Text>
-                      <Text style={styles.gridPrice}>
-                        {formatProduct(
-                          Number(p.price),
-                          p.region || store?.location?.country || "NG",
-                        )}
-                      </Text>
-                    </View>
+                    </Text>
                   </View>
                 </TouchableOpacity>
               ))}
             </View>
           )}
         </Animated.View>
-{/* Contact + Report — bottom of storefront */}
-<Animated.View
-  style={{
-    opacity: content,
-    paddingHorizontal: H_PAD,
-    marginTop: 28,
-  }}
->
-  <Text style={styles.sectionEyebrow}>Support</Text>
 
-  <TouchableOpacity
-    activeOpacity={0.88}
-    onPress={() => {
-      if (!authLoaded) return;
-      if (!isSignedIn) {
-        setAuthOpen(true);
-        return;
-      }
-      router.push({
-        pathname: "/contact" as any,
-        params: {
-          mode: "contact",
-          contextType: "store",
-          storeId: String(storeId || ""),
-          storeName: String(store.storeName || ""),
-        },
-      });
-    }}
-    style={styles.supportPrimary}
-  >
-    <View style={styles.supportIconPrimary}>
-      <Ionicons name="chatbubbles-outline" size={18} color={AI_GREEN} />
-    </View>
-    <View style={{ flex: 1, minWidth: 0 }}>
-      <Text style={styles.supportTitle}>Contact Store through Plazore</Text>
-      <Text style={styles.supportSub} numberOfLines={1}>
-        Routed through Plazore · not direct seller chat
-      </Text>
-    </View>
-    <Ionicons name="chevron-forward" size={16} color={MUTED} />
-  </TouchableOpacity>
-
-  <TouchableOpacity
-    activeOpacity={0.88}
-    onPress={() => {
-      if (!authLoaded) return;
-      if (!isSignedIn) {
-        setAuthOpen(true);
-        return;
-      }
-      router.push({
-        pathname: "/contact" as any,
-        params: {
-          mode: "report",
-          contextType: "store",
-          storeId: String(storeId || ""),
-          storeName: String(store.storeName || ""),
-        },
-      });
-    }}
-    style={styles.supportSecondary}
-  >
-    <View style={styles.supportIconSecondary}>
-      <Ionicons name="flag-outline" size={17} color={SECONDARY} />
-    </View>
-    <View style={{ flex: 1, minWidth: 0 }}>
-      <Text style={styles.supportTitleMuted}>Report Store</Text>
-      <Text style={styles.supportSub} numberOfLines={1}>
-        Structured report to Plazore moderation
-      </Text>
-    </View>
-    <Ionicons name="chevron-forward" size={16} color={MUTED} />
-  </TouchableOpacity>
-</Animated.View>
+        {/* Support — HIDDEN for store owner */}
+        {!ownerView && (
+          <Animated.View
+            style={{
+              opacity: content,
+              paddingHorizontal: H_PAD,
+              marginTop: 28,
+              marginBottom: 8,
+            }}
+          >
+            <Text style={styles.sectionEyebrow}>Support</Text>
+            <TouchableOpacity
+              activeOpacity={0.88}
+              onPress={onContact}
+              style={styles.supportPrimary}
+            >
+              <View style={styles.supportIconPrimary}>
+                <Ionicons
+                  name="chatbubbles-outline"
+                  size={18}
+                  color={AI_GREEN}
+                />
+              </View>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={styles.supportTitle}>
+                  Contact Store through Plazore
+                </Text>
+                <Text style={styles.supportSubCalm} numberOfLines={1}>
+                  Routed through Plazore · not direct seller chat
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={16} color={MUTED} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              activeOpacity={0.88}
+              onPress={onReport}
+              style={styles.supportSecondary}
+            >
+              <View style={styles.supportIconSecondary}>
+                <Ionicons name="flag-outline" size={17} color={REPORT} />
+              </View>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={styles.supportTitleReport}>Report Store</Text>
+                <Text style={styles.supportSubReport} numberOfLines={1}>
+                  Structured report to Plazore moderation
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={16} color={REPORT_SOFT} />
+            </TouchableOpacity>
+          </Animated.View>
+        )}
 
         <View style={styles.footer}>
           <View style={styles.footerLine} />
@@ -988,7 +1108,7 @@ export default function PublicStorefront() {
         </View>
       </ScrollView>
 
-      {/* Share sheet */}
+      {/* Share + Auth modals — same as your paste */}
       <Modal
         visible={shareOpen}
         transparent
@@ -1013,7 +1133,6 @@ export default function PublicStorefront() {
             <Text style={styles.sheetSub} numberOfLines={2}>
               {store.storeName}
             </Text>
-
             <TouchableOpacity
               style={styles.shareRow}
               onPress={shareNative}
@@ -1027,7 +1146,6 @@ export default function PublicStorefront() {
                 {shareBusy ? "Preparing…" : "Share via device"}
               </Text>
             </TouchableOpacity>
-
             <TouchableOpacity
               style={styles.shareRow}
               onPress={copyLink}
@@ -1044,7 +1162,6 @@ export default function PublicStorefront() {
                 {copied ? "Link copied" : "Copy link"}
               </Text>
             </TouchableOpacity>
-
             <TouchableOpacity
               style={styles.shareRow}
               onPress={openWhatsApp}
@@ -1057,7 +1174,6 @@ export default function PublicStorefront() {
               </View>
               <Text style={styles.shareLabel}>WhatsApp</Text>
             </TouchableOpacity>
-
             <TouchableOpacity
               style={styles.shareRow}
               onPress={openTwitter}
@@ -1068,7 +1184,6 @@ export default function PublicStorefront() {
               </View>
               <Text style={styles.shareLabel}>X / Twitter</Text>
             </TouchableOpacity>
-
             <TouchableOpacity
               style={[styles.shareRow, { marginBottom: 8 }]}
               onPress={openFacebook}
@@ -1083,7 +1198,6 @@ export default function PublicStorefront() {
         </Pressable>
       </Modal>
 
-      {/* Auth gate — Save store */}
       <Modal
         visible={authOpen}
         transparent
@@ -1097,7 +1211,7 @@ export default function PublicStorefront() {
           <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
             <View style={styles.sheetHandleBar} />
             <View style={styles.sheetHead}>
-              <Text style={styles.sheetTitle}>Continue on Plazore</Text>
+              <Text style={styles.sheetTitle}>{authCopy.title}</Text>
               <TouchableOpacity
                 onPress={() => setAuthOpen(false)}
                 hitSlop={12}
@@ -1105,11 +1219,27 @@ export default function PublicStorefront() {
                 <Ionicons name="close" size={20} color={MUTED} />
               </TouchableOpacity>
             </View>
-            <Text style={styles.sheetSub}>
-              Sign in to save this storefront. You’ll land back here when
-              you’re done.
-            </Text>
-
+            <Text style={styles.sheetSub}>{authCopy.body}</Text>
+            <TouchableOpacity
+              style={styles.authGoogle}
+              onPress={continueGoogle}
+              disabled={googleBusy}
+              activeOpacity={0.9}
+            >
+              {googleBusy ? (
+                <ActivityIndicator color="#1F1F1F" />
+              ) : (
+                <>
+                  <Image
+                    source={{ uri: GOOGLE_G }}
+                    style={{ width: 18, height: 18 }}
+                  />
+                  <Text style={styles.authGoogleText}>
+                    Continue with Google
+                  </Text>
+                </>
+              )}
+            </TouchableOpacity>
             <TouchableOpacity
               style={styles.authPrimary}
               onPress={goSignIn}
@@ -1126,6 +1256,9 @@ export default function PublicStorefront() {
                 Create a Plazore account
               </Text>
             </TouchableOpacity>
+            <Text style={styles.authFoot}>
+              After you sign in you’ll land back on this store.
+            </Text>
           </Pressable>
         </Pressable>
       </Modal>
@@ -1134,11 +1267,7 @@ export default function PublicStorefront() {
 }
 
 const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-    backgroundColor: BG,
-  },
-
+  root: { flex: 1, backgroundColor: BG },
   toastWrap: {
     position: "absolute",
     top: 0,
@@ -1161,11 +1290,6 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(17,20,26,0.96)",
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: "rgba(16,185,129,0.28)",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.35,
-    shadowRadius: 20,
-    elevation: 12,
   },
   toastIcon: {
     width: 34,
@@ -1181,9 +1305,7 @@ const styles = StyleSheet.create({
     fontSize: 13.5,
     fontWeight: "600",
     lineHeight: 19,
-    letterSpacing: -0.1,
   },
-
   loaderRoot: {
     flex: 1,
     backgroundColor: BG,
@@ -1216,11 +1338,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  orbLogo: {
-    width: 32,
-    height: 32,
-  },
-
+  orbLogo: { width: 32, height: 32 },
   emptyRoot: {
     flex: 1,
     backgroundColor: BG,
@@ -1258,12 +1376,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     backgroundColor: TEXT,
   },
-  emptyBtnText: {
-    color: BG,
-    fontWeight: "700",
-    fontSize: 13,
-  },
-
+  emptyBtnText: { color: BG, fontWeight: "700", fontSize: 13 },
   topBar: {
     position: "absolute",
     top: 0,
@@ -1286,7 +1399,6 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: "rgba(255,255,255,0.1)",
   },
-
   identityCard: {
     borderRadius: 26,
     borderWidth: StyleSheet.hairlineWidth,
@@ -1294,10 +1406,7 @@ const styles = StyleSheet.create({
     padding: 18,
     overflow: "hidden",
   },
-  identityTop: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
+  identityTop: { flexDirection: "row", alignItems: "center" },
   logoWrap: {
     width: 72,
     height: 72,
@@ -1309,10 +1418,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  logoImg: {
-    width: "100%",
-    height: "100%",
-  },
+  logoImg: { width: "100%", height: "100%" },
   nameRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -1335,11 +1441,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     gap: 4,
   },
-  verifiedText: {
-    color: AI_GREEN,
-    fontSize: 10,
-    fontWeight: "700",
-  },
+  verifiedText: { color: AI_GREEN, fontSize: 10, fontWeight: "700" },
   openLabel: {
     color: MUTED,
     fontSize: 12,
@@ -1358,11 +1460,7 @@ const styles = StyleSheet.create({
     fontWeight: "500",
     flex: 1,
   },
-  desc: {
-    color: SECONDARY,
-    fontSize: 14.5,
-    lineHeight: 22,
-  },
+  desc: { color: SECONDARY, fontSize: 14.5, lineHeight: 22 },
   goalBox: {
     marginTop: 14,
     backgroundColor: "rgba(255,255,255,0.03)",
@@ -1380,11 +1478,7 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
     marginBottom: 5,
   },
-  goalText: {
-    color: TEXT,
-    fontSize: 14,
-    lineHeight: 20,
-  },
+  goalText: { color: TEXT, fontSize: 14, lineHeight: 20 },
   actionRow: {
     flexDirection: "row",
     marginTop: 18,
@@ -1402,15 +1496,8 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: LINE,
   },
-  saveBtnActive: {
-    backgroundColor: TEXT,
-    borderColor: TEXT,
-  },
-  saveBtnText: {
-    color: TEXT,
-    fontWeight: "700",
-    fontSize: 14,
-  },
+  saveBtnActive: { backgroundColor: TEXT, borderColor: TEXT },
+  saveBtnText: { color: TEXT, fontWeight: "700", fontSize: 14 },
   countPill: {
     paddingHorizontal: 14,
     paddingVertical: 14,
@@ -1419,12 +1506,7 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: "rgba(255,255,255,0.07)",
   },
-  countText: {
-    color: SECONDARY,
-    fontWeight: "600",
-    fontSize: 13,
-  },
-
+  countText: { color: SECONDARY, fontWeight: "600", fontSize: 13 },
   sectionEyebrow: {
     color: MUTED,
     fontSize: 11,
@@ -1439,13 +1521,13 @@ const styles = StyleSheet.create({
     fontSize: 20,
     letterSpacing: -0.3,
   },
-
   featuredCard: {
     borderRadius: 24,
     overflow: "hidden",
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: "rgba(255,255,255,0.08)",
     backgroundColor: SURFACE,
+    marginRight: 0,
   },
   featuredFade: {
     position: "absolute",
@@ -1479,7 +1561,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginTop: 16,
   },
-
   dividerRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -1508,69 +1589,8 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: "rgba(255,255,255,0.06)",
+    marginBottom: GAP,
   },
-  supportBlock: {
-  marginTop: 8,
-  marginBottom: 28,
-},
-supportPrimary: {
-  flexDirection: "row",
-  alignItems: "center",
-  borderRadius: 18,
-  borderWidth: StyleSheet.hairlineWidth,
-  borderColor: "rgba(16,185,129,0.22)",
-  backgroundColor: "rgba(16,185,129,0.06)",
-  paddingVertical: 14,
-  paddingHorizontal: 14,
-  marginBottom: 10,
-},
-supportSecondary: {
-  flexDirection: "row",
-  alignItems: "center",
-  borderRadius: 18,
-  borderWidth: StyleSheet.hairlineWidth,
-  borderColor: "rgba(239,68,68,0.35)",
-  backgroundColor: "rgba(239,68,68,0.08)",
-  paddingVertical: 14,
-  paddingHorizontal: 14,
-},
-supportIconPrimary: {
-  width: 40,
-  height: 40,
-  borderRadius: 12,
-  backgroundColor: "rgba(16,185,129,0.12)",
-  alignItems: "center",
-  justifyContent: "center",
-  marginRight: 12,
-},
-supportIconSecondary: {
-  width: 40,
-  height: 40,
-  borderRadius: 12,
-  backgroundColor: "rgba(239,68,68,0.12)",
-  alignItems: "center",
-  justifyContent: "center",
-  marginRight: 12,
-  borderWidth: StyleSheet.hairlineWidth,
-  borderColor: "rgba(239,68,68,0.25)",
-},
-supportTitle: {
-  color: TEXT,
-  fontWeight: "700",
-  fontSize: 14.5,
-  letterSpacing: -0.2,
-},
-supportTitleMuted: {
-  color: "#F87171",
-  fontWeight: "700",
-  fontSize: 14.5,
-  letterSpacing: -0.2,
-},
-supportSub: {
-  color: "rgba(248,113,113,0.75)",
-  fontSize: 12,
-  marginTop: 2,
-},
   gridInfo: {
     paddingHorizontal: 12,
     paddingTop: 10,
@@ -1588,16 +1608,8 @@ supportSub: {
     fontSize: 14.5,
     marginTop: 6,
   },
-  noImg: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-
-  emptyFloor: {
-    paddingVertical: 60,
-    alignItems: "center",
-  },
+  noImg: { flex: 1, alignItems: "center", justifyContent: "center" },
+  emptyFloor: { paddingVertical: 60, alignItems: "center" },
   emptyFloorIcon: {
     width: 56,
     height: 56,
@@ -1615,12 +1627,67 @@ supportSub: {
     fontSize: 14,
     lineHeight: 21,
   },
-
-  footer: {
+  supportPrimary: {
+    flexDirection: "row",
     alignItems: "center",
-    marginTop: 40,
-    marginBottom: 8,
+    borderRadius: 18,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "rgba(16,185,129,0.25)",
+    backgroundColor: "rgba(16,185,129,0.06)",
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+    marginTop: 12,
+    marginBottom: 10,
   },
+  supportSecondary: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderRadius: 18,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "rgba(239,68,68,0.35)",
+    backgroundColor: "rgba(239,68,68,0.08)",
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+  },
+  supportIconPrimary: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: "rgba(16,185,129,0.15)",
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 12,
+  },
+  supportIconSecondary: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: "rgba(239,68,68,0.15)",
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "rgba(239,68,68,0.25)",
+  },
+  supportTitle: {
+    color: TEXT,
+    fontWeight: "700",
+    fontSize: 14.5,
+    letterSpacing: -0.2,
+  },
+  supportTitleReport: {
+    color: REPORT_SOFT,
+    fontWeight: "700",
+    fontSize: 14.5,
+    letterSpacing: -0.2,
+  },
+  supportSubCalm: { color: MUTED, fontSize: 12, marginTop: 2 },
+  supportSubReport: {
+    color: "rgba(248,113,113,0.75)",
+    fontSize: 12,
+    marginTop: 2,
+  },
+  footer: { alignItems: "center", marginTop: 40, marginBottom: 8 },
   footerLine: {
     width: 36,
     height: 3,
@@ -1628,18 +1695,8 @@ supportSub: {
     backgroundColor: LINE,
     marginBottom: 14,
   },
-  footerText: {
-    color: MUTED,
-    fontSize: 11,
-    letterSpacing: 1,
-  },
-  seeMore: {
-    color: AI_GREEN,
-    fontSize: 13,
-    fontWeight: "600",
-  },
-
-  /* Share + auth sheets */
+  footerText: { color: MUTED, fontSize: 11, letterSpacing: 1 },
+  seeMore: { color: AI_GREEN, fontSize: 13, fontWeight: "600", marginTop: 6 },
   sheetScrim: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.58)",
@@ -1665,15 +1722,12 @@ supportSub: {
   },
   sheetHead: {
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "flex-start",
     justifyContent: "space-between",
     marginBottom: 6,
+    gap: 12,
   },
-  sheetTitle: {
-    color: TEXT,
-    fontSize: 17,
-    fontWeight: "700",
-  },
+  sheetTitle: { color: TEXT, fontSize: 17, fontWeight: "700", flex: 1 },
   sheetSub: {
     color: MUTED,
     fontSize: 13,
@@ -1698,32 +1752,40 @@ supportSub: {
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: LINE,
   },
-  shareLabel: {
-    color: TEXT,
-    fontSize: 15,
-    fontWeight: "600",
+  shareLabel: { color: TEXT, fontSize: 15, fontWeight: "600" },
+  authGoogle: {
+    height: 52,
+    borderRadius: 14,
+    backgroundColor: "#FFFFFF",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+    marginBottom: 10,
   },
+  authGoogleText: { color: "#1F1F1F", fontSize: 15, fontWeight: "800" },
   authPrimary: {
     height: 52,
     borderRadius: 14,
-    backgroundColor: TEXT,
+    backgroundColor: SURFACE_2,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "rgba(255,255,255,0.12)",
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: 10,
+    marginBottom: 6,
   },
-  authPrimaryText: {
-    color: BG,
-    fontSize: 15,
-    fontWeight: "800",
-  },
+  authPrimaryText: { color: TEXT, fontSize: 15, fontWeight: "800" },
   authSecondary: {
     height: 48,
     alignItems: "center",
     justifyContent: "center",
   },
-  authSecondaryText: {
-    color: AI_GREEN,
-    fontSize: 14,
-    fontWeight: "700",
+  authSecondaryText: { color: AI_GREEN, fontSize: 14, fontWeight: "700" },
+  authFoot: {
+    marginTop: 6,
+    textAlign: "center",
+    color: "rgba(255,255,255,0.38)",
+    fontSize: 11,
+    lineHeight: 16,
   },
 });

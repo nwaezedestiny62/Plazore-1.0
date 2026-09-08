@@ -3,9 +3,10 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth, useClerk, useUser } from "@clerk/nextjs";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowRight,
+  Bell,
   Bookmark,
   Building2,
   CreditCard,
@@ -20,6 +21,7 @@ import {
   Music,
   Package,
   Search,
+  Settings,
   ShoppingBag,
   Sparkles,
   Store,
@@ -93,6 +95,39 @@ const TOP_TABS = [
   { id: "profile", label: "Profile", href: "/profile" },
 ];
 
+const EXPLORE_CHIPS = [
+  {
+    id: "categories",
+    label: "Categories",
+    href: "/shop?mode=categories",
+    bg: "linear-gradient(90deg,#06B6D4,#22D3EE)",
+  },
+  {
+    id: "new",
+    label: "New arrivals",
+    href: "/shop?mode=new",
+    bg: "linear-gradient(90deg,#16A34A,#4ADE80)",
+  },
+  {
+    id: "trending",
+    label: "Trending",
+    href: "/shop?mode=trending",
+    bg: "linear-gradient(90deg,#DB2777,#FB7185)",
+  },
+  {
+    id: "stores",
+    label: "Stores",
+    href: "/shop?mode=stores",
+    bg: "linear-gradient(90deg,#4F46E5,#818CF8)",
+  },
+  {
+    id: "shop",
+    label: "Shop",
+    href: "/shop",
+    bg: "linear-gradient(90deg,#7C3AED,#C084FC)",
+  },
+];
+
 function resolveHref(item: LoungeItem) {
   return TILE_HREF[item.id] || item.href || "/";
 }
@@ -112,6 +147,8 @@ type Hit =
   | { type: "product"; id: string; label: string; image?: string; price: number; region?: string }
   | { type: "store"; id: string; label: string; logo?: string }
   | { type: "category"; label: string };
+
+type StorePick = { id: string; name: string; logo?: string; cover?: string };
 
 function Tile({
   item,
@@ -209,7 +246,6 @@ function Tile({
   );
 }
 
-/** Soft Google-TV style app tile */
 function TvAppIcon({
   item,
   index,
@@ -224,6 +260,7 @@ function TvAppIcon({
   const palette = TILE_COLORS[item.id] || {
     bg: "#1C1F2A",
     accent: "#00E575",
+    glow: "rgba(0,229,117,0.2)",
   };
   const Icon = ICONS[item.id] || Store;
   const href = resolveHref(item);
@@ -232,36 +269,38 @@ function TvAppIcon({
   const inner = (
     <>
       <span
-        className="relative flex h-16 w-[112px] items-center justify-center overflow-hidden rounded-xl transition duration-300 group-hover:brightness-110"
-        style={{ background: palette.bg }}
+        className="relative flex h-[72px] w-[118px] items-center justify-center overflow-hidden rounded-2xl shadow-[0_8px_24px_rgba(0,0,0,0.35)] transition duration-300 group-hover:scale-[1.04] group-hover:brightness-110 group-focus-visible:ring-2 group-focus-visible:ring-white"
+        style={{
+          background: `linear-gradient(160deg, ${palette.bg} 0%, #0A0B10 100%)`,
+          boxShadow: `inset 0 1px 0 ${palette.accent}40, 0 8px 24px ${palette.glow}`,
+        }}
       >
-        <Icon className="h-7 w-7" style={{ color: palette.accent }} />
+        <span
+          className="pointer-events-none absolute -right-4 -top-4 h-14 w-14 rounded-full opacity-50"
+          style={{ background: palette.accent }}
+        />
+        <Icon className="relative h-8 w-8" style={{ color: palette.accent }} />
         {item.id === "cart" && (bagCount ?? 0) > 0 && (
           <span className="absolute right-2 top-2 min-w-[18px] rounded-full bg-[#00E575] px-1 text-center text-[10px] font-extrabold text-[#041412]">
             {(bagCount ?? 0) > 99 ? "99+" : bagCount}
           </span>
         )}
       </span>
-      <span className="mt-2 max-w-[112px] truncate text-center text-[12px] font-medium text-white/80">
+      <span className="mt-2 max-w-[118px] truncate text-center text-[12px] font-medium text-white/80">
         {item.label}
       </span>
     </>
   );
 
   const wrap =
-    "group flex w-[112px] shrink-0 flex-col items-center outline-none";
+    "group flex w-[118px] shrink-0 flex-col items-center outline-none";
   const anim = {
     animation: `loungeIn 600ms cubic-bezier(0.22,1,0.36,1) ${100 + index * 35}ms both`,
   } as React.CSSProperties;
 
   if (isAppOnly) {
     return (
-      <button
-        type="button"
-        onClick={() => onAppOnly?.(item.id)}
-        className={wrap}
-        style={anim}
-      >
+      <button type="button" onClick={() => onAppOnly?.(item.id)} className={wrap} style={anim}>
         {inner}
       </button>
     );
@@ -274,12 +313,77 @@ function TvAppIcon({
   );
 }
 
+function PosterCard({
+  href,
+  image,
+  kicker,
+  title,
+  body,
+  cta,
+  onClick,
+}: {
+  href?: string;
+  image?: string | null;
+  kicker: string;
+  title: string;
+  body?: string;
+  cta?: string;
+  onClick?: () => void;
+}) {
+  const inner = (
+    <>
+      {image ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={image} alt="" className="absolute inset-0 h-full w-full object-cover" />
+      ) : (
+        <div
+          className="absolute inset-0"
+          style={{
+            background:
+              "linear-gradient(115deg,#0B1220 0%,#0C1A16 45%,#0A1018 100%)",
+          }}
+        />
+      )}
+      <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/25 to-black/10" />
+      <div className="relative z-[1] flex h-full flex-col justify-end p-6 lg:p-8">
+        <p className="text-[11px] font-semibold tracking-[0.18em] text-white/55">{kicker}</p>
+        <h2 className="mt-1 max-w-lg text-[1.65rem] font-semibold leading-tight tracking-tight text-white lg:text-[2rem]">
+          {title}
+        </h2>
+        {body && <p className="mt-2 max-w-md text-[13px] leading-relaxed text-white/65">{body}</p>}
+        {cta && (
+          <span className="mt-4 inline-flex h-9 w-fit items-center rounded-full bg-white px-4 text-[12px] font-semibold text-[#0A0B10]">
+            {cta}
+          </span>
+        )}
+      </div>
+    </>
+  );
+
+  const cls =
+    "group relative block min-h-[240px] overflow-hidden rounded-2xl bg-[#12141C] transition duration-300 hover:brightness-110 lg:min-h-[280px]";
+
+  if (onClick) {
+    return (
+      <button type="button" onClick={onClick} className={`${cls} w-full text-left`}>
+        {inner}
+      </button>
+    );
+  }
+  return (
+    <Link href={href || "/"} className={cls}>
+      {inner}
+    </Link>
+  );
+}
+
 export default function LoungePage() {
   const pathname = usePathname();
   const router = useRouter();
   const { isSignedIn, isLoaded, getToken } = useAuth();
   const { user } = useUser();
   const { signOut } = useClerk();
+  const searchRef = useRef<HTMLInputElement>(null);
 
   const [query, setQuery] = useState("");
   const [debounced, setDebounced] = useState("");
@@ -439,21 +543,47 @@ export default function LoungePage() {
     []
   );
 
-  /** Featured products for the horizontal “Top picks” row */
- const topPicks = useMemo(
-  () =>
-    [...(allProducts || [])]
-      .filter((p) => p.images?.[0])
-      .sort(
-        (a, b) =>
-          new Date(b.createdAt || 0).getTime() -
-          new Date(a.createdAt || 0).getTime(),
-      )
-      .slice(0, 20),
-  [allProducts],
-);
+  const topPicks = useMemo(
+    () =>
+      [...(allProducts || [])]
+        .filter((p) => p.images?.[0])
+        .sort(
+          (a, b) =>
+            new Date(b.createdAt || 0).getTime() -
+            new Date(a.createdAt || 0).getTime()
+        )
+        .slice(0, 20),
+    [allProducts]
+  );
+
+  const trendingPicks = useMemo(
+    () =>
+      [...(allProducts || [])]
+        .filter((p) => p.images?.[0])
+        .sort((a, b) => Number((b as any).views || 0) - Number((a as any).views || 0))
+        .slice(0, 16),
+    [allProducts]
+  );
+
+  const storePicks = useMemo(() => {
+    const map = new Map<string, StorePick>();
+    (allProducts || []).forEach((p) => {
+      const s = p.seller as any;
+      if (!s || typeof s === "string" || !s._id) return;
+      const id = String(s._id);
+      if (map.has(id)) return;
+      map.set(id, {
+        id,
+        name: s.storeName || s.name || "Store",
+        logo: s.storeLogo,
+        cover: p.images?.[0],
+      });
+    });
+    return Array.from(map.values()).slice(0, 14);
+  }, [allProducts]);
 
   let mobileTileIndex = 0;
+  const heroPoster = topPicks[0]?.images?.[0] || trendingPicks[0]?.images?.[0];
 
   return (
     <div className="min-h-dvh bg-[#050508] text-[#F5F7FA]">
@@ -607,229 +737,382 @@ export default function LoungePage() {
         </div>
       </div>
 
-      {/* ════════════ DESKTOP — Google TV calm shell ════════════ */}
-      <div className="relative hidden min-h-dvh md:block">
-        {/* Soft full-bleed ambient (no hard frames) */}
-        <div
-          className="pointer-events-none absolute inset-0"
-          style={{
-            background:
-              "radial-gradient(ellipse 80% 50% at 50% -5%, rgba(0,229,117,0.07), transparent 50%), radial-gradient(ellipse 60% 40% at 90% 30%, rgba(59,130,246,0.05), transparent 45%)",
-          }}
-        />
+      {/* ════════════ DESKTOP — Smart TV / LG home ════════════ */}
+      <div className="relative hidden min-h-dvh md:flex">
+        <aside className="sticky top-0 z-20 flex h-dvh w-[72px] shrink-0 flex-col items-center gap-3 border-r border-white/6 bg-black/50 py-6 backdrop-blur-md">
+          <Link href="/profile" className="mb-2" aria-label="Profile">
+            {user?.imageUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={user.imageUrl}
+                alt=""
+                className="h-10 w-10 rounded-full object-cover ring-2 ring-white/20"
+              />
+            ) : (
+              <span className="flex h-10 w-10 items-center justify-center rounded-full bg-white/10">
+                <User className="h-4 w-4 text-white/70" />
+              </span>
+            )}
+          </Link>
+          <Link
+            href="/notifications"
+            className="flex h-10 w-10 items-center justify-center rounded-full text-white/55 transition hover:bg-white/10 hover:text-white"
+            aria-label="Notifications"
+          >
+            <Bell className="h-[18px] w-[18px]" />
+          </Link>
+          <button
+            type="button"
+            onClick={() => searchRef.current?.focus()}
+            className="flex h-10 w-10 items-center justify-center rounded-full text-white/55 transition hover:bg-white/10 hover:text-white"
+            aria-label="Search"
+          >
+            <Search className="h-[18px] w-[18px]" />
+          </button>
+          {isSeller && (
+            <button
+              type="button"
+              onClick={handleSellerCta}
+              className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full bg-[#00E575]/15 text-[#00E575] transition hover:bg-[#00E575]/25"
+              aria-label="Seller dashboard"
+            >
+              {storeLogo ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={storeLogo} alt="" className="h-full w-full object-cover" />
+              ) : (
+                <Store className="h-[18px] w-[18px]" />
+              )}
+            </button>
+          )}
+          <Link
+            href={isSeller ? "/seller/settings" : "/profile"}
+            className="flex h-10 w-10 items-center justify-center rounded-full text-white/55 transition hover:bg-white/10 hover:text-white"
+            aria-label="Settings"
+          >
+            <Settings className="h-[18px] w-[18px]" />
+          </Link>
+          <div className="mt-auto" />
+          {isLoaded && isSignedIn ? (
+            <button
+              type="button"
+              onClick={() => signOut({ redirectUrl: "/sign-in" })}
+              className="flex h-10 w-10 items-center justify-center rounded-full text-white/40 transition hover:bg-white/10 hover:text-white"
+              aria-label="Log out"
+            >
+              <LogOut className="h-4 w-4" />
+            </button>
+          ) : (
+            <Link
+              href="/sign-in"
+              className="flex h-10 w-10 items-center justify-center rounded-full text-[#00E575]"
+              aria-label="Sign in"
+            >
+              <User className="h-4 w-4" />
+            </Link>
+          )}
+        </aside>
 
-        <div className="relative z-[1] mx-auto flex min-h-dvh max-w-[1440px] flex-col px-10 pb-12 pt-5 lg:px-14">
-          {/* Top tabs — pill style like Google TV */}
-          <header className="mb-6 flex items-center justify-between">
-            <div className="flex items-center gap-1">
-              <Link href="/" className="mr-4 flex items-center gap-2">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src="/logo.png" alt="" className="h-7 w-7 object-contain" />
-                <span className="text-[13px] font-semibold tracking-wide text-white/50">
-                  Plazore
-                </span>
-              </Link>
+        <div className="relative min-w-0 flex-1">
+          <div
+            className="pointer-events-none absolute inset-0"
+            style={{
+              background:
+                "radial-gradient(ellipse 80% 50% at 50% -5%, rgba(0,229,117,0.07), transparent 50%), radial-gradient(ellipse 60% 40% at 90% 30%, rgba(59,130,246,0.05), transparent 45%)",
+            }}
+          />
 
-              <nav className="flex items-center gap-1">
-                {TOP_TABS.map((tab) => {
-                  const active =
-                    tab.id === "for-you"
-                      ? pathname === "/lounge"
-                      : pathname === tab.href ||
-                        (tab.href !== "/" &&
-                          !tab.href.includes("?") &&
-                          pathname.startsWith(tab.href));
-                  return (
-                    <Link
-                      key={tab.id}
-                      href={tab.href}
-                      className={`rounded-full px-4 py-2 text-[13px] font-medium transition duration-300 ${
-                        active
-                          ? "bg-white text-[#0A0B10]"
-                          : "text-white/55 hover:bg-white/8 hover:text-white"
-                      }`}
-                    >
-                      {tab.label}
-                    </Link>
-                  );
-                })}
-              </nav>
-            </div>
+          <div className="relative z-[1] mx-auto flex min-h-dvh max-w-[1600px] flex-col px-8 pb-12 pt-5 lg:px-10">
+            <header className="mb-6 flex items-center justify-between gap-4">
+              <div className="flex min-w-0 items-center gap-1">
+                <Link href="/" className="mr-3 flex shrink-0 items-center gap-2">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src="/logo.png" alt="" className="h-7 w-7 object-contain" />
+                  <span className="text-[13px] font-semibold tracking-wide text-white/50">
+                    Plazore
+                  </span>
+                </Link>
+                <nav className="hidden items-center gap-1 lg:flex">
+                  {TOP_TABS.map((tab) => {
+                    const active =
+                      tab.id === "for-you"
+                        ? pathname === "/lounge"
+                        : pathname === tab.href ||
+                          (tab.href !== "/" &&
+                            !tab.href.includes("?") &&
+                            pathname.startsWith(tab.href));
+                    return (
+                      <Link
+                        key={tab.id}
+                        href={tab.href}
+                        className={`rounded-full px-4 py-2 text-[13px] font-medium transition duration-300 ${
+                          active
+                            ? "bg-white text-[#0A0B10]"
+                            : "text-white/55 hover:bg-white/8 hover:text-white"
+                        }`}
+                      >
+                        {tab.label}
+                      </Link>
+                    );
+                  })}
+                </nav>
+              </div>
 
-            <div className="flex items-center gap-3">
-              <label className="flex h-9 w-56 items-center gap-2 rounded-full bg-white/[0.06] px-3.5">
+              <label className="flex h-9 w-56 shrink-0 items-center gap-2 rounded-full bg-white/[0.06] px-3.5">
                 <Search className="h-3.5 w-3.5 text-white/40" />
                 <input
+                  ref={searchRef}
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder="Search"
                   className="w-full bg-transparent text-[13px] outline-none placeholder:text-white/35"
                 />
               </label>
-              {user?.imageUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={user.imageUrl}
-                  alt=""
-                  className="h-8 w-8 rounded-full object-cover"
-                />
-              ) : (
-                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-white/10">
-                  <User className="h-4 w-4 text-white/60" />
-                </div>
-              )}
-            </div>
-          </header>
+            </header>
 
-          {searching ? (
-            <div className="mx-auto w-full max-w-3xl flex-1 pt-8">
-              <SearchResults
-                query={query}
-                searchLoading={searchLoading}
-                totalHits={totalHits}
-                hits={hits}
-              />
-            </div>
-          ) : (
-            <>
-              {/* Hero — full-bleed soft, no hard border/shadow */}
-              <section
-                className="relative mb-8 overflow-hidden rounded-2xl"
-                style={{
-                  minHeight: 280,
-                  animation: "loungeIn 700ms cubic-bezier(0.22,1,0.36,1) both",
-                }}
-              >
-                <div
-                  className="absolute inset-0"
-                  style={{
-                    background:
-                      "linear-gradient(115deg, #0B1220 0%, #0C1A16 45%, #0A1018 100%)",
-                  }}
+            {searching ? (
+              <div className="mx-auto w-full max-w-3xl flex-1 pt-8">
+                <SearchResults
+                  query={query}
+                  searchLoading={searchLoading}
+                  totalHits={totalHits}
+                  hits={hits}
                 />
-                <div
-                  className="pointer-events-none absolute inset-0"
-                  style={{
-                    background:
-                      "radial-gradient(ellipse 55% 70% at 78% 40%, rgba(0,229,117,0.18), transparent 55%), radial-gradient(ellipse 40% 50% at 15% 85%, rgba(59,130,246,0.12), transparent 50%)",
-                  }}
-                />
-                {/* bottom fade into page */}
-                <div className="pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-[#050508] to-transparent" />
-
-                <div className="relative z-[1] flex min-h-[280px] flex-col justify-end p-10 pb-9">
-                  <p className="mb-2 text-[12px] font-semibold tracking-[0.14em] text-white/45">
-                    PLAZORE
-                  </p>
-                  <h1 className="max-w-2xl text-[2.4rem] font-semibold tracking-tight text-white/95 leading-[1.15]">
-                    Your digital mall,{" "}
-                    <span className="text-white/70">reimagined</span>
-                  </h1>
-                  <p className="mt-3 max-w-lg text-[15px] leading-relaxed text-white/50">
-                    Shop, manage orders, and explore stores — all from one calm
-                    lounge.
-                  </p>
-                  <div className="mt-6 flex items-center gap-3">
-                    <Link
-                      href="/shop"
-                      className="inline-flex h-10 items-center rounded-full bg-white px-5 text-[13px] font-semibold text-[#0A0B10] transition hover:bg-white/90"
-                    >
-                      Go to Shop
-                    </Link>
-                    <button
-                      type="button"
+              </div>
+            ) : (
+              <>
+                {/* Dual featured posters */}
+                <section className="mb-6 grid grid-cols-1 gap-3 lg:grid-cols-[1.35fr_1fr]">
+                  <PosterCard
+                    href="/shop"
+                    image={heroPoster}
+                    kicker="FOR YOU"
+                    title="Your digital mall, reimagined"
+                    body="Shop, manage orders, and explore stores from one lounge."
+                    cta="Go to Shop"
+                  />
+                  {isSeller ? (
+                    <PosterCard
+                      href="/seller"
+                      image={storeLogo}
+                      kicker="SELLER DASHBOARD"
+                      title={storeName || "Your storefront"}
+                      body="Products, orders, messages and payouts — in one place."
+                      cta="Open dashboard"
+                    />
+                  ) : (
+                    <PosterCard
                       onClick={handleSellerCta}
-                      className="inline-flex h-10 items-center rounded-full bg-white/10 px-5 text-[13px] font-medium text-white/85 transition hover:bg-white/15"
-                    >
-                      {isSeller ? "Open storefront" : "Open a store"}
-                    </button>
-                  </div>
-                </div>
-              </section>
+                      kicker="SELL ON PLAZORE"
+                      title="Open a store"
+                      body="List products and reach buyers across the digital mall."
+                      cta="Start selling"
+                    />
+                  )}
+                </section>
 
-              {/* Top picks — horizontal cards, soft, no hard shadow */}
-              {topPicks.length > 0 && (
-                <section className="mb-9">
-                  <p className="mb-3 text-[10px] font-extrabold uppercase tracking-[0.16em] text-white/35">
-  New to Plazore
-</p>
-                  <div className="tv-row flex gap-3 overflow-x-auto pb-1">
-                    {topPicks.map((p, i) => (
+                {/* Colored explore chips — LG Radio+ / Sports / Gaming row */}
+                <section className="mb-7">
+                  <div className="tv-row flex gap-2.5 overflow-x-auto pb-1">
+                    {EXPLORE_CHIPS.map((chip) => (
                       <Link
-                        key={p._id}
-                        href={`/product/${p._id}`}
-                        className="group shrink-0"
+                        key={chip.id}
+                        href={chip.href}
+                        className="flex h-12 shrink-0 items-center rounded-xl px-6 text-[14px] font-bold text-white shadow-[0_8px_20px_rgba(0,0,0,0.25)] transition hover:brightness-110"
+                        style={{ background: chip.bg }}
+                      >
+                        {chip.label}
+                      </Link>
+                    ))}
+                    <Link
+                      href="/cart"
+                      className="flex h-12 shrink-0 items-center gap-2 rounded-xl bg-white/10 px-5 text-[14px] font-semibold text-white/90 transition hover:bg-white/15"
+                    >
+                      Bag
+                      {bag > 0 && (
+                        <span className="rounded-full bg-[#00E575] px-1.5 text-[10px] font-extrabold text-[#041412]">
+                          {bag > 99 ? "99+" : bag}
+                        </span>
+                      )}
+                    </Link>
+                  </div>
+                </section>
+
+                {/* App icon row */}
+                <section className="mb-9">
+                  <p className="mb-3 text-[14px] font-medium text-white/70">Your apps</p>
+                  <div className="tv-row flex gap-3 overflow-x-auto pb-2">
+                    {allLoungeItems.map((item, index) => (
+                      <TvAppIcon
+                        key={item.id}
+                        item={item}
+                        index={index}
+                        bagCount={item.id === "cart" ? bag : undefined}
+                        onAppOnly={onAppOnly}
+                      />
+                    ))}
+                  </div>
+                </section>
+
+                {topPicks.length > 0 && (
+                  <section className="mb-9">
+                    <div className="mb-3 flex items-end justify-between">
+                      <p className="text-[14px] font-medium text-white/70">New arrivals</p>
+                      <Link
+                        href="/shop?mode=new"
+                        className="text-[12px] font-semibold text-white/40 hover:text-white/70"
+                      >
+                        Show more
+                      </Link>
+                    </div>
+                    <div className="tv-row flex gap-3 overflow-x-auto pb-1">
+                      {topPicks.map((p, i) => (
+                        <Link
+                          key={p._id}
+                          href={`/product/${p._id}`}
+                          className="group shrink-0"
+                          style={{
+                            animation: `loungeIn 600ms cubic-bezier(0.22,1,0.36,1) ${80 + i * 40}ms both`,
+                          }}
+                        >
+                          <div className="relative h-[148px] w-[240px] overflow-hidden rounded-xl bg-[#12141C] transition duration-300 group-hover:brightness-110">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={p.images![0]} alt="" className="h-full w-full object-cover" />
+                            <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent px-3 pb-2.5 pt-10">
+                              <p className="truncate text-[13px] font-medium text-white">{p.name}</p>
+                              <p className="text-[12px] text-[#00E575]">
+                                {formatProductPrice(p.price, p.region, "NG")}
+                              </p>
+                            </div>
+                          </div>
+                        </Link>
+                      ))}
+                    </div>
+                  </section>
+                )}
+
+                {trendingPicks.length > 0 && (
+                  <section className="mb-9">
+                    <div className="mb-3 flex items-end justify-between">
+                      <p className="text-[14px] font-medium text-white/70">Trending</p>
+                      <Link
+                        href="/shop?mode=trending"
+                        className="text-[12px] font-semibold text-white/40 hover:text-white/70"
+                      >
+                        Show more
+                      </Link>
+                    </div>
+                    <div className="tv-row flex gap-3 overflow-x-auto pb-1">
+                      {trendingPicks.map((p) => (
+                        <Link key={`tr-${p._id}`} href={`/product/${p._id}`} className="group shrink-0">
+                          <div className="relative h-[148px] w-[240px] overflow-hidden rounded-xl bg-[#12141C] transition duration-300 group-hover:brightness-110">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={p.images![0]} alt="" className="h-full w-full object-cover" />
+                            <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent px-3 pb-2.5 pt-10">
+                              <p className="truncate text-[13px] font-medium text-white">{p.name}</p>
+                              <p className="text-[12px] text-[#FB7185]">
+                                {formatProductPrice(p.price, p.region, "NG")}
+                              </p>
+                            </div>
+                          </div>
+                        </Link>
+                      ))}
+                    </div>
+                  </section>
+                )}
+
+                <section className="mb-9">
+                  <div className="mb-3 flex items-end justify-between">
+                    <p className="text-[14px] font-medium text-white/70">Categories</p>
+                    <Link
+                      href="/shop?mode=categories"
+                      className="text-[12px] font-semibold text-white/40 hover:text-white/70"
+                    >
+                      Show more
+                    </Link>
+                  </div>
+                  <div className="tv-row flex gap-2.5 overflow-x-auto pb-1">
+                    {CATEGORY_LIST.slice(0, 16).map((c, i) => (
+                      <Link
+                        key={c}
+                        href={`/shop?mode=category&category=${encodeURIComponent(c)}`}
+                        className="flex h-[88px] w-[160px] shrink-0 items-end rounded-xl px-3.5 py-3 text-[13px] font-bold text-white transition hover:brightness-110"
                         style={{
-                          animation: `loungeIn 600ms cubic-bezier(0.22,1,0.36,1) ${80 + i * 40}ms both`,
+                          background: `linear-gradient(160deg, ${
+                            ["#0B3A4A", "#1A2A4A", "#2A1848", "#123628", "#3A1A28", "#1C2840"][
+                              i % 6
+                            ]
+                          } 0%, #0A0B10 100%)`,
                         }}
                       >
-                        <div className="relative h-[148px] w-[240px] overflow-hidden rounded-xl bg-[#12141C] transition duration-300 group-hover:brightness-110">
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img
-                            src={p.images![0]}
-                            alt=""
-                            className="h-full w-full object-cover"
-                          />
-                          <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent px-3 pb-2.5 pt-10">
-                            <p className="truncate text-[13px] font-medium text-white">
-                              {p.name}
-                            </p>
-                            <p className="text-[12px] text-[#00E575]">
-                              {formatProductPrice(p.price, p.region, "NG")}
-                            </p>
-                          </div>
-                        </div>
+                        {c}
                       </Link>
                     ))}
                   </div>
                 </section>
-              )}
 
-              {/* Your apps — soft flat tiles */}
-              <section>
-                <p className="mb-3 text-[14px] font-medium text-white/70">
-                  Your apps
-                </p>
-                <div className="tv-row flex gap-3 overflow-x-auto pb-2">
-                  {allLoungeItems.map((item, index) => (
-                    <TvAppIcon
-                      key={item.id}
-                      item={item}
-                      index={index}
-                      bagCount={item.id === "cart" ? bag : undefined}
-                      onAppOnly={onAppOnly}
-                    />
-                  ))}
-                </div>
-              </section>
-
-              {/* Minimal footer identity */}
-              <div className="mt-auto flex items-center justify-between pt-10">
-                <p className="text-[12px] text-white/30">
-                  {isLoaded && isSignedIn
-                    ? `Signed in as ${displayName}`
-                    : "Browsing as guest"}
-                </p>
-                {isLoaded && isSignedIn ? (
-                  <button
-                    type="button"
-                    onClick={() => signOut({ redirectUrl: "/sign-in" })}
-                    className="inline-flex items-center gap-1.5 text-[12px] text-white/40 transition hover:text-white/70"
-                  >
-                    <LogOut className="h-3.5 w-3.5" />
-                    Log out
-                  </button>
-                ) : (
-                  <Link
-                    href="/sign-in"
-                    className="text-[12px] font-medium text-[#00E575]"
-                  >
-                    Sign in
-                  </Link>
+                {storePicks.length > 0 && (
+                  <section className="mb-6">
+                    <div className="mb-3 flex items-end justify-between">
+                      <p className="text-[14px] font-medium text-white/70">Stores</p>
+                      <Link
+                        href="/shop?mode=stores"
+                        className="text-[12px] font-semibold text-white/40 hover:text-white/70"
+                      >
+                        Show more
+                      </Link>
+                    </div>
+                    <div className="tv-row flex gap-3 overflow-x-auto pb-1">
+                      {storePicks.map((s) => (
+                        <Link key={s.id} href={`/store/${s.id}`} className="group shrink-0">
+                          <div className="relative h-[148px] w-[220px] overflow-hidden rounded-xl bg-[#12141C] transition duration-300 group-hover:brightness-110">
+                            {s.cover ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img src={s.cover} alt="" className="h-full w-full object-cover" />
+                            ) : (
+                              <div className="h-full w-full bg-[#161822]" />
+                            )}
+                            <div className="absolute inset-x-0 bottom-0 flex items-center gap-2 bg-gradient-to-t from-black/85 via-black/40 to-transparent px-3 pb-2.5 pt-10">
+                              <span className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-white/10">
+                                {s.logo ? (
+                                  // eslint-disable-next-line @next/next/no-img-element
+                                  <img src={s.logo} alt="" className="h-full w-full object-cover" />
+                                ) : (
+                                  <Store className="h-3.5 w-3.5 text-white/70" />
+                                )}
+                              </span>
+                              <p className="truncate text-[13px] font-medium text-white">{s.name}</p>
+                            </div>
+                          </div>
+                        </Link>
+                      ))}
+                    </div>
+                  </section>
                 )}
-              </div>
-            </>
-          )}
+
+                <div className="mt-auto flex items-center justify-between pt-6">
+                  <p className="text-[12px] text-white/30">
+                    {isLoaded && isSignedIn
+                      ? `Signed in as ${displayName}`
+                      : "Browsing as guest"}
+                  </p>
+                  {isLoaded && isSignedIn ? (
+                    <button
+                      type="button"
+                      onClick={() => signOut({ redirectUrl: "/sign-in" })}
+                      className="inline-flex items-center gap-1.5 text-[12px] text-white/40 transition hover:text-white/70"
+                    >
+                      <LogOut className="h-3.5 w-3.5" />
+                      Log out
+                    </button>
+                  ) : (
+                    <Link href="/sign-in" className="text-[12px] font-medium text-[#00E575]">
+                      Sign in
+                    </Link>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </div>
 
@@ -908,9 +1191,7 @@ function SearchResults({
                 </div>
                 <div>
                   <p className="font-medium">{h.label}</p>
-                  <p className="mt-1 text-xs font-semibold text-[#3B82F6]">
-                    Official storefront
-                  </p>
+                  <p className="mt-1 text-xs font-semibold text-[#3B82F6]">Official storefront</p>
                 </div>
               </Link>
             ) : null

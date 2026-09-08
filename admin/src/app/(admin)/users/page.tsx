@@ -239,10 +239,10 @@ export default function UsersPage() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [paneOpen, setPaneOpen] = useState(false);
 
-  // Contact through Plazore
   const [contactOpen, setContactOpen] = useState(false);
   const [contactSubject, setContactSubject] = useState("");
   const [contactMessage, setContactMessage] = useState("");
+  const [contactAllowsReply, setContactAllowsReply] = useState(true);
   const [contactBusy, setContactBusy] = useState(false);
   const [contactError, setContactError] = useState("");
   const [contactSuccess, setContactSuccess] = useState(false);
@@ -416,6 +416,7 @@ export default function UsersPage() {
       setContactOpen(false);
       setContactSubject("");
       setContactMessage("");
+      setContactAllowsReply(true);
       setContactError("");
       setContactSuccess(false);
       await loadDetail(id);
@@ -459,7 +460,6 @@ export default function UsersPage() {
     setQ("");
   };
 
-  /** PART 9 — Contact User through Plazore (mediated, context auto-attached) */
   const startContactThroughPlazore = async () => {
     if (!detail?.user || contactBusy || showOffline) return;
 
@@ -471,7 +471,9 @@ export default function UsersPage() {
     }
     const wordCount = msg.split(/\s+/).filter(Boolean).length;
     if (wordCount > 300) {
-      setContactError(`Message must be 300 words or fewer (you wrote ${wordCount}).`);
+      setContactError(
+        `Message must be 300 words or fewer (you wrote ${wordCount}).`
+      );
       return;
     }
 
@@ -497,14 +499,13 @@ export default function UsersPage() {
             contactSubject.trim() ||
             `Message from Plazore · ${u.storeName || u.name || "Account"}`,
           message: msg,
-          // Auto-attach identity so the user never has to explain who they are
           storeId: u.role === "seller" ? u._id : undefined,
+          allowsReply: contactAllowsReply,
         }),
       });
 
       setContactSuccess(true);
       setContactMessage("");
-      // Keep subject for possible follow-up, or clear if you prefer
     } catch (e: any) {
       setContactError(e?.message || "Could not start conversation");
     } finally {
@@ -573,9 +574,8 @@ export default function UsersPage() {
               Users & sellers
             </h1>
             <p className="mt-2 max-w-xl text-sm leading-relaxed text-[#A7ADB8]">
-              Search, filter, and inspect accounts. Open from Orders or Products
-              to jump straight into a profile. Contact is always mediated by
-              Plazore.
+              Search, filter, and inspect accounts. Contact is always mediated
+              by Plazore. You choose whether the user can text back.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -969,7 +969,6 @@ export default function UsersPage() {
         </div>
       )}
 
-      {/* Overlay */}
       <div
         className={cn(
           "fixed inset-0 z-40 bg-black/50 transition-opacity duration-300",
@@ -981,7 +980,6 @@ export default function UsersPage() {
         aria-hidden
       />
 
-      {/* Detail pane */}
       <aside
         className={cn(
           poppins.className,
@@ -1153,12 +1151,11 @@ export default function UsersPage() {
                 </div>
               )}
 
-              {/* ─── PART 9: Contact User through Plazore ─── */}
               <div className="space-y-3 border-t border-[#252A33] pt-4">
                 <SectionLabel>Contact through Plazore</SectionLabel>
                 <p className="text-xs leading-relaxed text-[#A7ADB8]">
-                  Message is mediated by Plazore. The user sees it in their
-                  Contact history. No direct buyer–seller chat is created.
+                  Mediated by Plazore. No direct buyer–seller chat. Uncheck
+                  “Allow text back” for a one-way notice.
                 </p>
 
                 {contactSuccess ? (
@@ -1167,8 +1164,9 @@ export default function UsersPage() {
                       Message sent via Plazore
                     </p>
                     <p className="mt-1 text-xs text-[#A7ADB8]">
-                      The user will see this conversation in their Contact
-                      inbox.
+                      {contactAllowsReply
+                        ? "The user can reply in their Contact inbox."
+                        : "One-way notice — the user cannot text back."}
                     </p>
                     <Button
                       tone="ghost"
@@ -1189,6 +1187,7 @@ export default function UsersPage() {
                       setContactSubject(
                         `Message from Plazore · ${u.storeName || u.name || "Account"}`
                       );
+                      setContactAllowsReply(true);
                       setContactError("");
                     }}
                     disabled={showOffline}
@@ -1212,6 +1211,24 @@ export default function UsersPage() {
                       className="w-full border border-[#252A33] bg-[#0C0F14] px-3 py-2 text-sm text-[#F5F7FA] outline-none focus:border-[#00E575]/40"
                       disabled={contactBusy}
                     />
+                    <label className="flex items-start gap-2 text-xs text-[#A7ADB8]">
+                      <input
+                        type="checkbox"
+                        className="mt-0.5"
+                        checked={contactAllowsReply}
+                        onChange={(e) =>
+                          setContactAllowsReply(e.target.checked)
+                        }
+                        disabled={contactBusy}
+                      />
+                      <span>
+                        <span className="font-medium text-[#F5F7FA]">
+                          Allow user to text back
+                        </span>
+                        <br />
+                        Off = one-way notice only. They see it but cannot reply.
+                      </span>
+                    </label>
                     {contactError && (
                       <p className="text-xs text-red-400">{contactError}</p>
                     )}

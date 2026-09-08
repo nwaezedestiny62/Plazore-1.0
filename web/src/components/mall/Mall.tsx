@@ -11,7 +11,7 @@ import {
   ShoppingCart,
 } from "lucide-react";
 import { AppFeaturePrompt, type AppFeature } from "@/components/app/AppFeaturePrompt";
-import { useAuth } from "@clerk/nextjs";
+import { useAuth, useUser } from "@clerk/nextjs";
 import { HERO_SLIDES, type HeroSlide } from "@/lib/heroCampaigns";
 import { fetchHeroBanners, prefetchHeroImages } from "@/lib/fetchHeroBanners";
 import { cartCount } from "@/lib/cart";
@@ -63,7 +63,6 @@ type SplitRooms = {
   titles: RoomTitles;
 };
 
-/** Shrink headline when personalized copy is long — stays cinematic, never overflows */
 function heroHeadlineSize(text: string): string {
   const n = (text || "").trim().length;
   if (n > 52) return "clamp(1.25rem, 2.8vw, 2.15rem)";
@@ -138,7 +137,9 @@ function buildRooms(
 
 function CustomBarIcon({ className = "" }: { className?: string }) {
   return (
-    <span className={`flex w-[22px] flex-col items-start gap-[5.5px] ${className}`}>
+    <span
+      className={`flex w-[22px] flex-col items-start gap-[5.5px] ${className}`}
+    >
       <span className="block h-[2.6px] w-[22px] bg-current" />
       <span className="block h-[2.6px] w-[15px] bg-current" />
       <span className="block h-[2.6px] w-[22px] bg-current" />
@@ -161,6 +162,15 @@ function MallChrome({
   const atTop = progress < 0.06;
   const solid = progress >= 0.06;
   const [prompt, setPrompt] = useState<AppFeature | null>(null);
+  const { isSignedIn } = useAuth();
+  const { user } = useUser();
+
+  const avatarUrl = user?.imageUrl || null;
+  const avatarAlt =
+    user?.fullName ||
+    user?.username ||
+    user?.primaryEmailAddress?.emailAddress ||
+    "Account";
 
   useEffect(() => {
     const el = bagRefDesktop.current || bagRefMobile.current;
@@ -183,6 +193,7 @@ function MallChrome({
 
   return (
     <>
+      {/* Desktop / large canvas */}
       <header
         className={`fixed inset-x-0 top-0 z-50 hidden h-16 items-center justify-between px-6 transition-all duration-500 md:flex lg:px-10 ${
           solid ? "bg-[#090B0F]/80 backdrop-blur-xl" : "bg-transparent"
@@ -193,28 +204,19 @@ function MallChrome({
             : "1px solid transparent",
         }}
       >
-        <div className="flex items-center gap-4">
-          <Link
-            href="/lounge"
-            className="flex h-10 w-10 items-center justify-center text-white/90 transition hover:text-white"
-            aria-label="Open Lounge"
+        <Link href="/" className="flex items-center gap-3">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/logo.png" alt="Plazore" className="h-8 w-8 object-contain" />
+          <span
+            className={`text-[13px] font-semibold tracking-[0.22em] uppercase ${
+              atTop ? "text-white/90" : "text-text"
+            }`}
           >
-            <CustomBarIcon />
-          </Link>
-          <Link href="/" className="flex items-center gap-3">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/logo.png" alt="Plazore" className="h-8 w-8 object-contain" />
-            <span
-              className={`text-[13px] font-semibold tracking-[0.22em] uppercase ${
-                atTop ? "text-white/90" : "text-text"
-              }`}
-            >
-              Plazore
-            </span>
-          </Link>
-        </div>
+            Plazore
+          </span>
+        </Link>
 
-        <nav className="flex items-center gap-7 lg:gap-9">
+        <nav className="flex items-center gap-6 lg:gap-8">
           <Link
             href="/"
             className="text-[11px] font-semibold tracking-[0.2em] uppercase text-text"
@@ -227,15 +229,19 @@ function MallChrome({
           >
             Browse
           </Link>
+
+          {/* Lounge — same premium pill as Browse */}
           <Link
             href="/lounge"
-            className="group relative text-[11px] font-semibold tracking-[0.2em] uppercase text-white/55 transition hover:text-text"
+            className="relative inline-flex items-center gap-2.5 rounded-full border border-[#00E575]/40 bg-gradient-to-b from-[#00E575]/18 to-[#00E575]/06 px-4 py-2 text-[11px] font-bold tracking-[0.2em] uppercase text-[#00E575] shadow-[0_0_24px_rgba(0,229,117,0.12)] transition hover:border-[#00E575]/60 hover:from-[#00E575]/24 hover:to-[#00E575]/10 hover:shadow-[0_0_28px_rgba(0,229,117,0.2)]"
           >
-            <span className="relative">
-              Lounge
-              <span className="absolute -bottom-1 left-0 h-px w-full origin-left scale-x-0 bg-gradient-to-r from-[#00E575] to-[#3B82F6] transition duration-300 group-hover:scale-x-100" />
+            Lounge
+            <span className="relative flex h-2 w-2">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#00E575] opacity-40" />
+              <span className="relative inline-flex h-2 w-2 rounded-full bg-[#00E575]" />
             </span>
           </Link>
+
           <button
             type="button"
             onClick={() => setPrompt("wishlist")}
@@ -249,31 +255,61 @@ function MallChrome({
           <Link
             href="/notifications"
             className="relative flex h-10 w-10 items-center justify-center text-white/80 transition hover:text-text"
-            aria-label="Notifications"
+            aria-label={
+              notifN > 0
+                ? `Notifications, ${notifN} unread`
+                : "Notifications"
+            }
           >
             <Bell className="h-[18px] w-[18px]" strokeWidth={1.75} />
-            {notifN > 0 && (
-              <span className="absolute right-1.5 top-1.5 min-w-[16px] rounded-full bg-[#00E575] px-1 text-center text-[9px] font-extrabold text-[#041412]">
-                {notifN > 9 ? "9+" : notifN}
+            {notifN > 0 ? (
+              <span className="absolute right-1 top-1.5 flex min-w-[16px] items-center justify-center rounded-full bg-[#00E575] px-1 text-center text-[9px] font-extrabold leading-none text-[#041412]">
+                {notifN > 99 ? "99+" : notifN}
               </span>
-            )}
+            ) : null}
           </Link>
+
           <Link
             ref={bagRefDesktop}
             href="/cart"
             className="relative flex h-10 w-10 items-center justify-center text-white/80 transition hover:text-text"
             aria-label="Cart"
+            data-plazore-cart-icon
           >
             <ShoppingBag className="h-[18px] w-[18px]" strokeWidth={1.75} />
-            {bagN > 0 && (
+            {bagN > 0 ? (
               <span className="absolute right-1.5 top-1.5 min-w-[16px] rounded-full bg-[#00E575] px-1 text-center text-[9px] font-extrabold text-[#041412]">
                 {bagN > 9 ? "9+" : bagN}
               </span>
-            )}
+            ) : null}
           </Link>
+
+          {isSignedIn && avatarUrl ? (
+            <div
+              className="ml-1.5 h-8 w-8 overflow-hidden rounded-full ring-1 ring-white/15"
+              aria-hidden
+              title={avatarAlt}
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={avatarUrl}
+                alt=""
+                className="h-full w-full object-cover"
+                draggable={false}
+              />
+            </div>
+          ) : isSignedIn ? (
+            <div
+              className="ml-1.5 flex h-8 w-8 items-center justify-center rounded-full bg-white/10 text-[11px] font-bold text-white/70 ring-1 ring-white/15"
+              aria-hidden
+            >
+              {(avatarAlt || "U").charAt(0).toUpperCase()}
+            </div>
+          ) : null}
         </div>
       </header>
 
+      {/* Mobile / responsive only */}
       <header
         className={`fixed inset-x-0 top-0 z-50 flex h-14 items-center justify-between px-3.5 transition-all duration-400 md:hidden ${
           solid ? "bg-[#090B0F]/88 backdrop-blur-xl" : "bg-transparent"
@@ -287,7 +323,10 @@ function MallChrome({
           <CustomBarIcon />
         </Link>
 
-        <Link href="/" className="absolute left-1/2 flex -translate-x-1/2 items-center">
+        <Link
+          href="/"
+          className="absolute left-1/2 flex -translate-x-1/2 items-center"
+        >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/logo.png" alt="Plazore" className="h-7 w-7 object-contain" />
         </Link>
@@ -303,28 +342,56 @@ function MallChrome({
           <Link
             href="/notifications"
             className="relative flex h-10 w-10 items-center justify-center text-white/90"
-            aria-label="Notifications"
+            aria-label={
+              notifN > 0
+                ? `Notifications, ${notifN} unread`
+                : "Notifications"
+            }
           >
             <Bell className="h-[18px] w-[18px]" strokeWidth={1.75} />
-            {notifN > 0 && (
-              <span className="absolute right-1 top-1.5 min-w-[15px] rounded-full bg-[#00E575] px-0.5 text-center text-[8.5px] font-extrabold text-[#041412]">
-                {notifN > 9 ? "9+" : notifN}
+            {notifN > 0 ? (
+              <span className="absolute right-1 top-1.5 flex min-w-[15px] items-center justify-center rounded-full bg-[#00E575] px-0.5 text-center text-[8.5px] font-extrabold leading-none text-[#041412]">
+                {notifN > 99 ? "99+" : notifN}
               </span>
-            )}
+            ) : null}
           </Link>
           <Link
             ref={bagRefMobile}
             href="/cart"
             className="relative flex h-10 w-10 items-center justify-center text-white/90"
             aria-label="Cart"
+            data-plazore-cart-icon
           >
             <ShoppingCart className="h-[18px] w-[18px]" strokeWidth={1.75} />
-            {bagN > 0 && (
+            {bagN > 0 ? (
               <span className="absolute right-1 top-1.5 min-w-[15px] rounded-full bg-[#00E575] px-0.5 text-center text-[8.5px] font-extrabold text-[#041412]">
                 {bagN > 9 ? "9+" : bagN}
               </span>
-            )}
+            ) : null}
           </Link>
+
+          {isSignedIn && avatarUrl ? (
+            <div
+              className="ml-0.5 h-7 w-7 overflow-hidden rounded-full ring-1 ring-white/15"
+              aria-hidden
+              title={avatarAlt}
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={avatarUrl}
+                alt=""
+                className="h-full w-full object-cover"
+                draggable={false}
+              />
+            </div>
+          ) : isSignedIn ? (
+            <div
+              className="ml-0.5 flex h-7 w-7 items-center justify-center rounded-full bg-white/10 text-[10px] font-bold text-white/70 ring-1 ring-white/15"
+              aria-hidden
+            >
+              {(avatarAlt || "U").charAt(0).toUpperCase()}
+            </div>
+          ) : null}
         </div>
       </header>
 
@@ -493,7 +560,7 @@ function RoomThreeStage({ products }: { products: Product[] }) {
           </Link>
         </div>
 
-        {products.length > 1 && (
+        {products.length > 1 ? (
           <div className="mt-7 flex justify-center gap-2">
             {products.map((_, i) => (
               <button
@@ -507,7 +574,7 @@ function RoomThreeStage({ products }: { products: Product[] }) {
               />
             ))}
           </div>
-        )}
+        ) : null}
       </div>
     </div>
   );
@@ -605,33 +672,124 @@ function MallInner({
     return Math.max(n, 1);
   }, [rooms]);
 
+  // Cart badge — both event names
   useEffect(() => {
     const sync = () => setBagN(cartCount());
     sync();
     window.addEventListener("plazore-cart", sync);
-    return () => window.removeEventListener("plazore-cart", sync);
+    window.addEventListener("plazore-cart-change", sync);
+    return () => {
+      window.removeEventListener("plazore-cart", sync);
+      window.removeEventListener("plazore-cart-change", sync);
+    };
   }, []);
 
+  // Unread notifications — robust parse + fallback list
   useEffect(() => {
     if (!isSignedIn) {
       setNotifN(0);
       return;
     }
-    (async () => {
+
+    let cancelled = false;
+
+    const parseCount = (json: any): number => {
+      const direct = Number(
+        json?.data?.count ??
+          json?.data?.unreadCount ??
+          json?.data?.unread ??
+          json?.unreadCount ??
+          json?.count ??
+          json?.data?.totalUnread ??
+          NaN
+      );
+      if (Number.isFinite(direct) && direct >= 0) return Math.floor(direct);
+
+      const list = Array.isArray(json?.data)
+        ? json.data
+        : Array.isArray(json?.data?.notifications)
+          ? json.data.notifications
+          : Array.isArray(json?.notifications)
+            ? json.notifications
+            : Array.isArray(json?.data?.items)
+              ? json.data.items
+              : [];
+
+      if (!list.length) return 0;
+      return list.filter(
+        (n: any) =>
+          n &&
+          (n.read === false ||
+            n.isRead === false ||
+            n.unread === true ||
+            (!n.readAt && n.read !== true && n.isRead !== true))
+      ).length;
+    };
+
+    const loadUnread = async () => {
       try {
         const token = await getToken();
-        if (!token) return;
-        const res = await fetch(`${API}/notifications/unread-count`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (!res.ok) return;
-        const json = await res.json();
-        const n = Number(json?.data?.count ?? json?.count ?? 0);
-        if (Number.isFinite(n)) setNotifN(n);
+        if (!token || cancelled) return;
+
+        const headers = {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/json",
+        };
+
+        // 1) dedicated count
+        try {
+          const res = await fetch(`${API}/notifications/unread-count`, {
+            headers,
+            cache: "no-store",
+          });
+          if (res.ok) {
+            const json = await res.json();
+            if (!cancelled) setNotifN(parseCount(json));
+            return;
+          }
+        } catch {
+          /* fall through */
+        }
+
+        // 2) list fallback
+        try {
+          const res2 = await fetch(`${API}/notifications?limit=50`, {
+            headers,
+            cache: "no-store",
+          });
+          if (res2.ok) {
+            const json2 = await res2.json();
+            if (!cancelled) setNotifN(parseCount(json2));
+            return;
+          }
+        } catch {
+          /* silent */
+        }
       } catch {
         /* silent */
       }
-    })();
+    };
+
+    void loadUnread();
+
+    const onFocus = () => void loadUnread();
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void loadUnread();
+    };
+    const onNotif = () => void loadUnread();
+
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("plazore-notifications", onNotif);
+    const interval = window.setInterval(() => void loadUnread(), 30000);
+
+    return () => {
+      cancelled = true;
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("plazore-notifications", onNotif);
+      window.clearInterval(interval);
+    };
   }, [isSignedIn, getToken]);
 
   useEffect(() => {
@@ -739,7 +897,7 @@ function MallInner({
             </button>
           </div>
 
-          {heroSlides.length > 1 && (
+          {heroSlides.length > 1 ? (
             <div className="mt-8 flex items-center gap-1.5">
               {heroSlides.map((_, i) => (
                 <button
@@ -755,7 +913,7 @@ function MallInner({
                 />
               ))}
             </div>
-          )}
+          ) : null}
         </div>
 
         <button
@@ -771,7 +929,6 @@ function MallInner({
         </button>
       </section>
 
-      {/* room nav + showroom sections unchanged below */}
       <div
         className={`fixed right-4 top-1/2 z-40 hidden -translate-y-1/2 flex-col gap-2.5 md:flex ${
           roomNavOn ? "opacity-100" : "pointer-events-none opacity-0"
@@ -824,7 +981,7 @@ function MallInner({
           </div>
         ) : (
           <>
-            {rooms.one.length > 0 && (
+            {rooms.one.length > 0 ? (
               <section
                 ref={(el) => {
                   roomRefs.current[1] = el;
@@ -832,14 +989,14 @@ function MallInner({
                 className="bg-[#0C0F14] pb-16"
               >
                 <div className="relative h-[38vh] min-h-[240px] max-h-[420px] overflow-hidden sm:h-[42vh]">
-                  {rooms.one[0]?.images?.[0] && (
+                  {rooms.one[0]?.images?.[0] ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
                       src={rooms.one[0].images[0]}
                       alt=""
                       className="h-full w-full object-cover"
                     />
-                  )}
+                  ) : null}
                   <div className="absolute inset-0 bg-[rgba(6,8,12,0.58)]" />
                   <div className="absolute bottom-8 left-5 right-5 sm:left-8 md:left-16">
                     <p className="text-[11px] font-semibold tracking-[0.28em] text-white/50">
@@ -857,21 +1014,31 @@ function MallInner({
                   </p>
                   <div className="flex gap-2 overflow-x-auto px-5 pb-2 sm:gap-3 sm:px-8 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                     {rooms.one.map((p) => (
-                      <ProductCard key={`r1a-${p._id}`} product={p} compact room={1} />
+                      <ProductCard
+                        key={`r1a-${p._id}`}
+                        product={p}
+                        compact
+                        room={1}
+                      />
                     ))}
                   </div>
                 </div>
                 <div className="pt-7">
                   <div className="flex gap-2 overflow-x-auto px-5 pb-2 sm:gap-3 sm:px-8 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                     {[...rooms.one].reverse().map((p) => (
-                      <ProductCard key={`r1b-${p._id}`} product={p} compact room={1} />
+                      <ProductCard
+                        key={`r1b-${p._id}`}
+                        product={p}
+                        compact
+                        room={1}
+                      />
                     ))}
                   </div>
                 </div>
               </section>
-            )}
+            ) : null}
 
-            {rooms.two.length > 0 && (
+            {rooms.two.length > 0 ? (
               <section
                 ref={(el) => {
                   roomRefs.current[2] = el;
@@ -897,7 +1064,7 @@ function MallInner({
                   ))}
                 </div>
 
-                {rooms.two.length > 2 && (
+                {rooms.two.length > 2 ? (
                   <div className="mx-auto mt-8 grid max-w-[720px] grid-cols-2 gap-3 sm:gap-5 lg:max-w-[800px]">
                     {rooms.two.slice(2).map((p) => (
                       <div
@@ -908,11 +1075,11 @@ function MallInner({
                       </div>
                     ))}
                   </div>
-                )}
+                ) : null}
               </section>
-            )}
+            ) : null}
 
-            {rooms.three.length > 0 && (
+            {rooms.three.length > 0 ? (
               <section
                 ref={(el) => {
                   roomRefs.current[3] = el;
@@ -929,9 +1096,9 @@ function MallInner({
                   <RoomThreeStage products={rooms.three} />
                 </div>
               </section>
-            )}
+            ) : null}
 
-            {rooms.four.length > 0 && (
+            {rooms.four.length > 0 ? (
               <section
                 ref={(el) => {
                   roomRefs.current[4] = el;
@@ -961,7 +1128,7 @@ function MallInner({
                   ))}
                 </div>
               </section>
-            )}
+            ) : null}
           </>
         )}
       </section>

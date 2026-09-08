@@ -103,6 +103,36 @@ function isPlazoreMessage(type?: string) {
   );
 }
 
+function isContactThread(type?: string) {
+  return type === "contact_reply" || type === "contact_need_info";
+}
+
+function PlazoreLogoChip({ dimmed }: { dimmed?: boolean }) {
+  return (
+    <span
+      className={`relative flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-[13px] border ${
+        dimmed
+          ? "border-white/[0.07] bg-[#171B22]"
+          : "border-[rgba(0,229,117,0.35)] bg-[rgba(0,229,117,0.14)]"
+      }`}
+    >
+      <span
+        className={`absolute h-7 w-7 rounded-full ${
+          dimmed ? "bg-transparent" : "bg-[rgba(0,229,117,0.08)]"
+        }`}
+      />
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src="/logo.png"
+        alt="Plazore"
+        className={`relative z-[1] h-5 w-5 object-contain ${
+          dimmed ? "opacity-55" : "opacity-100"
+        }`}
+      />
+    </span>
+  );
+}
+
 function IconForType({
   type,
   className,
@@ -110,20 +140,6 @@ function IconForType({
   type?: string;
   className?: string;
 }) {
-  if (isPlazoreMessage(type)) {
-    return (
-      // eslint-disable-next-line @next/next/no-img-element
-      <img
-        src="/logo.png"
-        alt="Plazore"
-        className={
-          className
-            ? `${className} object-contain`
-            : "h-5 w-5 object-contain"
-        }
-      />
-    );
-  }
   switch (type as NotifType) {
     case "new_order":
       return <Package className={className} />;
@@ -143,6 +159,9 @@ function IconForType({
 
 function accentForType(type?: string, isRead?: boolean) {
   if (isRead) return { bg: "bg-[#171B22]", icon: "text-[#6B7280]" };
+  if (type === "announcement") {
+    return { bg: "bg-[rgba(0,229,117,0.16)]", icon: "text-[#00E575]" };
+  }
   if (isPlazoreMessage(type)) {
     return { bg: "bg-[rgba(0,229,117,0.12)]", icon: "text-[#00E575]" };
   }
@@ -282,7 +301,7 @@ export default function NotificationsPage() {
         setNotifications(applyClearedFilter(json.data || []));
       }
     } catch {
-      /* keep list */
+      /* keep */
     } finally {
       setLoading(false);
     }
@@ -299,7 +318,7 @@ export default function NotificationsPage() {
 
   const markAsRead = async (id: string) => {
     setNotifications((prev) =>
-      prev.map((n) => (n._id === id ? { ...n, isRead: true } : n)),
+      prev.map((n) => (n._id === id ? { ...n, isRead: true } : n))
     );
     try {
       const token = await getToken();
@@ -309,19 +328,35 @@ export default function NotificationsPage() {
         headers: { Authorization: `Bearer ${token}` },
       });
     } catch {
-      /* local ok */
+      /* local */
     }
   };
 
   const handlePress = async (item: Notif) => {
     if (!item.isRead) await markAsRead(item._id);
 
+    // Announcements: always one-way
+    if (item.type === "announcement") {
+      const annId = idOf(item.announcement);
+      if (annId) {
+        router.push(`/announcements/${annId}`);
+        return;
+      }
+      setOverlay({
+        title: item.title || "Announcement",
+        message: item.message || "One-way notice from Plazore.",
+        tone: "info",
+        durationMs: 8000,
+      });
+      return;
+    }
+
     if (item.link) {
       router.push(item.link);
       return;
     }
 
-    if (item.type === "contact_reply" || item.type === "contact_need_info") {
+    if (isContactThread(item.type)) {
       const contactId = idOf(item.contact);
       if (contactId) {
         router.push(`/contact/conversation/${contactId}`);
@@ -331,14 +366,6 @@ export default function NotificationsPage() {
 
     if (item.type === "report_received" || item.type === "report_update") {
       return;
-    }
-
-    if (item.type === "announcement") {
-      const annId = idOf(item.announcement);
-      if (annId) {
-        router.push(`/announcements/${annId}`);
-        return;
-      }
     }
 
     const orderId = idOf(item.order);
@@ -373,7 +400,7 @@ export default function NotificationsPage() {
         headers: { Authorization: `Bearer ${token}` },
       });
     } catch {
-      /* local ok */
+      /* local */
     }
   };
 
@@ -406,7 +433,7 @@ export default function NotificationsPage() {
         });
       }
     } catch {
-      /* local is source of truth */
+      /* local */
     } finally {
       setClearing(false);
     }
@@ -499,13 +526,16 @@ export default function NotificationsPage() {
             </div>
             <h2 className="text-[17px] font-bold">No notifications yet</h2>
             <p className="mt-1.5 text-[13px] leading-5 text-[#A7ADB8]">
-              Order updates and alerts will show up here.
+              Orders, contact replies, and Plazore announcements show up here.
             </p>
           </div>
         ) : (
           <ul className="space-y-2.5">
             {notifications.map((item) => {
               const colors = accentForType(item.type, item.isRead);
+              const isAnn = item.type === "announcement";
+              const isPlazore = isPlazoreMessage(item.type);
+
               return (
                 <li key={item._id}>
                   <button
@@ -514,27 +544,56 @@ export default function NotificationsPage() {
                     className={`flex w-full items-start rounded-[14px] border p-3.5 text-left ${
                       item.isRead
                         ? "border-white/[0.07] bg-[#11141A]"
-                        : "border-white/12 bg-[#171B22]"
+                        : isAnn
+                          ? "border-[rgba(0,229,117,0.28)] bg-[#171B22]"
+                          : "border-white/12 bg-[#171B22]"
                     }`}
                   >
-                    <span
-                      className={`mr-3 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${colors.bg}`}
-                    >
-                      <IconForType
-                        type={item.type}
-                        className={`h-[18px] w-[18px] ${colors.icon}`}
-                      />
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span
-                        className={`block text-sm leading-[19px] ${
-                          item.isRead
-                            ? "font-semibold text-[#A7ADB8]"
-                            : "font-bold text-[#F5F7FA]"
-                        }`}
-                      >
-                        {item.title}
+                    {isPlazore ? (
+                      <span className="mr-3">
+                        <PlazoreLogoChip dimmed={!!item.isRead} />
                       </span>
+                    ) : (
+                      <span
+                        className={`mr-3 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${colors.bg}`}
+                      >
+                        <IconForType
+                          type={item.type}
+                          className={`h-[18px] w-[18px] ${colors.icon}`}
+                        />
+                      </span>
+                    )}
+
+                    <span className="min-w-0 flex-1">
+                      <span className="flex items-start gap-2">
+                        <span
+                          className={`min-w-0 flex-1 text-sm leading-[19px] ${
+                            item.isRead
+                              ? "font-semibold text-[#A7ADB8]"
+                              : "font-bold text-[#F5F7FA]"
+                          }`}
+                        >
+                          {item.title}
+                        </span>
+                        {!item.isRead ? (
+                          <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-[#00E575]" />
+                        ) : null}
+                      </span>
+
+                      {isAnn ? (
+                        <span className="mt-1 flex flex-wrap items-center gap-2 text-[10px] font-bold">
+                          <span className="uppercase tracking-wide text-[#00E575]">
+                            Announcement
+                          </span>
+                        </span>
+                      ) : null}
+
+                      {isContactThread(item.type) ? (
+                        <span className="mt-1 block text-[10px] font-semibold text-[#00E575]">
+                          Plazore · Contact
+                        </span>
+                      ) : null}
+
                       <span className="mt-1 block text-[13px] leading-[18px] text-[#A7ADB8] line-clamp-3">
                         {item.message}
                       </span>
@@ -549,9 +608,6 @@ export default function NotificationsPage() {
                           : ""}
                       </span>
                     </span>
-                    {!item.isRead ? (
-                      <span className="ml-2 mt-1.5 h-2 w-2 shrink-0 rounded-full bg-[#00E575]" />
-                    ) : null}
                   </button>
                 </li>
               );

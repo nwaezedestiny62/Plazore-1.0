@@ -1091,6 +1091,20 @@ export const getAdminContactDetail = async (req: Request, res: Response) => {
 // Mediated conversation. Never creates direct buyer↔seller chat.
 // ─────────────────────────────────────────────────────────────
 
+// ─────────────────────────────────────────────────────────────
+// CONTACT — Admin reach-out (PART 9)
+// Mediated conversation. Never creates direct buyer↔seller chat.
+// allowsReply: true  = user can text back
+// allowsReply: false = one-way notice (no reply)
+// ─────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────
+// CONTACT — Admin reach-out (PART 9)
+// Mediated. Never direct buyer↔seller chat.
+// allowsReply true  = user can text back
+// allowsReply false = one-way notice
+// ─────────────────────────────────────────────────────────────
+
 export const adminReachOut = async (req: Request, res: Response) => {
   try {
     const admin = (req as any).user;
@@ -1108,6 +1122,7 @@ export const adminReachOut = async (req: Request, res: Response) => {
       storeId,
       productId,
       orderId,
+      allowsReply = true,
     } = req.body || {};
 
     if (!targetUserId || !mongoose.isValidObjectId(String(targetUserId))) {
@@ -1186,6 +1201,7 @@ export const adminReachOut = async (req: Request, res: Response) => {
       if (ctx === "general") ctx = "order";
     }
 
+    const canReply = Boolean(allowsReply);
     const now = new Date();
     const email =
       String((target as any).email || "").trim().toLowerCase() ||
@@ -1216,7 +1232,8 @@ export const adminReachOut = async (req: Request, res: Response) => {
           createdAt: now,
         },
       ],
-      status: "awaiting_user",
+      allowsReply: canReply,
+      status: canReply ? "awaiting_user" : "open",
       priority: "normal",
       assignedAdmin: admin._id,
       unreadByAdmin: false,
@@ -1226,7 +1243,7 @@ export const adminReachOut = async (req: Request, res: Response) => {
 
     await safeNotify({
       user: target._id,
-      title: "Message from Plazore",
+      title: canReply ? "Message from Plazore" : "Notice from Plazore",
       message: body.slice(0, 120) + (body.length > 120 ? "…" : ""),
       type: "contact_reply",
       contact: doc._id,
@@ -1234,7 +1251,7 @@ export const adminReachOut = async (req: Request, res: Response) => {
 
     res.status(201).json({
       success: true,
-      data: { _id: String(doc._id) },
+      data: { _id: String(doc._id), allowsReply: canReply },
     });
   } catch (error: any) {
     console.error("adminReachOut:", error);
@@ -1293,7 +1310,6 @@ export const updateAdminContact = async (req: Request, res: Response) => {
         });
       }
 
-      // Idempotency guards
       if (
         (order as any).payout?.status === "initiated" ||
         (order as any).payout?.status === "completed"
@@ -1311,7 +1327,6 @@ export const updateAdminContact = async (req: Request, res: Response) => {
       }
 
       if (resolveAction === "refund_buyer") {
-        // Mark for refund (actual Paystack call comes in later step)
         order.paymentStatus = "refunded";
         (order as any).buyerConfirmation = {
           status: "issue_reported",
@@ -1326,7 +1341,6 @@ export const updateAdminContact = async (req: Request, res: Response) => {
           blockedReason: "Admin initiated refund after delivery issue",
         };
       } else if (resolveAction === "seller_favour") {
-        // Clear the issue so buyer can still confirm, or move toward eligible
         (order as any).buyerConfirmation = {
           status: "pending",
           confirmedAt: undefined,
@@ -1339,7 +1353,6 @@ export const updateAdminContact = async (req: Request, res: Response) => {
           blockedReason: "",
         };
       } else if (resolveAction === "authorize_payout") {
-        // Admin force-authorizes payout (buyer cannot/will not confirm)
         (order as any).buyerConfirmation = {
           status: "confirmed",
           confirmedAt: now,
@@ -1356,11 +1369,9 @@ export const updateAdminContact = async (req: Request, res: Response) => {
 
       await order.save();
 
-      // Force conversation to resolved
       item.status = "resolved";
       item.resolvedAt = now;
 
-      // System note so the thread has a record
       if (!Array.isArray((item as any).internalNotes)) {
         (item as any).internalNotes = [];
       }
@@ -1370,7 +1381,6 @@ export const updateAdminContact = async (req: Request, res: Response) => {
         createdAt: now,
       });
 
-      // Notify buyer
       await safeNotify({
         user: order.buyer,
         title: "Delivery issue update",
@@ -1384,7 +1394,6 @@ export const updateAdminContact = async (req: Request, res: Response) => {
         contact: item._id,
       });
 
-      // Notify seller when payout is unlocked
       if (
         resolveAction === "authorize_payout" ||
         resolveAction === "seller_favour"
@@ -1407,6 +1416,15 @@ export const updateAdminContact = async (req: Request, res: Response) => {
     ).trim();
 
     if (replyBody) {
+      // One-way threads: no conversation-style admin reply
+      if ((item as any).allowsReply === false) {
+        return res.status(403).json({
+          success: false,
+          message:
+            "This thread is one-way (no text back). Use an internal note or status change instead.",
+        });
+      }
+
       if (!Array.isArray((item as any).messages)) {
         (item as any).messages = [];
       }

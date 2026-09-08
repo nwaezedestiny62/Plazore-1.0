@@ -35,9 +35,10 @@ export async function searchSuggest(q: string) {
 
 export async function fetchProduct(id: string) {
   try {
-    const json = await apiGet<{ success: boolean; data: import("./types").Product }>(
-      `/products/${id}`
-    );
+    const json = await apiGet<{
+      success: boolean;
+      data: import("./types").Product;
+    }>(`/products/${id}`);
     return json.data || null;
   } catch {
     return null;
@@ -46,9 +47,10 @@ export async function fetchProduct(id: string) {
 
 export async function fetchProductAI(id: string) {
   try {
-    const json = await apiGet<{ success: boolean; data: import("./plazoreAI").PlazoreAIData }>(
-      `/ai/product/${id}`
-    );
+    const json = await apiGet<{
+      success: boolean;
+      data: import("./plazoreAI").PlazoreAIData;
+    }>(`/ai/product/${id}`);
     return json.data || null;
   } catch {
     return null;
@@ -144,5 +146,52 @@ export async function fetchShowroom(opts?: {
   } catch {
     const products = await fetchMallProducts();
     return { products, rooms: null as ShowroomRooms | null, sessionId: "" };
+  }
+}
+
+/** Public announcements (no auth) */
+export type PublicAnnouncement = {
+  _id: string;
+  headline?: string;
+  body?: string;
+  mediaType?: "none" | "image" | "video";
+  mediaUrl?: string;
+  mediaPosterUrl?: string;
+  audience?: string;
+  actionLabel?: string;
+  actionRoute?: string;
+  design?: import("@/components/AnnouncementCard").AnnouncementDesign;
+  publishedAt?: string;
+};
+
+export async function fetchPublicAnnouncements(opts?: {
+  limit?: number;
+  audience?: "all" | "buyers" | "sellers";
+}): Promise<PublicAnnouncement[]> {
+  try {
+    const q = new URLSearchParams();
+    if (opts?.limit) q.set("limit", String(opts.limit));
+    if (opts?.audience) q.set("audience", opts.audience);
+    const path = q.toString() ? `/announcements?${q}` : "/announcements";
+    const json = await apiGet<{ success: boolean; data: PublicAnnouncement[] }>(
+      path
+    );
+    return Array.isArray(json.data) ? json.data : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Optional detail route — returns null if not implemented on server */
+export async function fetchAnnouncementById(
+  id: string
+): Promise<PublicAnnouncement | null> {
+  try {
+    const json = await apiGet<{ success: boolean; data: PublicAnnouncement }>(
+      `/announcements/${id}`
+    );
+    return json.data || null;
+  } catch {
+    return null;
   }
 }

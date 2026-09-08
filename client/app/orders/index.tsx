@@ -7,6 +7,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage'
 import { useFocusEffect, useRouter } from 'expo-router'
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
+  Alert,
   Animated,
   Easing,
   FlatList,
@@ -16,13 +17,11 @@ import {
   Text,
   TouchableOpacity,
   View,
-  Alert,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 
 const BG = '#090B0F'
 const SURFACE = '#11141A'
-const SURFACE_2 = '#171B22'
 const LINE = 'rgba(255,255,255,0.07)'
 const TEXT = '#F5F7FA'
 const SECONDARY = '#A7ADB8'
@@ -45,10 +44,7 @@ const STATUS_ORDER = ['Preparing', 'Shipped', 'Delivered', 'Cancelled']
 
 type SortMode = 'newest' | 'oldest' | 'status'
 
-function confirmationHint(order: any): {
-  label: string
-  color: string
-} | null {
+function confirmationHint(order: any): { label: string; color: string } | null {
   if (order?.orderStatus !== 'Delivered') return null
   const status =
     order?.buyerConfirmation?.status ||
@@ -60,7 +56,6 @@ function confirmationHint(order: any): {
   if (status === 'confirmed') {
     return { label: 'Delivery confirmed', color: GREEN }
   }
-  // pending / none after Delivered
   return { label: 'Confirm delivery', color: GREEN }
 }
 
@@ -74,11 +69,11 @@ function PlazoreOrbPreloader() {
         duration: 2600,
         easing: Easing.linear,
         useNativeDriver: true,
-      })
+      }),
     )
     loop.start()
     return () => loop.stop()
-  }, [])
+  }, [rotation])
 
   const rotate = rotation.interpolate({
     inputRange: [0, 1],
@@ -102,7 +97,7 @@ function PlazoreOrbPreloader() {
 }
 
 export default function BuyerOrders() {
-  const { getToken } = useAuth()
+  const { getToken, isSignedIn, isLoaded } = useAuth()
   const router = useRouter()
   const { format } = useMarketplace()
 
@@ -116,10 +111,9 @@ export default function BuyerOrders() {
   const loadHidden = useCallback(async () => {
     try {
       const raw = await AsyncStorage.getItem(HIDDEN_KEY)
-      if (raw) {
-        const parsed = JSON.parse(raw)
-        if (Array.isArray(parsed)) setHiddenIds(parsed.map(String))
-      }
+      if (!raw) return
+      const parsed = JSON.parse(raw)
+      if (Array.isArray(parsed)) setHiddenIds(parsed.map(String))
     } catch {
       /* ignore */
     }
@@ -128,12 +122,13 @@ export default function BuyerOrders() {
   const fetchOrders = useCallback(async () => {
     try {
       const token = await getToken()
+      if (!token) return
       const res = await api.get('/orders', {
         headers: { Authorization: `Bearer ${token}` },
       })
-      if (res.data.success) setOrders(res.data.data || [])
+      if (res.data?.success) setOrders(res.data.data || [])
     } catch {
-      /* keep existing list */
+      /* keep list */
     } finally {
       setLoading(false)
       setRefreshing(false)
@@ -142,9 +137,14 @@ export default function BuyerOrders() {
 
   useFocusEffect(
     useCallback(() => {
+      if (!isLoaded) return
+      if (!isSignedIn) {
+        router.replace('/(auth)/sign-in' as any)
+        return
+      }
       loadHidden()
       fetchOrders()
-    }, [loadHidden, fetchOrders])
+    }, [isLoaded, isSignedIn, loadHidden, fetchOrders, router]),
   )
 
   const visibleOrders = useMemo(() => {
@@ -158,17 +158,16 @@ export default function BuyerOrders() {
       list.sort(
         (a, b) =>
           new Date(b.createdAt || 0).getTime() -
-          new Date(a.createdAt || 0).getTime()
+          new Date(a.createdAt || 0).getTime(),
       )
     } else if (sort === 'oldest') {
       list.sort(
         (a, b) =>
           new Date(a.createdAt || 0).getTime() -
-          new Date(b.createdAt || 0).getTime()
+          new Date(b.createdAt || 0).getTime(),
       )
     } else {
       list.sort((a, b) => {
-        // Pending confirmation first among Delivered
         const ha = confirmationHint(a)
         const hb = confirmationHint(b)
         const aNeeds =
@@ -179,29 +178,31 @@ export default function BuyerOrders() {
           hb?.label === 'Confirm delivery' || hb?.label === 'Issue under review'
             ? 0
             : 1
-        if (sort === 'status' && aNeeds !== bNeeds) return aNeeds - bNeeds
+        if (aNeeds !== bNeeds) return aNeeds - bNeeds
         return (
-          STATUS_ORDER.indexOf(a.orderStatus) -
-          STATUS_ORDER.indexOf(b.orderStatus)
+          STATUS_ORDER.indexOf(a.orderStatus || '') -
+          STATUS_ORDER.indexOf(b.orderStatus || '')
         )
       })
     }
     return list
   }, [visibleOrders, sort])
 
-  const clearCompleted = () => {
-    // Only hide fully done: Cancelled, or Delivered + confirmed (not pending / issue)
-    const completed = orders.filter((o) => {
-      if (o.orderStatus === 'Cancelled') return true
-      if (o.orderStatus !== 'Delivered') return false
-      const s = o?.buyerConfirmation?.status
-      return s === 'confirmed'
-    })
+  const completed = useMemo(
+    () =>
+      orders.filter((o) => {
+        if (o.orderStatus === 'Cancelled') return true
+        if (o.orderStatus !== 'Delivered') return false
+        return o?.buyerConfirmation?.status === 'confirmed'
+      }),
+    [orders],
+  )
 
+  const clearCompleted = () => {
     if (completed.length === 0) {
       Alert.alert(
         'Nothing to clear',
-        'No fully completed orders to hide. Orders waiting for your confirmation stay visible.'
+        'No fully completed orders to hide. Orders waiting for your confirmation stay visible.',
       )
       return
     }
@@ -210,7 +211,7 @@ export default function BuyerOrders() {
       'Clear completed',
       `Hide ${completed.length} completed order${
         completed.length !== 1 ? 's' : ''
-      } from this list? They remain on the server.`,
+      } from this list? They remain on the server. Orders still needing confirmation are not hidden.`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -227,11 +228,11 @@ export default function BuyerOrders() {
             }
           },
         },
-      ]
+      ],
     )
   }
 
-  if (loading && !refreshing) {
+  if (!isLoaded || (loading && !refreshing && isSignedIn)) {
     return <PlazoreOrbPreloader />
   }
 
@@ -253,7 +254,6 @@ export default function BuyerOrders() {
             </Text>
           </View>
         </View>
-
         <TouchableOpacity
           onPress={() => setConfigOpen(true)}
           style={styles.configBtn}
@@ -265,7 +265,7 @@ export default function BuyerOrders() {
 
       <FlatList
         data={sorted}
-        keyExtractor={(item) => item._id}
+        keyExtractor={(item) => String(item._id)}
         contentContainerStyle={styles.listContent}
         refreshControl={
           <RefreshControl
@@ -397,11 +397,7 @@ export default function BuyerOrders() {
 }
 
 const styles = StyleSheet.create({
-  safe: {
-    flex: 1,
-    backgroundColor: BG,
-  },
-
+  safe: { flex: 1, backgroundColor: BG },
   loaderRoot: {
     flex: 1,
     backgroundColor: BG,
@@ -434,11 +430,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  orbLogo: {
-    width: 32,
-    height: 32,
-  },
-
+  orbLogo: { width: 32, height: 32 },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -481,12 +473,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginRight: 6,
   },
-
   listContent: {
     padding: 16,
     paddingBottom: 40,
   },
-
   emptyWrap: {
     alignItems: 'center',
     marginTop: 80,
@@ -515,7 +505,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 20,
   },
-
   card: {
     backgroundColor: SURFACE,
     borderRadius: 16,

@@ -2,13 +2,18 @@ import { Product } from '@/constants/types'
 import { useCart } from '@/context/CartContext'
 import { useMarketplace } from '@/context/MarketplaceContext'
 import { trackShowroomEvent } from '@/services/showroomEvents'
+import { useAuth, useOAuth } from '@clerk/clerk-expo'
 import { Ionicons } from '@expo/vector-icons'
-import { Link } from 'expo-router'
-import React, { useCallback, useEffect, useMemo, useRef } from 'react'
+import * as WebBrowser from 'expo-web-browser'
+import { Link, usePathname, useRouter } from 'expo-router'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
+  ActivityIndicator,
   Animated,
   Easing,
   Image,
+  Modal,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -17,12 +22,22 @@ import {
 } from 'react-native'
 import { useShowroomFlyCart } from './ShowroomFlyCart'
 
+WebBrowser.maybeCompleteAuthSession()
+
 const H_PADDING = 16
 const GAP = 4
-const IMAGE_ASPECT = 1.35
+/** Was 1.35 — shorter product cards */
+const IMAGE_ASPECT = 1.08
 const HOLD_MS = 5200
 const CROSSFADE_MS = 1800
 const EASE = Easing.bezier(0.4, 0.0, 0.2, 1.0)
+
+const BG = '#090B0F'
+const SURFACE = '#11141A'
+const LINE = 'rgba(255,255,255,0.1)'
+const TEXT = '#F5F7FA'
+const SECONDARY = 'rgba(255,255,255,0.55)'
+const GREEN = '#00E575'
 
 type Props = {
   product: Product
@@ -87,6 +102,16 @@ export default function ShowroomProductCard({
   const { addToCart } = useCart()
   const flyCart = useShowroomFlyCart()
   const { width: screenW } = useWindowDimensions()
+  const { isSignedIn, isLoaded } = useAuth()
+  const { startOAuthFlow } = useOAuth({ strategy: 'oauth_google' })
+  const router = useRouter()
+  const pathname = usePathname()
+
+  const [authOpen, setAuthOpen] = useState(false)
+  const [googleBusy, setGoogleBusy] = useState(false)
+
+  /** Product waiting to be added after successful auth */
+  const pendingCartRef = useRef<Product | null>(null)
 
   const defaultW = (screenW - H_PADDING * 2 - GAP) / 2
   const cardW = Number(style?.width) > 0 ? Number(style.width) : defaultW
@@ -96,7 +121,7 @@ export default function ShowroomProductCard({
   const brand = useMemo(() => resolveBrand(product), [product])
   const priceLabel = useMemo(
     () => formatProduct(resolvePrice(product), product.region),
-    [formatProduct, product]
+    [formatProduct, product],
   )
 
   const images = useMemo(() => {
@@ -110,7 +135,6 @@ export default function ShowroomProductCard({
   const currentRef = useRef(0)
   const busy = useRef(false)
   const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-
   const opacities = useRef<Animated.Value[]>([]).current
 
   if (opacities.length !== images.length) {
@@ -165,7 +189,7 @@ export default function ShowroomProductCard({
         }
       })
     },
-    [images, opacities, clearHold]
+    [images, opacities, clearHold],
   )
 
   useEffect(() => {
@@ -193,6 +217,39 @@ export default function ShowroomProductCard({
     })
   }, [product?._id, product?.region, room, position])
 
+  const doAddToCart = useCallback(
+    (p: Product) => {
+      trackShowroomEvent({
+        productId: String(p._id),
+        type: 'cart',
+        room,
+        position,
+        region: p.region,
+      })
+      cartBtnRef.current?.measureInWindow((x, y, width, height) => {
+        if (width <= 0 || height <= 0) {
+          addToCart(p)
+          return
+        }
+        if (flyCart) flyCart.flyAdd(p, { x, y, width, height })
+        else addToCart(p)
+      })
+    },
+    [flyCart, addToCart, room, position],
+  )
+
+  /** After sign-in / Google OAuth succeeds → add pending product */
+  useEffect(() => {
+    if (!isLoaded || !isSignedIn) return
+    const pending = pendingCartRef.current
+    if (!pending) return
+    pendingCartRef.current = null
+    setAuthOpen(false)
+    // small delay so session is fully ready
+    const t = setTimeout(() => doAddToCart(pending), 120)
+    return () => clearTimeout(t)
+  }, [isLoaded, isSignedIn, doAddToCart])
+
   const trackOpen = useCallback(() => {
     if (!product?._id) return
     trackShowroomEvent({
@@ -205,22 +262,43 @@ export default function ShowroomProductCard({
   }, [product?._id, product?.region, room, position])
 
   const handleAddToCart = useCallback(() => {
-    trackShowroomEvent({
-      productId: String(product._id),
-      type: 'cart',
-      room,
-      position,
-      region: product.region,
+    if (!isLoaded) return
+
+    if (!isSignedIn) {
+      pendingCartRef.current = product
+      setAuthOpen(true)
+      return
+    }
+
+    doAddToCart(product)
+  }, [isLoaded, isSignedIn, product, doAddToCart])
+
+  const returnPath = pathname || '/'
+
+  const onSignIn = useCallback(() => {
+    setAuthOpen(false)
+    // Keep pending product so useEffect adds it after return
+    router.push({
+      pathname: '/(auth)/sign-in' as any,
+      params: { redirect_url: returnPath },
     })
-    cartBtnRef.current?.measureInWindow((x, y, width, height) => {
-      if (width <= 0 || height <= 0) {
-        addToCart(product)
-        return
+  }, [router, returnPath])
+
+  const onContinueGoogle = useCallback(async () => {
+    try {
+      setGoogleBusy(true)
+      const { createdSessionId, setActive } = await startOAuthFlow()
+      if (createdSessionId && setActive) {
+        await setActive({ session: createdSessionId })
+        // pending product stays in ref → useEffect will add to cart
+        setAuthOpen(false)
       }
-      if (flyCart) flyCart.flyAdd(product, { x, y, width, height })
-      else addToCart(product)
-    })
-  }, [product, flyCart, addToCart, room, position])
+    } catch {
+      // user cancelled or error — keep sheet open
+    } finally {
+      setGoogleBusy(false)
+    }
+  }, [startOAuthFlow])
 
   const textPrimary = dark ? '#FFFFFF' : '#111111'
   const textSecondary = dark ? 'rgba(255,255,255,0.65)' : '#6B7280'
@@ -287,6 +365,94 @@ export default function ShowroomProductCard({
           )}
         </Pressable>
       </Link>
+
+      {/* Auth sheet — same idea as web */}
+      <Modal
+        visible={authOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          pendingCartRef.current = null
+          setAuthOpen(false)
+        }}
+      >
+        <Pressable
+          style={styles.authScrim}
+          onPress={() => {
+            pendingCartRef.current = null
+            setAuthOpen(false)
+          }}
+        >
+          <Pressable
+            style={styles.authSheet}
+            onPress={(e) => e.stopPropagation()}
+          >
+            <View style={styles.authHead}>
+              <View style={{ flex: 1, paddingRight: 12 }}>
+                <Text style={styles.authTitle}>Continue on Plazore</Text>
+                <Text style={styles.authSub}>
+                  Sign in to add this product to your cart. You’ll return here
+                  after.
+                </Text>
+              </View>
+              <Pressable
+                onPress={() => {
+                  pendingCartRef.current = null
+                  setAuthOpen(false)
+                }}
+                hitSlop={12}
+                style={styles.authClose}
+              >
+                <Ionicons name="close" size={18} color="rgba(255,255,255,0.5)" />
+              </Pressable>
+            </View>
+
+            <View style={styles.authActions}>
+              <Pressable
+                onPress={onSignIn}
+                style={styles.authPrimary}
+                disabled={googleBusy}
+              >
+                <Text style={styles.authPrimaryText}>Sign in</Text>
+              </Pressable>
+
+              <Pressable
+                onPress={onContinueGoogle}
+                style={styles.authGoogle}
+                disabled={googleBusy}
+              >
+                {googleBusy ? (
+                  <ActivityIndicator color={TEXT} />
+                ) : (
+                  <>
+                    <Ionicons name="logo-google" size={18} color={TEXT} />
+                    <Text style={styles.authGoogleText}>
+                      Continue with Google
+                    </Text>
+                  </>
+                )}
+              </Pressable>
+
+              <Pressable
+                onPress={() => {
+                  pendingCartRef.current = product
+                  setAuthOpen(false)
+                  router.push({
+                    pathname: '/(auth)/sign-in' as any,
+                    params: {
+                      mode: 'signup',
+                      redirect_url: returnPath,
+                    },
+                  })
+                }}
+                disabled={googleBusy}
+              >
+                <Text style={styles.authSignup}>Create a Plazore account</Text>
+              </Pressable>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   )
 }
@@ -319,7 +485,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     zIndex: 10,
   },
-  info: { paddingTop: 11, paddingHorizontal: 2 },
+  info: { paddingTop: 9, paddingHorizontal: 2, paddingBottom: 2 },
   name: {
     fontFamily: 'Manrope_500Medium',
     fontSize: 13.5,
@@ -334,5 +500,84 @@ const styles = StyleSheet.create({
     fontFamily: 'Manrope_400Regular',
     fontSize: 11,
     marginTop: 3,
+  },
+
+  authScrim: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.75)',
+    justifyContent: Platform.OS === 'ios' ? 'flex-end' : 'center',
+    paddingHorizontal: Platform.OS === 'ios' ? 0 : 24,
+  },
+  authSheet: {
+    backgroundColor: SURFACE,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderColor: LINE,
+    paddingTop: 20,
+    paddingBottom: Platform.OS === 'ios' ? 36 : 24,
+    paddingHorizontal: 20,
+    ...(Platform.OS === 'ios'
+      ? {}
+      : { borderRadius: 16, borderWidth: StyleSheet.hairlineWidth }),
+  },
+  authHead: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: 20,
+  },
+  authTitle: {
+    color: TEXT,
+    fontSize: 16,
+    fontWeight: '800',
+    letterSpacing: -0.2,
+  },
+  authSub: {
+    color: SECONDARY,
+    fontSize: 13,
+    lineHeight: 19,
+    marginTop: 6,
+  },
+  authClose: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  authActions: { gap: 10 },
+  authPrimary: {
+    height: 48,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 12,
+  },
+  authPrimaryText: {
+    color: '#1F1F1F',
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  authGoogle: {
+    height: 48,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: LINE,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderRadius: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+  },
+  authGoogleText: {
+    color: TEXT,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  authSignup: {
+    textAlign: 'center',
+    color: GREEN,
+    fontSize: 14,
+    fontWeight: '700',
+    paddingVertical: 12,
   },
 })

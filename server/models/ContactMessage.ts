@@ -24,7 +24,12 @@ const internalNoteSchema = new Schema(
 
 const contactMessageSchema = new Schema(
   {
-    user: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
+    user: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+      index: true,
+    },
     contactAs: {
       type: String,
       enum: ["buyer", "seller"],
@@ -60,9 +65,21 @@ const contactMessageSchema = new Schema(
       city: { type: String, required: true, trim: true },
       street: { type: String, default: "", trim: true },
     },
-    relatedProduct: { type: Schema.Types.ObjectId, ref: "Product", default: null },
-    relatedSeller: { type: Schema.Types.ObjectId, ref: "User", default: null },
-    relatedOrder: { type: Schema.Types.ObjectId, ref: "Order", default: null },
+    relatedProduct: {
+      type: Schema.Types.ObjectId,
+      ref: "Product",
+      default: null,
+    },
+    relatedSeller: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+    relatedOrder: {
+      type: Schema.Types.ObjectId,
+      ref: "Order",
+      default: null,
+    },
     messages: { type: [messageSchema], default: [] },
     internalNotes: { type: [internalNoteSchema], default: [] },
     status: {
@@ -84,14 +101,18 @@ const contactMessageSchema = new Schema(
       default: "normal",
       index: true,
     },
+    /** true = user can text back; false = one-way Plazore notice */
     allowsReply: { type: Boolean, default: true, index: true },
-    assignedAdmin: { type: Schema.Types.ObjectId, ref: "User", default: null },
+    assignedAdmin: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
     unreadByAdmin: { type: Boolean, default: true, index: true },
     unreadByUser: { type: Boolean, default: false, index: true },
     lastMessageAt: { type: Date, default: Date.now, index: true },
     resolvedAt: { type: Date },
     closedAt: { type: Date },
-    // legacy field kept so old rows still load
     message: { type: String, default: "" },
     responses: { type: Array, default: [] },
   },

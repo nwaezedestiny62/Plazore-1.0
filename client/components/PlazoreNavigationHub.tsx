@@ -958,7 +958,7 @@ export default function PlazoreNavigationHub({
     // Support screens
     if (itemId === 'help' || itemId === 'contact' || itemId === 'about') {
       requestAnimationFrame(() => {
-        router.push('/settings/about' as any)
+        router.push('/contact' as any)
       })
       return
     }

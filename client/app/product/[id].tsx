@@ -1,6 +1,6 @@
 /**
  * Product Details — Plazore mobile
- * + share sheet · auth gate · tighter AI / confidence
+ * Report at bottom · 6-line description · Google/sign-in resume
  */
 
 import { useCart } from "@/context/CartContext";
@@ -11,7 +11,7 @@ import { SpaceGrotesk_600SemiBold } from "@expo-google-fonts/space-grotesk/600Se
 import { useFonts } from "expo-font";
 import { Ionicons } from "@expo/vector-icons";
 import MaskedView from "@react-native-masked-view/masked-view";
-import { useAuth } from "@clerk/clerk-expo";
+import { useAuth, useOAuth } from "@clerk/clerk-expo";
 import { LinearGradient } from "expo-linear-gradient";
 import * as WebBrowser from "expo-web-browser";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -45,6 +45,8 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+WebBrowser.maybeCompleteAuthSession();
+
 const { width, height: SCREEN_H } = Dimensions.get("window");
 const GALLERY_H = Math.min(Math.max(SCREEN_H * 0.58, width * 0.95), 440);
 
@@ -60,8 +62,10 @@ const AI_BLUE = "#3B82F6";
 const ERROR = "#EF6262";
 
 const GRADIENT_COLORS = [AI_GREEN, "#14B8A6", AI_BLUE] as const;
-const SITE = "https://plazore.com"; // swap for your real web origin if different
+const SITE = "https://plazore.com";
 const PENDING_KEY = "plazore_pending_action";
+const GOOGLE_G =
+  "https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg";
 
 const FONT = {
   space500: "SpaceGrotesk_500Medium",
@@ -73,7 +77,46 @@ type PendingAction =
   | "add_to_cart"
   | "buy_now"
   | "message"
+  | "report"
   | null;
+
+async function savePending(payload: {
+  action: PendingAction;
+  productId?: string;
+}) {
+  try {
+    const AsyncStorage =
+      require("@react-native-async-storage/async-storage").default;
+    await AsyncStorage.setItem(PENDING_KEY, JSON.stringify(payload));
+  } catch {
+    /* optional */
+  }
+}
+
+async function readPending(): Promise<{
+  action?: PendingAction;
+  productId?: string;
+} | null> {
+  try {
+    const AsyncStorage =
+      require("@react-native-async-storage/async-storage").default;
+    const raw = await AsyncStorage.getItem(PENDING_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+async function clearPending() {
+  try {
+    const AsyncStorage =
+      require("@react-native-async-storage/async-storage").default;
+    await AsyncStorage.removeItem(PENDING_KEY);
+  } catch {
+    /* optional */
+  }
+}
 
 function GradientText({
   children,
@@ -276,6 +319,7 @@ export default function ProductDetails() {
   const id = Array.isArray(rawId) ? rawId[0] : rawId;
   const router = useRouter();
   const { getToken, isSignedIn, isLoaded: authLoaded } = useAuth();
+  const { startOAuthFlow } = useOAuth({ strategy: "oauth_google" });
 
   const [product, setProduct] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -293,6 +337,9 @@ export default function ProductDetails() {
   const [pending, setPending] = useState<PendingAction>(null);
   const [copied, setCopied] = useState(false);
   const [shareBusy, setShareBusy] = useState(false);
+  const [googleBusy, setGoogleBusy] = useState(false);
+
+  const ranPending = useRef(false);
 
   const aiReveal = useRef(new Animated.Value(0)).current;
   const aiLift = useRef(new Animated.Value(12)).current;
@@ -461,23 +508,43 @@ export default function ProductDetails() {
       : `${name}\nOn Plazore — shop with confidence.\n${productUrl}`;
   }, [product, productUrl, formatProduct]);
 
+  const seller = product?.seller || {};
+  const sellerId =
+    typeof seller === "object" && seller?._id
+      ? String(seller._id)
+      : typeof seller === "string"
+        ? seller
+        : null;
+
+  const openReport = useCallback(() => {
+    if (!product) return;
+    router.push({
+      pathname: "/contact" as any,
+      params: {
+        mode: "report",
+        contextType: "product",
+        productId: String(product._id || ""),
+        productName: String(product.name || ""),
+        storeId: sellerId || "",
+        storeName: String(seller.storeName || seller.name || ""),
+      },
+    });
+  }, [product, router, seller, sellerId]);
+
   const requireAuth = useCallback(
     (action: PendingAction) => {
       if (!authLoaded) return false;
       if (isSignedIn) return true;
       setPending(action);
+      void savePending({ action, productId: String(id || "") });
       setAuthOpen(true);
       return false;
     },
-    [authLoaded, isSignedIn],
+    [authLoaded, isSignedIn, id],
   );
 
   const goSignIn = () => {
-    try {
-      if (pending && product?._id) {
-        // AsyncStorage alternative if you prefer persistence
-      }
-    } catch {}
+    void savePending({ action: pending, productId: String(id || "") });
     setAuthOpen(false);
     router.push({
       pathname: "/sign-in" as any,
@@ -486,11 +553,33 @@ export default function ProductDetails() {
   };
 
   const goSignUp = () => {
+    void savePending({ action: pending, productId: String(id || "") });
     setAuthOpen(false);
     router.push({
       pathname: "/sign-up" as any,
       params: { redirect_url: `/product/${id}` },
     });
+  };
+
+  const continueGoogle = async () => {
+    void savePending({
+      action: pending || "add_to_cart",
+      productId: String(id || ""),
+    });
+    setGoogleBusy(true);
+    try {
+      const { createdSessionId, setActive } = await startOAuthFlow();
+      if (createdSessionId && setActive) {
+        await setActive({ session: createdSessionId });
+        setAuthOpen(false);
+      } else {
+        goSignIn();
+      }
+    } catch {
+      goSignIn();
+    } finally {
+      setGoogleBusy(false);
+    }
   };
 
   const pulseHeart = () => {
@@ -606,6 +695,42 @@ export default function ProductDetails() {
     }
   };
 
+  const handleReport = () => {
+    if (!requireAuth("report")) return;
+    openReport();
+  };
+
+  const runAction = useCallback(
+    (action: PendingAction) => {
+      if (action === "wishlist") runWishlist("toggle");
+      else if (action === "add_to_cart") {
+        if (product) addToCart(product, "");
+      } else if (action === "buy_now") {
+        if (product) {
+          addToCart(product, "");
+          router.push("/(tabs)/checkout" as any);
+        }
+      } else if (action === "message") void handleMessageSeller();
+      else if (action === "report") openReport();
+    },
+    [product, addToCart, router, runWishlist, openReport],
+  );
+
+  useEffect(() => {
+    if (!authLoaded || !isSignedIn || ranPending.current || !product) return;
+    (async () => {
+      const stored = await readPending();
+      const action = stored?.action || pending;
+      if (!action) return;
+      if (stored?.productId && stored.productId !== String(product._id)) return;
+      ranPending.current = true;
+      await clearPending();
+      setAuthOpen(false);
+      setPending(null);
+      runAction(action);
+    })();
+  }, [authLoaded, isSignedIn, product, pending, runAction]);
+
   const shareNative = async () => {
     if (!product) return;
     try {
@@ -616,7 +741,7 @@ export default function ProductDetails() {
         title: String(product.name || "Plazore"),
       });
     } catch {
-      /* user cancelled */
+      /* cancelled */
     } finally {
       setShareBusy(false);
     }
@@ -624,7 +749,6 @@ export default function ProductDetails() {
 
   const copyLink = async () => {
     try {
-      // Prefer expo-clipboard if installed; fallback Share
       const Clipboard = require("expo-clipboard");
       if (Clipboard?.setStringAsync) {
         await Clipboard.setStringAsync(productUrl);
@@ -683,6 +807,33 @@ export default function ProductDetails() {
     extrapolate: "clamp",
   });
 
+  const authCopy: Record<
+    NonNullable<PendingAction>,
+    { title: string; body: string }
+  > = {
+    wishlist: {
+      title: "Sign in to save this piece",
+      body: "Saves live on your account so they follow you across devices.",
+    },
+    add_to_cart: {
+      title: "Sign in to add this to your bag",
+      body: "Your bag stays with your Plazore account so you can finish this anytime.",
+    },
+    buy_now: {
+      title: "Sign in to buy this piece",
+      body: "Checkout is tied to your account so orders and delivery stay in one place.",
+    },
+    message: {
+      title: "Sign in to message the seller",
+      body: "Chat stays on Plazore — no contact swap until a real order is complete.",
+    },
+    report: {
+      title: "Sign in to report this listing",
+      body: "Reports go to Plazore moderation. You’ll return here after.",
+    },
+  };
+  const gate = authCopy[pending || "add_to_cart"];
+
   if (loading || !fontsLoaded) {
     return <StorePreloader />;
   }
@@ -708,14 +859,6 @@ export default function ProductDetails() {
   const images: string[] = product.images?.length > 0 ? product.images : [];
   const ship = product.shipping || {};
   const deliveryFee = Number(ship.deliveryFee) || 0;
-  const seller = product.seller || {};
-  const sellerId =
-    typeof seller === "object" && seller?._id
-      ? String(seller._id)
-      : typeof seller === "string"
-        ? seller
-        : null;
-
   const isSelf = ship.method === "self";
   const courierName =
     ship.courier ||
@@ -814,7 +957,7 @@ export default function ProductDetails() {
             <Animated.View
               pointerEvents="none"
               style={[
-                {position:'absolute',top:0,right:0,bottom:0,left:0},
+                { position: "absolute", top: 0, right: 0, bottom: 0, left: 0 },
                 { backgroundColor: "#090B0F", opacity: heroDarkOpacity },
               ]}
             />
@@ -941,13 +1084,12 @@ export default function ProductDetails() {
               )}
             </View>
 
-            {/* Plazore AI — slightly smaller */}
             <View style={styles.aiCard}>
               <LinearGradient
                 colors={["rgba(20,24,32,0.85)", "rgba(17,20,26,0.9)"]}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
-                style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 }}
+                style={{ position: "absolute", top: 0, right: 0, bottom: 0, left: 0 }}
               />
 
               {!aiReady ? (
@@ -989,7 +1131,6 @@ export default function ProductDetails() {
                     aiData.highlights?.length > 0 && (
                       <View style={{ marginTop: 10 }}>
                         <Text style={styles.aiSectionTitle}>Key Points</Text>
-
                         <View style={styles.highlightRow}>
                           <LinearGradient
                             colors={[...GRADIENT_COLORS]}
@@ -1001,25 +1142,6 @@ export default function ProductDetails() {
                             {aiData.highlights[0]}
                           </Text>
                         </View>
-
-                        {aiData.highlights.length > 1 && (
-                          <View
-                            style={[styles.highlightRow, { opacity: 0.28 }]}
-                          >
-                            <LinearGradient
-                              colors={[...GRADIENT_COLORS]}
-                              start={{ x: 0, y: 0 }}
-                              end={{ x: 1, y: 1 }}
-                              style={styles.bullet}
-                            />
-                            <Text
-                              style={styles.highlightText}
-                              numberOfLines={1}
-                            >
-                              {aiData.highlights[1]}
-                            </Text>
-                          </View>
-                        )}
                       </View>
                     )}
 
@@ -1040,13 +1162,12 @@ export default function ProductDetails() {
               )}
             </View>
 
-            {/* Buyer Confidence — tighter */}
             <View style={styles.confidenceCard}>
               <LinearGradient
                 colors={["rgba(16,185,129,0.08)", "rgba(59,130,246,0.06)"]}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
-                style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 }}
+                style={{ position: "absolute", top: 0, right: 0, bottom: 0, left: 0 }}
               />
               <View style={styles.confidenceHeader}>
                 <LinearGradient
@@ -1055,11 +1176,7 @@ export default function ProductDetails() {
                   end={{ x: 1, y: 1 }}
                   style={styles.confidenceBadge}
                 >
-                  <Ionicons
-                    name="shield-checkmark"
-                    size={11}
-                    color="#FFFFFF"
-                  />
+                  <Ionicons name="shield-checkmark" size={11} color="#FFFFFF" />
                 </LinearGradient>
                 <GradientText style={styles.confidenceEyebrow}>
                   Buyer Confidence
@@ -1084,7 +1201,7 @@ export default function ProductDetails() {
                 <ExpandableText
                   text={String(product.description)}
                   style={styles.body}
-                  numberOfLines={4}
+                  numberOfLines={6}
                 />
               </View>
             )}
@@ -1180,11 +1297,7 @@ export default function ProductDetails() {
             {!!shipsFrom && (
               <View style={[styles.card, styles.shipsFromCard]}>
                 <View style={styles.shipIcon}>
-                  <Ionicons
-                    name="location-outline"
-                    size={16}
-                    color={SECONDARY}
-                  />
+                  <Ionicons name="location-outline" size={16} color={SECONDARY} />
                 </View>
                 <View style={{ flex: 1, minWidth: 0 }}>
                   <Text style={styles.shipLabel}>Ships from</Text>
@@ -1243,9 +1356,14 @@ export default function ProductDetails() {
                     colors={["#13201A", "#111820"]}
                     start={{ x: 0, y: 0 }}
                     end={{ x: 1, y: 1 }}
-                    style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 }}
+                    style={{
+                      position: "absolute",
+                      top: 0,
+                      right: 0,
+                      bottom: 0,
+                      left: 0,
+                    }}
                   />
-
                   {messaging ? (
                     <ActivityIndicator size="small" color={AI_GREEN} />
                   ) : (
@@ -1274,42 +1392,27 @@ export default function ProductDetails() {
               </>
             )}
 
-            {/* Report Product — bottom support, not commerce hierarchy */}
-{/* Report Product — bottom support */}
-{!isOwnProduct && (
-  <View style={{ marginTop: 4, marginBottom: 28 }}>
-    <Text style={styles.sectionEyebrow}>Support</Text>
-    <TouchableOpacity
-      activeOpacity={0.88}
-      onPress={() => {
-        if (!requireAuth("message")) return;
-        router.push({
-          pathname: "/contact" as any,
-          params: {
-            mode: "report",
-            contextType: "product",
-            productId: String(product._id || ""),
-            productName: String(product.name || ""),
-            storeId: sellerId || "",
-            storeName: String(seller.storeName || seller.name || ""),
-          },
-        });
-      }}
-      style={styles.reportCard}
-    >
-      <View style={styles.reportIcon}>
-        <Ionicons name="flag-outline" size={17} color="#EF4444" />
-      </View>
-      <View style={{ flex: 1, minWidth: 0 }}>
-        <Text style={styles.reportTitle}>Report Product</Text>
-        <Text style={styles.reportSub} numberOfLines={1}>
-          Structured report to Plazore moderation
-        </Text>
-      </View>
-      <Ionicons name="chevron-forward" size={16} color="#F87171" />
-    </TouchableOpacity>
-  </View>
-)}
+            {!isOwnProduct && (
+              <View style={{ marginTop: 8, marginBottom: 8 }}>
+                <Text style={styles.sectionEyebrow}>Support</Text>
+                <TouchableOpacity
+                  activeOpacity={0.88}
+                  onPress={handleReport}
+                  style={styles.reportCard}
+                >
+                  <View style={styles.reportIcon}>
+                    <Ionicons name="flag-outline" size={17} color="#EF4444" />
+                  </View>
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text style={styles.reportTitle}>Report Product</Text>
+                    <Text style={styles.reportSub} numberOfLines={1}>
+                      Structured report to Plazore moderation
+                    </Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={16} color="#F87171" />
+                </TouchableOpacity>
+              </View>
+            )}
           </View>
         </Animated.ScrollView>
 
@@ -1399,7 +1502,6 @@ export default function ProductDetails() {
         </SafeAreaView>
       </Animated.View>
 
-      {/* Share sheet */}
       <Modal
         visible={shareOpen}
         transparent
@@ -1410,10 +1512,7 @@ export default function ProductDetails() {
           style={styles.sheetScrim}
           onPress={() => setShareOpen(false)}
         >
-          <Pressable
-            style={styles.sheet}
-            onPress={(e) => e.stopPropagation()}
-          >
+          <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
             <View style={styles.sheetHandleBar} />
             <View style={styles.sheetHead}>
               <Text style={styles.sheetTitle}>Share this piece</Text>
@@ -1464,7 +1563,9 @@ export default function ProductDetails() {
               onPress={openWhatsApp}
               activeOpacity={0.85}
             >
-              <View style={[styles.shareIcon, { backgroundColor: "#128C7E22" }]}>
+              <View
+                style={[styles.shareIcon, { backgroundColor: "#128C7E22" }]}
+              >
                 <Ionicons name="logo-whatsapp" size={18} color="#25D366" />
               </View>
               <Text style={styles.shareLabel}>WhatsApp</Text>
@@ -1495,24 +1596,17 @@ export default function ProductDetails() {
         </Pressable>
       </Modal>
 
-      {/* Auth gate */}
       <Modal
         visible={authOpen}
         transparent
         animationType="fade"
         onRequestClose={() => setAuthOpen(false)}
       >
-        <Pressable
-          style={styles.sheetScrim}
-          onPress={() => setAuthOpen(false)}
-        >
-          <Pressable
-            style={styles.sheet}
-            onPress={(e) => e.stopPropagation()}
-          >
+        <Pressable style={styles.sheetScrim} onPress={() => setAuthOpen(false)}>
+          <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
             <View style={styles.sheetHandleBar} />
             <View style={styles.sheetHead}>
-              <Text style={styles.sheetTitle}>Continue on Plazore</Text>
+              <Text style={styles.sheetTitle}>{gate.title}</Text>
               <TouchableOpacity
                 onPress={() => setAuthOpen(false)}
                 hitSlop={12}
@@ -1520,10 +1614,22 @@ export default function ProductDetails() {
                 <Ionicons name="close" size={20} color={MUTED} />
               </TouchableOpacity>
             </View>
-            <Text style={styles.sheetSub}>
-              Sign in to save, message the seller, or complete your purchase.
-              You’ll return to this product.
-            </Text>
+            <Text style={styles.sheetSub}>{gate.body}</Text>
+
+            <TouchableOpacity
+              style={styles.authGoogle}
+              onPress={continueGoogle}
+              disabled={googleBusy}
+              activeOpacity={0.9}
+            >
+              <Image
+                source={{ uri: GOOGLE_G }}
+                style={{ width: 20, height: 20 }}
+              />
+              <Text style={styles.authGoogleText}>
+                {googleBusy ? "Connecting…" : "Continue with Google"}
+              </Text>
+            </TouchableOpacity>
 
             <TouchableOpacity
               style={styles.authPrimary}
@@ -1537,8 +1643,13 @@ export default function ProductDetails() {
               onPress={goSignUp}
               activeOpacity={0.9}
             >
-              <Text style={styles.authSecondaryText}>Create a Plazore account</Text>
+              <Text style={styles.authSecondaryText}>
+                Create a Plazore account
+              </Text>
             </TouchableOpacity>
+            <Text style={styles.authFoot}>
+              After you sign in you’ll land back on this product.
+            </Text>
           </Pressable>
         </Pressable>
       </Modal>
@@ -1831,47 +1942,47 @@ const styles = StyleSheet.create({
     fontWeight: "500",
   },
 
-confidenceCard: {
-  borderRadius: 12,
-  borderWidth: StyleSheet.hairlineWidth,
-  borderColor: "rgba(16,185,129,0.22)",
-  paddingHorizontal: 10,     // was 12
-  paddingVertical: 8,        // was 10
-  marginBottom: 16,          // was 20
-  overflow: "hidden",
-  backgroundColor: "rgba(17,20,26,0.7)",
-},
-confidenceHeader: {
-  flexDirection: "row",
-  alignItems: "center",
-  marginBottom: 3,
-  gap: 5,
-},
-confidenceBadge: {
-  width: 18,                 // was 20
-  height: 18,
-  borderRadius: 5,
-  alignItems: "center",
-  justifyContent: "center",
-},
-confidenceEyebrow: {
-  fontFamily: FONT.space500,
-  fontSize: 9,
-  letterSpacing: 1,
-  textTransform: "uppercase",
-},
-confidenceLevel: {
-  color: TEXT,
-  fontSize: 12.5,            // was 13.5
-  fontWeight: "700",
-  marginBottom: 2,
-  letterSpacing: -0.2,
-},
-confidenceBody: {
-  color: SECONDARY,
-  fontSize: 12,              // was 12.5
-  lineHeight: 16.5,
-},
+  confidenceCard: {
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "rgba(16,185,129,0.22)",
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    marginBottom: 16,
+    overflow: "hidden",
+    backgroundColor: "rgba(17,20,26,0.7)",
+  },
+  confidenceHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 3,
+    gap: 5,
+  },
+  confidenceBadge: {
+    width: 18,
+    height: 18,
+    borderRadius: 5,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  confidenceEyebrow: {
+    fontFamily: FONT.space500,
+    fontSize: 9,
+    letterSpacing: 1,
+    textTransform: "uppercase",
+  },
+  confidenceLevel: {
+    color: TEXT,
+    fontSize: 12.5,
+    fontWeight: "700",
+    marginBottom: 2,
+    letterSpacing: -0.2,
+  },
+  confidenceBody: {
+    color: SECONDARY,
+    fontSize: 12,
+    lineHeight: 16.5,
+  },
 
   sectionEyebrow: {
     color: "#FFFFFF",
@@ -2016,37 +2127,37 @@ confidenceBody: {
     overflow: "hidden",
   },
   reportCard: {
-  flexDirection: "row",
-  alignItems: "center",
-  borderRadius: 18,
-  borderWidth: StyleSheet.hairlineWidth,
-  borderColor: "rgba(239,68,68,0.35)",
-  backgroundColor: "rgba(239,68,68,0.08)",
-  paddingVertical: 14,
-  paddingHorizontal: 14,
-},
-reportIcon: {
-  width: 40,
-  height: 40,
-  borderRadius: 12,
-  backgroundColor: "rgba(239,68,68,0.12)",
-  alignItems: "center",
-  justifyContent: "center",
-  marginRight: 12,
-  borderWidth: StyleSheet.hairlineWidth,
-  borderColor: "rgba(239,68,68,0.25)",
-},
-reportTitle: {
-  color: "#F87171",
-  fontWeight: "700",
-  fontSize: 14.5,
-  letterSpacing: -0.2,
-},
-reportSub: {
-  color: "rgba(248,113,113,0.75)",
-  fontSize: 12,
-  marginTop: 2,
-},
+    flexDirection: "row",
+    alignItems: "center",
+    borderRadius: 18,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "rgba(239,68,68,0.35)",
+    backgroundColor: "rgba(239,68,68,0.08)",
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+  },
+  reportIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: "rgba(239,68,68,0.12)",
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "rgba(239,68,68,0.25)",
+  },
+  reportTitle: {
+    color: "#F87171",
+    fontWeight: "700",
+    fontSize: 14.5,
+    letterSpacing: -0.2,
+  },
+  reportSub: {
+    color: "rgba(248,113,113,0.75)",
+    fontSize: 12,
+    marginTop: 2,
+  },
   commIcon: {
     width: 44,
     height: 44,
@@ -2250,6 +2361,8 @@ reportSub: {
     color: TEXT,
     fontSize: 17,
     fontWeight: "700",
+    flex: 1,
+    paddingRight: 12,
   },
   sheetSub: {
     color: MUTED,
@@ -2280,16 +2393,33 @@ reportSub: {
     fontSize: 15,
     fontWeight: "600",
   },
+  authGoogle: {
+    height: 52,
+    borderRadius: 14,
+    backgroundColor: "#FFFFFF",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+    marginBottom: 10,
+  },
+  authGoogleText: {
+    color: "#1F1F1F",
+    fontSize: 15,
+    fontWeight: "800",
+  },
   authPrimary: {
     height: 52,
     borderRadius: 14,
-    backgroundColor: TEXT,
+    backgroundColor: SURFACE_2,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "rgba(255,255,255,0.12)",
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: 10,
+    marginBottom: 6,
   },
   authPrimaryText: {
-    color: BG,
+    color: TEXT,
     fontSize: 15,
     fontWeight: "800",
   },
@@ -2302,5 +2432,12 @@ reportSub: {
     color: AI_GREEN,
     fontSize: 14,
     fontWeight: "700",
+  },
+  authFoot: {
+    marginTop: 8,
+    textAlign: "center",
+    color: "rgba(255,255,255,0.38)",
+    fontSize: 11,
+    lineHeight: 16,
   },
 });

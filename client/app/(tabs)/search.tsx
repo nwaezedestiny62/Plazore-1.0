@@ -1,5 +1,4 @@
 // client/app/(tabs)/search.tsx
-import PlazoreFloatingNav from '@/components/PlazoreFloatingNav'
 import PlazoreNavigationHub from '@/components/PlazoreNavigationHub'
 import ShowroomProductCard from '@/components/showroom/ShowroomProductCard'
 import { ShowroomFlyCartProvider } from '@/components/showroom/ShowroomFlyCart'
@@ -26,7 +25,6 @@ import {
 } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
-/* ── Plazore dark ── */
 const BG = '#090B0F'
 const SURFACE = '#11141A'
 const SURFACE_2 = '#171B22'
@@ -40,14 +38,33 @@ const AI_BLUE = '#3B82F6'
 const RECENT_KEY = 'plazore_recent_searches'
 const MAX_RECENT = 8
 const DEBOUNCE = 240
-
 const PAD = 16
-const GAP = 4
+const GAP = 10
+const PAGE_SIZE = 20
+const MOVING_NOW_MAX = 14
 
-/**
- * Floors = human labels.
- * Each floor owns one or more real CATEGORY_LIST keys.
- */
+type SortKey =
+  | 'relevance'
+  | 'newest'
+  | 'oldest'
+  | 'price_high'
+  | 'price_low'
+  | 'name_az'
+  | 'name_za'
+  | 'views'
+
+const SORT_OPTIONS: { key: SortKey; label: string }[] = [
+  { key: 'relevance', label: 'Relevance' },
+  { key: 'newest', label: 'Newest first' },
+  { key: 'oldest', label: 'Oldest first' },
+  { key: 'price_high', label: 'Price: high → low' },
+  { key: 'price_low', label: 'Price: low → high' },
+  { key: 'name_az', label: 'Name: A → Z' },
+  { key: 'name_za', label: 'Name: Z → A' },
+  { key: 'views', label: 'Most viewed' },
+]
+
+/** Exact floor images from your original paste */
 const FLOORS: {
   id: string
   short: string
@@ -233,12 +250,80 @@ function getProductCategory(p: any): string {
   return String(p.category?.name || '')
 }
 
+function viewScore(p: any): number {
+  for (const c of [
+    p.viewCount,
+    p.views,
+    p.viewsCount,
+    p.impressionCount,
+    p.impressions,
+    p.openCount,
+    p.stats?.views,
+    p.stats?.impressions,
+    p.analytics?.views,
+    p.metrics?.views,
+  ]) {
+    const n = Number(c)
+    if (Number.isFinite(n) && n >= 0) return n
+  }
+  return 0
+}
+
+function productPrice(p: any) {
+  const n = Number(p.price)
+  return Number.isFinite(n) ? n : 0
+}
+
+function productCreated(p: any) {
+  const t = new Date(p.createdAt || 0).getTime()
+  return Number.isFinite(t) ? t : 0
+}
+
+function sortProducts(list: any[], sort: SortKey): any[] {
+  const arr = [...list]
+  switch (sort) {
+    case 'newest':
+      return arr.sort((a, b) => productCreated(b) - productCreated(a))
+    case 'oldest':
+      return arr.sort((a, b) => productCreated(a) - productCreated(b))
+    case 'price_high':
+      return arr.sort((a, b) => productPrice(b) - productPrice(a))
+    case 'price_low':
+      return arr.sort((a, b) => productPrice(a) - productPrice(b))
+    case 'name_az':
+      return arr.sort((a, b) =>
+        String(a.name || '').localeCompare(String(b.name || ''), undefined, {
+          sensitivity: 'base',
+        }),
+      )
+    case 'name_za':
+      return arr.sort((a, b) =>
+        String(b.name || '').localeCompare(String(a.name || ''), undefined, {
+          sensitivity: 'base',
+        }),
+      )
+    case 'views':
+      return arr.sort((a, b) => {
+        const d = viewScore(b) - viewScore(a)
+        return d !== 0 ? d : productCreated(b) - productCreated(a)
+      })
+    default:
+      return arr
+  }
+}
+
 function FloorImage({ images }: { images: [string, string, string] }) {
   const [idx, setIdx] = useState(0)
   return (
     <Image
-      source={{ uri: images[idx] }}
-      style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 }}
+      source={{ uri: images[Math.min(idx, 2)] }}
+      style={{
+        position: 'absolute',
+        top: 0,
+        right: 0,
+        bottom: 0,
+        left: 0,
+      }}
       contentFit="cover"
       transition={0}
       cachePolicy="memory-disk"
@@ -251,16 +336,11 @@ function FloorImage({ images }: { images: [string, string, string] }) {
 
 function toStaticProduct(p: Product): Product {
   const imgs = Array.isArray(p.images) ? p.images.filter(Boolean) : []
-  return {
-    ...p,
-    images: imgs.length ? [imgs[0]] : [],
-  }
+  return { ...p, images: imgs.length ? [imgs[0]] : [] }
 }
 
-/** Same orb preloader as product page entry */
 function StorePreloader() {
   const rotation = useRef(new Animated.Value(0)).current
-
   useEffect(() => {
     const loop = Animated.loop(
       Animated.timing(rotation, {
@@ -268,17 +348,15 @@ function StorePreloader() {
         duration: 2600,
         easing: Easing.linear,
         useNativeDriver: true,
-      })
+      }),
     )
     loop.start()
     return () => loop.stop()
   }, [rotation])
-
   const rotate = rotation.interpolate({
     inputRange: [0, 1],
     outputRange: ['0deg', '360deg'],
   })
-
   return (
     <View style={styles.loaderRoot}>
       <View style={styles.orbWrapper}>
@@ -295,7 +373,6 @@ function StorePreloader() {
   )
 }
 
-/** Smooth fade + slight lift when a product list appears */
 function FadeInGrid({
   children,
   animKey,
@@ -305,7 +382,6 @@ function FadeInGrid({
 }) {
   const opacity = useRef(new Animated.Value(0)).current
   const translateY = useRef(new Animated.Value(14)).current
-
   useEffect(() => {
     opacity.setValue(0)
     translateY.setValue(14)
@@ -324,7 +400,6 @@ function FadeInGrid({
       }),
     ]).start()
   }, [animKey, opacity, translateY])
-
   return (
     <Animated.View style={{ opacity, transform: [{ translateY }] }}>
       {children}
@@ -341,34 +416,31 @@ export default function BrowseScreen() {
   const [query, setQuery] = useState('')
   const [debounced, setDebounced] = useState('')
   const [allProducts, setAllProducts] = useState<Product[]>([])
-  const [trending, setTrending] = useState<Product[]>([])
   const [loading, setLoading] = useState(true)
   const [recent, setRecent] = useState<string[]>([])
   const [activeCategory, setActiveCategory] = useState<string | null>(null)
   const [serverProducts, setServerProducts] = useState<any[]>([])
   const [searchLoading, setSearchLoading] = useState(false)
-  /** Category/floor selection loading (product-page style preloader) */
   const [categoryLoading, setCategoryLoading] = useState(false)
 
-  const [filterOpen, setFilterOpen] = useState(false)
+  const [sortOpen, setSortOpen] = useState(false)
+  const [priceOpen, setPriceOpen] = useState(false)
+  const [sortKey, setSortKey] = useState<SortKey>('relevance')
   const [minPrice, setMinPrice] = useState('')
   const [maxPrice, setMaxPrice] = useState('')
   const [inStockOnly, setInStockOnly] = useState(false)
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE)
 
   useEffect(() => {
     let alive = true
     ;(async () => {
       try {
         const [res, stored] = await Promise.all([
-          api.get('/products?limit=80'),
+          api.get('/products?limit=120'),
           AsyncStorage.getItem(RECENT_KEY),
         ])
         if (!alive) return
-        if (res.data?.success) {
-          const list: Product[] = res.data.data || []
-          setAllProducts(list)
-          setTrending(list.slice(0, 8))
-        }
+        if (res.data?.success) setAllProducts(res.data.data || [])
         if (stored) {
           try {
             const p = JSON.parse(stored)
@@ -392,23 +464,25 @@ export default function BrowseScreen() {
   }, [query])
 
   useEffect(() => {
+    setVisibleCount(PAGE_SIZE)
+  }, [debounced, activeCategory, sortKey, minPrice, maxPrice, inStockOnly])
+
+  useEffect(() => {
     if (debounced.length < 1 || activeCategory) {
       setServerProducts([])
       setSearchLoading(false)
       return
     }
-
     let cancelled = false
     setSearchLoading(true)
-
     ;(async () => {
       try {
         const res = await api.get(
-          `/ai/search-suggest?q=${encodeURIComponent(debounced)}`
+          `/ai/search-suggest?q=${encodeURIComponent(debounced)}`,
         )
         if (cancelled || !res.data?.success) return
         setServerProducts(
-          Array.isArray(res.data.data?.products) ? res.data.data.products : []
+          Array.isArray(res.data.data?.products) ? res.data.data.products : [],
         )
       } catch {
         if (!cancelled) setServerProducts([])
@@ -416,7 +490,6 @@ export default function BrowseScreen() {
         if (!cancelled) setSearchLoading(false)
       }
     })()
-
     return () => {
       cancelled = true
     }
@@ -438,35 +511,30 @@ export default function BrowseScreen() {
   const matchesActive = useCallback((p: any, active: string) => {
     const cat = getProductCategory(p)
     const catL = cat.toLowerCase()
-
     if (catL === active.toLowerCase()) return true
-
     const floor = FLOORS.find((f) => f.id === active)
-    if (floor) {
-      return floor.match.some((m) => m.toLowerCase() === catL)
-    }
-
+    if (floor) return floor.match.some((m) => m.toLowerCase() === catL)
     const floorId = CATEGORY_TO_FLOOR[active.toLowerCase()]
     if (floorId) {
       const f = FLOORS.find((x) => x.id === floorId)
       return !!f?.match.some((m) => m.toLowerCase() === catL)
     }
-
     return false
   }, [])
 
-  const live = useMemo(() => {
-    const q = debounced.toLowerCase()
-    if (!q && !activeCategory) {
-      return {
-        products: [] as any[],
-        stores: [] as any[],
-        brands: [] as string[],
-        categories: [] as string[],
-      }
-    }
+  const movingNow = useMemo(
+    () => sortProducts(allProducts, 'views').slice(0, MOVING_NOW_MAX),
+    [allProducts],
+  )
 
-    let products = serverProducts.length > 0 ? serverProducts : allProducts
+  const filteredProducts = useMemo(() => {
+    const q = debounced.toLowerCase()
+    if (!q && !activeCategory) return [] as any[]
+
+    let products =
+      serverProducts.length > 0 && !activeCategory
+        ? serverProducts
+        : allProducts
 
     if (activeCategory) {
       products = products.filter((p: any) => matchesActive(p, activeCategory))
@@ -482,49 +550,18 @@ export default function BrowseScreen() {
     const min = Number(minPrice)
     const max = Number(maxPrice)
     if (Number.isFinite(min) && min > 0) {
-      products = products.filter((p: any) => Number(p.price) >= min)
+      products = products.filter((p: any) => productPrice(p) >= min)
     }
     if (Number.isFinite(max) && max > 0) {
-      products = products.filter((p: any) => Number(p.price) <= max)
+      products = products.filter((p: any) => productPrice(p) <= max)
     }
     if (inStockOnly) {
       products = products.filter((p: any) => Number(p.stock ?? 0) > 0)
     }
 
-    const storesMap = new Map<string, SellerInfo>()
-    if (q) {
-      allProducts.forEach((p) => {
-        const s = getSeller(p)
-        if (!s) return
-        const name = (s.storeName || s.name || '').toLowerCase()
-        if (name && name.includes(q)) storesMap.set(s._id, s)
-      })
-    }
-    const stores = Array.from(storesMap.values()).slice(0, 8)
-
-    const brandSet = new Set<string>()
-    if (q) {
-      allProducts.forEach((p) => {
-        if (p.brand && p.brand.toLowerCase().includes(q)) brandSet.add(p.brand)
-      })
-    }
-    const brands = Array.from(brandSet).slice(0, 10)
-
-    const categories = CATEGORY_LIST.filter((c) => {
-      if (!q) return false
-      const lower = c.toLowerCase()
-      return (
-        lower.includes(q) ||
-        q.split(' ').some((word) => word.length > 2 && lower.includes(word))
-      )
-    }).slice(0, 10)
-
-    return {
-      products: products.slice(0, 24),
-      stores,
-      brands,
-      categories,
-    }
+    const effective: SortKey =
+      sortKey === 'relevance' ? (q ? 'views' : 'newest') : sortKey
+    return sortProducts(products, effective)
   }, [
     debounced,
     activeCategory,
@@ -533,8 +570,44 @@ export default function BrowseScreen() {
     minPrice,
     maxPrice,
     inStockOnly,
+    sortKey,
     matchesActive,
   ])
+
+  const live = useMemo(() => {
+    const q = debounced.toLowerCase()
+    const products = filteredProducts.slice(0, visibleCount)
+    const storesMap = new Map<string, SellerInfo>()
+    const brandSet = new Set<string>()
+    if (q) {
+      allProducts.forEach((p) => {
+        const s = getSeller(p)
+        if (s) {
+          const name = (s.storeName || s.name || '').toLowerCase()
+          if (name.includes(q)) storesMap.set(s._id, s)
+        }
+        if (p.brand && String(p.brand).toLowerCase().includes(q)) {
+          brandSet.add(String(p.brand))
+        }
+      })
+    }
+    const categories = CATEGORY_LIST.filter((c) => {
+      if (!q) return false
+      const lower = c.toLowerCase()
+      return (
+        lower.includes(q) ||
+        q.split(' ').some((word) => word.length > 2 && lower.includes(word))
+      )
+    }).slice(0, 12)
+
+    return {
+      products,
+      totalProducts: filteredProducts.length,
+      stores: Array.from(storesMap.values()).slice(0, 12),
+      brands: Array.from(brandSet).slice(0, 12),
+      categories,
+    }
+  }, [debounced, filteredProducts, visibleCount, allProducts])
 
   const isSearching = debounced.length > 0 || !!activeCategory
   const hasResults =
@@ -543,20 +616,21 @@ export default function BrowseScreen() {
     live.brands.length > 0 ||
     live.categories.length > 0
 
+  const sortActive = sortKey !== 'relevance'
+  const priceActive = !!(minPrice || maxPrice) || inStockOnly
+
   const activeLabel = useMemo(() => {
     if (!activeCategory) return debounced
-    const floor = FLOORS.find((f) => f.id === activeCategory)
-    return floor ? floor.short : activeCategory
+    return FLOORS.find((f) => f.id === activeCategory)?.short || activeCategory
   }, [activeCategory, debounced])
 
-  /** Key so FadeInGrid re-runs when results change */
   const gridAnimKey = useMemo(
     () =>
-      `${activeCategory || debounced || 'idle'}-${live.products
+      `${activeCategory || debounced || 'idle'}-${sortKey}-${visibleCount}-${live.products
         .map((p: any) => p._id)
         .join(',')
-        .slice(0, 80)}`,
-    [activeCategory, debounced, live.products]
+        .slice(0, 60)}`,
+    [activeCategory, debounced, sortKey, visibleCount, live.products],
   )
 
   const pushRecent = useCallback(async (term: string) => {
@@ -581,18 +655,18 @@ export default function BrowseScreen() {
     setMinPrice('')
     setMaxPrice('')
     setInStockOnly(false)
+    setSortKey('relevance')
+    setVisibleCount(PAGE_SIZE)
     inputRef.current?.focus()
   }
 
-  /** Floor / category tap → same preloader as product page, then results */
   const selectFloor = (floorId: string) => {
     setQuery('')
     setDebounced('')
     setCategoryLoading(true)
     setActiveCategory(floorId)
     Keyboard.dismiss()
-    // Brief hold so the orb is visible (filter is sync from cache)
-    setTimeout(() => setCategoryLoading(false), 650)
+    setTimeout(() => setCategoryLoading(false), 500)
   }
 
   const selectExactCategory = (cat: string) => {
@@ -601,14 +675,20 @@ export default function BrowseScreen() {
     setCategoryLoading(true)
     setActiveCategory(cat)
     Keyboard.dismiss()
-    setTimeout(() => setCategoryLoading(false), 650)
+    setTimeout(() => setCategoryLoading(false), 500)
+  }
+
+  const openTrendingShop = () => {
+    router.push('/shop?mode=trending' as any)
   }
 
   const renderProductGrid = (items: Product[], key: string) => (
     <FadeInGrid animKey={key}>
       <View style={styles.grid}>
         {items.map((p) => (
-          <ShowroomProductCard key={p._id} product={toStaticProduct(p)} dark />
+          <View key={p._id} style={styles.gridCell}>
+            <ShowroomProductCard product={toStaticProduct(p)} dark />
+          </View>
         ))}
       </View>
     </FadeInGrid>
@@ -688,12 +768,22 @@ export default function BrowseScreen() {
 
       <View style={[styles.section, { marginTop: 28 }]}>
         <Text style={styles.sectionLabel}>MOVING NOW</Text>
+        <Text style={styles.sectionSub}>
+          Highest viewed products on Plazore
+        </Text>
         {loading ? (
           <View style={{ height: 220 }}>
             <StorePreloader />
           </View>
+        ) : movingNow.length === 0 ? (
+          <Text style={styles.emptyBody}>Nothing moving yet.</Text>
         ) : (
-          renderProductGrid(trending, 'trending')
+          <>
+            {renderProductGrid(movingNow as Product[], 'moving-now')}
+            <Pressable onPress={openTrendingShop} style={styles.showMoreBtn}>
+              <Text style={styles.showMoreText}>SHOW MORE</Text>
+            </Pressable>
+          </>
         )}
       </View>
     </ScrollView>
@@ -707,7 +797,6 @@ export default function BrowseScreen() {
         </View>
       )
     }
-
     if (searchLoading && live.products.length === 0) {
       return (
         <View style={{ flex: 1, minHeight: 280 }}>
@@ -729,23 +818,23 @@ export default function BrowseScreen() {
               {activeLabel}
             </Text>
             <Text style={styles.metaCount}>
-  {[
-    live.products.length > 0
-      ? `${live.products.length} ${live.products.length === 1 ? 'product' : 'products'}`
-      : null,
-    live.stores.length > 0
-      ? `${live.stores.length} ${live.stores.length === 1 ? 'storefront' : 'storefronts'}`
-      : null,
-    live.brands.length > 0
-      ? `${live.brands.length} ${live.brands.length === 1 ? 'brand' : 'brands'}`
-      : null,
-    live.categories.length > 0
-      ? `${live.categories.length} ${live.categories.length === 1 ? 'category' : 'categories'}`
-      : null,
-  ]
-    .filter(Boolean)
-    .join(' · ')}
-</Text>
+              {[
+                live.totalProducts > 0
+                  ? `${Math.min(visibleCount, live.totalProducts)} of ${live.totalProducts} products`
+                  : null,
+                live.stores.length
+                  ? `${live.stores.length} storefront${live.stores.length === 1 ? '' : 's'}`
+                  : null,
+                live.brands.length
+                  ? `${live.brands.length} brand${live.brands.length === 1 ? '' : 's'}`
+                  : null,
+                live.categories.length
+                  ? `${live.categories.length} categor${live.categories.length === 1 ? 'y' : 'ies'}`
+                  : null,
+              ]
+                .filter(Boolean)
+                .join(' · ')}
+            </Text>
           </View>
           <Pressable onPress={clearAll} hitSlop={10}>
             <Text style={styles.clearTxt}>Clear</Text>
@@ -756,6 +845,14 @@ export default function BrowseScreen() {
           <View>
             <Text style={styles.groupTitle}>PRODUCTS</Text>
             {renderProductGrid(live.products as Product[], gridAnimKey)}
+            {live.totalProducts > visibleCount && (
+              <Pressable
+                onPress={() => setVisibleCount((c) => c + PAGE_SIZE)}
+                style={styles.showMoreBtn}
+              >
+                <Text style={styles.showMoreText}>SHOW MORE</Text>
+              </Pressable>
+            )}
           </View>
         )}
 
@@ -840,7 +937,7 @@ export default function BrowseScreen() {
           <View style={styles.empty}>
             <Text style={styles.emptyTitle}>Nothing found</Text>
             <Text style={styles.emptyBody}>
-              Try another search or browse by category.
+              Try another search, sort, or price filter.
             </Text>
           </View>
         )}
@@ -853,7 +950,6 @@ export default function BrowseScreen() {
       <View style={[styles.root, { paddingTop: insets.top }]}>
         <View style={styles.header}>
           <Text style={styles.title}>Browse</Text>
-
           <View style={styles.searchRow}>
             <View style={styles.searchShell}>
               <Ionicons name="search" size={18} color={DIM} />
@@ -877,20 +973,35 @@ export default function BrowseScreen() {
                 autoCapitalize="none"
                 selectionColor={ACCENT}
               />
-              {(query.length > 0 || !!activeCategory) && (
+              {(query.length > 0 || !!activeCategory || priceActive) && (
                 <Pressable onPress={clearAll} hitSlop={12}>
                   <Ionicons name="close-circle" size={18} color={DIM} />
                 </Pressable>
               )}
             </View>
-
             {isSearching && (
-              <Pressable
-                onPress={() => setFilterOpen(true)}
-                style={styles.filterBtn}
-              >
-                <Ionicons name="options-outline" size={20} color={TEXT} />
-              </Pressable>
+              <>
+                <Pressable
+                  onPress={() => setSortOpen(true)}
+                  style={[styles.toolBtn, sortActive && styles.toolBtnOn]}
+                >
+                  <Ionicons
+                    name="swap-vertical-outline"
+                    size={20}
+                    color={sortActive ? ACCENT : TEXT}
+                  />
+                </Pressable>
+                <Pressable
+                  onPress={() => setPriceOpen(true)}
+                  style={[styles.toolBtn, priceActive && styles.toolBtnOn]}
+                >
+                  <Ionicons
+                    name="options-outline"
+                    size={20}
+                    color={priceActive ? ACCENT : TEXT}
+                  />
+                </Pressable>
+              </>
             )}
           </View>
         </View>
@@ -904,14 +1015,48 @@ export default function BrowseScreen() {
           onClose={() => setHubOpen(false)}
         />
 
-        <Modal visible={filterOpen} transparent animationType="fade">
+        <Modal visible={sortOpen} transparent animationType="fade">
           <Pressable
             style={styles.modalScrim}
-            onPress={() => setFilterOpen(false)}
+            onPress={() => setSortOpen(false)}
           />
-          <View style={styles.filterSheet}>
-            <Text style={styles.filterTitle}>Filters</Text>
+          <View style={styles.sheet}>
+            <Text style={styles.sheetTitle}>Sort</Text>
+            {SORT_OPTIONS.map((o) => (
+              <Pressable
+                key={o.key}
+                onPress={() => setSortKey(o.key)}
+                style={[styles.sortRow, sortKey === o.key && styles.sortRowOn]}
+              >
+                <Text
+                  style={[
+                    styles.sortRowText,
+                    sortKey === o.key && styles.sortRowTextOn,
+                  ]}
+                >
+                  {o.label}
+                </Text>
+                {sortKey === o.key ? (
+                  <Ionicons name="checkmark" size={18} color={ACCENT} />
+                ) : null}
+              </Pressable>
+            ))}
+            <Pressable
+              onPress={() => setSortOpen(false)}
+              style={styles.sheetDone}
+            >
+              <Text style={styles.sheetDoneText}>Done</Text>
+            </Pressable>
+          </View>
+        </Modal>
 
+        <Modal visible={priceOpen} transparent animationType="fade">
+          <Pressable
+            style={styles.modalScrim}
+            onPress={() => setPriceOpen(false)}
+          />
+          <View style={styles.sheet}>
+            <Text style={styles.sheetTitle}>Price filter</Text>
             <Text style={styles.filterLabel}>Price range</Text>
             <View style={{ flexDirection: 'row', gap: 10, marginBottom: 20 }}>
               <TextInput
@@ -919,7 +1064,7 @@ export default function BrowseScreen() {
                 placeholder="Min"
                 keyboardType="numeric"
                 value={minPrice}
-                onChangeText={setMinPrice}
+                onChangeText={(t) => setMinPrice(t.replace(/[^\d.]/g, ''))}
                 placeholderTextColor={DIM}
                 selectionColor={ACCENT}
               />
@@ -928,12 +1073,11 @@ export default function BrowseScreen() {
                 placeholder="Max"
                 keyboardType="numeric"
                 value={maxPrice}
-                onChangeText={setMaxPrice}
+                onChangeText={(t) => setMaxPrice(t.replace(/[^\d.]/g, ''))}
                 placeholderTextColor={DIM}
                 selectionColor={ACCENT}
               />
             </View>
-
             <Pressable
               onPress={() => setInStockOnly((v) => !v)}
               style={styles.checkRow}
@@ -947,21 +1091,19 @@ export default function BrowseScreen() {
               </View>
               <Text style={{ fontSize: 14, color: TEXT }}>In stock only</Text>
             </Pressable>
-
             <View style={{ flexDirection: 'row', gap: 12 }}>
               <Pressable
                 onPress={() => {
                   setMinPrice('')
                   setMaxPrice('')
                   setInStockOnly(false)
-                  setFilterOpen(false)
                 }}
                 style={styles.filterReset}
               >
                 <Text style={{ fontWeight: '600', color: MUTED }}>Reset</Text>
               </Pressable>
               <Pressable
-                onPress={() => setFilterOpen(false)}
+                onPress={() => setPriceOpen(false)}
                 style={styles.filterApply}
               >
                 <Text style={{ fontWeight: '700', color: BG }}>Apply</Text>
@@ -976,8 +1118,6 @@ export default function BrowseScreen() {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: BG },
-
-  /* Product-page orb preloader */
   loaderRoot: {
     flex: 1,
     backgroundColor: BG,
@@ -1011,7 +1151,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   orbLogo: { width: 32, height: 32 },
-
   header: {
     paddingHorizontal: PAD,
     paddingTop: 6,
@@ -1026,17 +1165,13 @@ const styles = StyleSheet.create({
     letterSpacing: -0.6,
     marginBottom: 14,
   },
-  searchRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
+  searchRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   searchShell: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    height: 48,
+    height: 52,
     paddingHorizontal: 14,
     backgroundColor: SURFACE,
     borderWidth: StyleSheet.hairlineWidth,
@@ -1049,18 +1184,20 @@ const styles = StyleSheet.create({
     color: TEXT,
     paddingVertical: 0,
   },
-  filterBtn: {
+  toolBtn: {
     width: 48,
-    height: 48,
+    height: 52,
     backgroundColor: SURFACE_2,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: LINE,
     alignItems: 'center',
     justifyContent: 'center',
   },
-
+  toolBtnOn: {
+    borderColor: 'rgba(16,185,129,0.45)',
+    backgroundColor: 'rgba(16,185,129,0.1)',
+  },
   body: { flex: 1 },
-
   section: { marginTop: 24 },
   sectionHead: {
     flexDirection: 'row',
@@ -1077,12 +1214,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: PAD,
     marginBottom: 12,
   },
-  clearTxt: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: ACCENT,
+  sectionSub: {
+    fontSize: 12,
+    color: MUTED,
+    paddingHorizontal: PAD,
+    marginTop: -6,
+    marginBottom: 14,
   },
-
+  clearTxt: { fontSize: 13, fontWeight: '600', color: ACCENT },
   floorCard: {
     width: 112,
     height: 148,
@@ -1109,7 +1248,6 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: 'rgba(255,255,255,0.55)',
   },
-
   chipWrap: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -1123,20 +1261,29 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: LINE,
   },
-  chipText: {
-    fontSize: 13,
-    fontWeight: '500',
-    color: TEXT,
-  },
-
+  chipText: { fontSize: 13, fontWeight: '500', color: TEXT },
   grid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: GAP,
     paddingHorizontal: PAD,
-    justifyContent: 'space-between',
   },
-
+  gridCell: { width: '48%', flexGrow: 1, maxWidth: '48.5%' },
+  showMoreBtn: {
+    alignSelf: 'center',
+    marginTop: 20,
+    marginBottom: 8,
+    paddingHorizontal: 28,
+    paddingVertical: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.22)',
+  },
+  showMoreText: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 1.4,
+    color: TEXT,
+  },
   meta: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -1145,16 +1292,8 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     gap: 12,
   },
-  metaText: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: TEXT,
-  },
-  metaCount: {
-    fontSize: 12,
-    color: DIM,
-    marginTop: 2,
-  },
+  metaText: { fontSize: 16, fontWeight: '700', color: TEXT },
+  metaCount: { fontSize: 12, color: DIM, marginTop: 2 },
   groupTitle: {
     fontSize: 11,
     fontWeight: '700',
@@ -1163,7 +1302,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: PAD,
     marginBottom: 12,
   },
-
   storeCard: {
     width: 112,
     backgroundColor: SURFACE,
@@ -1187,7 +1325,6 @@ const styles = StyleSheet.create({
     color: TEXT,
     textAlign: 'center',
   },
-
   brandChip: {
     paddingHorizontal: 14,
     paddingVertical: 9,
@@ -1195,11 +1332,7 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(16,185,129,0.25)',
   },
-  brandText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: ACCENT,
-  },
+  brandText: { fontSize: 13, fontWeight: '600', color: ACCENT },
   catChip: {
     paddingHorizontal: 14,
     paddingVertical: 9,
@@ -1207,17 +1340,8 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: LINE,
   },
-  catText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: TEXT,
-  },
-
-  empty: {
-    paddingTop: 72,
-    alignItems: 'center',
-    paddingHorizontal: 40,
-  },
+  catText: { fontSize: 13, fontWeight: '600', color: TEXT },
+  empty: { paddingTop: 72, alignItems: 'center', paddingHorizontal: 40 },
   emptyTitle: {
     fontSize: 16,
     fontWeight: '700',
@@ -1228,13 +1352,10 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: MUTED,
     textAlign: 'center',
+    paddingHorizontal: PAD,
   },
-
-  modalScrim: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.65)',
-  },
-  filterSheet: {
+  modalScrim: { flex: 1, backgroundColor: 'rgba(0,0,0,0.65)' },
+  sheet: {
     backgroundColor: SURFACE,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: LINE,
@@ -1242,12 +1363,37 @@ const styles = StyleSheet.create({
     paddingTop: 20,
     paddingBottom: 40,
   },
-  filterTitle: {
+  sheetTitle: {
     fontSize: 17,
     fontWeight: '700',
     color: TEXT,
-    marginBottom: 20,
+    marginBottom: 16,
   },
+  sortRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 14,
+    paddingHorizontal: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: LINE,
+    backgroundColor: SURFACE_2,
+    marginBottom: 8,
+  },
+  sortRowOn: {
+    borderColor: 'rgba(16,185,129,0.4)',
+    backgroundColor: 'rgba(16,185,129,0.08)',
+  },
+  sortRowText: { fontSize: 14, color: MUTED },
+  sortRowTextOn: { color: ACCENT, fontWeight: '700' },
+  sheetDone: {
+    marginTop: 12,
+    height: 48,
+    backgroundColor: TEXT,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sheetDoneText: { fontWeight: '700', color: BG, fontSize: 15 },
   filterLabel: {
     fontSize: 13,
     fontWeight: '600',
@@ -1278,10 +1424,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  checkBoxOn: {
-    backgroundColor: ACCENT,
-    borderColor: ACCENT,
-  },
+  checkBoxOn: { backgroundColor: ACCENT, borderColor: ACCENT },
   filterReset: {
     flex: 1,
     height: 48,

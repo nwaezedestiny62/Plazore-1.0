@@ -39,6 +39,7 @@ const NAV = [
     section: "Platform",
     items: [
       { href: "/content", label: "Content" },
+      { href: "/announcements", label: "Announcements" },
       { href: "/experience", label: "Music" },
     ],
   },
@@ -66,13 +67,14 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
             className="h-8 w-8 object-contain"
           />
           <div>
-            <p className="text-[13px] font-semibold tracking-wide">Plazore Admin</p>
+            <p className="text-[13px] font-semibold tracking-wide">
+              Plazore Admin
+            </p>
             <p className="hidden text-[10px] uppercase tracking-[0.16em] text-[#737A86] sm:block">
               Operational control
             </p>
           </div>
         </div>
-        {/* Clerk v6+: afterSignOutUrl removed — configure signOutUrl on ClerkProvider if needed */}
         <UserButton />
       </header>
 

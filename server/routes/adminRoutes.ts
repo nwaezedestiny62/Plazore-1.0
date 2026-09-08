@@ -37,6 +37,16 @@ import {
   getAdminPersonalDiagnostics,
 } from "../controllers/contentController.js";
 
+import {
+  getAdminAnnouncements,
+  getAdminAnnouncement,
+  createAdminAnnouncement,
+  updateAdminAnnouncement,
+  publishAdminAnnouncement,
+  archiveAdminAnnouncement,
+  uploadAnnouncementMediaHandler,
+} from "../controllers/announcementController.js";
+
 const AdminRouter = express.Router();
 
 const adminOnly = [protect, authorize("admin")] as const;
@@ -47,7 +57,6 @@ AdminRouter.get("/users", ...adminOnly, getAdminUsers);
 AdminRouter.get("/users/:id", ...adminOnly, getAdminUserDetail);
 AdminRouter.patch("/sellers/:id/suspend", ...adminOnly, setSellerSuspended);
 AdminRouter.patch("/sellers/:id/verify", ...adminOnly, setSellerVerified);
-AdminRouter.post("/contacts/reach-out", ...adminOnly, adminReachOut);
 
 AdminRouter.post(
   "/content/upload-banner",
@@ -62,7 +71,9 @@ AdminRouter.patch("/products/:id/active", ...adminOnly, setProductActive);
 AdminRouter.get("/orders", ...adminOnly, getAdminOrders);
 AdminRouter.get("/orders/:id", ...adminOnly, getAdminOrderDetail);
 
+// ─── Contacts ───
 AdminRouter.get("/contacts", ...adminOnly, getAdminContacts);
+AdminRouter.post("/contacts/reach-out", ...adminOnly, adminReachOut);
 AdminRouter.get("/contacts/:id", ...adminOnly, getAdminContactDetail);
 AdminRouter.patch("/contacts/:id", ...adminOnly, updateAdminContact);
 
@@ -84,9 +95,30 @@ AdminRouter.post(
   regenerateAdminIntelligence
 );
 
+// Announcements
+AdminRouter.get("/announcements", ...adminOnly, getAdminAnnouncements);
+AdminRouter.post("/announcements", ...adminOnly, createAdminAnnouncement);
+AdminRouter.get("/announcements/:id", ...adminOnly, getAdminAnnouncement);
+AdminRouter.patch("/announcements/:id", ...adminOnly, updateAdminAnnouncement);
+AdminRouter.post(
+  "/announcements/:id/publish",
+  ...adminOnly,
+  publishAdminAnnouncement
+);
+AdminRouter.post(
+  "/announcements/:id/archive",
+  ...adminOnly,
+  archiveAdminAnnouncement
+);
+AdminRouter.post(
+  "/announcements/upload",
+  ...adminOnly,
+  upload.single("file"),
+  uploadAnnouncementMediaHandler
+);
+
 AdminRouter.get("/analytics", ...adminOnly, getAdminAnalytics);
 
-/** ─── Content / Hero Banners ─── */
 AdminRouter.get("/content", ...adminOnly, getAdminContent);
 AdminRouter.get("/content/slots/:position", ...adminOnly, getAdminBannerSlot);
 AdminRouter.put(
@@ -110,7 +142,6 @@ AdminRouter.get(
   getAdminPersonalDiagnostics
 );
 
-// Any logged-in user — presence heartbeat
 AdminRouter.post("/me/presence", protect, pingPresence);
 
 export default AdminRouter;

@@ -49,6 +49,16 @@ function resolveOrderRegion(order: any, item?: any): string {
   return DEFAULT_REGION
 }
 
+/** Only real buyer notes — empty / garbage → treat as none */
+function resolveBuyerNote(note: unknown): string {
+  if (typeof note !== 'string') return ''
+  const t = note.trim()
+  if (!t) return ''
+  const lower = t.toLowerCase()
+  if (lower === 'null' || lower === 'undefined' || lower === 'n/a') return ''
+  return t
+}
+
 function PlazoreOrbPreloader() {
   const rotation = useRef(new Animated.Value(0)).current
 
@@ -59,11 +69,11 @@ function PlazoreOrbPreloader() {
         duration: 2600,
         easing: Easing.linear,
         useNativeDriver: true,
-      })
+      }),
     )
     loop.start()
     return () => loop.stop()
-  }, [])
+  }, [rotation])
 
   const rotate = rotation.interpolate({
     inputRange: [0, 1],
@@ -89,7 +99,7 @@ function PlazoreOrbPreloader() {
 export default function BuyerOrderDetails() {
   const rawId = useLocalSearchParams<{ id: string | string[] }>().id
   const id = Array.isArray(rawId) ? rawId[0] : rawId
-  const { getToken } = useAuth()
+  const { getToken, isSignedIn, isLoaded } = useAuth()
   const router = useRouter()
   const {
     format,
@@ -103,7 +113,6 @@ export default function BuyerOrderDetails() {
   const [toastVisible, setToastVisible] = useState(false)
   const [actionBusy, setActionBusy] = useState(false)
   const [actionError, setActionError] = useState('')
-
   const toastAnim = useRef(new Animated.Value(0)).current
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -122,12 +131,12 @@ export default function BuyerOrderDetails() {
         const converted = convertPrice(
           amount,
           fromRegion || displayRegion,
-          displayRegion
+          displayRegion,
         )
         return formatMoney(converted, displayRegion)
       }
     },
-    [format, formatProduct, displayRegion]
+    [format, formatProduct, displayRegion],
   )
 
   const loadOrder = useCallback(async () => {
@@ -136,22 +145,27 @@ export default function BuyerOrderDetails() {
       return
     }
     try {
-      await refreshRegion()
+      await refreshRegion?.()
       const token = await getToken()
       const res = await api.get(`/orders/${id}`, {
         headers: { Authorization: `Bearer ${token}` },
       })
-      if (res.data.success) setOrder(res.data.data)
+      if (res.data?.success) setOrder(res.data.data)
     } catch {
-      /* ignore */
+      /* keep previous */
     } finally {
       setLoading(false)
     }
   }, [id, getToken, refreshRegion])
 
   useEffect(() => {
+    if (!isLoaded) return
+    if (!isSignedIn) {
+      router.replace('/(auth)/sign-in' as any)
+      return
+    }
     void loadOrder()
-  }, [loadOrder])
+  }, [isLoaded, isSignedIn, router, loadOrder])
 
   useEffect(() => {
     return () => {
@@ -167,10 +181,12 @@ export default function BuyerOrderDetails() {
   const confStatus =
     order?.buyerConfirmation?.status ||
     (order?.orderStatus === 'Delivered' ? 'pending' : 'none')
+
   const needsConfirm =
     order?.orderStatus === 'Delivered' &&
     confStatus !== 'confirmed' &&
     confStatus !== 'issue_reported'
+
   const issueOpen = confStatus === 'issue_reported'
   const confirmed = confStatus === 'confirmed'
 
@@ -183,16 +199,18 @@ export default function BuyerOrderDetails() {
       const res = await api.put(
         `/orders/${order._id}/confirm-delivery`,
         {},
-        { headers: { Authorization: `Bearer ${token}` } }
+        { headers: { Authorization: `Bearer ${token}` } },
       )
       if (res.data?.success && res.data?.data) {
         setOrder(res.data.data)
+      } else if (res.data?.success === false) {
+        throw new Error(res.data?.message || 'Could not confirm delivery')
       } else {
         await loadOrder()
       }
     } catch (e: any) {
       setActionError(
-        e?.response?.data?.message || e?.message || 'Could not confirm delivery'
+        e?.response?.data?.message || e?.message || 'Could not confirm delivery',
       )
     } finally {
       setActionBusy(false)
@@ -205,12 +223,22 @@ export default function BuyerOrderDetails() {
     setActionBusy(true)
     try {
       const token = await getToken()
-      await api.put(
+      const res = await api.put(
         `/orders/${order._id}/report-delivery-issue`,
         {},
-        { headers: { Authorization: `Bearer ${token}` } }
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+        },
       )
-      await loadOrder()
+      if (res.data?.success === false) {
+        throw new Error(res.data?.message || 'Could not open issue')
+      }
+      if (res.data?.data) setOrder(res.data.data)
+      else await loadOrder()
+
       router.push({
         pathname: '/contact',
         params: {
@@ -222,7 +250,7 @@ export default function BuyerOrderDetails() {
       })
     } catch (e: any) {
       setActionError(
-        e?.response?.data?.message || e?.message || 'Could not open issue'
+        e?.response?.data?.message || e?.message || 'Could not open issue',
       )
     } finally {
       setActionBusy(false)
@@ -259,7 +287,7 @@ export default function BuyerOrderDetails() {
     }
   }
 
-  if (loading) return <PlazoreOrbPreloader />
+  if (!isLoaded || loading) return <PlazoreOrbPreloader />
 
   if (!order) {
     return (
@@ -283,8 +311,8 @@ export default function BuyerOrderDetails() {
     order.productShipping?.method ||
     (shipping.deliveryCompany ? 'courier' : undefined)
   const isSelf = method === 'self'
-  const sellerNote = (shipping.selfDeliveryNote || '').trim()
-  const tracking = (shipping.trackingNumber || '').trim()
+  const sellerNote = String(shipping.selfDeliveryNote || '').trim()
+  const tracking = String(shipping.trackingNumber || '').trim()
   const hasShippingBlock =
     !isCancelled &&
     (order.orderStatus === 'Shipped' ||
@@ -382,8 +410,8 @@ export default function BuyerOrderDetails() {
           <View style={styles.issueCard}>
             <Text style={styles.issueTitle}>Issue under review</Text>
             <Text style={styles.issueBody}>
-              Seller payout is pending while Plazore reviews this. Continue in
-              Contact if needed.
+              Seller payout is pending while Plazore reviews this. You can
+              continue the conversation in Contact.
             </Text>
             <TouchableOpacity
               onPress={() =>
@@ -502,6 +530,8 @@ export default function BuyerOrderDetails() {
         {order.items?.map((item: any, idx: number) => {
           const itemRegion = resolveOrderRegion(order, item)
           const unit = Number(item.price) || 0
+          const buyerNote = resolveBuyerNote(item.note)
+
           return (
             <View key={idx} style={styles.itemCard}>
               <View style={styles.itemRow}>
@@ -521,10 +551,11 @@ export default function BuyerOrderDetails() {
                   </Text>
                 </View>
               </View>
+
               <View style={styles.noteBox}>
                 <Text style={styles.noteLabel}>Your note</Text>
                 <Text style={styles.noteText}>
-                  {item.note?.trim() ? item.note : 'No note added.'}
+                  {buyerNote ? buyerNote : 'No note added.'}
                 </Text>
               </View>
             </View>
@@ -534,18 +565,21 @@ export default function BuyerOrderDetails() {
         {hasShippingBlock && (
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Shipping Details</Text>
+
             <View style={styles.detailBlock}>
               <Text style={styles.metaLabel}>Method</Text>
               <Text style={styles.detailValue}>
                 {isSelf ? 'Self Delivery' : 'Courier'}
               </Text>
             </View>
+
             {!!shipping.deliveryCompany && (
               <View style={styles.detailBlock}>
                 <Text style={styles.metaLabel}>Courier Company</Text>
                 <Text style={styles.detailValue}>{shipping.deliveryCompany}</Text>
               </View>
             )}
+
             {!!tracking && (
               <View style={styles.detailBlock}>
                 <Text style={styles.metaLabel}>Tracking Number</Text>
@@ -564,12 +598,14 @@ export default function BuyerOrderDetails() {
                 </TouchableOpacity>
               </View>
             )}
+
             {!!sellerNote && (
               <View style={styles.sellerNoteBox}>
                 <Text style={styles.metaLabel}>Note from seller</Text>
                 <Text style={styles.detailValue}>{sellerNote}</Text>
               </View>
             )}
+
             {!!shipping.estimatedDelivery && (
               <View style={styles.detailBlock}>
                 <Text style={styles.metaLabel}>Estimated Delivery</Text>
@@ -655,7 +691,6 @@ const styles = StyleSheet.create({
     borderColor: LINE,
   },
   emptyBtnText: { color: TEXT, fontWeight: '600', fontSize: 14 },
-
   loaderRoot: {
     flex: 1,
     backgroundColor: BG,
@@ -689,7 +724,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   orbLogo: { width: 32, height: 32 },
-
   toastWrap: {
     position: 'absolute',
     top: 8,
@@ -716,7 +750,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: 0.2,
   },
-
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -740,9 +773,7 @@ const styles = StyleSheet.create({
   },
   headerSub: { fontSize: 11, color: MUTED, marginTop: 2 },
   headerRight: { width: 42 },
-
   scrollContent: { padding: 16, paddingBottom: 40 },
-
   confirmCard: {
     backgroundColor: 'rgba(0,229,117,0.06)',
     borderRadius: 16,
@@ -802,7 +833,6 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '700',
   },
-
   issueCard: {
     backgroundColor: 'rgba(245,158,11,0.1)',
     borderRadius: 16,
@@ -824,7 +854,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: GREEN,
   },
-
   confirmedCard: {
     backgroundColor: 'rgba(0,229,117,0.05)',
     borderRadius: 16,
@@ -840,7 +869,6 @@ const styles = StyleSheet.create({
     marginTop: 6,
     lineHeight: 20,
   },
-
   card: {
     backgroundColor: SURFACE,
     borderRadius: 16,
@@ -855,7 +883,6 @@ const styles = StyleSheet.create({
     color: TEXT,
     marginBottom: 14,
   },
-
   cancelCard: {
     backgroundColor: 'rgba(239,68,68,0.08)',
     borderRadius: 16,
@@ -888,7 +915,6 @@ const styles = StyleSheet.create({
   },
   cancelReasonLabel: { fontSize: 11, color: MUTED, marginBottom: 4 },
   cancelReasonText: { fontSize: 14, color: TEXT, lineHeight: 20 },
-
   stepRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -934,7 +960,6 @@ const styles = StyleSheet.create({
   },
   stepLabelCurrent: { color: TEXT, fontWeight: '700' },
   stepLabelDone: { color: SECONDARY },
-
   metaLabel: {
     fontSize: 11,
     fontWeight: '600',
@@ -944,7 +969,6 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   sellerName: { fontSize: 17, fontWeight: '700', color: TEXT },
-
   sectionLabel: {
     fontSize: 11,
     fontWeight: '700',
@@ -955,7 +979,6 @@ const styles = StyleSheet.create({
     marginTop: 4,
     marginLeft: 2,
   },
-
   itemCard: {
     backgroundColor: SURFACE,
     borderRadius: 16,
@@ -996,7 +1019,6 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   noteText: { fontSize: 13, color: SECONDARY, lineHeight: 18 },
-
   detailBlock: { marginBottom: 14 },
   detailValue: { fontSize: 15, fontWeight: '600', color: TEXT },
   trackingBox: {
@@ -1032,7 +1054,6 @@ const styles = StyleSheet.create({
     padding: 12,
     marginBottom: 4,
   },
-
   infoCard: {
     flexDirection: 'row',
     backgroundColor: 'rgba(59,130,246,0.08)',
@@ -1058,9 +1079,7 @@ const styles = StyleSheet.create({
     marginBottom: 3,
   },
   infoBody: { fontSize: 12, color: SECONDARY, lineHeight: 18 },
-
   addressText: { fontSize: 14, color: SECONDARY, lineHeight: 22 },
-
   receiptRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',

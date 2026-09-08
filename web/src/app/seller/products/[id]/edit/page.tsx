@@ -163,6 +163,213 @@ const pillCls = (on: boolean) =>
       : "border-line bg-[#0A121C] text-[#737A86]"
   }`;
 
+type BuyerPreviewProps = {
+  images: string[];
+  name: string;
+  brand: string;
+  storeName: string;
+  category: string;
+  subCategory: string;
+  description: string;
+  priceLabel: string;
+  stockN: number;
+  shipsFrom: string | null;
+  shippingMethod: "self" | "courier" | null;
+  courierCompany: string;
+  deliveryFeeLabel: string;
+};
+
+function BuyerLivePreview({
+  images,
+  name,
+  brand,
+  storeName,
+  category,
+  subCategory,
+  description,
+  priceLabel,
+  stockN,
+  shipsFrom,
+  shippingMethod,
+  courierCompany,
+  deliveryFeeLabel,
+}: BuyerPreviewProps) {
+  const cover = images[0];
+  const [idx, setIdx] = useState(0);
+  const shown = images[Math.min(idx, Math.max(images.length - 1, 0))] || cover;
+
+  useEffect(() => {
+    setIdx(0);
+  }, [images.join("|")]);
+
+  return (
+    <div>
+      <p className="mb-1 text-[11px] font-bold uppercase tracking-[2px] text-[#737A86]">
+        Live preview
+      </p>
+      <p className="mb-3 text-lg font-extrabold text-text">What buyers will see</p>
+
+      <div className="mb-4 border border-line bg-[#0A121C] p-3.5">
+        <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.8px] text-[#737A86]">
+          Showroom card
+        </p>
+        <div className="w-[150px]">
+          <div className="relative aspect-[1/1.35] bg-[#F1F1F1]">
+            {cover ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={cover} alt="" className="h-full w-full object-cover" />
+            ) : (
+              <div className="flex h-full items-center justify-center bg-[#E5E7EB]">
+                <ImagePlus className="h-6 w-6 text-[#9CA3AF]" />
+              </div>
+            )}
+            <div className="absolute bottom-[11px] right-[11px] flex h-[34px] w-[34px] items-center justify-center bg-white shadow">
+              <span className="text-[10px] font-bold text-[#111]">Bag</span>
+            </div>
+          </div>
+          <p className="mt-2.5 truncate text-[13.5px] font-medium text-white">
+            {name || "Product name"}
+          </p>
+          <p className="text-xs text-white/65">
+            {(brand || storeName || "plazore").toLowerCase()} |{" "}
+            <span className="font-medium text-white">{priceLabel}</span>
+          </p>
+          {shipsFrom ? (
+            <p className="mt-1 truncate text-[11px] text-white/42">{shipsFrom}</p>
+          ) : (
+            <p className="mt-1 text-[11px] text-white/30">Ships from…</p>
+          )}
+        </div>
+      </div>
+
+      <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.8px] text-[#737A86]">
+        Mobile product screen
+      </p>
+      <div className="overflow-hidden rounded-[28px] border-[3px] border-[#2C313A] bg-[#12141A] p-2 shadow-2xl">
+        <div className="mx-auto mb-1 h-3.5 w-[78px] rounded-lg bg-black" />
+        <div className="max-h-[520px] overflow-y-auto rounded-[22px] bg-bg [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <div className="relative aspect-[1/1.05] bg-[#07080C]">
+            {shown ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={shown} alt="" className="h-full w-full object-cover" />
+            ) : (
+              <div className="flex h-full items-center justify-center">
+                <ImagePlus className="h-8 w-8 text-[#3A3F4A]" />
+              </div>
+            )}
+            {images.length > 1 && (
+              <div className="absolute bottom-2 left-0 right-0 flex justify-center gap-1">
+                {images.slice(0, 6).map((_, i) => (
+                  <button
+                    key={i}
+                    type="button"
+                    onClick={() => setIdx(i)}
+                    className={`h-[4px] rounded-full ${
+                      i === idx ? "w-4 bg-white" : "w-1.5 bg-white/30"
+                    }`}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="p-3.5">
+            {(category || subCategory) && (
+              <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-[1.2px] text-[#737A86]">
+                {[category, subCategory].filter(Boolean).join(" · ")}
+              </p>
+            )}
+            <p className="text-lg font-bold leading-6 text-text">
+              {name || "Product name"}
+            </p>
+            <div className="mt-2 flex items-center justify-between gap-2">
+              <p className="text-xl font-bold text-text">{priceLabel}</p>
+              <span
+                className={`rounded-full border px-2 py-1 text-[11px] font-semibold ${
+                  stockN > 0
+                    ? "border-blue/28 bg-ai-green/10 text-ai-green"
+                    : "border-red-400/28 bg-red-400/10 text-red-400"
+                }`}
+              >
+                {stockN > 0 ? `Available · ${stockN}` : "Unavailable"}
+              </span>
+            </div>
+            {!!brand && (
+              <span className="mt-2 inline-block rounded-full border border-line bg-[#171B22] px-2.5 py-1 text-xs text-[#A7ADB8]">
+                {brand}
+              </span>
+            )}
+
+            {!!description.trim() && (
+              <>
+                <p className="mb-1.5 mt-3 text-xs font-semibold uppercase tracking-wide text-text">
+                  About
+                </p>
+                <div className="rounded-[14px] border border-line bg-surface p-3 text-[13px] leading-[19px] text-[#A7ADB8]">
+                  {description}
+                </div>
+              </>
+            )}
+
+            <p className="mb-1.5 mt-3 text-xs font-semibold uppercase tracking-wide text-text">
+              Sold by
+            </p>
+            <div className="flex items-center gap-2.5 rounded-[14px] border border-line bg-surface p-3">
+              <div className="flex h-9 w-9 items-center justify-center rounded-[10px] bg-[#171B22]">
+                <Store className="h-4 w-4 text-[#A7ADB8]" />
+              </div>
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-[#737A86]">
+                  Visit storefront
+                </p>
+                <p className="text-sm font-bold text-text">
+                  {storeName || brand || "Your store"}
+                </p>
+              </div>
+            </div>
+
+            <p className="mb-1.5 mt-3 text-xs font-semibold uppercase tracking-wide text-text">
+              Delivery
+            </p>
+            <div className="rounded-[14px] border border-line bg-surface p-3">
+              <div className="flex items-center gap-2">
+                {shippingMethod === "courier" ? (
+                  <Truck className="h-4 w-4 text-green" />
+                ) : (
+                  <Footprints className="h-4 w-4 text-green" />
+                )}
+                <p className="text-[13px] font-semibold text-text">
+                  {shippingMethod === "courier"
+                    ? courierCompany || "Courier"
+                    : shippingMethod === "self"
+                      ? "Self delivery"
+                      : "Shipping"}
+                </p>
+                <p className="ml-auto text-[13px] font-bold text-text">
+                  {deliveryFeeLabel}
+                </p>
+              </div>
+              <p className="mt-1.5 text-[11px] leading-[16px] text-[#737A86]">
+                {shipsFrom || "Set fulfillment location"}
+              </p>
+            </div>
+
+            <div className="mt-3.5 grid grid-cols-2 gap-2">
+              <span className="flex h-11 items-center justify-center border border-line text-[11px] font-bold uppercase tracking-wide text-text">
+                Add to bag
+              </span>
+              <span className="flex h-11 items-center justify-center bg-text text-[11px] font-extrabold uppercase tracking-wide text-bg">
+                Buy now
+              </span>
+            </div>
+          </div>
+        </div>
+        <div className="mx-auto mt-2 h-1 w-24 rounded-full bg-white/15" />
+      </div>
+    </div>
+  );
+}
+
 export default function EditProductPage() {
   const params = useParams();
   const id = String(params?.id || "");
@@ -193,7 +400,9 @@ export default function EditProductPage() {
   const [fulfillCountryCode, setFulfillCountryCode] = useState("");
   const [fulfillStateCode, setFulfillStateCode] = useState("");
   const [fulfillCity, setFulfillCity] = useState("");
-  const [shippingMethod, setShippingMethod] = useState<"self" | "courier" | null>(null);
+  const [shippingMethod, setShippingMethod] = useState<"self" | "courier" | null>(
+    null
+  );
   const [courierCompany, setCourierCompany] = useState("");
   const [deliveryFee, setDeliveryFee] = useState("");
 
@@ -262,7 +471,6 @@ export default function EditProductPage() {
       const token = await getToken();
       if (!token) return;
 
-      // Store name (optional)
       try {
         const storeRaw = await fetch(`${API}/seller/store`, {
           headers: { Authorization: `Bearer ${token}` },
@@ -277,7 +485,6 @@ export default function EditProductPage() {
         /* ignore */
       }
 
-      // Try single product endpoint
       let product: any = null;
       try {
         const prodRaw = await fetch(`${API}/seller/products/${id}`, {
@@ -292,7 +499,6 @@ export default function EditProductPage() {
         console.warn("GET /seller/products/:id failed, trying list", e);
       }
 
-      // Fallback: list and find by id
       if (!product) {
         const listRaw = await fetch(`${API}/seller/products`, {
           headers: { Authorization: `Bearer ${token}` },
@@ -301,9 +507,7 @@ export default function EditProductPage() {
         const list = Array.isArray(listRes?.data)
           ? listRes.data
           : listRes?.data?.products || [];
-        product = list.find(
-          (x: any) => String(x._id || x.id) === String(id)
-        );
+        product = list.find((x: any) => String(x._id || x.id) === String(id));
       }
 
       if (!product) {
@@ -373,6 +577,29 @@ export default function EditProductPage() {
     },
     [formatProduct, region]
   );
+
+  const deliveryFeeLabel =
+    deliveryFee === ""
+      ? "—"
+      : feeN === 0
+        ? "Free delivery"
+        : formatPreviewPrice(feeN);
+
+  const previewProps: BuyerPreviewProps = {
+    images: previewImages,
+    name,
+    brand,
+    storeName,
+    category,
+    subCategory,
+    description,
+    priceLabel: formatPreviewPrice(priceN),
+    stockN,
+    shipsFrom,
+    shippingMethod,
+    courierCompany,
+    deliveryFeeLabel,
+  };
 
   const onImages = (files: FileList | null) => {
     if (!files?.length) return;
@@ -466,8 +693,7 @@ export default function EditProductPage() {
             country: country?.name || "",
             stateCode: fulfillStateCode,
             state:
-              fulfillStates.find((s) => s.code === fulfillStateCode)?.name ||
-              "",
+              fulfillStates.find((s) => s.code === fulfillStateCode)?.name || "",
             city: fulfillCity,
           })
         )
@@ -562,6 +788,10 @@ export default function EditProductPage() {
 
         <div className="grid gap-8 lg:grid-cols-[1fr_320px] lg:items-start">
           <div>
+            <div className="mb-5 lg:hidden">
+              <BuyerLivePreview {...previewProps} />
+            </div>
+
             <Section step="01" title="Images" subtitle={`Up to ${maxImages} photos`}>
               <div className="flex flex-wrap gap-2">
                 {images.map((item, i) => (
@@ -753,9 +983,7 @@ export default function EditProductPage() {
                       <button
                         type="button"
                         onClick={() =>
-                          setNewDocuments((p) =>
-                            p.filter((_, i) => i !== index)
-                          )
+                          setNewDocuments((p) => p.filter((_, i) => i !== index))
                         }
                       >
                         <Trash2 className="h-4 w-4 text-[#FF8A9A]" />
@@ -961,44 +1189,7 @@ export default function EditProductPage() {
           </div>
 
           <div className="hidden lg:sticky lg:top-6 lg:block">
-            <p className="mb-1 text-[11px] font-bold uppercase tracking-[2px] text-[#737A86]">
-              Live preview
-            </p>
-            <p className="mb-3 text-lg font-extrabold text-text">
-              What buyers will see
-            </p>
-            <div className="mb-4 border border-line bg-[#0A121C] p-3.5">
-              <div className="w-[150px]">
-                <div className="relative aspect-[1/1.35] bg-[#F1F1F1]">
-                  {previewImages[0] ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={previewImages[0]}
-                      alt=""
-                      className="h-full w-full object-cover"
-                    />
-                  ) : (
-                    <div className="flex h-full items-center justify-center bg-[#E5E7EB]">
-                      <ImagePlus className="h-6 w-6 text-[#9CA3AF]" />
-                    </div>
-                  )}
-                </div>
-                <p className="mt-2.5 truncate text-[13.5px] font-medium text-white">
-                  {name || "Product name"}
-                </p>
-                <p className="text-xs text-white/65">
-                  {(brand || storeName || "plazore").toLowerCase()} |{" "}
-                  <span className="font-medium text-white">
-                    {formatPreviewPrice(priceN)}
-                  </span>
-                </p>
-                {shipsFrom && (
-                  <p className="mt-1 truncate text-[11px] text-white/42">
-                    {shipsFrom}
-                  </p>
-                )}
-              </div>
-            </div>
+            <BuyerLivePreview {...previewProps} />
           </div>
         </div>
       </div>

@@ -1,10 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { AppFeaturePrompt, type AppFeature } from "@/components/app/AppFeaturePrompt";
-import { useEffect, useState } from "react";
-import { useAuth } from "@clerk/nextjs";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useAuth, useUser } from "@clerk/nextjs";
 import {
   Bookmark,
   CheckCircle,
@@ -29,7 +29,7 @@ function storeKey(store: StorePublic) {
   return String(
     (store as { _id?: string; id?: string })._id ||
       (store as { id?: string }).id ||
-      ""
+      "",
   );
 }
 
@@ -54,7 +54,11 @@ function ChromeBtn({
   );
 }
 
-function BrandMark({ brand }: { brand: "whatsapp" | "x" | "telegram" | "facebook" }) {
+function BrandMark({
+  brand,
+}: {
+  brand: "whatsapp" | "x" | "telegram" | "facebook";
+}) {
   const box = "flex h-10 w-10 shrink-0 items-center justify-center rounded-full";
   if (brand === "whatsapp") {
     return (
@@ -102,6 +106,8 @@ export function Storefront({
   const router = useRouter();
   const { region: marketplaceRegion } = useMarketplace();
   const displayRegion = marketplaceRegion || DEFAULT_REGION;
+  const { isSignedIn, isLoaded } = useAuth();
+  const { user } = useUser();
 
   const [featured, setFeatured] = useState(0);
   const [descOpen, setDescOpen] = useState(false);
@@ -110,30 +116,76 @@ export function Storefront({
   const [shareBusy, setShareBusy] = useState(false);
   const [copied, setCopied] = useState(false);
   const [prompt, setPrompt] = useState<AppFeature | null>(null);
-  const { isSignedIn, isLoaded } = useAuth();
-const [authOpen, setAuthOpen] = useState(false);
+  const [authOpen, setAuthOpen] = useState(false);
+
+  const trackRef = useRef<HTMLDivElement>(null);
+  const featuredRef = useRef(0);
+  const userTouching = useRef(false);
 
   const id = storeKey(store);
   const locationLabel = [store.location?.state, store.location?.country]
     .filter(Boolean)
     .join(", ");
-  const current = products[featured];
   const storeUrl =
     typeof window !== "undefined"
       ? `${window.location.origin}/store/${id}`
       : `/store/${id}`;
   const shareText = `Shop ${store.storeName} on Plazore — a clean storefront, real products, no guesswork.`;
 
+  const isOwner = useMemo(() => {
+    if (!user?.id || !store) return false;
+    const uid = String(user.id);
+    const s = store as any;
+    const candidates = [
+      s.userId,
+      s.clerkId,
+      s.ownerId,
+      s.sellerId,
+      s.seller?._id,
+      s.seller?.id,
+      s.seller?.clerkId,
+      s.seller?.userId,
+      s.owner?._id,
+      s.owner?.id,
+      s.owner?.clerkId,
+    ]
+      .filter(Boolean)
+      .map(String);
+    return candidates.some((c) => c === uid);
+  }, [user?.id, store]);
+
   const priceOf = (p: Product) =>
     formatProductPrice(Number(p.price) || 0, p.region, displayRegion);
+
+  const scrollToIndex = useCallback((index: number, smooth = true) => {
+    const el = trackRef.current;
+    if (!el) return;
+    const slide = el.clientWidth;
+    if (slide <= 0) return;
+    el.scrollTo({ left: index * slide, behavior: smooth ? "smooth" : "auto" });
+  }, []);
 
   useEffect(() => {
     if (products.length <= 1) return;
     const t = setInterval(() => {
-      setFeatured((i) => (i + 1) % products.length);
+      if (userTouching.current) return;
+      const next = (featuredRef.current + 1) % products.length;
+      featuredRef.current = next;
+      setFeatured(next);
+      scrollToIndex(next, true);
     }, FEATURED_MS);
     return () => clearInterval(t);
-  }, [products.length]);
+  }, [products.length, scrollToIndex]);
+
+  const onTrackScroll = () => {
+    const el = trackRef.current;
+    if (!el) return;
+    const slide = el.clientWidth || 1;
+    const idx = Math.round(el.scrollLeft / slide);
+    const safe = Math.max(0, Math.min(idx, products.length - 1));
+    featuredRef.current = safe;
+    setFeatured(safe);
+  };
 
   const copyLink = async () => {
     try {
@@ -177,39 +229,36 @@ const [authOpen, setAuthOpen] = useState(false);
     window.open(urls[kind], "_blank", "noopener,noreferrer");
   };
 
-  const featuredCard = current ? (
-    <Link
-      href={`/product/${current._id}`}
-      className="block overflow-hidden rounded-[24px] border border-white/8 bg-[#11141A]"
-    >
-      <div className="relative aspect-[4/5] lg:aspect-[16/10]">
-        {current.images?.[0] ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={current.images[0]} alt={current.name} className="h-full w-full object-cover" />
-        ) : (
-          <div className="h-full bg-[#171B22]" />
-        )}
-        <div className="absolute inset-x-0 bottom-0 h-36 bg-gradient-to-t from-[#090B0F] to-transparent" />
-        <div className="absolute inset-x-[18px] bottom-[18px]">
-          <p className="text-[17px] font-bold leading-snug">{current.name}</p>
-          <p className="mt-1.5 text-xl font-extrabold tracking-tight">{priceOf(current)}</p>
-        </div>
-      </div>
-    </Link>
-  ) : null;
+  const goSupport = (mode: "contact" | "report") => {
+    if (isOwner) return;
+    if (!isLoaded) return;
+    if (!isSignedIn) {
+      setAuthOpen(true);
+      return;
+    }
+    const q = new URLSearchParams({
+      mode,
+      contextType: "store",
+      storeId: String(id || ""),
+      storeName: String(store.storeName || ""),
+    });
+    router.push(`/contact?${q.toString()}`);
+  };
 
   return (
     <div className="min-h-dvh overflow-x-hidden bg-[#090B0F] text-[#F5F7FA]">
-      {/* Banner */}
       <div className="relative h-[34vh] min-h-[220px] max-h-[280px] bg-[#07080C] lg:h-[42vh] lg:max-h-[420px]">
         {store.storeBanner ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={store.storeBanner} alt="" className="h-full w-full object-cover" />
+          <img
+            src={store.storeBanner}
+            alt=""
+            className="h-full w-full object-cover"
+          />
         ) : (
           <div className="h-full w-full bg-gradient-to-b from-slate-900 via-[#090B0F] to-[#111827]" />
         )}
         <div className="absolute inset-0 bg-gradient-to-b from-[#090B0F]/20 via-transparent to-[#090B0F]/90" />
-
         <div className="absolute inset-x-0 top-0 z-20 flex items-center justify-between px-4 pt-[max(12px,env(safe-area-inset-top))] lg:px-8">
           <ChromeBtn onClick={() => router.back()} label="Back">
             <ChevronLeft className="h-5 w-5" />
@@ -226,7 +275,11 @@ const [authOpen, setAuthOpen] = useState(false);
             <div className="flex h-[72px] w-[72px] shrink-0 items-center justify-center overflow-hidden rounded-[20px] border border-[#252A33] bg-[#171B22] lg:h-24 lg:w-24">
               {store.storeLogo ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={store.storeLogo} alt="" className="h-full w-full object-cover" />
+                <img
+                  src={store.storeLogo}
+                  alt=""
+                  className="h-full w-full object-cover"
+                />
               ) : (
                 <Store className="h-8 w-8 text-[#737A86]" />
               )}
@@ -242,7 +295,9 @@ const [authOpen, setAuthOpen] = useState(false);
                   </span>
                 ) : null}
               </div>
-              <p className="mt-1.5 text-xs tracking-wide text-[#737A86]">Explore this store</p>
+              <p className="mt-1.5 text-xs tracking-wide text-[#737A86]">
+                {isOwner ? "Your storefront" : "Explore this store"}
+              </p>
               {locationLabel ? (
                 <p className="mt-2 flex items-center gap-1.5 text-[12.5px] text-[#A7ADB8]">
                   <MapPin className="h-3.5 w-3.5 text-[#737A86]" />
@@ -278,7 +333,9 @@ const [authOpen, setAuthOpen] = useState(false);
               <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.14em] text-[#737A86]">
                 Our goal
               </p>
-              <p className={`text-sm leading-5 ${goalOpen ? "" : "line-clamp-2"}`}>
+              <p
+                className={`text-sm leading-5 ${goalOpen ? "" : "line-clamp-2"}`}
+              >
                 {store.businessGoal}
               </p>
               {store.businessGoal.length > 80 ? (
@@ -293,17 +350,21 @@ const [authOpen, setAuthOpen] = useState(false);
             </div>
           ) : null}
 
-          {/* Save = app-only prompt */}
           <div className="mt-[18px] flex items-center gap-2.5">
-            <button
-              type="button"
-              onClick={() => setPrompt("saved_stores")}
-              aria-label="Save store"
-              className="flex h-12 items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.04] px-4 text-[13px] font-semibold text-[#F5F7FA]"
-            >
-              <Bookmark className="h-4 w-4 text-[#D4A853]" strokeWidth={2.2} />
-              Save store
-            </button>
+            {!isOwner ? (
+              <button
+                type="button"
+                onClick={() => setPrompt("saved_stores")}
+                aria-label="Save store"
+                className="flex h-12 items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.04] px-4 text-[13px] font-semibold text-[#F5F7FA]"
+              >
+                <Bookmark
+                  className="h-4 w-4 text-[#D4A853]"
+                  strokeWidth={2.2}
+                />
+                Save store
+              </button>
+            ) : null}
             <span className="rounded-2xl border border-white/7 bg-white/[0.04] px-3.5 py-3.5 text-[13px] font-semibold text-[#A7ADB8]">
               {products.length} products
             </span>
@@ -316,16 +377,72 @@ const [authOpen, setAuthOpen] = useState(false);
               Featured
             </p>
             <p className="mt-1 text-xl font-bold tracking-tight">A closer look</p>
-            <div className="mt-4">{featuredCard}</div>
+            <div
+              ref={trackRef}
+              onScroll={onTrackScroll}
+              onPointerDown={() => {
+                userTouching.current = true;
+              }}
+              onPointerUp={() => {
+                userTouching.current = false;
+              }}
+              onTouchStart={() => {
+                userTouching.current = true;
+              }}
+              onTouchEnd={() => {
+                userTouching.current = false;
+              }}
+              className="mt-4 flex snap-x snap-mandatory overflow-x-auto scroll-smooth [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            >
+              {products.map((p) => (
+                <div
+                  key={String(p._id)}
+                  className="w-full shrink-0 snap-center"
+                >
+                  <Link
+                    href={`/product/${p._id}`}
+                    className="block overflow-hidden rounded-[24px] border border-white/8 bg-[#11141A]"
+                  >
+                    <div className="relative aspect-[4/5] lg:aspect-[16/10]">
+                      {p.images?.[0] ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={p.images[0]}
+                          alt={p.name}
+                          className="h-full w-full object-cover"
+                        />
+                      ) : (
+                        <div className="h-full bg-[#171B22]" />
+                      )}
+                      <div className="absolute inset-x-0 bottom-0 h-36 bg-gradient-to-t from-[#090B0F] to-transparent" />
+                      <div className="absolute inset-x-[18px] bottom-[18px]">
+                        <p className="text-[17px] font-bold leading-snug">
+                          {p.name}
+                        </p>
+                        <p className="mt-1.5 text-xl font-extrabold tracking-tight">
+                          {priceOf(p)}
+                        </p>
+                      </div>
+                    </div>
+                  </Link>
+                </div>
+              ))}
+            </div>
             {products.length > 1 ? (
               <div className="mt-4 flex justify-center gap-1.5">
                 {products.map((_, i) => (
                   <button
                     key={i}
                     type="button"
-                    onClick={() => setFeatured(i)}
-                    className={`h-[5px] rounded-full ${
-                      i === featured ? "w-[18px] bg-[#10B981]" : "w-1.5 bg-white/20"
+                    onClick={() => {
+                      featuredRef.current = i;
+                      setFeatured(i);
+                      scrollToIndex(i, true);
+                    }}
+                    className={`h-[5px] rounded-full transition-all ${
+                      i === featured
+                        ? "w-[18px] bg-[#10B981]"
+                        : "w-1.5 bg-white/20"
                     }`}
                     aria-label={`Featured ${i + 1}`}
                   />
@@ -339,7 +456,9 @@ const [authOpen, setAuthOpen] = useState(false);
           <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#737A86]">
             The store
           </p>
-          <p className="mt-1 text-xl font-bold tracking-tight">Explore the collection</p>
+          <p className="mt-1 text-xl font-bold tracking-tight">
+            Explore the collection
+          </p>
           <div className="my-[18px] flex items-center gap-3">
             <span className="h-px flex-1 bg-[#252A33]" />
             <span className="text-[10px] uppercase tracking-[0.16em] text-[#737A86]">
@@ -367,99 +486,79 @@ const [authOpen, setAuthOpen] = useState(false);
                   <div className="aspect-[1/1.15] bg-[#171B22]">
                     {p.images?.[0] ? (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img src={p.images[0]} alt={p.name} className="h-full w-full object-cover" />
+                      <img
+                        src={p.images[0]}
+                        alt={p.name}
+                        className="h-full w-full object-cover"
+                      />
                     ) : null}
                   </div>
                   <div className="px-3 pb-3 pt-2.5">
                     <p className="line-clamp-2 text-[13px] font-semibold leading-[18px]">
                       {p.name}
                     </p>
-                    <p className="mt-1.5 text-[14.5px] font-extrabold">{priceOf(p)}</p>
+                    <p className="mt-1.5 text-[14.5px] font-extrabold">
+                      {priceOf(p)}
+                    </p>
                   </div>
                 </Link>
               ))}
             </div>
           )}
 
-{/* Support — Contact Store through Plazore + Report Store */}
-<section className="mt-10">
-  <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#737A86]">
-    Support
-  </p>
-
-  <button
-    type="button"
-    onClick={() => {
-      if (!isLoaded) return;
-      if (!isSignedIn) {
-        setAuthOpen(true);
-        return;
-      }
-      const q = new URLSearchParams({
-        mode: "contact",
-        contextType: "store",
-        storeId: String(id || ""),
-        storeName: String(store.storeName || ""),
-      });
-      router.push(`/contact?${q.toString()}`);
-    }}
-    className="mt-3 flex w-full items-center gap-3 rounded-[18px] border border-[#10B981]/25 bg-[#10B981]/[0.06] px-3.5 py-3.5 text-left transition hover:border-[#10B981]/40"
-  >
-    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#10B981]/15">
-      <MessageCircle className="h-4 w-4 text-[#10B981]" />
-    </span>
-    <span className="min-w-0 flex-1">
-      <span className="block text-[14.5px] font-bold tracking-tight">
-        Contact Store through Plazore
-      </span>
-      <span className="mt-0.5 block text-xs text-[#737A86]">
-        Routed through Plazore · not direct seller chat
-      </span>
-    </span>
-    <ChevronLeft className="h-4 w-4 shrink-0 rotate-180 text-[#737A86]" />
-  </button>
-
-  <button
-    type="button"
-    onClick={() => {
-      if (!isLoaded) return;
-      if (!isSignedIn) {
-        setAuthOpen(true);
-        return;
-      }
-      const q = new URLSearchParams({
-        mode: "report",
-        contextType: "store",
-        storeId: String(id || ""),
-        storeName: String(store.storeName || ""),
-      });
-      router.push(`/contact?${q.toString()}`);
-    }}
-    className="mt-2.5 flex w-full items-center gap-3 rounded-[18px] border border-[#252A33] bg-[#11141A] px-3.5 py-3.5 text-left transition hover:border-white/15"
-  >
-    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-[#EF4444]/25 bg-[#EF4444]/15">
-    <Flag className="h-4 w-4 text-[#EF4444]" />
-  </span>
-  <span className="min-w-0 flex-1">
-    <span className="block text-[14.5px] font-bold tracking-tight text-[#F87171]">
-      Report Store
-    </span>
-    <span className="mt-0.5 block text-xs text-[#F87171]/70">
-      Structured report to Plazore moderation
-    </span>
-  </span>
-  <ChevronLeft className="h-4 w-4 shrink-0 rotate-180 text-[#F87171]/80" />
-</button>
-</section>
+          {!isOwner ? (
+            <section className="mt-10">
+              <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#737A86]">
+                Support
+              </p>
+              <button
+                type="button"
+                onClick={() => goSupport("contact")}
+                className="mt-3 flex w-full items-center gap-3 rounded-[18px] border border-[#10B981]/25 bg-[#10B981]/[0.06] px-3.5 py-3.5 text-left transition hover:border-[#10B981]/40"
+              >
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#10B981]/15">
+                  <MessageCircle className="h-4 w-4 text-[#10B981]" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-[14.5px] font-bold tracking-tight">
+                    Contact Store through Plazore
+                  </span>
+                  <span className="mt-0.5 block text-xs text-[#737A86]">
+                    Routed through Plazore · not direct seller chat
+                  </span>
+                </span>
+                <ChevronLeft className="h-4 w-4 shrink-0 rotate-180 text-[#737A86]" />
+              </button>
+              <button
+                type="button"
+                onClick={() => goSupport("report")}
+                className="mt-2.5 flex w-full items-center gap-3 rounded-[18px] border border-[#252A33] bg-[#11141A] px-3.5 py-3.5 text-left transition hover:border-white/15"
+              >
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-[#EF4444]/25 bg-[#EF4444]/15">
+                  <Flag className="h-4 w-4 text-[#EF4444]" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-[14.5px] font-bold tracking-tight text-[#F87171]">
+                    Report Store
+                  </span>
+                  <span className="mt-0.5 block text-xs text-[#F87171]/70">
+                    Structured report to Plazore moderation
+                  </span>
+                </span>
+                <ChevronLeft className="h-4 w-4 shrink-0 rotate-180 text-[#F87171]/80" />
+              </button>
+            </section>
+          ) : null}
         </section>
 
         <footer className="mb-2 mt-10 flex flex-col items-center">
           <span className="mb-3.5 h-[3px] w-9 rounded-sm bg-[#252A33]" />
-          <p className="text-[11px] tracking-widest text-[#737A86]">Plazore · Digital Mall</p>
+          <p className="text-[11px] tracking-widest text-[#737A86]">
+            Plazore · Digital Mall
+          </p>
         </footer>
       </div>
 
-      {/* Share sheet */}
       {shareOpen ? (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/75 sm:items-center sm:p-6">
           <div className="max-h-[90dvh] w-full max-w-md overflow-y-auto border border-white/10 bg-[#11141A] sm:rounded-2xl">
@@ -490,7 +589,9 @@ const [authOpen, setAuthOpen] = useState(false);
                   className="flex flex-col items-center gap-2"
                 >
                   <BrandMark brand={item.id} />
-                  <span className="text-[11px] font-medium text-white/55">{item.label}</span>
+                  <span className="text-[11px] font-medium text-white/55">
+                    {item.label}
+                  </span>
                 </button>
               ))}
             </div>
@@ -525,43 +626,43 @@ const [authOpen, setAuthOpen] = useState(false);
       ) : null}
 
       {authOpen ? (
-  <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/75 sm:items-center sm:p-6">
-    <div className="w-full max-w-md border border-white/10 bg-[#11141A] sm:rounded-2xl">
-      <div className="flex items-start justify-between gap-3 px-5 pt-5">
-        <div>
-          <p className="text-[16px] font-extrabold">Continue on Plazore</p>
-          <p className="mt-1.5 text-[13px] leading-5 text-white/55">
-            Sign in to contact this store or send a report. You’ll return here after.
-          </p>
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/75 sm:items-center sm:p-6">
+          <div className="w-full max-w-md border border-white/10 bg-[#11141A] sm:rounded-2xl">
+            <div className="flex items-start justify-between gap-3 px-5 pt-5">
+              <div>
+                <p className="text-[16px] font-extrabold">Continue on Plazore</p>
+                <p className="mt-1.5 text-[13px] leading-5 text-white/55">
+                  Sign in to contact this store or send a report. You’ll return
+                  here after.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAuthOpen(false)}
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/6"
+                aria-label="Close"
+              >
+                <X className="h-4 w-4 text-white/50" />
+              </button>
+            </div>
+            <div className="space-y-2.5 px-5 py-5">
+              <Link
+                href={`/sign-in?redirect_url=${encodeURIComponent(`/store/${id}`)}`}
+                className="flex h-12 w-full items-center justify-center rounded-xl bg-white text-[14px] font-bold text-[#1F1F1F]"
+              >
+                Sign in
+              </Link>
+              <Link
+                href={`/sign-in?mode=signup&redirect_url=${encodeURIComponent(`/store/${id}`)}`}
+                className="flex h-12 w-full items-center justify-center rounded-xl text-[14px] font-bold text-[#00E575]"
+              >
+                Create a Plazore account
+              </Link>
+            </div>
+          </div>
         </div>
-        <button
-          type="button"
-          onClick={() => setAuthOpen(false)}
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/6"
-          aria-label="Close"
-        >
-          <X className="h-4 w-4 text-white/50" />
-        </button>
-      </div>
-      <div className="space-y-2.5 px-5 py-5">
-        <Link
-          href={`/sign-in?redirect_url=${encodeURIComponent(`/store/${id}`)}`}
-          className="flex h-12 w-full items-center justify-center rounded-xl bg-white text-[14px] font-bold text-[#1F1F1F]"
-        >
-          Sign in
-        </Link>
-        <Link
-          href={`/sign-in?mode=signup&redirect_url=${encodeURIComponent(`/store/${id}`)}`}
-          className="flex h-12 w-full items-center justify-center rounded-xl text-[14px] font-bold text-[#00E575]"
-        >
-          Create a Plazore account
-        </Link>
-      </div>
-    </div>
-  </div>
-) : null}
+      ) : null}
 
-      {/* App necessity — Save store */}
       <AppFeaturePrompt feature={prompt} onClose={() => setPrompt(null)} />
     </div>
   );

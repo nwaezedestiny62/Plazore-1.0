@@ -13,6 +13,7 @@ import {
   getShowroomSessionId,
   saveShowroomSessionId,
 } from '@/services/showroomEvents'
+import { useAuth } from '@clerk/clerk-expo'
 import { useRouter } from 'expo-router'
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import {
@@ -32,7 +33,8 @@ const ROOM_NAV_HOLD_MS = 1200
 export default function Home() {
   const { setScrollProgress, setHomeChrome, openHub } = usePlazoreChrome()
   const router = useRouter()
-    const { region } = useMarketplace()
+  const { region } = useMarketplace()
+  const { getToken, isSignedIn } = useAuth()
   const insets = useSafeAreaInsets()
   const { height: windowH } = useWindowDimensions()
   const heroH = Math.max(windowH, 1)
@@ -49,6 +51,8 @@ export default function Home() {
   const [activeRoom, setActiveRoom] = useState(1)
   const [navVisible, setNavVisible] = useState(0)
   const [roomCount, setRoomCount] = useState(4)
+  const [heroToken, setHeroToken] = useState<string | null>(null)
+  const [sessionId, setSessionId] = useState('')
 
   const showroomY = useRef(0)
   const roomYs = useRef<Record<number, number>>({})
@@ -58,7 +62,7 @@ export default function Home() {
   const roomNavPinned = useRef(false)
   const roomNavHoldUntil = useRef(0)
   const selectionReleaseTimer = useRef<ReturnType<typeof setTimeout> | null>(
-    null
+    null,
   )
   const lastProgress = useRef(-1)
 
@@ -72,11 +76,32 @@ export default function Home() {
     }
   }, [setHomeChrome, setScrollProgress])
 
-    const fetchProducts = useCallback(async () => {
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const sid = await getShowroomSessionId()
+        if (!cancelled) setSessionId(sid || '')
+      } catch {
+        if (!cancelled) setSessionId('')
+      }
+      try {
+        const t = isSignedIn ? (await getToken()) || null : null
+        if (!cancelled) setHeroToken(t)
+      } catch {
+        if (!cancelled) setHeroToken(null)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [isSignedIn, getToken])
+
+  const fetchProducts = useCallback(async () => {
     try {
       setLoading(true)
 
-      const sessionId = await getShowroomSessionId()
+      const sid = await getShowroomSessionId()
       let list: Product[] = []
       let nextRooms: {
         1: Product[]
@@ -88,7 +113,7 @@ export default function Home() {
       try {
         const res = await api.get('/products/showroom', {
           params: {
-            sessionId,
+            sessionId: sid,
             region,
           },
         })
@@ -196,8 +221,7 @@ export default function Home() {
       roomNavPinned.current = false
     }
 
-    const nextVisibility =
-      Math.round(Math.min(1, Math.max(0, v)) * 100) / 100
+    const nextVisibility = Math.round(Math.min(1, Math.max(0, v)) * 100) / 100
 
     const isHoldingSelection = Date.now() < roomNavHoldUntil.current
     if (isHoldingSelection && focusedRoom.current != null) {
@@ -232,7 +256,7 @@ export default function Home() {
       const target = Math.max(showroomY.current + rel - landingOffset, 0)
       scrollRef.current?.scrollTo({ y: target, animated: true })
     },
-    [insets.top]
+    [insets.top],
   )
 
   const onRoomScrollSettled = useCallback(() => {
@@ -248,7 +272,9 @@ export default function Home() {
 
   const onRoomDragEnd = useCallback(() => {
     if (focusedRoom.current == null) return
-    if (selectionReleaseTimer.current) clearTimeout(selectionReleaseTimer.current)
+    if (selectionReleaseTimer.current) {
+      clearTimeout(selectionReleaseTimer.current)
+    }
     selectionReleaseTimer.current = setTimeout(() => {
       selectionReleaseTimer.current = null
       if (focusedRoom.current == null) return
@@ -257,6 +283,9 @@ export default function Home() {
       roomNavHoldUntil.current = Date.now() + 220
     }, 820)
   }, [])
+
+  const regionCode =
+    typeof region === 'string' ? region : String((region as any)?.code || '')
 
   return (
     <ShowroomFlyCartProvider>
@@ -287,7 +316,13 @@ export default function Home() {
           onScrollEndDrag={onRoomDragEnd}
           style={{ flex: 1 }}
         >
-          <HeroBanner topChrome={0} onScrollToShowroom={scrollToShowroom} />
+          <HeroBanner
+            token={heroToken}
+            region={regionCode}
+            sessionId={sessionId}
+            topChrome={0}
+            onScrollToShowroom={scrollToShowroom}
+          />
 
           <View
             onLayout={(e) => {

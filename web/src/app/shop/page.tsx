@@ -74,10 +74,10 @@ const CATEGORY_IMAGES: Record<string, [string, string, string]> = {
     "https://images.unsplash.com/photo-1604719312566-8912e9227c6a?w=600&q=80",
     "https://images.unsplash.com/photo-1488459716781-31db52582fe9?w=600&q=80",
   ],
-  Health: [
-    "https://images.unsplash.com/photo-1505751172876-fa1923c5c528?w=600&q=80",
-    "https://images.unsplash.com/photo-1576091160399-112ba8d25d1d?w=600&q=80",
-    "https://images.unsplash.com/photo-1584308666744-24d5c474f2ae?w=600&q=80",
+    Health: [
+    "https://images.unsplash.com/photo-1576091160550-2173dba999ef?auto=format&fit=crop&w=800&q=80",
+    "https://images.unsplash.com/photo-1584308666744-24d5c474f2ae?auto=format&fit=crop&w=800&q=80",
+    "https://images.unsplash.com/photo-1532938911079-1b06ac7ceec7?auto=format&fit=crop&w=800&q=80",
   ],
   "Sports & Outdoors": [
     "https://images.unsplash.com/photo-1461896836934-ffe607ba6851?w=600&q=80",

@@ -30,7 +30,6 @@ const GREEN = '#00E575'
 const BLUE = '#3B82F6'
 const DANGER = '#EF4444'
 
-/** Locally dismissed notification ids — survive refresh / focus */
 const CLEARED_KEY = 'plazore_cleared_notification_ids'
 
 type NotifType =
@@ -77,7 +76,7 @@ async function saveClearedIds(ids: Set<string>) {
   try {
     await AsyncStorage.setItem(CLEARED_KEY, JSON.stringify([...ids]))
   } catch {
-    // ignore storage errors
+    /* ignore */
   }
 }
 
@@ -90,6 +89,11 @@ function isPlazoreMessage(type?: string) {
     type === 'announcement' ||
     type === 'general'
   )
+}
+
+/** Contact types that can open a thread (reply allowed depends on server allowsReply) */
+function isContactThread(type?: string) {
+  return type === 'contact_reply' || type === 'contact_need_info'
 }
 
 function iconForType(type: string): keyof typeof Ionicons.glyphMap {
@@ -105,6 +109,8 @@ function iconForType(type: string): keyof typeof Ionicons.glyphMap {
     case 'order_reminder':
     case 'order_shipped_reminder':
       return 'time-outline'
+    case 'announcement':
+      return 'megaphone-outline'
     default:
       return 'notifications-outline'
   }
@@ -115,11 +121,12 @@ function accentForType(
   isRead: boolean
 ): { bg: string; iconColor: string } {
   if (isRead) return { bg: SURFACE_2, iconColor: MUTED }
-
+  if (type === 'announcement') {
+    return { bg: 'rgba(0,229,117,0.16)', iconColor: GREEN }
+  }
   if (isPlazoreMessage(type)) {
     return { bg: 'rgba(0,229,117,0.12)', iconColor: GREEN }
   }
-
   switch (type as NotifType) {
     case 'order_cancelled':
       return { bg: 'rgba(239,68,68,0.18)', iconColor: DANGER }
@@ -134,10 +141,57 @@ function accentForType(
   }
 }
 
+function resolveId(ref: any): string {
+  if (!ref) return ''
+  if (typeof ref === 'object' && ref._id) return String(ref._id)
+  return String(ref)
+}
+
 function toneColor(tone?: NonNullable<OverlayState>['tone']) {
   if (tone === 'danger') return DANGER
   if (tone === 'success') return GREEN
   return BLUE
+}
+
+/** Improved Plazore logo chip */
+function PlazoreLogoChip({
+  size = 40,
+  dimmed,
+}: {
+  size?: number
+  dimmed?: boolean
+}) {
+  const logo = Math.round(size * 0.52)
+  return (
+    <View
+      style={{
+        width: size,
+        height: size,
+        borderRadius: size * 0.32,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: dimmed ? SURFACE_2 : 'rgba(0,229,117,0.14)',
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: dimmed ? LINE : 'rgba(0,229,117,0.35)',
+        overflow: 'hidden',
+      }}
+    >
+      <View
+        style={{
+          position: 'absolute',
+          width: size * 0.7,
+          height: size * 0.7,
+          borderRadius: size * 0.35,
+          backgroundColor: dimmed ? 'transparent' : 'rgba(0,229,117,0.08)',
+        }}
+      />
+      <Image
+        source={require('@/assets/logo-1.png')}
+        style={{ width: logo, height: logo, opacity: dimmed ? 0.55 : 1 }}
+        resizeMode="contain"
+      />
+    </View>
+  )
 }
 
 function TopOverlay({
@@ -219,7 +273,6 @@ function TopOverlay({
     >
       <View style={[styles.overlayCard, hasActions && styles.overlayCardTall]}>
         <View style={[styles.overlayAccent, { backgroundColor: accent }]} />
-
         <View style={styles.overlayBody}>
           <View style={styles.overlayTopRow}>
             <View
@@ -257,7 +310,6 @@ function TopOverlay({
               </Pressable>
             )}
           </View>
-
           {hasActions && (
             <View style={styles.overlayActions}>
               {state.actions!.map((a, i) => (
@@ -350,17 +402,15 @@ export default function Notifications() {
   const fetchNotifications = async () => {
     try {
       clearedRef.current = await loadClearedIds()
-
       const token = await getToken()
       const res = await api.get('/notifications', {
         headers: { Authorization: `Bearer ${token}` },
       })
       if (res.data.success) {
-        const raw = res.data.data || []
-        setNotifications(applyClearedFilter(raw))
+        setNotifications(applyClearedFilter(res.data.data || []))
       }
     } catch {
-      // keep list
+      /* keep */
     } finally {
       setLoading(false)
       setRefreshing(false)
@@ -385,13 +435,27 @@ export default function Notifications() {
         { headers: { Authorization: `Bearer ${token}` } }
       )
     } catch {
-      // stay local
+      /* local */
     }
   }
 
   const handlePress = async (item: any) => {
-    if (!item.isRead) {
-      await markAsRead(item._id)
+    if (!item.isRead) await markAsRead(item._id)
+
+    // Announcements are always one-way — open detail, never contact reply
+    if (item.type === 'announcement') {
+      const annId = resolveId(item.announcement)
+      if (annId) {
+        router.push(`/announcements/${annId}` as any)
+        return
+      }
+      setOverlay({
+        title: item.title || 'Announcement',
+        message: item.message || 'This is a one-way notice from Plazore.',
+        tone: 'info',
+        durationMs: 8000,
+      })
+      return
     }
 
     if (item.link) {
@@ -399,17 +463,13 @@ export default function Notifications() {
       return
     }
 
-    if (item.type === 'contact_reply' || item.type === 'contact_need_info') {
-      const id = item.contact ? String(item.contact) : ''
+    // Contact threads — conversation screen decides reply UI via allowsReply
+    if (isContactThread(item.type)) {
+      const id = resolveId(item.contact)
       if (id) {
         router.push(`/contact/conversation/${id}` as any)
         return
       }
-    }
-
-    if (item.type === 'announcement' && item.announcement) {
-      router.push(`/announcements/${item.announcement}` as any)
-      return
     }
 
     if (!item.order) return
@@ -419,11 +479,11 @@ export default function Notifications() {
       item.type === 'order_reminder' ||
       item.type === 'order_shipped_reminder'
     ) {
-      router.push(`/seller/orders/${item.order}` as any)
+      router.push(`/seller/orders/${resolveId(item.order)}` as any)
       return
     }
 
-    router.push(`/orders/${item.order}` as any)
+    router.push(`/orders/${resolveId(item.order)}` as any)
   }
 
   const markAllRead = async () => {
@@ -442,31 +502,25 @@ export default function Notifications() {
         { headers: { Authorization: `Bearer ${token}` } }
       )
     } catch {
-      // already updated locally
+      /* local */
     }
   }
 
   const runClearRead = async () => {
     if (clearing) return
     setClearing(true)
-
-    const toClear = notifications.filter((n) => n.isRead)
-    const ids = toClear.map((n) => String(n._id))
-
+    const ids = notifications.filter((n) => n.isRead).map((n) => String(n._id))
     setNotifications((prev) => prev.filter((n) => !n.isRead))
-
     const next = new Set(clearedRef.current)
     ids.forEach((id) => next.add(id))
     clearedRef.current = next
     await saveClearedIds(next)
-
     setOverlay({
       title: 'Read notifications cleared',
       message: 'They’re gone from this list on your device.',
       tone: 'success',
       durationMs: 5000,
     })
-
     try {
       const token = await getToken()
       try {
@@ -481,11 +535,11 @@ export default function Notifications() {
             { headers: { Authorization: `Bearer ${token}` } }
           )
         } catch {
-          // local clear is the source of truth
+          /* local */
         }
       }
     } catch {
-      // fine
+      /* fine */
     } finally {
       setClearing(false)
     }
@@ -502,12 +556,9 @@ export default function Notifications() {
       })
       return
     }
-
     setOverlay({
       title: 'Clear read notifications?',
-      message: `Remove ${readCount} read notification${
-        readCount !== 1 ? 's' : ''
-      } from this list?`,
+      message: `Remove ${readCount} read notification${readCount !== 1 ? 's' : ''} from this list?`,
       tone: 'danger',
       actions: [
         { label: 'Cancel', onPress: () => {} },
@@ -520,9 +571,7 @@ export default function Notifications() {
     })
   }
 
-  if (loading && !refreshing) {
-    return <PlazoreOrbPreloader />
-  }
+  if (loading && !refreshing) return <PlazoreOrbPreloader />
 
   const unreadCount = notifications.filter((n) => !n.isRead).length
 
@@ -585,54 +634,67 @@ export default function Notifications() {
             </View>
             <Text style={styles.emptyTitle}>No notifications yet</Text>
             <Text style={styles.emptySub}>
-              Order updates and alerts will show up here.
+              Orders, contact replies, and Plazore announcements show up here.
             </Text>
           </View>
         }
         renderItem={({ item }) => {
-          const colors = accentForType(
-            String(item.type || 'general'),
-            !!item.isRead
-          )
+          const type = String(item.type || 'general')
+          const colors = accentForType(type, !!item.isRead)
+          const isAnn = type === 'announcement'
+          const isPlazore = isPlazoreMessage(type)
 
           return (
             <TouchableOpacity
               activeOpacity={0.85}
               onPress={() => handlePress(item)}
-              style={[styles.card, !item.isRead && styles.cardUnread]}
+              style={[
+                styles.card,
+                !item.isRead && styles.cardUnread,
+                isAnn && !item.isRead && styles.cardAnnouncement,
+              ]}
             >
               <View style={styles.cardRow}>
-                <View
-                  style={[
-                    styles.iconWrap,
-                    { backgroundColor: colors.bg },
-                  ]}
-                >
-                  {isPlazoreMessage(item.type) ? (
-                    <Image
-                      source={require('@/assets/logo-1.png')}
-                      style={{ width: 22, height: 22 }}
-                      resizeMode="contain"
-                    />
-                  ) : (
+                {isPlazore ? (
+                  <PlazoreLogoChip size={42} dimmed={!!item.isRead} />
+                ) : (
+                  <View
+                    style={[styles.iconWrap, { backgroundColor: colors.bg }]}
+                  >
                     <Ionicons
-                      name={iconForType(String(item.type || 'general'))}
+                      name={iconForType(type)}
                       size={20}
                       color={colors.iconColor}
                     />
-                  )}
-                </View>
+                  </View>
+                )}
 
                 <View style={styles.cardBody}>
-                  <Text
-                    style={[
-                      styles.cardTitle,
-                      item.isRead && styles.cardTitleRead,
-                    ]}
-                    numberOfLines={2}
-                  >
-                    {item.title}
-                  </Text>
+                  <View style={styles.titleRow}>
+                    <Text
+                      style={[
+                        styles.cardTitle,
+                        item.isRead && styles.cardTitleRead,
+                        { flex: 1 },
+                      ]}
+                      numberOfLines={2}
+                    >
+                      {item.title}
+                    </Text>
+                    {!item.isRead && <View style={styles.unreadDot} />}
+                  </View>
+
+                  {isAnn && (
+                    <View style={styles.metaRow}>
+                      <Text style={styles.annBadge}>ANNOUNCEMENT</Text>
+                      <Text style={styles.noReplyMeta}>No reply</Text>
+                    </View>
+                  )}
+
+                  {isContactThread(type) && (
+                    <Text style={styles.contactMeta}>Plazore · Contact</Text>
+                  )}
+
                   <Text style={styles.cardMessage} numberOfLines={3}>
                     {item.message}
                   </Text>
@@ -645,8 +707,6 @@ export default function Notifications() {
                       : ''}
                   </Text>
                 </View>
-
-                {!item.isRead && <View style={styles.unreadDot} />}
               </View>
             </TouchableOpacity>
           )
@@ -703,16 +763,8 @@ const styles = StyleSheet.create({
   },
   overlayCardTall: { minHeight: 88 },
   overlayAccent: { width: 3 },
-  overlayBody: {
-    flex: 1,
-    paddingVertical: 12,
-    paddingHorizontal: 12,
-  },
-  overlayTopRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 10,
-  },
+  overlayBody: { flex: 1, paddingVertical: 12, paddingHorizontal: 12 },
+  overlayTopRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
   overlayIcon: {
     width: 32,
     height: 32,
@@ -815,16 +867,8 @@ const styles = StyleSheet.create({
     letterSpacing: -0.3,
   },
   headerSub: { fontSize: 11, color: MUTED, marginTop: 1 },
-  headerRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  markAllText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: SECONDARY,
-  },
+  headerRight: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  markAllText: { fontSize: 12, fontWeight: '600', color: SECONDARY },
   configBtn: {
     width: 38,
     height: 38,
@@ -878,16 +922,27 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.12)',
     backgroundColor: SURFACE_2,
   },
-  cardRow: { flexDirection: 'row', alignItems: 'flex-start' },
+  cardAnnouncement: {
+    borderColor: 'rgba(0,229,117,0.28)',
+  },
+  cardRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
   iconWrap: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
+    width: 42,
+    height: 42,
+    borderRadius: 13,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 12,
   },
   cardBody: { flex: 1, minWidth: 0 },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+  },
   cardTitle: {
     fontSize: 14,
     fontWeight: '700',
@@ -895,6 +950,25 @@ const styles = StyleSheet.create({
     lineHeight: 19,
   },
   cardTitleRead: { color: SECONDARY, fontWeight: '600' },
+  metaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 4,
+  },
+  annBadge: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: GREEN,
+    letterSpacing: 0.6,
+  },
+  noReplyMeta: { fontSize: 10, color: MUTED, fontWeight: '600' },
+  contactMeta: {
+    fontSize: 10,
+    color: GREEN,
+    fontWeight: '600',
+    marginTop: 4,
+  },
   cardMessage: {
     fontSize: 13,
     color: SECONDARY,
@@ -908,7 +982,6 @@ const styles = StyleSheet.create({
     height: 8,
     borderRadius: 4,
     backgroundColor: GREEN,
-    marginTop: 6,
-    marginLeft: 8,
+    marginTop: 5,
   },
 })
