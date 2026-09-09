@@ -24,7 +24,7 @@ const MUTED = "#737A86";
 const AI_GREEN = "#10B981";
 const AI_BLUE = "#3B82F6";
 
-const INACTIVITY_MS = 2 * 24 * 60 * 60 * 1000; // 2 days
+const INACTIVITY_MS = 2 * 24 * 60 * 60 * 1000;
 
 type Conversation = {
   _id: string;
@@ -58,17 +58,30 @@ type Conversation = {
   createdAt?: string;
 };
 
+function hasRealMessage(conv: Conversation): boolean {
+  return Boolean(String(conv.lastMessage?.text || "").trim());
+}
+
 function getActivityTime(conv: Conversation): number {
-  const raw =
-    conv.lastMessage?.createdAt || conv.updatedAt || conv.createdAt || 0;
+  const raw = conv.lastMessage?.createdAt || 0;
   const t = new Date(raw).getTime();
   return Number.isFinite(t) ? t : 0;
 }
 
 function isActiveConversation(conv: Conversation): boolean {
+  if (!hasRealMessage(conv)) return false;
   const activity = getActivityTime(conv);
   if (!activity) return false;
   return Date.now() - activity <= INACTIVITY_MS;
+}
+
+function idOf(value: unknown): string {
+  if (!value) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "object" && value && "_id" in value) {
+    return String((value as { _id?: string })._id || "");
+  }
+  return "";
 }
 
 export default function SellerChat() {
@@ -94,6 +107,28 @@ export default function SellerChat() {
     };
   }, []);
 
+  const goBackSafe = useCallback(() => {
+    if (router.canGoBack()) {
+      router.back();
+      return;
+    }
+    router.replace("/seller" as any);
+  }, [router]);
+
+  const openThread = useCallback(
+    (item: Conversation) => {
+      const productId = item.product?._id ? String(item.product._id) : "";
+      const qs = [
+        "from=seller",
+        productId ? `productId=${encodeURIComponent(productId)}` : "",
+      ]
+        .filter(Boolean)
+        .join("&");
+      router.push(`/chat/${item._id}?${qs}` as any);
+    },
+    [router],
+  );
+
   const resolveMyUserId = useCallback(async (token: string) => {
     const endpoints = ["/users/me", "/users/profile", "/user/me"];
     for (const endpoint of endpoints) {
@@ -103,7 +138,7 @@ export default function SellerChat() {
         });
         const id = res.data?.data?._id || res.data?._id;
         if (id) {
-          setMyUserId(String(id));
+          if (mountedRef.current) setMyUserId(String(id));
           return String(id);
         }
       } catch {
@@ -139,7 +174,6 @@ export default function SellerChat() {
           return;
         }
 
-        // Resolve seller identity so we never show another store's threads
         let uid = myUserId;
         if (!uid) {
           uid = await resolveMyUserId(token);
@@ -157,13 +191,10 @@ export default function SellerChat() {
 
           const me = String(uid || "");
 
-          // ONLY conversations where THIS user is the seller for that product
           const sellerChats = list
             .filter((conv) => {
               if (conv.myRole === "seller") return true;
-              const sellerId = String(
-                (conv.seller as any)?._id || conv.seller || "",
-              );
+              const sellerId = idOf(conv.seller);
               return !!me && sellerId === me;
             })
             .map((conv) => {
@@ -178,7 +209,6 @@ export default function SellerChat() {
                 unreadCount: unread,
               };
             })
-            // 2 days of no messages → leave the dashboard
             .filter(isActiveConversation);
 
           if (mountedRef.current) setConversations(sellerChats);
@@ -189,7 +219,6 @@ export default function SellerChat() {
           }
         }
       } catch (err: any) {
-        console.log("Seller chat fetch error:", err?.response?.data || err);
         if (mountedRef.current) {
           const msg =
             err?.response?.data?.message ||
@@ -260,13 +289,27 @@ export default function SellerChat() {
     <View style={styles.root}>
       <StatusBar barStyle="light-content" />
       <SafeAreaView edges={["top"]} style={{ flex: 1 }}>
-        {/* Header */}
         <View style={styles.header}>
-          <Text style={styles.eyebrow}>STOREFRONT</Text>
-          <Text style={styles.title}>Buyer messages</Text>
+          <View style={styles.headerTop}>
+            <TouchableOpacity
+              onPress={goBackSafe}
+              activeOpacity={0.85}
+              hitSlop={12}
+              style={styles.backBtn}
+              accessibilityRole="button"
+              accessibilityLabel="Go back"
+            >
+              <Ionicons name="chevron-back" size={20} color={TEXT} />
+            </TouchableOpacity>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.eyebrow}>STOREFRONT</Text>
+              <Text style={styles.title}>Buyer messages</Text>
+            </View>
+          </View>
           <Text style={styles.subtitle}>
-            Only chats about your products. Threads with no activity for 2 days
-            leave this list automatically.
+            Only chats about your products. A buyer opening Message seller
+            without sending stays off this list. Threads with no activity for 2
+            days leave automatically.
           </Text>
         </View>
 
@@ -303,8 +346,8 @@ export default function SellerChat() {
                 </View>
                 <Text style={styles.emptyTitle}>No buyer messages</Text>
                 <Text style={styles.emptyBody}>
-                  When someone messages you about one of your products, it will
-                  appear here — only on this storefront.
+                  When a buyer actually writes about one of your products, the
+                  thread appears here with that listing attached.
                 </Text>
               </View>
             ) : (
@@ -314,16 +357,14 @@ export default function SellerChat() {
           renderItem={({ item }) => {
             const unread = getUnread(item);
             const product = item.product;
-            const lastText = item.lastMessage?.text || "No messages yet";
-            const time = formatTime(
-              item.lastMessage?.createdAt || item.updatedAt || item.createdAt,
-            );
+            const lastText = String(item.lastMessage?.text || "").trim();
+            const time = formatTime(item.lastMessage?.createdAt);
             const hasUnread = unread > 0;
 
             return (
               <TouchableOpacity
                 activeOpacity={0.88}
-                onPress={() => router.push(`/chat/${item._id}` as any)}
+                onPress={() => openThread(item)}
                 style={[styles.card, hasUnread && styles.cardUnread]}
               >
                 <View style={styles.thumbWrap}>
@@ -339,11 +380,7 @@ export default function SellerChat() {
                     />
                   ) : (
                     <View style={[styles.thumb, styles.thumbFallback]}>
-                      <Ionicons
-                        name="person-outline"
-                        size={20}
-                        color={MUTED}
-                      />
+                      <Ionicons name="person-outline" size={20} color={MUTED} />
                     </View>
                   )}
                   {hasUnread ? <View style={styles.unreadDot} /> : null}
@@ -401,6 +438,20 @@ const styles = StyleSheet.create({
     paddingBottom: 14,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: LINE,
+  },
+  headerTop: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  backBtn: {
+    width: 40,
+    height: 40,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: SURFACE,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: LINE,
   },
   eyebrow: {
     color: AI_GREEN,

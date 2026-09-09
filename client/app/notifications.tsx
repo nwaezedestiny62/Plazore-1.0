@@ -45,6 +45,9 @@ type NotifType =
   | 'report_received'
   | 'report_update'
   | 'announcement'
+  | 'chat_message'
+  | 'new_message'
+  | 'message'
 
 type OverlayAction = {
   label: string
@@ -91,9 +94,51 @@ function isPlazoreMessage(type?: string) {
   )
 }
 
-/** Contact types that can open a thread (reply allowed depends on server allowsReply) */
 function isContactThread(type?: string) {
   return type === 'contact_reply' || type === 'contact_need_info'
+}
+
+function isChatNotif(item: any): boolean {
+  const type = String(item?.type || '')
+  if (
+    type === 'chat_message' ||
+    type === 'new_message' ||
+    type === 'message'
+  ) {
+    return true
+  }
+  const link = typeof item?.link === 'string' ? item.link : ''
+  return link.includes('/chat/')
+}
+
+function chatIdFrom(item: any): string {
+  const fromRef =
+    resolveId(item?.conversation) ||
+    resolveId(item?.chat) ||
+    resolveId(item?.thread)
+  if (fromRef) return fromRef
+  const link = typeof item?.link === 'string' ? item.link : ''
+  if (!link) return ''
+  const cleaned = link.split('?')[0]
+  const match = cleaned.match(/\/chat\/([^/]+)/)
+  return match?.[1] ? String(match[1]) : ''
+}
+
+function productIdFrom(item: any): string {
+  return (
+    resolveId(item?.product) ||
+    resolveId(item?.conversation?.product) ||
+    ''
+  )
+}
+
+function productNameFrom(item: any): string {
+  const p = item?.product
+  if (p && typeof p === 'object' && p.name) return String(p.name)
+  if (item?.productName) return String(item.productName)
+  const convP = item?.conversation?.product
+  if (convP && typeof convP === 'object' && convP.name) return String(convP.name)
+  return ''
 }
 
 function iconForType(type: string): keyof typeof Ionicons.glyphMap {
@@ -111,6 +156,10 @@ function iconForType(type: string): keyof typeof Ionicons.glyphMap {
       return 'time-outline'
     case 'announcement':
       return 'megaphone-outline'
+    case 'chat_message':
+    case 'new_message':
+    case 'message':
+      return 'chatbubble-ellipses-outline'
     default:
       return 'notifications-outline'
   }
@@ -121,6 +170,13 @@ function accentForType(
   isRead: boolean
 ): { bg: string; iconColor: string } {
   if (isRead) return { bg: SURFACE_2, iconColor: MUTED }
+  if (
+    type === 'chat_message' ||
+    type === 'new_message' ||
+    type === 'message'
+  ) {
+    return { bg: 'rgba(0,229,117,0.14)', iconColor: GREEN }
+  }
   if (type === 'announcement') {
     return { bg: 'rgba(0,229,117,0.16)', iconColor: GREEN }
   }
@@ -153,7 +209,6 @@ function toneColor(tone?: NonNullable<OverlayState>['tone']) {
   return BLUE
 }
 
-/** Improved Plazore logo chip */
 function PlazoreLogoChip({
   size = 40,
   dimmed,
@@ -393,6 +448,14 @@ export default function Notifications() {
 
   const dismissOverlay = useCallback(() => setOverlay(null), [])
 
+  const goBackSafe = useCallback(() => {
+    if (router.canGoBack()) {
+      router.back()
+      return
+    }
+    router.replace('/(tabs)/profile' as any)
+  }, [router])
+
   const applyClearedFilter = useCallback((list: any[]) => {
     const cleared = clearedRef.current
     if (!cleared.size) return list
@@ -439,10 +502,35 @@ export default function Notifications() {
     }
   }
 
+  const openChatFromNotif = (item: any) => {
+    const chatId = chatIdFrom(item)
+    if (!chatId) {
+      setOverlay({
+        title: 'Chat unavailable',
+        message: 'This conversation could not be opened.',
+        tone: 'info',
+        durationMs: 5000,
+      })
+      return
+    }
+    const productId = productIdFrom(item)
+    const qs = [
+      'from=notif',
+      productId ? `productId=${encodeURIComponent(productId)}` : '',
+    ]
+      .filter(Boolean)
+      .join('&')
+    router.push(`/chat/${chatId}?${qs}` as any)
+  }
+
   const handlePress = async (item: any) => {
     if (!item.isRead) await markAsRead(item._id)
 
-    // Announcements are always one-way — open detail, never contact reply
+    if (isChatNotif(item)) {
+      openChatFromNotif(item)
+      return
+    }
+
     if (item.type === 'announcement') {
       const annId = resolveId(item.announcement)
       if (annId) {
@@ -463,7 +551,6 @@ export default function Notifications() {
       return
     }
 
-    // Contact threads — conversation screen decides reply UI via allowsReply
     if (isContactThread(item.type)) {
       const id = resolveId(item.contact)
       if (id) {
@@ -582,9 +669,11 @@ export default function Notifications() {
       <View style={styles.header}>
         <View style={styles.headerLeft}>
           <TouchableOpacity
-            onPress={() => router.back()}
+            onPress={goBackSafe}
             style={styles.backBtn}
             hitSlop={12}
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
           >
             <Ionicons name="chevron-back" size={22} color={TEXT} />
           </TouchableOpacity>
@@ -634,7 +723,8 @@ export default function Notifications() {
             </View>
             <Text style={styles.emptyTitle}>No notifications yet</Text>
             <Text style={styles.emptySub}>
-              Orders, contact replies, and Plazore announcements show up here.
+              Orders, chats, contact replies, and Plazore announcements show up
+              here.
             </Text>
           </View>
         }
@@ -642,7 +732,9 @@ export default function Notifications() {
           const type = String(item.type || 'general')
           const colors = accentForType(type, !!item.isRead)
           const isAnn = type === 'announcement'
-          const isPlazore = isPlazoreMessage(type)
+          const isPlazore = isPlazoreMessage(type) && !isChatNotif(item)
+          const isChat = isChatNotif(item)
+          const productName = productNameFrom(item)
 
           return (
             <TouchableOpacity
@@ -652,6 +744,7 @@ export default function Notifications() {
                 styles.card,
                 !item.isRead && styles.cardUnread,
                 isAnn && !item.isRead && styles.cardAnnouncement,
+                isChat && !item.isRead && styles.cardChat,
               ]}
             >
               <View style={styles.cardRow}>
@@ -662,7 +755,7 @@ export default function Notifications() {
                     style={[styles.iconWrap, { backgroundColor: colors.bg }]}
                   >
                     <Ionicons
-                      name={iconForType(type)}
+                      name={iconForType(isChat ? 'chat_message' : type)}
                       size={20}
                       color={colors.iconColor}
                     />
@@ -693,6 +786,13 @@ export default function Notifications() {
 
                   {isContactThread(type) && (
                     <Text style={styles.contactMeta}>Plazore · Contact</Text>
+                  )}
+
+                  {isChat && (
+                    <Text style={styles.chatMeta} numberOfLines={1}>
+                      Chat
+                      {productName ? ` · ${productName}` : ''}
+                    </Text>
                   )}
 
                   <Text style={styles.cardMessage} numberOfLines={3}>
@@ -925,6 +1025,9 @@ const styles = StyleSheet.create({
   cardAnnouncement: {
     borderColor: 'rgba(0,229,117,0.28)',
   },
+  cardChat: {
+    borderColor: 'rgba(0,229,117,0.32)',
+  },
   cardRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -968,6 +1071,13 @@ const styles = StyleSheet.create({
     color: GREEN,
     fontWeight: '600',
     marginTop: 4,
+  },
+  chatMeta: {
+    fontSize: 10,
+    color: GREEN,
+    fontWeight: '700',
+    marginTop: 4,
+    letterSpacing: 0.2,
   },
   cardMessage: {
     fontSize: 13,

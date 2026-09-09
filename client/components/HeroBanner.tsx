@@ -511,35 +511,102 @@ export default function HeroBanner({
   const copy = slides[current] || slides[0]
   if (!copy) return null
 
-  const handleCta = () => {
-    if (onCtaPress) {
-      onCtaPress(copy)
-      return
-    }
-    const action = (copy.ctaAction || 'scroll_showroom').toLowerCase()
-    const target = (copy.ctaTarget || '').trim()
-    switch (action) {
-      case 'store':
-      case 'storefront':
-        if (target) router.push(`/store/${target}`)
-        else onScrollToShowroom?.()
-        break
-      case 'product':
-        if (target) router.push(`/product/${target}`)
-        else onScrollToShowroom?.()
-        break
-      case 'category':
-        if (target) router.push(`/browse?category=${encodeURIComponent(target)}`)
-        else onScrollToShowroom?.()
-        break
-      case 'url':
-        if (target.startsWith('http')) Linking.openURL(target).catch(() => {})
-        else onScrollToShowroom?.()
-        break
-      default:
-        onScrollToShowroom?.()
-    }
+ const handleCta = () => {
+  if (onCtaPress) {
+    onCtaPress(copy)
+    return
   }
+
+  const action = String(copy.ctaAction || 'scroll_showroom')
+    .toLowerCase()
+    .trim()
+  let target = String(copy.ctaTarget || '').trim()
+
+  // If API stuffed a full path into the action field
+  if (
+    !target &&
+    (action.startsWith('/') || action.startsWith('http'))
+  ) {
+    target = action
+  }
+
+  // External URL
+  if (
+    target.startsWith('http://') ||
+    target.startsWith('https://') ||
+    action === 'url' ||
+    action === 'external'
+  ) {
+    if (target.startsWith('http')) {
+      Linking.openURL(target).catch(() => {})
+    } else {
+      onScrollToShowroom?.()
+    }
+    return
+  }
+
+  // Absolute in-app path from API (normalize web → mobile)
+  if (target.startsWith('/')) {
+    let path = target
+
+    // web → mobile
+    if (path.startsWith('/browse')) {
+      path = path.replace(/^\/browse/, '/search')
+    } else if (path.startsWith('/shop')) {
+      path = path.replace(/^\/shop/, '/search')
+    }
+
+    try {
+      router.push(path as any)
+    } catch {
+      onScrollToShowroom?.()
+    }
+    return
+  }
+
+  switch (action) {
+    case 'store':
+    case 'storefront':
+    case 'seller': {
+      if (target) {
+        router.push(`/store/${target}` as any)
+      } else {
+        onScrollToShowroom?.()
+      }
+      break
+    }
+
+    case 'product': {
+      if (target) {
+        router.push(`/product/${target}` as any)
+      } else {
+        onScrollToShowroom?.()
+      }
+      break
+    }
+
+    case 'category':
+    case 'search':
+    case 'browse': {
+      if (target) {
+        router.push({
+          pathname: '/search',
+          params: { category: target, q: target },
+        } as any)
+      } else {
+        router.push('/search' as any)
+      }
+      break
+    }
+
+    case 'scroll_showroom':
+    case 'showroom':
+    case 'campaign':
+    default:
+      onScrollToShowroom?.()
+      break
+  }
+}
 
   const kStyle = kickerFit(copy.kicker || '', maxW)
   const hStyle = headlineFit(copy.headline || '', maxW)

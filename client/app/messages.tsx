@@ -24,7 +24,7 @@ const MUTED = "#737A86";
 const AI_GREEN = "#10B981";
 const AI_BLUE = "#3B82F6";
 
-const INACTIVITY_MS = 2 * 24 * 60 * 60 * 1000; // 2 days
+const INACTIVITY_MS = 2 * 24 * 60 * 60 * 1000;
 
 type Conversation = {
   _id: string;
@@ -58,15 +58,18 @@ type Conversation = {
   createdAt?: string;
 };
 
+function hasRealMessage(conv: Conversation): boolean {
+  return Boolean(String(conv.lastMessage?.text || "").trim());
+}
+
 function getActivityTime(conv: Conversation): number {
-  // True inactivity = last message, not mark-as-read bumps on updatedAt
-  const raw =
-    conv.lastMessage?.createdAt || conv.updatedAt || conv.createdAt || 0;
+  const raw = conv.lastMessage?.createdAt || 0;
   const t = new Date(raw).getTime();
   return Number.isFinite(t) ? t : 0;
 }
 
 function isActiveConversation(conv: Conversation): boolean {
+  if (!hasRealMessage(conv)) return false;
   const activity = getActivityTime(conv);
   if (!activity) return false;
   return Date.now() - activity <= INACTIVITY_MS;
@@ -86,6 +89,14 @@ export default function MessagesInbox() {
   const [booted, setBooted] = useState(false);
 
   const isFetching = useRef(false);
+
+  const goBackSafe = useCallback(() => {
+    if (router.canGoBack()) {
+      router.back();
+      return;
+    }
+    router.replace("/(tabs)/profile" as any);
+  }, [router]);
 
   const resolveMyUserId = useCallback(async (token: string) => {
     const endpoints = ["/users/me", "/users/profile", "/user/me"];
@@ -143,24 +154,24 @@ export default function MessagesInbox() {
             : [];
 
           const enriched = list.map((conv) => {
-            if (conv.myRole && typeof conv.unreadCount === "number") {
-              return conv;
-            }
-
             const buyerId = String(conv.buyer?._id || conv.buyer || "");
             const sellerId = String(conv.seller?._id || conv.seller || "");
             const me = String(uid || "");
 
-            let myRole: "buyer" | "seller" | null = null;
-            if (me && buyerId === me) myRole = "buyer";
-            else if (me && sellerId === me) myRole = "seller";
+            let myRole: "buyer" | "seller" | null = conv.myRole || null;
+            if (!myRole) {
+              if (me && buyerId === me) myRole = "buyer";
+              else if (me && sellerId === me) myRole = "seller";
+            }
 
             const unreadCount =
-              myRole === "buyer"
-                ? conv.unreadByBuyer || 0
-                : myRole === "seller"
-                  ? conv.unreadBySeller || 0
-                  : (conv.unreadByBuyer || 0) + (conv.unreadBySeller || 0);
+              typeof conv.unreadCount === "number"
+                ? conv.unreadCount
+                : myRole === "buyer"
+                  ? conv.unreadByBuyer || 0
+                  : myRole === "seller"
+                    ? conv.unreadBySeller || 0
+                    : (conv.unreadByBuyer || 0) + (conv.unreadBySeller || 0);
 
             return {
               ...conv,
@@ -169,7 +180,6 @@ export default function MessagesInbox() {
             };
           });
 
-          // Client-side hard filter: hide after 2 days of no messages
           const activeOnly = enriched.filter(isActiveConversation);
           setConversations(activeOnly);
         } else {
@@ -177,14 +187,13 @@ export default function MessagesInbox() {
           setError(res.data?.message || "Failed to load messages");
         }
       } catch (err: any) {
-        console.log("Fetch conversations error:", err?.response?.data || err);
         const msg =
           err?.response?.data?.message ||
           err?.message ||
           "Network error. Please try again.";
 
         if (
-          msg.toLowerCase().includes("network") ||
+          String(msg).toLowerCase().includes("network") ||
           err?.message === "Network Error"
         ) {
           setError("No internet connection. Check your network and try again.");
@@ -231,11 +240,13 @@ export default function MessagesInbox() {
       return {
         name: conv.buyer?.name || "Buyer",
         image: conv.buyer?.image,
+        roleLabel: "Buyer",
       };
     }
     return {
-      name: conv.seller?.storeName || conv.seller?.name || "Seller",
+      name: conv.seller?.storeName || conv.seller?.name || "Store",
       image: conv.seller?.storeLogo || conv.seller?.image,
+      roleLabel: "Store",
     };
   };
 
@@ -252,17 +263,25 @@ export default function MessagesInbox() {
     );
   }, [conversations]);
 
+  const openThread = (item: Conversation) => {
+    const pid = item.product?._id || "";
+    const from = item.myRole === "seller" ? "inbox-seller" : "inbox";
+    router.push(
+      `/chat/${item._id}?from=${from}&productId=${encodeURIComponent(pid)}` as any,
+    );
+  };
+
   return (
     <View style={styles.root}>
       <StatusBar barStyle="light-content" />
       <SafeAreaView edges={["top"]} style={{ flex: 1 }}>
-        {/* Header */}
         <View style={styles.header}>
           <View style={styles.headerTop}>
             <TouchableOpacity
-              onPress={() => router.back()}
+              onPress={goBackSafe}
               activeOpacity={0.85}
               style={styles.backBtn}
+              accessibilityLabel="Back"
             >
               <Ionicons name="chevron-back" size={20} color={TEXT} />
             </TouchableOpacity>
@@ -271,8 +290,8 @@ export default function MessagesInbox() {
             </View>
           </View>
           <Text style={styles.subtitle}>
-            Product conversations. Threads without activity for 2 days leave
-            your inbox automatically.
+            Buyer and store threads. A chat only appears after someone sends a
+            real message, and quiet threads leave this inbox after 2 days.
           </Text>
         </View>
 
@@ -309,8 +328,9 @@ export default function MessagesInbox() {
                 </View>
                 <Text style={styles.emptyTitle}>No active conversations</Text>
                 <Text style={styles.emptyBody}>
-                  Message a seller about a product and the thread will appear
-                  here. Quiet chats clear after 2 days.
+                  Message a seller about a product and the thread shows here
+                  after you send. Opening a chat without sending never appears
+                  in anyone’s inbox.
                 </Text>
               </View>
             ) : (
@@ -321,20 +341,15 @@ export default function MessagesInbox() {
             const unread = getUnread(item);
             const other = getOtherParty(item);
             const product = item.product;
-            const lastText = item.lastMessage?.text || "No messages yet";
-            const time = formatTime(
-              item.lastMessage?.createdAt || item.updatedAt || item.createdAt,
-            );
+            const lastText = item.lastMessage?.text || "";
+            const time = formatTime(item.lastMessage?.createdAt);
             const hasUnread = unread > 0;
 
             return (
               <TouchableOpacity
                 activeOpacity={0.88}
-                onPress={() => router.push(`/chat/${item._id}` as any)}
-                style={[
-                  styles.card,
-                  hasUnread && styles.cardUnread,
-                ]}
+                onPress={() => openThread(item)}
+                style={[styles.card, hasUnread && styles.cardUnread]}
               >
                 <View style={styles.thumbWrap}>
                   {product?.images?.[0] ? (
@@ -343,10 +358,7 @@ export default function MessagesInbox() {
                       style={styles.thumb}
                     />
                   ) : other.image ? (
-                    <Image
-                      source={{ uri: other.image }}
-                      style={styles.thumb}
-                    />
+                    <Image source={{ uri: other.image }} style={styles.thumb} />
                   ) : (
                     <View style={[styles.thumb, styles.thumbFallback]}>
                       <Ionicons
@@ -367,9 +379,14 @@ export default function MessagesInbox() {
                     <Text style={styles.time}>{time}</Text>
                   </View>
 
-                  <Text style={styles.productLine} numberOfLines={1}>
-                    {product?.name || "Product conversation"}
-                  </Text>
+                  <View style={styles.metaLine}>
+                    <Text style={styles.roleChip}>
+                      {item.myRole === "seller" ? "As store" : "As buyer"}
+                    </Text>
+                    <Text style={styles.productLine} numberOfLines={1}>
+                      {product?.name || "Product conversation"}
+                    </Text>
+                  </View>
 
                   <View style={styles.rowBottom}>
                     <Text
@@ -552,10 +569,23 @@ const styles = StyleSheet.create({
     color: MUTED,
     fontSize: 11,
   },
+  metaLine: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginTop: 3,
+  },
+  roleChip: {
+    color: AI_GREEN,
+    fontSize: 10,
+    fontWeight: "700",
+    letterSpacing: 0.4,
+    textTransform: "uppercase",
+  },
   productLine: {
+    flex: 1,
     color: MUTED,
     fontSize: 12,
-    marginTop: 3,
   },
   rowBottom: {
     flexDirection: "row",

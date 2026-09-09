@@ -1,6 +1,8 @@
 /**
  * Product Details — Plazore mobile
  * Report at bottom · 6-line description · Google/sign-in resume
+ * Message seller opens /chat/:id?from=product&productId= so the thread
+ * always shows this listing + store, and back returns here.
  */
 
 import { useCart } from "@/context/CartContext";
@@ -504,8 +506,8 @@ export default function ProductDetails() {
         ? formatProduct(Number(product.price), product.region)
         : "";
     return price
-      ? `${name} · ${price}\nOn Plazore — shop with confidence.\n${productUrl}`
-      : `${name}\nOn Plazore — shop with confidence.\n${productUrl}`;
+      ? `${name} · ${price}\nOn Plazore — THE NEW WAY TO SHOP AND EARN.\n${productUrl}`
+      : `${name}\nOn Plazore — THE NEW WAY TO SHOP AND EARN.\n${productUrl}`;
   }, [product, productUrl, formatProduct]);
 
   const seller = product?.seller || {};
@@ -515,6 +517,7 @@ export default function ProductDetails() {
       : typeof seller === "string"
         ? seller
         : null;
+  const storeName = String(seller.storeName || seller.name || "this store");
 
   const openReport = useCallback(() => {
     if (!product) return;
@@ -682,7 +685,14 @@ export default function ProductDetails() {
         { productId: product._id },
         { headers: { Authorization: `Bearer ${token}` } },
       );
-      if (res.data.success) router.push(`/chat/${res.data.data._id}` as any);
+      const chatId = res.data?.data?._id;
+      if (res.data?.success && chatId) {
+        router.push(
+          `/chat/${chatId}?from=product&productId=${encodeURIComponent(
+            String(product._id),
+          )}` as any,
+        );
+      }
     } catch (error: any) {
       if (
         (error?.response?.data?.message || "")
@@ -892,6 +902,7 @@ export default function ProductDetails() {
 
   const showProductCommunication = !isOwnProduct;
   const inStock = Number(product.stock) > 0;
+  const productName = String(product.name || "this piece");
 
   return (
     <View style={{ flex: 1, backgroundColor: BG }}>
@@ -1377,10 +1388,10 @@ export default function ProductDetails() {
                       </View>
                       <View style={{ flex: 1, minWidth: 0 }}>
                         <Text style={styles.commTitle} numberOfLines={1}>
-                          Ask about this product
+                          Ask about {productName}
                         </Text>
                         <Text style={styles.commSub} numberOfLines={1}>
-                          Ask questions · Continues inside Plazore
+                          Chat with {storeName} · stays on this listing
                         </Text>
                       </View>
                       <View style={styles.commArrow}>

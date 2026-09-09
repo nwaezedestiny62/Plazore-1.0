@@ -10,7 +10,7 @@ const getBaseURL = () => {
   if (__DEV__) {
     if (Platform.OS === "android") {
       // Emulator: return "http://10.0.2.2:3000/api";
-      return "http://10.196.138.77:3000/api";
+      return "http://192.168.100.82:3000/api";
     }
 
     if (Platform.OS === "ios") {
@@ -18,7 +18,7 @@ const getBaseURL = () => {
     }
   }
 
-  return "http://10.196.138.77:3000/api";
+  return "http://192.168.100.82:3000/api";
 };
 
 const api = axios.create({

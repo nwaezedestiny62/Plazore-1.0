@@ -545,7 +545,7 @@ export default function SellerProductsPage() {
                     </div>
                     {!selectMode ? (
                       <div className="ml-2 flex flex-col gap-3.5">
-                        <button type="button" onClick={() => router.push(`/seller/products/performance/${item._id}`)}>
+                        <button type="button" onClick={() => router.push(`/seller/products/${item._id}/performance`)}>
                           <BarChart3 className="h-[19px] w-[19px] text-[#A7ADB8]" />
                         </button>
                         <button type="button" onClick={() => router.push(`/seller/products/${item._id}/edit`)}>

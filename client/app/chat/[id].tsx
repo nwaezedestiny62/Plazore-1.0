@@ -1,7 +1,17 @@
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
-import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useFocusEffect,
+  useLocalSearchParams,
+  useRouter,
+} from "expo-router";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   Animated,
   AppState,
@@ -70,22 +80,36 @@ type Conversation = {
   myRole?: "buyer" | "seller" | null;
 };
 
+function firstParam(v: string | string[] | undefined): string {
+  if (Array.isArray(v)) return String(v[0] || "");
+  return String(v || "");
+}
+
 function mergeMessages(prev: Message[], incoming: Message[]): Message[] {
   const server = incoming.map((m) => ({ ...m, status: "sent" as const }));
-  const locals = prev.filter((m) => m.status === "sending" || m.status === "failed");
+  const locals = prev.filter(
+    (m) => m.status === "sending" || m.status === "failed",
+  );
   const keptLocals = locals.filter((local) => {
     return !server.some(
       (m) =>
         m.text === local.text &&
-        Math.abs(new Date(m.createdAt).getTime() - new Date(local.createdAt).getTime()) < 20000,
+        Math.abs(
+          new Date(m.createdAt).getTime() - new Date(local.createdAt).getTime(),
+        ) < 20000,
     );
   });
   const byId = new Map<string, Message>();
   for (const m of server) byId.set(String(m._id), m);
   for (const m of keptLocals) byId.set(String(m.localId || m._id), m);
   return Array.from(byId.values()).sort(
-    (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+    (a, b) =>
+      new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
   );
+}
+
+function unwrap(res: any): any {
+  return res?.data?.data ?? res?.data ?? res ?? null;
 }
 
 function StorePreloader() {
@@ -126,8 +150,15 @@ function StorePreloader() {
 }
 
 export default function ChatScreen() {
-  const { id: rawId } = useLocalSearchParams<{ id: string | string[] }>();
-  const conversationId = Array.isArray(rawId) ? rawId[0] : rawId;
+  const params = useLocalSearchParams<{
+    id?: string | string[];
+    from?: string | string[];
+    productId?: string | string[];
+  }>();
+  const conversationId = firstParam(params.id);
+  const from = firstParam(params.from);
+  const productIdParam = firstParam(params.productId);
+
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { getToken, isSignedIn } = useAuth();
@@ -154,6 +185,8 @@ export default function ChatScreen() {
   const polling = useRef(false);
   const messagesRef = useRef<Message[]>([]);
   messagesRef.current = messages;
+  const conversationRef = useRef<Conversation | null>(null);
+  conversationRef.current = conversation;
 
   useEffect(() => {
     mountedRef.current = true;
@@ -162,27 +195,50 @@ export default function ChatScreen() {
     };
   }, []);
 
-  const resolveMyUserId = useCallback(async (token: string) => {
-    if (myUserId) return myUserId;
-    const endpoints = ["/users/me", "/users/profile", "/user/me"];
-    for (const endpoint of endpoints) {
-      try {
-        const res = await api.get(endpoint, {
-          headers: { Authorization: `Bearer ${token}` },
-          timeout: 10000,
-        });
-        const id = res.data?.data?._id || res.data?._id;
-        if (id) {
-          const sid = String(id);
-          if (mountedRef.current) setMyUserId(sid);
-          return sid;
-        }
-      } catch {
-        /* try next */
-      }
+  const goBackSafe = useCallback(() => {
+    if (router.canGoBack()) {
+      router.back();
+      return;
     }
-    return null;
-  }, [myUserId]);
+    if (from === "product" && productIdParam) {
+      router.replace(`/product/${productIdParam}` as any);
+      return;
+    }
+    if (from === "seller") {
+      router.replace("/seller/chat" as any);
+      return;
+    }
+    if (from === "notif") {
+      router.replace("/notifications" as any);
+      return;
+    }
+    router.replace("/messages" as any);
+  }, [router, from, productIdParam]);
+
+  const resolveMyUserId = useCallback(
+    async (token: string) => {
+      if (myUserId) return myUserId;
+      const endpoints = ["/users/me", "/users/profile", "/user/me"];
+      for (const endpoint of endpoints) {
+        try {
+          const res = await api.get(endpoint, {
+            headers: { Authorization: `Bearer ${token}` },
+            timeout: 10000,
+          });
+          const id = res.data?.data?._id || res.data?._id;
+          if (id) {
+            const sid = String(id);
+            if (mountedRef.current) setMyUserId(sid);
+            return sid;
+          }
+        } catch {
+          /* try next */
+        }
+      }
+      return null;
+    },
+    [myUserId],
+  );
 
   const resolveRole = useCallback(
     (conv: any, uid: string | null): "buyer" | "seller" | null => {
@@ -199,8 +255,10 @@ export default function ChatScreen() {
   );
 
   useEffect(() => {
-    const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
-    const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+    const showEvent =
+      Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const hideEvent =
+      Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
     const onShow = (e: any) => {
       setKeyboardHeight(e?.endCoordinates?.height ?? 0);
       requestAnimationFrame(() => {
@@ -220,7 +278,7 @@ export default function ChatScreen() {
     const prev = messagesRef.current;
     const next = mergeMessages(prev, list);
     const grew = next.length > prev.length;
-    const readChanged = next.some((m, i) => {
+    const readChanged = next.some((m) => {
       const old = prev.find((p) => p._id === m._id);
       return old && (old.readBy?.length || 0) !== (m.readBy?.length || 0);
     });
@@ -234,6 +292,50 @@ export default function ChatScreen() {
     }
   }, []);
 
+  const hydrateFromProduct = useCallback(
+    async (token: string, productId: string, uid: string | null) => {
+      if (!productId) return;
+      try {
+        const res = await api.get(`/products/${productId}`, {
+          headers: { Authorization: `Bearer ${token}` },
+          timeout: 12000,
+        });
+        const product = unwrap(res);
+        if (!product?._id) return;
+        const seller = product.seller || {};
+        const prev = conversationRef.current;
+        const next: Conversation = {
+          _id: prev?._id || conversationId,
+          product: {
+            _id: String(product._id),
+            name: product.name,
+            images: product.images || [],
+            price: product.price,
+            region: product.region,
+          },
+          buyer: prev?.buyer,
+          seller: {
+            _id: String(seller._id || seller || ""),
+            name: seller.name,
+            storeName: seller.storeName,
+            storeLogo: seller.storeLogo,
+            image: seller.image,
+          },
+          lastMessage: prev?.lastMessage,
+          updatedAt: prev?.updatedAt,
+          myRole: prev?.myRole || resolveRole(
+            { ...prev, seller, buyer: prev?.buyer },
+            uid,
+          ),
+        };
+        if (mountedRef.current) setConversation(next);
+      } catch {
+        /* product card is optional */
+      }
+    },
+    [conversationId, resolveRole],
+  );
+
   const pollMessages = useCallback(async () => {
     if (!conversationId || !isSignedIn || polling.current) return;
     polling.current = true;
@@ -245,16 +347,22 @@ export default function ChatScreen() {
         timeout: 12000,
       });
       if (messagesRes.data?.success && mountedRef.current) {
-        applyIncoming(messagesRes.data.data || []);
+        const list = messagesRes.data.data || [];
+        applyIncoming(list);
         setLive(true);
+        if (list.length > 0) {
+          api
+            .patch(
+              `/chat/${conversationId}/read`,
+              {},
+              {
+                headers: { Authorization: `Bearer ${token}` },
+                timeout: 8000,
+              },
+            )
+            .catch(() => {});
+        }
       }
-      api
-        .patch(
-          `/chat/${conversationId}/read`,
-          {},
-          { headers: { Authorization: `Bearer ${token}` }, timeout: 8000 },
-        )
-        .catch(() => {});
     } catch {
       /* silent on poll */
     } finally {
@@ -294,8 +402,10 @@ export default function ChatScreen() {
         timeout: 15000,
       });
 
+      let loadedMessages: Message[] = [];
       if (messagesRes.data?.success && mountedRef.current) {
-        applyIncoming(messagesRes.data.data || []);
+        loadedMessages = messagesRes.data.data || [];
+        applyIncoming(loadedMessages);
       }
 
       try {
@@ -305,8 +415,9 @@ export default function ChatScreen() {
         });
         if (convRes.data?.success && mountedRef.current) {
           const found =
-            (convRes.data.data || []).find((c: any) => c._id === conversationId) ||
-            null;
+            (convRes.data.data || []).find(
+              (c: any) => String(c._id) === String(conversationId),
+            ) || null;
           if (found) {
             setConversation({ ...found, myRole: resolveRole(found, uid) });
           }
@@ -315,18 +426,33 @@ export default function ChatScreen() {
         /* meta optional */
       }
 
-      api
-        .patch(
-          `/chat/${conversationId}/read`,
-          {},
-          { headers: { Authorization: `Bearer ${token}` }, timeout: 8000 },
-        )
-        .catch(() => {});
+      const pid =
+        productIdParam ||
+        conversationRef.current?.product?._id ||
+        "";
+      if (pid) {
+        await hydrateFromProduct(token, String(pid), uid);
+      }
+
+      if (loadedMessages.length > 0) {
+        api
+          .patch(
+            `/chat/${conversationId}/read`,
+            {},
+            { headers: { Authorization: `Bearer ${token}` }, timeout: 8000 },
+          )
+          .catch(() => {});
+      }
     } catch (err: any) {
       if (mountedRef.current) {
         const msg =
-          err?.response?.data?.message || err?.message || "Could not load this chat.";
-        if (msg === "Network Error" || String(msg).toLowerCase().includes("network")) {
+          err?.response?.data?.message ||
+          err?.message ||
+          "Could not load this chat.";
+        if (
+          msg === "Network Error" ||
+          String(msg).toLowerCase().includes("network")
+        ) {
           setError("No internet connection. Check your network and try again.");
         } else if (err?.code === "ECONNABORTED") {
           setError("Request timed out. Try again.");
@@ -338,11 +464,21 @@ export default function ChatScreen() {
       inFlight.current = false;
       if (mountedRef.current) setLoading(false);
     }
-  }, [conversationId, isSignedIn, resolveMyUserId, resolveRole, applyIncoming]);
+  }, [
+    conversationId,
+    isSignedIn,
+    resolveMyUserId,
+    resolveRole,
+    applyIncoming,
+    productIdParam,
+    hydrateFromProduct,
+  ]);
 
   useFocusEffect(
     useCallback(() => {
-      setLoading(true);
+      if (!conversationRef.current && messagesRef.current.length === 0) {
+        setLoading(true);
+      }
       loadChat();
       const tick = setInterval(() => {
         if (AppState.currentState === "active") pollMessages();
@@ -397,12 +533,25 @@ export default function ChatScreen() {
         setMessages((prev) =>
           prev.map((m) => (m.localId === localId ? real : m)),
         );
+        setConversation((prev) =>
+          prev
+            ? {
+                ...prev,
+                lastMessage: {
+                  text: messageText,
+                  createdAt: real.createdAt,
+                },
+              }
+            : prev,
+        );
       } else {
         throw new Error(res.data?.message || "Failed to send");
       }
     } catch (err: any) {
       setMessages((prev) =>
-        prev.map((m) => (m.localId === localId ? { ...m, status: "failed" } : m)),
+        prev.map((m) =>
+          m.localId === localId ? { ...m, status: "failed" } : m,
+        ),
       );
       setText(messageText);
       setError(
@@ -426,7 +575,8 @@ export default function ChatScreen() {
 
   const isMine = useCallback(
     (message: Message) => {
-      if (message.status === "sending" || message.status === "failed") return true;
+      if (message.status === "sending" || message.status === "failed")
+        return true;
       const senderId = String(message.sender?._id || "");
       if (myUserId && senderId) return senderId === String(myUserId);
       if (conversation?.myRole === "buyer" && conversation.buyer?._id) {
@@ -460,48 +610,34 @@ export default function ChatScreen() {
         label: "Buyer",
       };
     }
-    if (role === "buyer") {
-      return {
-        name: conversation?.seller?.storeName || conversation?.seller?.name || "Seller",
-        image: conversation?.seller?.storeLogo || conversation?.seller?.image,
-        label: "Seller",
-      };
-    }
-    if (
-      myUserId &&
-      conversation?.seller?._id &&
-      String(conversation.seller._id) === String(myUserId)
-    ) {
-      return {
-        name: conversation?.buyer?.name || "Buyer",
-        image: conversation?.buyer?.image,
-        label: "Buyer",
-      };
-    }
     return {
       name:
         conversation?.seller?.storeName ||
         conversation?.seller?.name ||
-        conversation?.buyer?.name ||
-        "Chat",
+        "Store",
       image:
-        conversation?.seller?.storeLogo ||
-        conversation?.seller?.image ||
-        conversation?.buyer?.image,
-      label: "Chat",
+        conversation?.seller?.storeLogo || conversation?.seller?.image,
+      label: "Seller",
     };
   }, [conversation, myUserId, resolveRole]);
 
   const getTicks = (message: Message) => {
     if (!isMine(message)) return null;
     if (message.status === "sending") {
-      return <Ionicons name="time-outline" size={13} color="rgba(255,255,255,0.55)" />;
+      return (
+        <Ionicons
+          name="time-outline"
+          size={13}
+          color="rgba(255,255,255,0.55)"
+        />
+      );
     }
     if (message.status === "failed") {
       return <Ionicons name="alert-circle" size={13} color="#FECACA" />;
     }
     const role = conversation?.myRole || resolveRole(conversation, myUserId);
-    const otherId = role === "buyer" ? conversation?.seller?._id : conversation?.buyer?._id;
+    const otherId =
+      role === "buyer" ? conversation?.seller?._id : conversation?.buyer?._id;
     const readByOther =
       !!otherId &&
       Array.isArray(message.readBy) &&
@@ -515,9 +651,19 @@ export default function ChatScreen() {
     );
   };
 
-  if (loading) return <StorePreloader />;
-
   const product = conversation?.product;
+  const productId = product?._id || productIdParam;
+
+  const openProduct = () => {
+    if (!productId) return;
+    if (from === "product" && router.canGoBack()) {
+      router.back();
+      return;
+    }
+    router.push(`/product/${productId}` as any);
+  };
+
+  if (loading) return <StorePreloader />;
 
   return (
     <View style={styles.root}>
@@ -531,9 +677,10 @@ export default function ChatScreen() {
       <SafeAreaView edges={["top"]} style={{ flex: 1 }}>
         <View style={styles.header}>
           <TouchableOpacity
-            onPress={() => router.back()}
+            onPress={goBackSafe}
             activeOpacity={0.85}
             style={styles.headerBtn}
+            accessibilityLabel="Back"
           >
             <Ionicons name="chevron-back" size={20} color={TEXT} />
           </TouchableOpacity>
@@ -542,7 +689,11 @@ export default function ChatScreen() {
             <Image source={{ uri: otherParty.image }} style={styles.avatar} />
           ) : (
             <View style={[styles.avatar, styles.avatarFallback]}>
-              <Ionicons name="person" size={18} color={MUTED} />
+              <Ionicons
+                name={otherParty.label === "Seller" ? "storefront-outline" : "person"}
+                size={18}
+                color={MUTED}
+              />
             </View>
           )}
 
@@ -553,13 +704,13 @@ export default function ChatScreen() {
             <View style={styles.liveRow}>
               <View style={[styles.liveDot, live && styles.liveDotOn]} />
               <Text numberOfLines={1} style={styles.headerSub}>
-                {live
-                  ? "Live"
-                  : otherParty.label === "Buyer"
-                    ? "Buyer inquiry"
-                    : otherParty.label === "Seller"
-                      ? "Store conversation"
-                      : "Secure conversation"}
+                {product?.name
+                  ? product.name
+                  : live
+                    ? "Live"
+                    : otherParty.label === "Buyer"
+                      ? "Buyer inquiry"
+                      : "Store conversation"}
               </Text>
             </View>
           </View>
@@ -568,11 +719,14 @@ export default function ChatScreen() {
         {product ? (
           <TouchableOpacity
             activeOpacity={0.9}
-            onPress={() => product._id && router.push(`/product/${product._id}` as any)}
+            onPress={openProduct}
             style={styles.productCard}
           >
             {product.images?.[0] ? (
-              <Image source={{ uri: product.images[0] }} style={styles.productImg} />
+              <Image
+                source={{ uri: product.images[0] }}
+                style={styles.productImg}
+              />
             ) : (
               <View style={[styles.productImg, styles.productImgFallback]}>
                 <Ionicons name="image-outline" size={18} color={MUTED} />
@@ -580,7 +734,7 @@ export default function ChatScreen() {
             )}
             <View style={{ flex: 1, marginLeft: 12 }}>
               <Text numberOfLines={1} style={styles.productName}>
-                {product.name || "Product"}
+                {product.name || "This listing"}
               </Text>
               <Text style={styles.productPrice}>
                 {formatProduct(Number(product.price || 0), product.region)}
@@ -620,11 +774,17 @@ export default function ChatScreen() {
           ListEmptyComponent={
             <View style={styles.empty}>
               <View style={styles.emptyIcon}>
-                <Ionicons name="chatbubble-ellipses-outline" size={28} color={AI_GREEN} />
+                <Ionicons
+                  name="chatbubble-ellipses-outline"
+                  size={28}
+                  color={AI_GREEN}
+                />
               </View>
               <Text style={styles.emptyTitle}>Start the conversation</Text>
               <Text style={styles.emptyBody}>
-                Ask about condition, shipping, or anything else about this piece.
+                {product?.name
+                  ? `Ask about ${product.name} — condition, shipping, or anything else. The seller will only see this thread after you send a message.`
+                  : "Ask about condition, shipping, or anything else about this piece. The other person only sees this after you send."}
               </Text>
             </View>
           }
@@ -640,11 +800,23 @@ export default function ChatScreen() {
                   mine ? styles.bubbleWrapMine : styles.bubbleWrapOther,
                 ]}
               >
-                <View style={[styles.bubble, mine ? styles.bubbleMine : styles.bubbleOther]}>
+                <View
+                  style={[
+                    styles.bubble,
+                    mine ? styles.bubbleMine : styles.bubbleOther,
+                  ]}
+                >
                   <Text style={styles.bubbleText}>{item.text}</Text>
                 </View>
-                <View style={[styles.metaRow, mine ? { justifyContent: "flex-end" } : null]}>
-                  <Text style={styles.metaTime}>{formatTime(item.createdAt)}</Text>
+                <View
+                  style={[
+                    styles.metaRow,
+                    mine ? { justifyContent: "flex-end" } : null,
+                  ]}
+                >
+                  <Text style={styles.metaTime}>
+                    {formatTime(item.createdAt)}
+                  </Text>
                   {mine && getTicks(item)}
                   {item.status === "failed" && (
                     <Text style={styles.metaFail}>Tap to retry</Text>
@@ -659,12 +831,18 @@ export default function ChatScreen() {
           style={[
             styles.inputBar,
             {
-              paddingBottom: keyboardHeight > 0 ? 10 : Math.max(insets.bottom, 12),
+              paddingBottom:
+                keyboardHeight > 0 ? 10 : Math.max(insets.bottom, 12),
               marginBottom: keyboardHeight > 0 ? keyboardHeight : 0,
             },
           ]}
         >
-          <View style={[styles.inputShell, inputFocused && styles.inputShellFocused]}>
+          <View
+            style={[
+              styles.inputShell,
+              inputFocused && styles.inputShellFocused,
+            ]}
+          >
             <TextInput
               ref={inputRef}
               value={text}
@@ -691,13 +869,19 @@ export default function ChatScreen() {
               activeOpacity={0.85}
               style={[
                 styles.sendBtn,
-                text.trim() && !sending ? styles.sendBtnActive : styles.sendBtnIdle,
+                text.trim() && !sending
+                  ? styles.sendBtnActive
+                  : styles.sendBtnIdle,
               ]}
             >
               {sending ? (
                 <Ionicons name="hourglass-outline" size={18} color={MUTED} />
               ) : (
-                <Ionicons name="send" size={17} color={text.trim() ? BG : MUTED} />
+                <Ionicons
+                  name="send"
+                  size={17}
+                  color={text.trim() ? BG : MUTED}
+                />
               )}
             </TouchableOpacity>
           </View>

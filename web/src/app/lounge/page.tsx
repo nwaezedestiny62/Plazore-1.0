@@ -32,12 +32,71 @@ import { AppFeaturePrompt, type AppFeature } from "@/components/app/AppFeaturePr
 import { fetchMallProducts, searchSuggest } from "@/lib/api";
 import { LOUNGE_SECTIONS, TILE_COLORS, type LoungeItem } from "@/lib/lounge";
 import { CATEGORY_LIST } from "@/lib/productCatalog";
-import { formatProductPrice } from "@/lib/regions";
+import { useMarketplace } from "@/context/MarketplaceContext";
 import type { Product } from "@/lib/types";
 import { cartCount } from "@/lib/cart";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000/api";
 const GRAD = "linear-gradient(90deg,#00E575,#3B82F6)";
+
+/** External category cover images */
+const CATEGORY_IMAGES: Record<string, string> = {
+  Electronics:
+    "https://images.unsplash.com/photo-1498049794561-7780e7231661?w=400&h=300&fit=crop",
+  "Phones & Accessories":
+    "https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?w=400&h=300&fit=crop",
+  Computers:
+    "https://images.unsplash.com/photo-1517336714731-489689fd1ca8?w=400&h=300&fit=crop",
+  Fashion:
+    "https://images.unsplash.com/photo-1445205170230-053b83016050?w=400&h=300&fit=crop",
+  "Beauty & Personal Care":
+    "https://images.unsplash.com/photo-1596462502278-27bfdc403348?w=400&h=300&fit=crop",
+  "Home & Living":
+    "https://images.unsplash.com/photo-1616486338812-3dadae4b4ace?w=400&h=300&fit=crop",
+  Furniture:
+    "https://images.unsplash.com/photo-1555041469-a586c61ea9bc?w=400&h=300&fit=crop",
+  "Kitchen & Dining":
+    "https://images.unsplash.com/photo-1556911220-bff31c812dba?w=400&h=300&fit=crop",
+  Groceries:
+    "https://images.unsplash.com/photo-1542838132-92c53300491e?w=400&h=300&fit=crop",
+  Health:
+    "https://images.unsplash.com/photo-1505751172876-fa1923c5c528?w=400&h=300&fit=crop",
+  "Sports & Outdoors":
+    "https://images.unsplash.com/photo-1461896836934-ffe607ba6851?w=400&h=300&fit=crop",
+  Automotive:
+    "https://images.unsplash.com/photo-1492144534655-ae79c964c9d7?w=400&h=300&fit=crop",
+  Books:
+    "https://images.unsplash.com/photo-1495446815901-a7297e633e8d?w=400&h=300&fit=crop",
+  "Office Supplies":
+    "https://images.unsplash.com/photo-1497366216548-37526070297c?w=400&h=300&fit=crop",
+  "Toys & Games":
+    "https://images.unsplash.com/photo-1558060370-d644479cb6f7?w=400&h=300&fit=crop",
+  "Baby Products":
+    "https://images.unsplash.com/photo-1515488042361-ee00e0ddd4e4?w=400&h=300&fit=crop",
+  "Pet Supplies":
+    "https://images.unsplash.com/photo-1587300003388-59208cc962cb?w=400&h=300&fit=crop",
+  "Jewelry & Watches":
+    "https://images.unsplash.com/photo-1515562141207-7a88fb7ce338?w=400&h=300&fit=crop",
+  "Musical Instruments":
+    "https://images.unsplash.com/photo-1511379938547-c1f69419868d?w=400&h=300&fit=crop",
+  "Art & Crafts":
+    "https://images.unsplash.com/photo-1513364776144-60967b0f800f?w=400&h=300&fit=crop",
+  "Industrial Equipment":
+    "https://images.unsplash.com/photo-1581091226825-a6a2a5aee158?w=400&h=300&fit=crop",
+  Agriculture:
+    "https://images.unsplash.com/photo-1625246333195-78d9c38ad449?w=400&h=300&fit=crop",
+  "Building Materials":
+    "https://images.unsplash.com/photo-1504307651254-35680f356dfd?w=400&h=300&fit=crop",
+  Collectibles:
+    "https://images.unsplash.com/photo-1578301978693-85fa9c0320b9?w=400&h=300&fit=crop",
+  "Luxury Goods":
+    "https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=400&h=300&fit=crop",
+  Others:
+    "https://images.unsplash.com/photo-1472851294608-062f824d29cc?w=400&h=300&fit=crop",
+};
+
+const FALLBACK_CATEGORY_IMAGE =
+  "https://images.unsplash.com/photo-1472851294608-062f824d29cc?w=400&h=300&fit=crop";
 
 const ICONS: Record<
   string,
@@ -144,7 +203,14 @@ function isTileActive(item: LoungeItem, pathname: string) {
 }
 
 type Hit =
-  | { type: "product"; id: string; label: string; image?: string; price: number; region?: string }
+  | {
+      type: "product";
+      id: string;
+      label: string;
+      image?: string;
+      price: number;
+      region?: string;
+    }
   | { type: "store"; id: string; label: string; logo?: string }
   | { type: "category"; label: string };
 
@@ -211,7 +277,9 @@ function Tile({
           {item.label}
         </span>
         {item.subtitle && (
-          <span className="mt-1 block text-[11px] text-white/35">{item.subtitle}</span>
+          <span className="mt-1 block text-[11px] text-white/35">
+            {item.subtitle}
+          </span>
         )}
       </span>
     </>
@@ -300,7 +368,12 @@ function TvAppIcon({
 
   if (isAppOnly) {
     return (
-      <button type="button" onClick={() => onAppOnly?.(item.id)} className={wrap} style={anim}>
+      <button
+        type="button"
+        onClick={() => onAppOnly?.(item.id)}
+        className={wrap}
+        style={anim}
+      >
         {inner}
       </button>
     );
@@ -334,7 +407,11 @@ function PosterCard({
     <>
       {image ? (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={image} alt="" className="absolute inset-0 h-full w-full object-cover" />
+        <img
+          src={image}
+          alt=""
+          className="absolute inset-0 h-full w-full object-cover"
+        />
       ) : (
         <div
           className="absolute inset-0"
@@ -346,11 +423,17 @@ function PosterCard({
       )}
       <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/25 to-black/10" />
       <div className="relative z-[1] flex h-full flex-col justify-end p-6 lg:p-8">
-        <p className="text-[11px] font-semibold tracking-[0.18em] text-white/55">{kicker}</p>
+        <p className="text-[11px] font-semibold tracking-[0.18em] text-white/55">
+          {kicker}
+        </p>
         <h2 className="mt-1 max-w-lg text-[1.65rem] font-semibold leading-tight tracking-tight text-white lg:text-[2rem]">
           {title}
         </h2>
-        {body && <p className="mt-2 max-w-md text-[13px] leading-relaxed text-white/65">{body}</p>}
+        {body && (
+          <p className="mt-2 max-w-md text-[13px] leading-relaxed text-white/65">
+            {body}
+          </p>
+        )}
         {cta && (
           <span className="mt-4 inline-flex h-9 w-fit items-center rounded-full bg-white px-4 text-[12px] font-semibold text-[#0A0B10]">
             {cta}
@@ -365,7 +448,11 @@ function PosterCard({
 
   if (onClick) {
     return (
-      <button type="button" onClick={onClick} className={`${cls} w-full text-left`}>
+      <button
+        type="button"
+        onClick={onClick}
+        className={`${cls} w-full text-left`}
+      >
         {inner}
       </button>
     );
@@ -383,6 +470,7 @@ export default function LoungePage() {
   const { isSignedIn, isLoaded, getToken } = useAuth();
   const { user } = useUser();
   const { signOut } = useClerk();
+  const { region, formatProduct } = useMarketplace();
   const searchRef = useRef<HTMLInputElement>(null);
 
   const [query, setQuery] = useState("");
@@ -474,10 +562,23 @@ export default function LoungePage() {
     };
   }, [debounced]);
 
+  /** Region-filtered product pool */
+  const regionalProducts = useMemo(() => {
+    const list = allProducts || [];
+    const inRegion = list.filter(
+      (p) => (p.region || "NG").toUpperCase() === region.toUpperCase()
+    );
+    return inRegion.length > 0 ? inRegion : list;
+  }, [allProducts, region]);
+
   const hits = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q)
-      return { products: [] as Hit[], stores: [] as Hit[], categories: [] as Hit[] };
+      return {
+        products: [] as Hit[],
+        stores: [] as Hit[],
+        categories: [] as Hit[],
+      };
 
     const products: Hit[] = (serverProducts || []).slice(0, 8).map((p) => ({
       type: "product",
@@ -489,7 +590,7 @@ export default function LoungePage() {
     }));
 
     const storesMap = new Map<string, Hit>();
-    allProducts.forEach((p) => {
+    regionalProducts.forEach((p) => {
       const s = p.seller;
       if (!s || typeof s === "string" || !s._id) return;
       const name = (s.storeName || s.name || "").toLowerCase();
@@ -515,7 +616,7 @@ export default function LoungePage() {
       stores: Array.from(storesMap.values()).slice(0, 4),
       categories,
     };
-  }, [query, serverProducts, allProducts]);
+  }, [query, serverProducts, regionalProducts]);
 
   const searching = query.trim().length >= 1;
   const totalHits =
@@ -543,31 +644,50 @@ export default function LoungePage() {
     []
   );
 
-  const topPicks = useMemo(
+  /**
+   * NEW ARRIVALS = newest listings (createdAt descending)
+   */
+  const newArrivals = useMemo(
     () =>
-      [...(allProducts || [])]
-        .filter((p) => p.images?.[0])
+      [...regionalProducts]
+        .filter((p) => p.images?.[0] && p.isActive !== false)
         .sort(
           (a, b) =>
             new Date(b.createdAt || 0).getTime() -
             new Date(a.createdAt || 0).getTime()
         )
         .slice(0, 20),
-    [allProducts]
+    [regionalProducts]
   );
 
+  /**
+   * TRENDING = most viewed / most engaged products
+   * Uses views if present, otherwise wishlistCount (real engagement signal)
+   */
   const trendingPicks = useMemo(
     () =>
-      [...(allProducts || [])]
-        .filter((p) => p.images?.[0])
-        .sort((a, b) => Number((b as any).views || 0) - Number((a as any).views || 0))
+      [...regionalProducts]
+        .filter((p) => p.images?.[0] && p.isActive !== false)
+        .sort((a, b) => {
+          const aScore = Number(
+            (a as any).views ?? a.wishlistCount ?? 0
+          );
+          const bScore = Number(
+            (b as any).views ?? b.wishlistCount ?? 0
+          );
+          if (bScore !== aScore) return bScore - aScore;
+          return (
+            new Date(b.createdAt || 0).getTime() -
+            new Date(a.createdAt || 0).getTime()
+          );
+        })
         .slice(0, 16),
-    [allProducts]
+    [regionalProducts]
   );
 
   const storePicks = useMemo(() => {
     const map = new Map<string, StorePick>();
-    (allProducts || []).forEach((p) => {
+    regionalProducts.forEach((p) => {
       const s = p.seller as any;
       if (!s || typeof s === "string" || !s._id) return;
       const id = String(s._id);
@@ -580,10 +700,11 @@ export default function LoungePage() {
       });
     });
     return Array.from(map.values()).slice(0, 14);
-  }, [allProducts]);
+  }, [regionalProducts]);
 
   let mobileTileIndex = 0;
-  const heroPoster = topPicks[0]?.images?.[0] || trendingPicks[0]?.images?.[0];
+  const heroPoster =
+    newArrivals[0]?.images?.[0] || trendingPicks[0]?.images?.[0];
 
   return (
     <div className="min-h-dvh bg-[#050508] text-[#F5F7FA]">
@@ -596,7 +717,7 @@ export default function LoungePage() {
         .tv-row { scrollbar-width: none; }
       `}</style>
 
-      {/* ════════════ MOBILE — unchanged hub ════════════ */}
+      {/* ════════════ MOBILE ════════════ */}
       <div className="md:hidden">
         <header className="sticky top-0 z-40 flex h-14 items-center justify-between border-b border-white/5 bg-[#050508]/90 px-4 backdrop-blur-md">
           <p className="text-[10px] font-extrabold tracking-[0.2em] text-white/35">
@@ -626,11 +747,15 @@ export default function LoungePage() {
 
           <label
             className="mx-auto mt-4 flex h-12 max-w-2xl items-center gap-3 border bg-[#0B0C12] px-4"
-            style={{ borderColor: query ? "#00E575" : "rgba(255,255,255,0.08)" }}
+            style={{
+              borderColor: query ? "#00E575" : "rgba(255,255,255,0.08)",
+            }}
           >
             <Search
               className="h-4 w-4 shrink-0"
-              style={{ color: query ? "#00E575" : "rgba(245,247,250,0.35)" }}
+              style={{
+                color: query ? "#00E575" : "rgba(245,247,250,0.35)",
+              }}
             />
             <input
               value={query}
@@ -655,6 +780,7 @@ export default function LoungePage() {
               searchLoading={searchLoading}
               totalHits={totalHits}
               hits={hits}
+              formatProduct={formatProduct}
             />
           ) : (
             <>
@@ -671,7 +797,11 @@ export default function LoungePage() {
                     <span className="flex h-[42px] w-[42px] shrink-0 items-center justify-center overflow-hidden bg-black/15">
                       {storeLogo ? (
                         // eslint-disable-next-line @next/next/no-img-element
-                        <img src={storeLogo} alt="" className="h-full w-full object-cover" />
+                        <img
+                          src={storeLogo}
+                          alt=""
+                          className="h-full w-full object-cover"
+                        />
                       ) : (
                         <Store className="h-[18px] w-[18px] text-[#050508]" />
                       )}
@@ -692,7 +822,9 @@ export default function LoungePage() {
                       <Store className="h-5 w-5" />
                     </span>
                     <span className="min-w-0 flex-1">
-                      <span className="block text-sm font-bold">Open a store</span>
+                      <span className="block text-sm font-bold">
+                        Open a store
+                      </span>
                       <span className="mt-0.5 block text-xs text-white/65">
                         Sell on Plazore’s digital mall
                       </span>
@@ -737,7 +869,7 @@ export default function LoungePage() {
         </div>
       </div>
 
-      {/* ════════════ DESKTOP — Smart TV / LG home ════════════ */}
+      {/* ════════════ DESKTOP ════════════ */}
       <div className="relative hidden min-h-dvh md:flex">
         <aside className="sticky top-0 z-20 flex h-dvh w-[72px] shrink-0 flex-col items-center gap-3 border-r border-white/6 bg-black/50 py-6 backdrop-blur-md">
           <Link href="/profile" className="mb-2" aria-label="Profile">
@@ -778,7 +910,11 @@ export default function LoungePage() {
             >
               {storeLogo ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={storeLogo} alt="" className="h-full w-full object-cover" />
+                <img
+                  src={storeLogo}
+                  alt=""
+                  className="h-full w-full object-cover"
+                />
               ) : (
                 <Store className="h-[18px] w-[18px]" />
               )}
@@ -826,7 +962,11 @@ export default function LoungePage() {
               <div className="flex min-w-0 items-center gap-1">
                 <Link href="/" className="mr-3 flex shrink-0 items-center gap-2">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src="/logo.png" alt="" className="h-7 w-7 object-contain" />
+                  <img
+                    src="/logo.png"
+                    alt=""
+                    className="h-7 w-7 object-contain"
+                  />
                   <span className="text-[13px] font-semibold tracking-wide text-white/50">
                     Plazore
                   </span>
@@ -876,6 +1016,7 @@ export default function LoungePage() {
                   searchLoading={searchLoading}
                   totalHits={totalHits}
                   hits={hits}
+                  formatProduct={formatProduct}
                 />
               </div>
             ) : (
@@ -910,7 +1051,7 @@ export default function LoungePage() {
                   )}
                 </section>
 
-                {/* Colored explore chips — LG Radio+ / Sports / Gaming row */}
+                {/* Explore chips */}
                 <section className="mb-7">
                   <div className="tv-row flex gap-2.5 overflow-x-auto pb-1">
                     {EXPLORE_CHIPS.map((chip) => (
@@ -939,7 +1080,9 @@ export default function LoungePage() {
 
                 {/* App icon row */}
                 <section className="mb-9">
-                  <p className="mb-3 text-[14px] font-medium text-white/70">Your apps</p>
+                  <p className="mb-3 text-[14px] font-medium text-white/70">
+                    Your apps
+                  </p>
                   <div className="tv-row flex gap-3 overflow-x-auto pb-2">
                     {allLoungeItems.map((item, index) => (
                       <TvAppIcon
@@ -953,10 +1096,13 @@ export default function LoungePage() {
                   </div>
                 </section>
 
-                {topPicks.length > 0 && (
+                {/* NEW ARRIVALS — newest listings */}
+                {newArrivals.length > 0 && (
                   <section className="mb-9">
                     <div className="mb-3 flex items-end justify-between">
-                      <p className="text-[14px] font-medium text-white/70">New arrivals</p>
+                      <p className="text-[14px] font-medium text-white/70">
+                        New arrivals
+                      </p>
                       <Link
                         href="/shop?mode=new"
                         className="text-[12px] font-semibold text-white/40 hover:text-white/70"
@@ -965,22 +1111,30 @@ export default function LoungePage() {
                       </Link>
                     </div>
                     <div className="tv-row flex gap-3 overflow-x-auto pb-1">
-                      {topPicks.map((p, i) => (
+                      {newArrivals.map((p, i) => (
                         <Link
                           key={p._id}
                           href={`/product/${p._id}`}
                           className="group shrink-0"
                           style={{
-                            animation: `loungeIn 600ms cubic-bezier(0.22,1,0.36,1) ${80 + i * 40}ms both`,
+                            animation: `loungeIn 600ms cubic-bezier(0.22,1,0.36,1) ${
+                              80 + i * 40
+                            }ms both`,
                           }}
                         >
                           <div className="relative h-[148px] w-[240px] overflow-hidden rounded-xl bg-[#12141C] transition duration-300 group-hover:brightness-110">
                             {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img src={p.images![0]} alt="" className="h-full w-full object-cover" />
+                            <img
+                              src={p.images![0]}
+                              alt=""
+                              className="h-full w-full object-cover"
+                            />
                             <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent px-3 pb-2.5 pt-10">
-                              <p className="truncate text-[13px] font-medium text-white">{p.name}</p>
+                              <p className="truncate text-[13px] font-medium text-white">
+                                {p.name}
+                              </p>
                               <p className="text-[12px] text-[#00E575]">
-                                {formatProductPrice(p.price, p.region, "NG")}
+                                {formatProduct(p.price, p.region)}
                               </p>
                             </div>
                           </div>
@@ -990,10 +1144,13 @@ export default function LoungePage() {
                   </section>
                 )}
 
+                {/* TRENDING — most viewed / most engaged */}
                 {trendingPicks.length > 0 && (
                   <section className="mb-9">
                     <div className="mb-3 flex items-end justify-between">
-                      <p className="text-[14px] font-medium text-white/70">Trending</p>
+                      <p className="text-[14px] font-medium text-white/70">
+                        Trending
+                      </p>
                       <Link
                         href="/shop?mode=trending"
                         className="text-[12px] font-semibold text-white/40 hover:text-white/70"
@@ -1003,14 +1160,24 @@ export default function LoungePage() {
                     </div>
                     <div className="tv-row flex gap-3 overflow-x-auto pb-1">
                       {trendingPicks.map((p) => (
-                        <Link key={`tr-${p._id}`} href={`/product/${p._id}`} className="group shrink-0">
+                        <Link
+                          key={`tr-${p._id}`}
+                          href={`/product/${p._id}`}
+                          className="group shrink-0"
+                        >
                           <div className="relative h-[148px] w-[240px] overflow-hidden rounded-xl bg-[#12141C] transition duration-300 group-hover:brightness-110">
                             {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img src={p.images![0]} alt="" className="h-full w-full object-cover" />
+                            <img
+                              src={p.images![0]}
+                              alt=""
+                              className="h-full w-full object-cover"
+                            />
                             <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent px-3 pb-2.5 pt-10">
-                              <p className="truncate text-[13px] font-medium text-white">{p.name}</p>
+                              <p className="truncate text-[13px] font-medium text-white">
+                                {p.name}
+                              </p>
                               <p className="text-[12px] text-[#FB7185]">
-                                {formatProductPrice(p.price, p.region, "NG")}
+                                {formatProduct(p.price, p.region)}
                               </p>
                             </div>
                           </div>
@@ -1020,9 +1187,12 @@ export default function LoungePage() {
                   </section>
                 )}
 
+                {/* CATEGORIES with external images */}
                 <section className="mb-9">
                   <div className="mb-3 flex items-end justify-between">
-                    <p className="text-[14px] font-medium text-white/70">Categories</p>
+                    <p className="text-[14px] font-medium text-white/70">
+                      Categories
+                    </p>
                     <Link
                       href="/shop?mode=categories"
                       className="text-[12px] font-semibold text-white/40 hover:text-white/70"
@@ -1031,29 +1201,36 @@ export default function LoungePage() {
                     </Link>
                   </div>
                   <div className="tv-row flex gap-2.5 overflow-x-auto pb-1">
-                    {CATEGORY_LIST.slice(0, 16).map((c, i) => (
+                    {CATEGORY_LIST.slice(0, 16).map((c) => (
                       <Link
                         key={c}
-                        href={`/shop?mode=category&category=${encodeURIComponent(c)}`}
-                        className="flex h-[88px] w-[160px] shrink-0 items-end rounded-xl px-3.5 py-3 text-[13px] font-bold text-white transition hover:brightness-110"
-                        style={{
-                          background: `linear-gradient(160deg, ${
-                            ["#0B3A4A", "#1A2A4A", "#2A1848", "#123628", "#3A1A28", "#1C2840"][
-                              i % 6
-                            ]
-                          } 0%, #0A0B10 100%)`,
-                        }}
+                        href={`/shop?mode=category&category=${encodeURIComponent(
+                          c
+                        )}`}
+                        className="group relative h-[88px] w-[160px] shrink-0 overflow-hidden rounded-xl transition hover:brightness-110"
                       >
-                        {c}
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={CATEGORY_IMAGES[c] || FALLBACK_CATEGORY_IMAGE}
+                          alt={c}
+                          className="absolute inset-0 h-full w-full object-cover"
+                        />
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/40 to-black/10" />
+                        <span className="relative z-[1] flex h-full items-end px-3.5 py-3 text-[13px] font-bold text-white">
+                          {c}
+                        </span>
                       </Link>
                     ))}
                   </div>
                 </section>
 
+                {/* Stores */}
                 {storePicks.length > 0 && (
                   <section className="mb-6">
                     <div className="mb-3 flex items-end justify-between">
-                      <p className="text-[14px] font-medium text-white/70">Stores</p>
+                      <p className="text-[14px] font-medium text-white/70">
+                        Stores
+                      </p>
                       <Link
                         href="/shop?mode=stores"
                         className="text-[12px] font-semibold text-white/40 hover:text-white/70"
@@ -1063,11 +1240,19 @@ export default function LoungePage() {
                     </div>
                     <div className="tv-row flex gap-3 overflow-x-auto pb-1">
                       {storePicks.map((s) => (
-                        <Link key={s.id} href={`/store/${s.id}`} className="group shrink-0">
+                        <Link
+                          key={s.id}
+                          href={`/store/${s.id}`}
+                          className="group shrink-0"
+                        >
                           <div className="relative h-[148px] w-[220px] overflow-hidden rounded-xl bg-[#12141C] transition duration-300 group-hover:brightness-110">
                             {s.cover ? (
                               // eslint-disable-next-line @next/next/no-img-element
-                              <img src={s.cover} alt="" className="h-full w-full object-cover" />
+                              <img
+                                src={s.cover}
+                                alt=""
+                                className="h-full w-full object-cover"
+                              />
                             ) : (
                               <div className="h-full w-full bg-[#161822]" />
                             )}
@@ -1075,12 +1260,18 @@ export default function LoungePage() {
                               <span className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-white/10">
                                 {s.logo ? (
                                   // eslint-disable-next-line @next/next/no-img-element
-                                  <img src={s.logo} alt="" className="h-full w-full object-cover" />
+                                  <img
+                                    src={s.logo}
+                                    alt=""
+                                    className="h-full w-full object-cover"
+                                  />
                                 ) : (
                                   <Store className="h-3.5 w-3.5 text-white/70" />
                                 )}
                               </span>
-                              <p className="truncate text-[13px] font-medium text-white">{s.name}</p>
+                              <p className="truncate text-[13px] font-medium text-white">
+                                {s.name}
+                              </p>
                             </div>
                           </div>
                         </Link>
@@ -1105,7 +1296,10 @@ export default function LoungePage() {
                       Log out
                     </button>
                   ) : (
-                    <Link href="/sign-in" className="text-[12px] font-medium text-[#00E575]">
+                    <Link
+                      href="/sign-in"
+                      className="text-[12px] font-medium text-[#00E575]"
+                    >
                       Sign in
                     </Link>
                   )}
@@ -1126,15 +1320,19 @@ function SearchResults({
   searchLoading,
   totalHits,
   hits,
+  formatProduct,
 }: {
   query: string;
   searchLoading: boolean;
   totalHits: number;
   hits: { products: Hit[]; stores: Hit[]; categories: Hit[] };
+  formatProduct: (amount: number, productRegion?: string | null) => string;
 }) {
   if (searchLoading && totalHits === 0) {
     return (
-      <p className="py-16 text-center text-sm text-white/55">Searching Plazore…</p>
+      <p className="py-16 text-center text-sm text-white/55">
+        Searching Plazore…
+      </p>
     );
   }
   if (totalHits === 0) {
@@ -1154,17 +1352,25 @@ function SearchResults({
           <div className="space-y-3">
             {hits.products.map((h) =>
               h.type === "product" ? (
-                <Link key={h.id} href={`/product/${h.id}`} className="flex items-center gap-3">
+                <Link
+                  key={h.id}
+                  href={`/product/${h.id}`}
+                  className="flex items-center gap-3"
+                >
                   <div className="h-16 w-16 overflow-hidden bg-[#11131C]">
                     {h.image ? (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img src={h.image} alt="" className="h-full w-full object-cover" />
+                      <img
+                        src={h.image}
+                        alt=""
+                        className="h-full w-full object-cover"
+                      />
                     ) : null}
                   </div>
                   <div>
                     <p className="font-medium">{h.label}</p>
                     <p className="mt-1 text-sm font-semibold text-[#00E575]">
-                      {formatProductPrice(h.price, h.region, "NG")}
+                      {formatProduct(h.price, h.region)}
                     </p>
                   </div>
                 </Link>
@@ -1180,18 +1386,28 @@ function SearchResults({
           </p>
           {hits.stores.map((h) =>
             h.type === "store" ? (
-              <Link key={h.id} href={`/store/${h.id}`} className="mb-3 flex items-center gap-3">
+              <Link
+                key={h.id}
+                href={`/store/${h.id}`}
+                className="mb-3 flex items-center gap-3"
+              >
                 <div className="flex h-16 w-16 items-center justify-center overflow-hidden bg-[#11131C]">
                   {h.logo ? (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img src={h.logo} alt="" className="h-full w-full object-cover" />
+                    <img
+                      src={h.logo}
+                      alt=""
+                      className="h-full w-full object-cover"
+                    />
                   ) : (
                     <Store className="h-5 w-5 text-[#3B82F6]" />
                   )}
                 </div>
                 <div>
                   <p className="font-medium">{h.label}</p>
-                  <p className="mt-1 text-xs font-semibold text-[#3B82F6]">Official storefront</p>
+                  <p className="mt-1 text-xs font-semibold text-[#3B82F6]">
+                    Official storefront
+                  </p>
                 </div>
               </Link>
             ) : null
@@ -1208,7 +1424,9 @@ function SearchResults({
               h.type === "category" ? (
                 <Link
                   key={h.label}
-                  href={`/shop?mode=category&category=${encodeURIComponent(h.label)}`}
+                  href={`/shop?mode=category&category=${encodeURIComponent(
+                    h.label
+                  )}`}
                   className="border border-white/10 bg-[#0B0C12] px-3 py-2 text-sm font-semibold"
                 >
                   {h.label}
@@ -1241,7 +1459,11 @@ function ProfileCard({
         <div className="flex h-10 w-10 items-center justify-center overflow-hidden border border-[#00E575]/30 bg-[#11131C]">
           {imageUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={imageUrl} alt="" className="h-full w-full object-cover" />
+            <img
+              src={imageUrl}
+              alt=""
+              className="h-full w-full object-cover"
+            />
           ) : (
             <User className="h-4 w-4 text-white/65" />
           )}

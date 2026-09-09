@@ -1,11 +1,20 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { ShoppingBag } from "lucide-react";
 import { AppFeaturePrompt, type AppFeature } from "@/components/app/AppFeaturePrompt";
 import { ProductCard } from "@/components/mall/ProductCard";
-import { ShowroomFlyCartProvider } from "@/components/mall/ShowroomFlyCart";
+import {
+  ShowroomFlyCartProvider,
+  useShowroomFlyCart,
+} from "@/components/mall/ShowroomFlyCart";
 import { fetchMallProducts, searchSuggest } from "@/lib/api";
 import { cartCount } from "@/lib/cart";
 import { CATEGORY_TO_FLOOR, FLOORS } from "@/lib/floors";
@@ -70,6 +79,7 @@ function viewScore(p: Product): number {
     x.impressionCount,
     x.impressions,
     x.openCount,
+    x.wishlistCount,
     x.stats?.views,
     x.stats?.impressions,
     x.analytics?.views,
@@ -215,6 +225,9 @@ const PRODUCT_GRID =
   "grid grid-cols-2 gap-4 sm:gap-5 md:grid-cols-3 md:gap-5 lg:grid-cols-4 xl:grid-cols-5";
 
 function BrowseInner() {
+  const flyCart = useShowroomFlyCart();
+  const bagRef = useRef<HTMLAnchorElement | null>(null);
+
   const [query, setQuery] = useState("");
   const [debounced, setDebounced] = useState("");
   const [allProducts, setAllProducts] = useState<Product[]>([]);
@@ -241,6 +254,28 @@ function BrowseInner() {
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [bagCount, setBagCount] = useState(0);
   const [appFeature, setAppFeature] = useState<AppFeature | null>(null);
+
+  /** Register bag as fly-to-cart target (updates on resize/scroll) */
+  useEffect(() => {
+    const el = bagRef.current;
+    if (!el || !flyCart?.registerBagTarget) return;
+
+    const update = () => {
+      flyCart.registerBagTarget(el);
+    };
+
+    update();
+    // re-measure after layout settles
+    const t = window.setTimeout(update, 100);
+
+    window.addEventListener("resize", update);
+    window.addEventListener("scroll", update, true);
+    return () => {
+      clearTimeout(t);
+      window.removeEventListener("resize", update);
+      window.removeEventListener("scroll", update, true);
+    };
+  }, [flyCart, bagCount]);
 
   const refreshBag = useCallback(() => {
     try {
@@ -657,7 +692,7 @@ function BrowseInner() {
             </Link>
           </div>
 
-          {/* Desktop nav — sits mid, does not steal the far-right edge */}
+          {/* Desktop nav */}
           <nav className="ml-6 hidden flex-1 items-center gap-6 md:flex lg:ml-10 lg:gap-8">
             <Link
               href="/"
@@ -692,16 +727,17 @@ function BrowseInner() {
             </button>
           </nav>
 
-          {/* Bag — far right on every breakpoint; big left margin on large canvas */}
+          {/* Bag — far right + registered as fly target */}
           <Link
+            ref={bagRef}
             href="/cart"
-            className="relative ml-auto flex h-10 w-10 shrink-0 items-center justify-center text-text transition hover:opacity-80 md:ml-20 lg:ml-28 xl:ml-36"
+            className="relative ml-auto flex h-10 w-10 shrink-0 items-center justify-center text-text transition hover:opacity-80 md:ml-24 lg:ml-40 xl:ml-56 2xl:ml-72"
             aria-label={`Bag${bagCount ? `, ${bagCount} items` : ""}`}
             data-plazore-cart-icon
           >
             <ShoppingBag className="h-[22px] w-[22px]" strokeWidth={1.75} />
             {bagCount > 0 ? (
-              <span className="absolute -right-0.5 -top-0.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-[#00E575] px-1 text-[10px] font-bold leading-none text-[#041412]">
+              <span className="absolute -right-1 -top-1 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-[#00E575] px-1 text-[10px] font-bold leading-none text-[#041412]">
                 {bagCount > 99 ? "99+" : bagCount}
               </span>
             ) : null}
