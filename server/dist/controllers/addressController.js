@@ -11,6 +11,37 @@ export const getAddresses = async (req, res) => {
         res.status(500).json({ success: false, message: error.message });
     }
 };
+// PUT /api/addresses/:id/default
+export const setDefaultAddress = async (req, res) => {
+    try {
+        const address = await Address.findOne({
+            _id: req.params.id,
+            user: req.user._id,
+        });
+        if (!address) {
+            return res.status(404).json({
+                success: false,
+                message: "Address not found",
+            });
+        }
+        // Clear default from all user addresses
+        await Address.updateMany({ user: req.user._id }, { $set: { isDefault: false } });
+        // Set this one as default
+        address.isDefault = true;
+        await address.save();
+        res.json({
+            success: true,
+            data: address,
+        });
+    }
+    catch (error) {
+        console.error("Set default address error:", error);
+        res.status(500).json({
+            success: false,
+            message: error.message,
+        });
+    }
+};
 // Add new address
 // POST /api/addresses
 export const addAddress = async (req, res) => {

@@ -1,8 +1,49 @@
 import express from "express";
 import { protect, authorize } from "../middleware/auth.js";
-import { getDashboardStats } from "../controllers/adminController.js";
+import { getDashboardStats, getAdminUsers, getAdminUserDetail, getAdminProducts, setSellerSuspended, setSellerVerified, setProductActive, getAdminOrders, getAdminOrderDetail, getAdminContacts, getAdminContactDetail, updateAdminContact, adminReachOut, getAdminReports, updateAdminReport, pingPresence, } from "../controllers/adminController.js";
+import { uploadBannerImage } from "../controllers/contentController.js";
+import upload from "../middleware/upload.js";
+import { getAdminShowroom, refreshAdminShowroom, getAdminIntelligence, getAdminIntelligenceDetail, regenerateAdminIntelligence, getAdminAnalytics, } from "../controllers/adminObservabilityController.js";
+import { getAdminContent, getAdminBannerSlot, saveAdminBannerDraft, publishAdminBanner, setAdminBannerActive, getAdminPersonalDiagnostics, } from "../controllers/contentController.js";
+import { getAdminAnnouncements, getAdminAnnouncement, createAdminAnnouncement, updateAdminAnnouncement, publishAdminAnnouncement, archiveAdminAnnouncement, uploadAnnouncementMediaHandler, } from "../controllers/announcementController.js";
 const AdminRouter = express.Router();
-// Get admin dashboard statistics
-// GET /api/admin/stats
-AdminRouter.get("/stats", protect, authorize("admin"), getDashboardStats);
+const adminOnly = [protect, authorize("admin")];
+AdminRouter.get("/stats", ...adminOnly, getDashboardStats);
+AdminRouter.get("/users", ...adminOnly, getAdminUsers);
+AdminRouter.get("/users/:id", ...adminOnly, getAdminUserDetail);
+AdminRouter.patch("/sellers/:id/suspend", ...adminOnly, setSellerSuspended);
+AdminRouter.patch("/sellers/:id/verify", ...adminOnly, setSellerVerified);
+AdminRouter.post("/content/upload-banner", ...adminOnly, upload.single("image"), uploadBannerImage);
+AdminRouter.get("/products", ...adminOnly, getAdminProducts);
+AdminRouter.patch("/products/:id/active", ...adminOnly, setProductActive);
+AdminRouter.get("/orders", ...adminOnly, getAdminOrders);
+AdminRouter.get("/orders/:id", ...adminOnly, getAdminOrderDetail);
+// ─── Contacts ───
+AdminRouter.get("/contacts", ...adminOnly, getAdminContacts);
+AdminRouter.post("/contacts/reach-out", ...adminOnly, adminReachOut);
+AdminRouter.get("/contacts/:id", ...adminOnly, getAdminContactDetail);
+AdminRouter.patch("/contacts/:id", ...adminOnly, updateAdminContact);
+AdminRouter.get("/reports", ...adminOnly, getAdminReports);
+AdminRouter.patch("/reports/:id", ...adminOnly, updateAdminReport);
+AdminRouter.get("/showroom", ...adminOnly, getAdminShowroom);
+AdminRouter.post("/showroom/refresh", ...adminOnly, refreshAdminShowroom);
+AdminRouter.get("/intelligence", ...adminOnly, getAdminIntelligence);
+AdminRouter.get("/intelligence/:productId", ...adminOnly, getAdminIntelligenceDetail);
+AdminRouter.post("/intelligence/:productId/regenerate", ...adminOnly, regenerateAdminIntelligence);
+// Announcements
+AdminRouter.get("/announcements", ...adminOnly, getAdminAnnouncements);
+AdminRouter.post("/announcements", ...adminOnly, createAdminAnnouncement);
+AdminRouter.get("/announcements/:id", ...adminOnly, getAdminAnnouncement);
+AdminRouter.patch("/announcements/:id", ...adminOnly, updateAdminAnnouncement);
+AdminRouter.post("/announcements/:id/publish", ...adminOnly, publishAdminAnnouncement);
+AdminRouter.post("/announcements/:id/archive", ...adminOnly, archiveAdminAnnouncement);
+AdminRouter.post("/announcements/upload", ...adminOnly, upload.single("file"), uploadAnnouncementMediaHandler);
+AdminRouter.get("/analytics", ...adminOnly, getAdminAnalytics);
+AdminRouter.get("/content", ...adminOnly, getAdminContent);
+AdminRouter.get("/content/slots/:position", ...adminOnly, getAdminBannerSlot);
+AdminRouter.put("/content/slots/:position/draft", ...adminOnly, saveAdminBannerDraft);
+AdminRouter.post("/content/slots/:position/publish", ...adminOnly, publishAdminBanner);
+AdminRouter.patch("/content/slots/:position/active", ...adminOnly, setAdminBannerActive);
+AdminRouter.get("/content/diagnostics", ...adminOnly, getAdminPersonalDiagnostics);
+AdminRouter.post("/me/presence", protect, pingPresence);
 export default AdminRouter;

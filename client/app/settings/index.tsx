@@ -158,28 +158,6 @@ export default function SettingsScreen() {
           />
         </SettingsSection>
 
-        {/* Preferences */}
-        <SettingsSection title="Preferences">
-          <SettingsRow
-            icon="musical-notes-outline"
-            title="Ambient soundtrack"
-            subtitle="Immerse yourself in the Plazore atmosphere"
-            onPress={() => router.push('/settings/music' as any)}
-            last
-          />
-        </SettingsSection>
-
-        {/* Privacy */}
-        <SettingsSection title="Privacy & security">
-          <SettingsRow
-            icon="lock-closed-outline"
-            title="Privacy"
-            subtitle="Data and visibility preferences"
-            onPress={() => router.push('/settings/privacy' as any)}
-            last
-          />
-        </SettingsSection>
-
         {/* Plazore */}
         <SettingsSection title="Plazore">
           <SettingsRow
@@ -194,6 +172,13 @@ export default function SettingsScreen() {
             title="About Plazore"
             subtitle="What Plazore is and app info"
             onPress={() => router.push('/settings/about' as any)}
+            last
+          />
+          <SettingsRow
+            icon="information-circle-outline"
+            title="Help & FAQ"
+            subtitle="Get help and find answers to common questions"
+            onPress={() => router.push('/help' as any)}
             last
           />
         </SettingsSection>

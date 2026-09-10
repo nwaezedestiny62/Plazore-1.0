@@ -140,7 +140,7 @@ const TILE_HREF: Record<string, string> = {
   new: "/shop?mode=new",
   trending: "/shop?mode=trending",
   stores: "/shop?mode=stores",
-  help: "/about",
+  help: "/help",
   contact: "/contact",
   about: "/about",
 };
@@ -157,37 +157,40 @@ const TOP_TABS = [
 const EXPLORE_CHIPS = [
   {
     id: "categories",
-    label: "Categories",
+    label: "Shop by category",
     href: "/shop?mode=categories",
     bg: "linear-gradient(90deg,#06B6D4,#22D3EE)",
   },
   {
     id: "new",
-    label: "New arrivals",
+    label: "Just in",
     href: "/shop?mode=new",
     bg: "linear-gradient(90deg,#16A34A,#4ADE80)",
   },
   {
     id: "trending",
-    label: "Trending",
+    label: "What’s popular",
     href: "/shop?mode=trending",
     bg: "linear-gradient(90deg,#DB2777,#FB7185)",
   },
   {
     id: "stores",
-    label: "Stores",
+    label: "Browse stores",
     href: "/shop?mode=stores",
     bg: "linear-gradient(90deg,#4F46E5,#818CF8)",
   },
   {
     id: "shop",
-    label: "Shop",
+    label: "Start shopping",
     href: "/shop",
     bg: "linear-gradient(90deg,#7C3AED,#C084FC)",
   },
 ];
 
 function resolveHref(item: LoungeItem) {
+  if (item.id === "help") return "/help";
+  if (item.id === "contact") return "/contact";
+  if (item.id === "about") return "/about";
   return TILE_HREF[item.id] || item.href || "/";
 }
 
@@ -337,19 +340,19 @@ function TvAppIcon({
   const inner = (
     <>
       <span
-        className="relative flex h-[72px] w-[118px] items-center justify-center overflow-hidden rounded-2xl shadow-[0_8px_24px_rgba(0,0,0,0.35)] transition duration-300 group-hover:scale-[1.04] group-hover:brightness-110 group-focus-visible:ring-2 group-focus-visible:ring-white"
+        className="relative flex h-[72px] w-[118px] items-center justify-center overflow-hidden shadow-[0_8px_24px_rgba(0,0,0,0.35)] transition duration-300 group-hover:brightness-110 group-focus-visible:ring-2 group-focus-visible:ring-white"
         style={{
           background: `linear-gradient(160deg, ${palette.bg} 0%, #0A0B10 100%)`,
           boxShadow: `inset 0 1px 0 ${palette.accent}40, 0 8px 24px ${palette.glow}`,
         }}
       >
         <span
-          className="pointer-events-none absolute -right-4 -top-4 h-14 w-14 rounded-full opacity-50"
+          className="pointer-events-none absolute -right-4 -top-4 h-14 w-14 opacity-50"
           style={{ background: palette.accent }}
         />
         <Icon className="relative h-8 w-8" style={{ color: palette.accent }} />
         {item.id === "cart" && (bagCount ?? 0) > 0 && (
-          <span className="absolute right-2 top-2 min-w-[18px] rounded-full bg-[#00E575] px-1 text-center text-[10px] font-extrabold text-[#041412]">
+          <span className="absolute right-2 top-2 min-w-[18px] bg-[#00E575] px-1 text-center text-[10px] font-extrabold text-[#041412]">
             {(bagCount ?? 0) > 99 ? "99+" : bagCount}
           </span>
         )}
@@ -421,7 +424,7 @@ function PosterCard({
           }}
         />
       )}
-      <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/25 to-black/10" />
+      <div className="absolute inset-0 bg-gradient-to-t from-black/88 via-black/30 to-black/10" />
       <div className="relative z-[1] flex h-full flex-col justify-end p-6 lg:p-8">
         <p className="text-[11px] font-semibold tracking-[0.18em] text-white/55">
           {kicker}
@@ -435,7 +438,7 @@ function PosterCard({
           </p>
         )}
         {cta && (
-          <span className="mt-4 inline-flex h-9 w-fit items-center rounded-full bg-white px-4 text-[12px] font-semibold text-[#0A0B10]">
+          <span className="mt-4 inline-flex h-9 w-fit items-center bg-white px-4 text-[12px] font-semibold text-[#0A0B10]">
             {cta}
           </span>
         )}
@@ -444,7 +447,7 @@ function PosterCard({
   );
 
   const cls =
-    "group relative block min-h-[240px] overflow-hidden rounded-2xl bg-[#12141C] transition duration-300 hover:brightness-110 lg:min-h-[280px]";
+    "group relative block min-h-[240px] overflow-hidden bg-[#12141C] transition duration-300 hover:brightness-110 lg:min-h-[280px]";
 
   if (onClick) {
     return (
@@ -562,7 +565,6 @@ export default function LoungePage() {
     };
   }, [debounced]);
 
-  /** Region-filtered product pool */
   const regionalProducts = useMemo(() => {
     const list = allProducts || [];
     const inRegion = list.filter(
@@ -644,9 +646,6 @@ export default function LoungePage() {
     []
   );
 
-  /**
-   * NEW ARRIVALS = newest listings (createdAt descending)
-   */
   const newArrivals = useMemo(
     () =>
       [...regionalProducts]
@@ -660,21 +659,13 @@ export default function LoungePage() {
     [regionalProducts]
   );
 
-  /**
-   * TRENDING = most viewed / most engaged products
-   * Uses views if present, otherwise wishlistCount (real engagement signal)
-   */
   const trendingPicks = useMemo(
     () =>
       [...regionalProducts]
         .filter((p) => p.images?.[0] && p.isActive !== false)
         .sort((a, b) => {
-          const aScore = Number(
-            (a as any).views ?? a.wishlistCount ?? 0
-          );
-          const bScore = Number(
-            (b as any).views ?? b.wishlistCount ?? 0
-          );
+          const aScore = Number((a as any).views ?? a.wishlistCount ?? 0);
+          const bScore = Number((b as any).views ?? b.wishlistCount ?? 0);
           if (bScore !== aScore) return bScore - aScore;
           return (
             new Date(b.createdAt || 0).getTime() -
@@ -707,7 +698,7 @@ export default function LoungePage() {
     newArrivals[0]?.images?.[0] || trendingPicks[0]?.images?.[0];
 
   return (
-    <div className="min-h-dvh bg-[#050508] text-[#F5F7FA]">
+    <div className="lounge-root min-h-dvh bg-[#050508] text-[#F5F7FA]">
       <style>{`
         @keyframes loungeIn {
           from { opacity: 0; transform: translateY(14px); }
@@ -715,6 +706,7 @@ export default function LoungePage() {
         }
         .tv-row::-webkit-scrollbar { display: none; }
         .tv-row { scrollbar-width: none; }
+        .lounge-root, .lounge-root * { border-radius: 0 !important; }
       `}</style>
 
       {/* ════════════ MOBILE ════════════ */}
@@ -740,7 +732,9 @@ export default function LoungePage() {
               alt="Plazore"
               className="h-[72px] w-[120px] object-contain"
               onError={(e) => {
-                (e.target as HTMLImageElement).style.display = "none";
+                const el = e.target as HTMLImageElement;
+                if (el.src.indexOf("logo-2") === -1) el.src = "/logo-2.png";
+                else el.style.display = "none";
               }}
             />
           </div>
@@ -760,7 +754,7 @@ export default function LoungePage() {
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search products, stores, categories…"
+              placeholder="Find products, stores, or categories"
               className="w-full bg-transparent text-sm outline-none placeholder:text-white/35"
             />
             {query && (
@@ -808,10 +802,10 @@ export default function LoungePage() {
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className="block text-sm font-bold text-[#050508]">
-                        {storeName || "Seller Storefront"}
+                        {storeName || "Your store"}
                       </span>
                       <span className="mt-0.5 block text-xs text-[#050508]/65">
-                        Products, orders & messages
+                        Manage products, orders & messages
                       </span>
                     </span>
                     <ArrowRight className="h-4 w-4 shrink-0 text-[#050508]" />
@@ -823,10 +817,10 @@ export default function LoungePage() {
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className="block text-sm font-bold">
-                        Open a store
+                        Start selling
                       </span>
                       <span className="mt-0.5 block text-xs text-white/65">
-                        Sell on Plazore’s digital mall
+                        Open a store and reach shoppers on Plazore
                       </span>
                     </span>
                     <ArrowRight className="h-4 w-4 text-white/35" />
@@ -878,17 +872,17 @@ export default function LoungePage() {
               <img
                 src={user.imageUrl}
                 alt=""
-                className="h-10 w-10 rounded-full object-cover ring-2 ring-white/20"
+                className="h-10 w-10 object-cover ring-1 ring-white/20"
               />
             ) : (
-              <span className="flex h-10 w-10 items-center justify-center rounded-full bg-white/10">
+              <span className="flex h-10 w-10 items-center justify-center bg-white/10">
                 <User className="h-4 w-4 text-white/70" />
               </span>
             )}
           </Link>
           <Link
             href="/notifications"
-            className="flex h-10 w-10 items-center justify-center rounded-full text-white/55 transition hover:bg-white/10 hover:text-white"
+            className="flex h-10 w-10 items-center justify-center text-white/55 transition hover:bg-white/10 hover:text-white"
             aria-label="Notifications"
           >
             <Bell className="h-[18px] w-[18px]" />
@@ -896,7 +890,7 @@ export default function LoungePage() {
           <button
             type="button"
             onClick={() => searchRef.current?.focus()}
-            className="flex h-10 w-10 items-center justify-center rounded-full text-white/55 transition hover:bg-white/10 hover:text-white"
+            className="flex h-10 w-10 items-center justify-center text-white/55 transition hover:bg-white/10 hover:text-white"
             aria-label="Search"
           >
             <Search className="h-[18px] w-[18px]" />
@@ -905,7 +899,7 @@ export default function LoungePage() {
             <button
               type="button"
               onClick={handleSellerCta}
-              className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full bg-[#00E575]/15 text-[#00E575] transition hover:bg-[#00E575]/25"
+              className="flex h-10 w-10 items-center justify-center overflow-hidden bg-[#00E575]/15 text-[#00E575] transition hover:bg-[#00E575]/25"
               aria-label="Seller dashboard"
             >
               {storeLogo ? (
@@ -922,7 +916,7 @@ export default function LoungePage() {
           )}
           <Link
             href={isSeller ? "/seller/settings" : "/profile"}
-            className="flex h-10 w-10 items-center justify-center rounded-full text-white/55 transition hover:bg-white/10 hover:text-white"
+            className="flex h-10 w-10 items-center justify-center text-white/55 transition hover:bg-white/10 hover:text-white"
             aria-label="Settings"
           >
             <Settings className="h-[18px] w-[18px]" />
@@ -932,7 +926,7 @@ export default function LoungePage() {
             <button
               type="button"
               onClick={() => signOut({ redirectUrl: "/sign-in" })}
-              className="flex h-10 w-10 items-center justify-center rounded-full text-white/40 transition hover:bg-white/10 hover:text-white"
+              className="flex h-10 w-10 items-center justify-center text-white/40 transition hover:bg-white/10 hover:text-white"
               aria-label="Log out"
             >
               <LogOut className="h-4 w-4" />
@@ -940,7 +934,7 @@ export default function LoungePage() {
           ) : (
             <Link
               href="/sign-in"
-              className="flex h-10 w-10 items-center justify-center rounded-full text-[#00E575]"
+              className="flex h-10 w-10 items-center justify-center text-[#00E575]"
               aria-label="Sign in"
             >
               <User className="h-4 w-4" />
@@ -964,12 +958,12 @@ export default function LoungePage() {
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                     src="/logo.png"
-                    alt=""
-                    className="h-7 w-7 object-contain"
+                    alt="Plazore"
+                    className="h-8 w-8 object-contain"
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).src = "/logo.png";
+                    }}
                   />
-                  <span className="text-[13px] font-semibold tracking-wide text-white/50">
-                    Plazore
-                  </span>
                 </Link>
                 <nav className="hidden items-center gap-1 lg:flex">
                   {TOP_TABS.map((tab) => {
@@ -984,7 +978,7 @@ export default function LoungePage() {
                       <Link
                         key={tab.id}
                         href={tab.href}
-                        className={`rounded-full px-4 py-2 text-[13px] font-medium transition duration-300 ${
+                        className={`px-4 py-2 text-[13px] font-medium transition duration-300 ${
                           active
                             ? "bg-white text-[#0A0B10]"
                             : "text-white/55 hover:bg-white/8 hover:text-white"
@@ -997,13 +991,13 @@ export default function LoungePage() {
                 </nav>
               </div>
 
-              <label className="flex h-9 w-56 shrink-0 items-center gap-2 rounded-full bg-white/[0.06] px-3.5">
+              <label className="flex h-9 w-56 shrink-0 items-center gap-2 border border-white/10 bg-white/[0.06] px-3.5">
                 <Search className="h-3.5 w-3.5 text-white/40" />
                 <input
                   ref={searchRef}
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Search"
+                  placeholder="Search the mall"
                   className="w-full bg-transparent text-[13px] outline-none placeholder:text-white/35"
                 />
               </label>
@@ -1021,44 +1015,42 @@ export default function LoungePage() {
               </div>
             ) : (
               <>
-                {/* Dual featured posters */}
                 <section className="mb-6 grid grid-cols-1 gap-3 lg:grid-cols-[1.35fr_1fr]">
                   <PosterCard
                     href="/shop"
                     image={heroPoster}
                     kicker="FOR YOU"
-                    title="Your digital mall, reimagined"
-                    body="Shop, manage orders, and explore stores from one lounge."
-                    cta="Go to Shop"
+                    title="Find something you actually want"
+                    body="Browse the mall, save what you like, and check out when you’re ready."
+                    cta="Start shopping"
                   />
                   {isSeller ? (
                     <PosterCard
                       href="/seller"
                       image={storeLogo}
-                      kicker="SELLER DASHBOARD"
-                      title={storeName || "Your storefront"}
-                      body="Products, orders, messages and payouts — in one place."
-                      cta="Open dashboard"
+                      kicker="YOUR STORE"
+                      title={storeName || "Seller dashboard"}
+                      body="Listings, orders, messages, and payouts — all in one place."
+                      cta="Open your store"
                     />
                   ) : (
                     <PosterCard
                       onClick={handleSellerCta}
                       kicker="SELL ON PLAZORE"
-                      title="Open a store"
-                      body="List products and reach buyers across the digital mall."
+                      title="Turn what you sell into a store"
+                      body="List products and meet buyers already shopping the mall."
                       cta="Start selling"
                     />
                   )}
                 </section>
 
-                {/* Explore chips */}
                 <section className="mb-7">
                   <div className="tv-row flex gap-2.5 overflow-x-auto pb-1">
                     {EXPLORE_CHIPS.map((chip) => (
                       <Link
                         key={chip.id}
                         href={chip.href}
-                        className="flex h-12 shrink-0 items-center rounded-xl px-6 text-[14px] font-bold text-white shadow-[0_8px_20px_rgba(0,0,0,0.25)] transition hover:brightness-110"
+                        className="flex h-12 shrink-0 items-center px-6 text-[14px] font-bold text-white shadow-[0_8px_20px_rgba(0,0,0,0.25)] transition hover:brightness-110"
                         style={{ background: chip.bg }}
                       >
                         {chip.label}
@@ -1066,11 +1058,11 @@ export default function LoungePage() {
                     ))}
                     <Link
                       href="/cart"
-                      className="flex h-12 shrink-0 items-center gap-2 rounded-xl bg-white/10 px-5 text-[14px] font-semibold text-white/90 transition hover:bg-white/15"
+                      className="flex h-12 shrink-0 items-center gap-2 bg-white/10 px-5 text-[14px] font-semibold text-white/90 transition hover:bg-white/15"
                     >
-                      Bag
+                      Your bag
                       {bag > 0 && (
-                        <span className="rounded-full bg-[#00E575] px-1.5 text-[10px] font-extrabold text-[#041412]">
+                        <span className="bg-[#00E575] px-1.5 text-[10px] font-extrabold text-[#041412]">
                           {bag > 99 ? "99+" : bag}
                         </span>
                       )}
@@ -1078,10 +1070,9 @@ export default function LoungePage() {
                   </div>
                 </section>
 
-                {/* App icon row */}
                 <section className="mb-9">
                   <p className="mb-3 text-[14px] font-medium text-white/70">
-                    Your apps
+                    Jump in
                   </p>
                   <div className="tv-row flex gap-3 overflow-x-auto pb-2">
                     {allLoungeItems.map((item, index) => (
@@ -1096,18 +1087,17 @@ export default function LoungePage() {
                   </div>
                 </section>
 
-                {/* NEW ARRIVALS — newest listings */}
                 {newArrivals.length > 0 && (
                   <section className="mb-9">
                     <div className="mb-3 flex items-end justify-between">
                       <p className="text-[14px] font-medium text-white/70">
-                        New arrivals
+                        New to Plazore
                       </p>
                       <Link
                         href="/shop?mode=new"
                         className="text-[12px] font-semibold text-white/40 hover:text-white/70"
                       >
-                        Show more
+                        See all
                       </Link>
                     </div>
                     <div className="tv-row flex gap-3 overflow-x-auto pb-1">
@@ -1122,7 +1112,7 @@ export default function LoungePage() {
                             }ms both`,
                           }}
                         >
-                          <div className="relative h-[148px] w-[240px] overflow-hidden rounded-xl bg-[#12141C] transition duration-300 group-hover:brightness-110">
+                          <div className="relative h-[148px] w-[240px] overflow-hidden bg-[#12141C] transition duration-300 group-hover:brightness-110">
                             {/* eslint-disable-next-line @next/next/no-img-element */}
                             <img
                               src={p.images![0]}
@@ -1144,18 +1134,17 @@ export default function LoungePage() {
                   </section>
                 )}
 
-                {/* TRENDING — most viewed / most engaged */}
                 {trendingPicks.length > 0 && (
                   <section className="mb-9">
                     <div className="mb-3 flex items-end justify-between">
                       <p className="text-[14px] font-medium text-white/70">
-                        Trending
+                        Shoppers are looking at
                       </p>
                       <Link
                         href="/shop?mode=trending"
                         className="text-[12px] font-semibold text-white/40 hover:text-white/70"
                       >
-                        Show more
+                        See all
                       </Link>
                     </div>
                     <div className="tv-row flex gap-3 overflow-x-auto pb-1">
@@ -1165,7 +1154,7 @@ export default function LoungePage() {
                           href={`/product/${p._id}`}
                           className="group shrink-0"
                         >
-                          <div className="relative h-[148px] w-[240px] overflow-hidden rounded-xl bg-[#12141C] transition duration-300 group-hover:brightness-110">
+                          <div className="relative h-[148px] w-[240px] overflow-hidden bg-[#12141C] transition duration-300 group-hover:brightness-110">
                             {/* eslint-disable-next-line @next/next/no-img-element */}
                             <img
                               src={p.images![0]}
@@ -1187,17 +1176,16 @@ export default function LoungePage() {
                   </section>
                 )}
 
-                {/* CATEGORIES with external images */}
                 <section className="mb-9">
                   <div className="mb-3 flex items-end justify-between">
                     <p className="text-[14px] font-medium text-white/70">
-                      Categories
+                      Shop by category
                     </p>
                     <Link
                       href="/shop?mode=categories"
                       className="text-[12px] font-semibold text-white/40 hover:text-white/70"
                     >
-                      Show more
+                      See all
                     </Link>
                   </div>
                   <div className="tv-row flex gap-2.5 overflow-x-auto pb-1">
@@ -1207,7 +1195,7 @@ export default function LoungePage() {
                         href={`/shop?mode=category&category=${encodeURIComponent(
                           c
                         )}`}
-                        className="group relative h-[88px] w-[160px] shrink-0 overflow-hidden rounded-xl transition hover:brightness-110"
+                        className="group relative h-[88px] w-[160px] shrink-0 overflow-hidden transition hover:brightness-110"
                       >
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
@@ -1224,18 +1212,17 @@ export default function LoungePage() {
                   </div>
                 </section>
 
-                {/* Stores */}
                 {storePicks.length > 0 && (
                   <section className="mb-6">
                     <div className="mb-3 flex items-end justify-between">
                       <p className="text-[14px] font-medium text-white/70">
-                        Stores
+                        Stores to visit
                       </p>
                       <Link
                         href="/shop?mode=stores"
                         className="text-[12px] font-semibold text-white/40 hover:text-white/70"
                       >
-                        Show more
+                        See all
                       </Link>
                     </div>
                     <div className="tv-row flex gap-3 overflow-x-auto pb-1">
@@ -1245,7 +1232,7 @@ export default function LoungePage() {
                           href={`/store/${s.id}`}
                           className="group shrink-0"
                         >
-                          <div className="relative h-[148px] w-[220px] overflow-hidden rounded-xl bg-[#12141C] transition duration-300 group-hover:brightness-110">
+                          <div className="relative h-[148px] w-[220px] overflow-hidden bg-[#12141C] transition duration-300 group-hover:brightness-110">
                             {s.cover ? (
                               // eslint-disable-next-line @next/next/no-img-element
                               <img
@@ -1257,7 +1244,7 @@ export default function LoungePage() {
                               <div className="h-full w-full bg-[#161822]" />
                             )}
                             <div className="absolute inset-x-0 bottom-0 flex items-center gap-2 bg-gradient-to-t from-black/85 via-black/40 to-transparent px-3 pb-2.5 pt-10">
-                              <span className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-white/10">
+                              <span className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden bg-white/10">
                                 {s.logo ? (
                                   // eslint-disable-next-line @next/next/no-img-element
                                   <img
@@ -1331,14 +1318,14 @@ function SearchResults({
   if (searchLoading && totalHits === 0) {
     return (
       <p className="py-16 text-center text-sm text-white/55">
-        Searching Plazore…
+        Searching the mall…
       </p>
     );
   }
   if (totalHits === 0) {
     return (
       <p className="py-16 text-center text-sm text-white/55">
-        No results for “{query.trim()}”
+        Nothing matches “{query.trim()}” yet. Try another word.
       </p>
     );
   }
@@ -1406,7 +1393,7 @@ function SearchResults({
                 <div>
                   <p className="font-medium">{h.label}</p>
                   <p className="mt-1 text-xs font-semibold text-[#3B82F6]">
-                    Official storefront
+                    Visit store
                   </p>
                 </div>
               </Link>
@@ -1474,8 +1461,8 @@ function ProfileCard({
           </p>
           <p className="text-[11px] text-white/35">
             {isLoaded && isSignedIn
-              ? "This profile is currently active"
-              : "Sign in to sync your account"}
+              ? "You’re signed in"
+              : "Sign in to save your bag and orders"}
           </p>
         </div>
       </div>
@@ -1483,7 +1470,7 @@ function ProfileCard({
         <button
           type="button"
           onClick={onSignOut}
-          className="mt-3 inline-flex items-center gap-2 border border-white/8 px-3 py-1.5 text-xs text-red/65"
+          className="mt-3 inline-flex items-center gap-2 border border-white/8 px-3 py-1.5 text-xs text-red-400/70"
         >
           <LogOut className="h-3.5 w-3.5" />
           Log out

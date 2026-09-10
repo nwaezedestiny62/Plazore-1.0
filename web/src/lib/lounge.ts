@@ -63,13 +63,13 @@ export const LOUNGE_SECTIONS: LoungeSection[] = [
       { id: "stores", label: "Stores", subtitle: "Seller directories", href: "/shop?mode=stores" },
     ],
   },
-  {
-    id: "support",
-    title: "Support",
-    items: [
-      { id: "help", label: "Help", subtitle: "Guides & FAQs", href: "/about" },
-      { id: "contact", label: "Contact", subtitle: "Reach Plazore", href: "/about#contact" },
-      { id: "about", label: "About", subtitle: "The digital mall", href: "/about" },
-    ],
-  },
+ {
+  id: "support",
+  title: "Support",
+  items: [
+    { id: "help", label: "Help", subtitle: "Guides & FAQs", href: "/help" },
+    { id: "contact", label: "Contact", subtitle: "Reach Plazore", href: "/contact" },
+    { id: "about", label: "About", subtitle: "The digital mall", href: "/about" },
+  ],
+},
 ];

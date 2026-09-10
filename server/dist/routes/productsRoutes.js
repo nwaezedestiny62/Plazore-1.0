@@ -1,18 +1,23 @@
 import express from "express";
-import { createProduct, getProduct, getProducts, updateProduct, deleteProduct } from "../controllers/productController.js";
+import { createProduct, getProduct, getProducts, getShowroom, trackShowroomEvent, updateProduct, deleteProduct, setProductVisibility, } from "../controllers/productController.js";
 import upload from "../middleware/upload.js";
 import { authorize, protect } from "../middleware/auth.js";
+import SellerRouter from "./sellerRoutes.js";
 const ProductRouter = express.Router();
-// ==================== PUBLIC ROUTES ====================
-// Get all products
-ProductRouter.get('/', getProducts);
-// Get single product
-ProductRouter.get('/:id', getProduct);
-// ==================== PROTECTED ROUTES (Admin Only) ====================
-// Create product
-ProductRouter.post('/', protect, authorize('admin'), upload.array("images", 5), createProduct);
-// Update product
-ProductRouter.put('/:id', protect, authorize('admin'), upload.array("images", 5), updateProduct);
-// Delete product
-ProductRouter.delete('/:id', protect, authorize('admin'), deleteProduct);
+// Public — specific paths BEFORE /:id
+ProductRouter.get("/", getProducts);
+ProductRouter.get("/showroom", getShowroom);
+ProductRouter.post("/showroom/event", trackShowroomEvent);
+ProductRouter.get("/:id", getProduct);
+// Admin create/update/delete
+ProductRouter.post("/", protect, authorize("admin"), upload.fields([
+    { name: "images", maxCount: 10 },
+    { name: "documents", maxCount: 5 },
+]), createProduct);
+ProductRouter.put("/:id", protect, authorize("admin"), upload.fields([
+    { name: "images", maxCount: 10 },
+    { name: "documents", maxCount: 5 },
+]), updateProduct);
+SellerRouter.patch("/products/:id/visibility", protect, authorize("seller", "admin"), setProductVisibility);
+ProductRouter.delete("/:id", protect, authorize("admin"), deleteProduct);
 export default ProductRouter;

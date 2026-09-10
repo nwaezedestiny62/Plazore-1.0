@@ -1,5 +1,6 @@
 import Cart from "../models/Cart.js";
 import Product from '../models/Products.js';
+import { trackProductPerformance } from "../utils/performance.js";
 // Get user cart
 // GET /api/cart
 export const getCart = async (req, res) => {
@@ -21,22 +22,23 @@ export const addtoCart = async (req, res) => {
         const { productId, quantity = 1 } = req.body;
         const product = await Product.findById(productId);
         if (!product) {
-            return res.status(404).json({ success: false, message: "Product not found" });
+            return res
+                .status(404)
+                .json({ success: false, message: "Product not found" });
         }
         if (product.stock < quantity) {
-            return res.status(404).json({ success: false, message: "Insufficient stock" });
+            return res
+                .status(400)
+                .json({ success: false, message: "Insufficient stock" });
         }
         let cart = await Cart.findOne({ user: req.user._id });
         if (!cart) {
-            cart = new Cart({ user: req.user._id, item: [] });
+            cart = new Cart({ user: req.user._id, items: [] });
         }
-        // Find item with same product and size 
-        const exisitingItem = cart.items.find((item) => {
-            return item.product.toString() === productId;
-        });
-        if (exisitingItem) {
-            exisitingItem.quantity += quantity;
-            exisitingItem.price = product.price;
+        const existingItem = cart.items.find((item) => item.product.toString() === productId);
+        if (existingItem) {
+            existingItem.quantity += quantity;
+            existingItem.price = product.price;
         }
         else {
             cart.items.push({
@@ -47,11 +49,17 @@ export const addtoCart = async (req, res) => {
         }
         cart.calculateTotal();
         await cart.save();
+        // ★ PERFORMANCE: cart add = +5
+        trackProductPerformance({
+            productId: String(productId),
+            action: "cart",
+            actorUserId: req.user._id.toString(),
+        }).catch(() => { });
         await cart.populate("items.product", "name images price stock");
         res.json({ success: true, data: cart });
     }
     catch (error) {
-        res.json(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: error.message });
     }
 };
 // Update cart item quantity

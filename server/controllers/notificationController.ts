@@ -3,13 +3,25 @@ import Notification from "../models/Notification.js";
 
 export const getMyNotifications = async (req: Request, res: Response) => {
   try {
-    const notifications = await Notification.find({
-      user: (req as any).user._id,
-    })
-      .sort({ createdAt: -1 })
-      .limit(50);
+    const userId = (req as any).user._id;
 
-    res.json({ success: true, data: notifications });
+    const notifications = await Notification.find({
+      user: userId,
+    })
+      .populate("product", "name images")
+      .populate("conversation", "product buyer seller lastMessage")
+      .sort({ createdAt: -1 })
+      .limit(80)
+      .lean();
+
+    res.json({
+      success: true,
+      data: notifications,
+      meta: {
+        count: notifications.length,
+        userId: String(userId),
+      },
+    });
   } catch (error: any) {
     res.status(500).json({ success: false, message: error.message });
   }

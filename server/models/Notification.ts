@@ -20,10 +20,11 @@ const notificationSchema = new mongoose.Schema(
         "order_shipped_reminder",
         "general",
         "contact_reply",
-"contact_need_info",
-"report_received",
-"report_update",
-"announcement",
+        "contact_need_info",
+        "report_received",
+        "report_update",
+        "announcement",
+        "chat_message",
       ],
       required: true,
     },
@@ -51,10 +52,23 @@ const notificationSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+
     contact: { type: mongoose.Schema.Types.ObjectId, ref: "ContactMessage" },
-report: { type: mongoose.Schema.Types.ObjectId, ref: "Report" },
-announcement: { type: mongoose.Schema.Types.ObjectId, ref: "Announcement" },
-link: { type: String, default: "" },
+    report: { type: mongoose.Schema.Types.ObjectId, ref: "Report" },
+    announcement: { type: mongoose.Schema.Types.ObjectId, ref: "Announcement" },
+    conversation: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Conversation",
+    },
+    product: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Product",
+    },
+    productName: {
+      type: String,
+      default: "",
+    },
+    link: { type: String, default: "" },
   },
   { timestamps: true }
 );

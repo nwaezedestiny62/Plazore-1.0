@@ -19,7 +19,7 @@ type Conversation = {
     storeLogo?: string;
     image?: string;
   };
-  lastMessage?: { text?: string; createdAt?: string };
+  lastMessage?: { text?: string; createdAt?: string; sender?: string };
   unreadByBuyer?: number;
   unreadBySeller?: number;
   unreadCount?: number;
@@ -28,13 +28,23 @@ type Conversation = {
   createdAt?: string;
 };
 
+function asId(v: unknown) {
+  if (!v) return "";
+  if (typeof v === "string") return v;
+  if (typeof v === "object" && v && "_id" in v) return String((v as { _id: string })._id);
+  return String(v);
+}
+
 function getActivityTime(conv: Conversation) {
   const raw = conv.lastMessage?.createdAt || conv.updatedAt || conv.createdAt || 0;
   const t = new Date(raw).getTime();
   return Number.isFinite(t) ? t : 0;
 }
 
+/** Only threads with a real last message AND activity within 2 days. */
 function isActiveConversation(conv: Conversation) {
+  const text = String(conv.lastMessage?.text || "").trim();
+  if (!text) return false;
   const activity = getActivityTime(conv);
   if (!activity) return false;
   return Date.now() - activity <= INACTIVITY_MS;
@@ -51,6 +61,14 @@ export default function MessagesPage() {
   const [myUserId, setMyUserId] = useState<string | null>(null);
   const [booted, setBooted] = useState(false);
   const fetching = useRef(false);
+
+  const goBackSafe = useCallback(() => {
+    if (typeof window !== "undefined" && window.history.length > 1) {
+      router.back();
+      return;
+    }
+    router.replace("/");
+  }, [router]);
 
   const resolveMyUserId = useCallback(async (token: string) => {
     for (const endpoint of ["/users/me", "/users/profile", "/user/me"]) {
@@ -97,8 +115,8 @@ export default function MessagesPage() {
         const list: Conversation[] = Array.isArray(json.data) ? json.data : [];
         const enriched = list.map((conv) => {
           if (conv.myRole && typeof conv.unreadCount === "number") return conv;
-          const buyerId = String(conv.buyer?._id || conv.buyer || "");
-          const sellerId = String(conv.seller?._id || conv.seller || "");
+          const buyerId = asId(conv.buyer);
+          const sellerId = asId(conv.seller);
           const me = String(uid || "");
           let myRole: "buyer" | "seller" | null = null;
           if (me && buyerId === me) myRole = "buyer";
@@ -167,6 +185,14 @@ export default function MessagesPage() {
     return (conv.unreadByBuyer || 0) + (conv.unreadBySeller || 0);
   };
 
+  const openChat = (conv: Conversation) => {
+    const productId = asId(conv.product);
+    const qs = new URLSearchParams();
+    qs.set("from", "messages");
+    if (productId) qs.set("productId", productId);
+    router.push(`/chat/${conv._id}?${qs.toString()}`);
+  };
+
   const sorted = useMemo(
     () => [...conversations].sort((a, b) => getActivityTime(b) - getActivityTime(a)),
     [conversations],
@@ -178,7 +204,7 @@ export default function MessagesPage() {
         <div className="mx-auto flex max-w-3xl items-center gap-3">
           <button
             type="button"
-            onClick={() => router.back()}
+            onClick={goBackSafe}
             className="flex h-[42px] w-[42px] shrink-0 items-center justify-center border border-[#252A33] bg-[#11141A]"
             aria-label="Back"
           >
@@ -187,7 +213,8 @@ export default function MessagesPage() {
           <h1 className="text-2xl font-extrabold tracking-tight">Messages</h1>
         </div>
         <p className="mx-auto mt-3 max-w-3xl text-[13px] leading-[19px] text-[#A7ADB8]">
-          Product conversations. Threads without activity for 2 days leave your inbox automatically.
+          Product conversations. Threads without a real message, or with no activity for 2 days, leave
+          your inbox automatically.
         </p>
       </header>
 
@@ -212,7 +239,8 @@ export default function MessagesPage() {
             </div>
             <h2 className="text-lg font-bold tracking-tight">No active conversations</h2>
             <p className="mt-2 max-w-sm text-[13px] leading-5 text-[#A7ADB8]">
-              Message a seller about a product and the thread will appear here. Quiet chats clear after 2 days.
+              Message a seller about a product and the thread appears here only after the first real
+              message is sent. Quiet chats clear after 2 days.
             </p>
           </div>
         ) : (
@@ -221,14 +249,14 @@ export default function MessagesPage() {
               const unread = getUnread(item);
               const other = getOtherParty(item);
               const product = item.product;
-              const lastText = item.lastMessage?.text || "No messages yet";
+              const lastText = String(item.lastMessage?.text || "").trim() || "—";
               const time = formatTime(item.lastMessage?.createdAt || item.updatedAt || item.createdAt);
               const hasUnread = unread > 0;
               return (
                 <li key={item._id}>
                   <button
                     type="button"
-                    onClick={() => router.push(`/chat/${item._id}`)}
+                    onClick={() => openChat(item)}
                     className={`flex w-full items-center border p-3 text-left ${
                       hasUnread ? "border-[#10B981]/40 bg-[#11141A]" : "border-[#252A33] bg-[#11141A]"
                     }`}

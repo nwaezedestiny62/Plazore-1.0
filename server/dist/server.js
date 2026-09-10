@@ -1,33 +1,71 @@
 import "dotenv/config";
-import express from 'express';
+import express from "express";
 import cors from "cors";
 import connectDB from "./config/db.js";
-import { clerkMiddleware } from '@clerk/express';
+import { clerkMiddleware } from "@clerk/express";
 import { clerkWebhook } from "./controllers/webhooks.js";
 import makeAdmin from "./scripts/makeAdmin.js";
 import ProductRouter from "./routes/productsRoutes.js";
 import CartRouter from "./routes/cartRoutes.js";
+import ContentRouter from "./routes/contentRoutes.js";
 import OrderRouter from "./routes/ordersRoutes.js";
 import AddressRouter from "./routes/addressRoutes.js";
 import AdminRouter from "./routes/adminRoutes.js";
+import SellerRouter from "./routes/sellerRoutes.js";
+import NotificationRouter from "./routes/notificationRoutes.js";
+import UserRouter from "./routes/userRoutes.js";
+import WishlistRouter from "./routes/wishlistRoutes.js";
+import AnalyticsRouter from "./routes/analyticsRoutes.js";
+import AIRouter from "./routes/aiRoutes.js";
+import ChatRouter from "./routes/chatRoutes.js";
+import SavedStoreRouter from "./routes/savedStoreRoutes.js";
+import PaymentMethodRouter from "./routes/paymentMethodRoutes.js";
+import ModerationRouter from "./routes/moderationRoutes.js";
+import AnnouncementRouter from "./routes/announcementRoutes.js";
+import ContactRouter from "./routes/contactRoutes.js";
 const app = express();
-// Connect to MongoDB (Added await here!)
 await connectDB();
-app.post('/api/clerk', express.raw({ type: "application/json" }), clerkWebhook);
-// Middleware
-app.use(cors());
-app.use(express.json());
+// Clerk webhook needs raw body — must stay before express.json()
+app.post("/api/clerk", express.raw({ type: "application/json" }), clerkWebhook);
+app.use(cors({
+    origin: true,
+    credentials: true,
+}));
+app.use(express.json({ limit: "15mb" }));
+app.use(express.urlencoded({ extended: true, limit: "15mb" }));
 app.use(clerkMiddleware());
 const port = process.env.PORT || 3000;
-app.get('/', (req, res) => {
-    res.send('Server is Live!');
+app.get("/api/test", (req, res) => {
+    console.log("✅ PUBLIC /api/test route hit!");
+    res.json({ success: true, message: "Backend is reachable!" });
+});
+app.get("/api", (req, res) => {
+    res.json({ success: true, message: "Root API endpoint working" });
+});
+app.get("/", (req, res) => {
+    res.send("Server is Live!");
 });
 app.use("/api/products", ProductRouter);
 app.use("/api/cart", CartRouter);
 app.use("/api/orders", OrderRouter);
 app.use("/api/addresses", AddressRouter);
 app.use("/api/admin", AdminRouter);
+app.use("/api/seller", SellerRouter);
+app.use("/api/notifications", NotificationRouter);
+app.use("/api/users", UserRouter);
+app.use("/api/wishlist", WishlistRouter);
+app.use("/api/analytics", AnalyticsRouter);
+app.use("/api/ai", AIRouter);
+app.use("/api/chat", ChatRouter);
+app.use("/api/saved-stores", SavedStoreRouter);
+app.use("/api/payment-methods", PaymentMethodRouter);
+app.use("/api/contact", ContactRouter);
+app.use("/api/content", ContentRouter);
+app.use("/api/announcements", AnnouncementRouter);
+// Single moderation mount (covers /me + admin actions)
+app.use("/api/moderation", ModerationRouter);
 await makeAdmin();
 app.listen(port, () => {
     console.log(`Server is running at http://localhost:${port}`);
+    console.log(`Test it at: http://localhost:${port}/api/test`);
 });

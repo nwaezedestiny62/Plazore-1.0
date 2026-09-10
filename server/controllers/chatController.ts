@@ -3,10 +3,59 @@ import Conversation from "../models/Conversation.js";
 import Message from "../models/Message.js";
 import Product from "../models/Products.js";
 import mongoose from "mongoose";
+import { sendNotification } from "../utils/sendNotification.js";
 
 const getUser = (req: Request) => (req as any).user;
+const TWO_DAYS_MS = 2 * 24 * 60 * 60 * 1000;
 
-// Start or get existing conversation for a product
+async function notifyChatRecipient(opts: {
+  conversation: any;
+  senderId: any;
+  senderIsBuyer: boolean;
+  text: string;
+}) {
+  const buyerId = String(opts.conversation.buyer?._id || opts.conversation.buyer);
+  const sellerId = String(opts.conversation.seller?._id || opts.conversation.seller);
+  const sender = String(opts.senderId);
+  const recipientId = opts.senderIsBuyer ? sellerId : buyerId;
+
+  if (!recipientId || recipientId === sender) {
+    return;
+  }
+
+  let productName = "";
+  let productId =
+    opts.conversation.product?._id || opts.conversation.product || null;
+
+  if (opts.conversation.product?.name) {
+    productName = String(opts.conversation.product.name);
+  } else if (productId) {
+    try {
+      const product = await Product.findById(productId).select("name").lean();
+      productName = String((product as any)?.name || "");
+    } catch {
+      /* ignore */
+    }
+  }
+
+  const preview = String(opts.text || "").trim().slice(0, 140);
+  const title = opts.senderIsBuyer ? "New buyer message" : "New store message";
+  const message = productName
+    ? `${preview || "New message"} · ${productName}`
+    : preview || "You have a new message on Plazore.";
+
+  await sendNotification({
+    userId: recipientId,
+    type: "chat_message",
+    title,
+    message,
+    conversationId: String(opts.conversation._id),
+    productId: productId ? String(productId) : undefined,
+    productName: productName || undefined,
+    link: `/chat/${opts.conversation._id}`,
+  });
+}
+
 export const startConversation = async (req: Request, res: Response) => {
   try {
     const user = getUser(req);
@@ -30,7 +79,6 @@ export const startConversation = async (req: Request, res: Response) => {
       });
     }
 
-    // Buyer cannot message themselves
     if (String(product.seller) === String(user._id)) {
       return res.status(400).json({
         success: false,
@@ -51,7 +99,6 @@ export const startConversation = async (req: Request, res: Response) => {
       });
     }
 
-    // Populate for frontend
     await conversation.populate([
       { path: "product", select: "name images price" },
       { path: "buyer", select: "name image" },
@@ -71,26 +118,23 @@ export const startConversation = async (req: Request, res: Response) => {
   }
 };
 
-// Get all my conversations (inbox)
 export const getMyConversations = async (req: Request, res: Response) => {
   try {
     const user = getUser(req);
-
-    const twoDaysAgo = new Date();
-    twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
+    const twoDaysAgo = new Date(Date.now() - TWO_DAYS_MS);
 
     const conversations = await Conversation.find({
       $or: [{ buyer: user._id }, { seller: user._id }],
       status: "active",
-      updatedAt: { $gte: twoDaysAgo },
+      "lastMessage.text": { $exists: true, $nin: [null, ""] },
+      "lastMessage.createdAt": { $gte: twoDaysAgo },
     })
       .populate("product", "name images price region")
       .populate("buyer", "name image")
       .populate("seller", "name storeName storeLogo image")
-      .sort({ updatedAt: -1 })
+      .sort({ "lastMessage.createdAt": -1 })
       .lean();
 
-    // Add a helpful flag so frontend knows the role of current user in each chat
     const enriched = conversations.map((conv: any) => {
       const isBuyer = String(conv.buyer?._id || conv.buyer) === String(user._id);
       const isSeller = String(conv.seller?._id || conv.seller) === String(user._id);
@@ -119,7 +163,6 @@ export const getMyConversations = async (req: Request, res: Response) => {
   }
 };
 
-// Get messages in a conversation
 export const getMessages = async (req: Request, res: Response) => {
   try {
     const user = getUser(req);
@@ -141,7 +184,6 @@ export const getMessages = async (req: Request, res: Response) => {
       });
     }
 
-    // Security: only buyer or seller can view
     const isParticipant =
       String(conversation.buyer) === String(user._id) ||
       String(conversation.seller) === String(user._id);
@@ -171,7 +213,6 @@ export const getMessages = async (req: Request, res: Response) => {
   }
 };
 
-// Send a message
 export const sendMessage = async (req: Request, res: Response) => {
   try {
     const user = getUser(req);
@@ -211,17 +252,17 @@ export const sendMessage = async (req: Request, res: Response) => {
       });
     }
 
-    // Create the message
+    const trimmed = text.trim();
+
     const message = await Message.create({
       conversation: conversationId,
       sender: user._id,
-      text: text.trim(),
+      text: trimmed,
       readBy: [user._id],
     });
 
-    // Update conversation last message + unread counts
     conversation.lastMessage = {
-      text: text.trim(),
+      text: trimmed,
       sender: user._id,
       createdAt: new Date(),
     };
@@ -234,7 +275,13 @@ export const sendMessage = async (req: Request, res: Response) => {
 
     await conversation.save();
 
-    // Populate sender cleanly
+    await notifyChatRecipient({
+      conversation,
+      senderId: user._id,
+      senderIsBuyer: isBuyer,
+      text: trimmed,
+    });
+
     const populatedMessage = await Message.findById(message._id)
       .populate("sender", "name image")
       .lean();
@@ -252,7 +299,6 @@ export const sendMessage = async (req: Request, res: Response) => {
   }
 };
 
-// Mark conversation as read
 export const markAsRead = async (req: Request, res: Response) => {
   try {
     const user = getUser(req);
@@ -289,7 +335,6 @@ export const markAsRead = async (req: Request, res: Response) => {
 
     await conversation.save();
 
-    // Mark messages as read
     await Message.updateMany(
       {
         conversation: conversationId,
@@ -312,15 +357,17 @@ export const markAsRead = async (req: Request, res: Response) => {
   }
 };
 
-// Optional: archive very old conversations (run occasionally)
 export const archiveOldConversations = async () => {
-  const twoDaysAgo = new Date();
-  twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
+  const twoDaysAgo = new Date(Date.now() - TWO_DAYS_MS);
 
   await Conversation.updateMany(
     {
       status: "active",
-      updatedAt: { $lt: twoDaysAgo },
+      $or: [
+        { "lastMessage.createdAt": { $exists: false } },
+        { "lastMessage.createdAt": { $lt: twoDaysAgo } },
+        { "lastMessage.text": { $in: [null, ""] } },
+      ],
     },
     {
       $set: { status: "archived" },

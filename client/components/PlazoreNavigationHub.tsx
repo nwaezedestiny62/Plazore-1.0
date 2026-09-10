@@ -220,7 +220,7 @@ const SECTIONS: NavSection[] = [
       },
     ],
   },
-  {
+    {
     id: 'support',
     title: 'Support',
     items: [
@@ -229,18 +229,21 @@ const SECTIONS: NavSection[] = [
         label: 'Help',
         subtitle: 'Guides & FAQs',
         icon: 'help-buoy',
+        href: '/help',
       },
       {
         id: 'contact',
         label: 'Contact',
         subtitle: 'Reach Plazore',
         icon: 'chatbubbles',
+        href: '/contact',
       },
       {
         id: 'about',
         label: 'About',
         subtitle: 'The digital mall',
         icon: 'information-circle',
+        href: '/settings/about',
       },
     ],
   },
@@ -955,10 +958,23 @@ export default function PlazoreNavigationHub({
       return
     }
 
-    // Support screens
-    if (itemId === 'help' || itemId === 'contact' || itemId === 'about') {
+       if (itemId === 'help') {
+      requestAnimationFrame(() => {
+        router.push('/help' as any)
+      })
+      return
+    }
+
+    if (itemId === 'contact') {
       requestAnimationFrame(() => {
         router.push('/contact' as any)
+      })
+      return
+    }
+
+    if (itemId === 'about') {
+      requestAnimationFrame(() => {
+        router.push('/settings/about' as any)
       })
       return
     }

@@ -1,23 +1,128 @@
-import { getAuth } from "@clerk/express";
+import { getAuth, clerkClient } from "@clerk/express";
 import User from "../models/User.js";
+const isBadEmail = (email) => {
+    const e = (email || "").toLowerCase();
+    return (!e ||
+        e.includes("@plazore.temp") ||
+        e.startsWith("user_user_") ||
+        e.startsWith("pending_"));
+};
+const isBadName = (name) => {
+    const n = (name || "").trim();
+    return !n || n === "Plazore User" || n === "User";
+};
+const buildFromClerk = (clerkUser) => {
+    const email = clerkUser.emailAddresses?.find((e) => e.id === clerkUser.primaryEmailAddressId)?.emailAddress ||
+        clerkUser.emailAddresses?.[0]?.emailAddress ||
+        "";
+    const phone = clerkUser.phoneNumbers?.find((p) => p.id === clerkUser.primaryPhoneNumberId)?.phoneNumber ||
+        clerkUser.phoneNumbers?.[0]?.phoneNumber ||
+        "";
+    const name = `${clerkUser.firstName || ""} ${clerkUser.lastName || ""}`.trim() ||
+        clerkUser.username ||
+        (email ? email.split("@")[0] : "User");
+    return {
+        clerkId: clerkUser.id,
+        email: (email || "").toLowerCase().trim(),
+        name,
+        phone: phone || "",
+        image: clerkUser.imageUrl || "",
+    };
+};
 export const protect = async (req, res, next) => {
     try {
-        const { userId } = getAuth(req);
-        if (!userId) {
+        const { userId, isAuthenticated } = getAuth(req);
+        if (!userId || !isAuthenticated) {
             return res.status(401).json({
                 success: false,
-                message: "Not authorized"
+                message: "Not authorized. Please sign in.",
             });
         }
-        const user = await User.findOne({ clerkId: userId });
+        let user = await User.findOne({ clerkId: userId });
+        // Always try Clerk when missing OR placeholder data
+        const needsRefresh = !user || isBadName(user.name) || isBadEmail(user.email);
+        if (needsRefresh) {
+            try {
+                const clerkUser = await clerkClient.users.getUser(userId);
+                const data = buildFromClerk(clerkUser);
+                if (user) {
+                    // Update existing row — keep role / store fields
+                    if (data.name)
+                        user.name = data.name;
+                    if (data.email && !isBadEmail(data.email)) {
+                        const taken = await User.findOne({
+                            email: data.email,
+                            _id: { $ne: user._id },
+                        });
+                        if (!taken)
+                            user.email = data.email;
+                    }
+                    if (data.phone)
+                        user.phone = data.phone;
+                    if (data.image)
+                        user.image = data.image;
+                    await user.save();
+                }
+                else {
+                    // Maybe already exists by real email
+                    let byEmail = data.email && !isBadEmail(data.email)
+                        ? await User.findOne({ email: data.email })
+                        : null;
+                    if (byEmail) {
+                        byEmail.clerkId = userId;
+                        if (data.name)
+                            byEmail.name = data.name;
+                        if (data.phone)
+                            byEmail.phone = data.phone;
+                        if (data.image)
+                            byEmail.image = data.image;
+                        await byEmail.save();
+                        user = byEmail;
+                    }
+                    else {
+                        user = await User.create({
+                            clerkId: userId,
+                            email: data.email && !isBadEmail(data.email)
+                                ? data.email
+                                : `pending_${userId.slice(-8)}@plazore.temp`,
+                            name: data.name || "User",
+                            phone: data.phone || "",
+                            image: data.image || "",
+                            role: "buyer",
+                        });
+                    }
+                }
+            }
+            catch (e) {
+                console.error("Clerk refresh error:", e?.message || e);
+                if (!user) {
+                    return res.status(500).json({
+                        success: false,
+                        message: "Could not load user profile",
+                    });
+                }
+            }
+        }
         req.user = user;
         next();
     }
     catch (error) {
-        console.error("Auth error:", error);
+        console.error("Auth error:", error?.message || error);
         res.status(500).json({
             success: false,
             message: "Authentication failed",
         });
     }
+};
+export const authorize = (...roles) => {
+    return (req, res, next) => {
+        const user = req.user;
+        if (!user || !roles.includes(user.role)) {
+            return res.status(403).json({
+                success: false,
+                message: "User role is not authorized for this route",
+            });
+        }
+        next();
+    };
 };

@@ -40,6 +40,13 @@ type Conversation = {
   createdAt?: string;
 };
 
+function asId(v: unknown) {
+  if (!v) return "";
+  if (typeof v === "string") return v;
+  if (typeof v === "object" && v && "_id" in v) return String((v as { _id: string })._id);
+  return String(v);
+}
+
 function getActivityTime(conv: Conversation): number {
   const raw =
     conv.lastMessage?.createdAt || conv.updatedAt || conv.createdAt || 0;
@@ -47,7 +54,10 @@ function getActivityTime(conv: Conversation): number {
   return Number.isFinite(t) ? t : 0;
 }
 
+/** Real message text + activity within 2 days only. Never show empty opens. */
 function isActiveConversation(conv: Conversation): boolean {
+  const text = String(conv.lastMessage?.text || "").trim();
+  if (!text) return false;
   const activity = getActivityTime(conv);
   if (!activity) return false;
   return Date.now() - activity <= INACTIVITY_MS;
@@ -90,6 +100,8 @@ export default function SellerMessagesPage() {
 
   const isFetching = useRef(false);
   const mountedRef = useRef(true);
+  const myUserIdRef = useRef<string | null>(null);
+  myUserIdRef.current = myUserId;
 
   useEffect(() => {
     mountedRef.current = true;
@@ -99,6 +111,7 @@ export default function SellerMessagesPage() {
   }, []);
 
   const resolveMyUserId = useCallback(async (token: string) => {
+    if (myUserIdRef.current) return myUserIdRef.current;
     const endpoints = ["/users/me", "/users/profile", "/user/me"];
     for (const endpoint of endpoints) {
       try {
@@ -109,8 +122,10 @@ export default function SellerMessagesPage() {
         const json = await readJson(res);
         const id = json?.data?._id || json?._id;
         if (id) {
-          setMyUserId(String(id));
-          return String(id);
+          const sid = String(id);
+          myUserIdRef.current = sid;
+          if (mountedRef.current) setMyUserId(sid);
+          return sid;
         }
       } catch {
         /* try next */
@@ -119,120 +134,122 @@ export default function SellerMessagesPage() {
     return null;
   }, []);
 
-  const fetchConversations = useCallback(
-    async (isRefresh = false) => {
-      if (!isSignedIn) {
-        if (mountedRef.current) {
-          setConversations([]);
-          setBooted(true);
-          setRefreshing(false);
-        }
+  const fetchConversations = useCallback(async (isRefresh = false) => {
+    if (!isSignedIn) {
+      if (mountedRef.current) {
+        setConversations([]);
+        setBooted(true);
+        setRefreshing(false);
+      }
+      return;
+    }
+
+    if (isFetching.current) return;
+    isFetching.current = true;
+
+    try {
+      if (mountedRef.current) {
+        setError(null);
+        if (isRefresh) setRefreshing(true);
+      }
+
+      const token = await getTokenRef.current();
+      if (!token) {
+        if (mountedRef.current) setError("Please sign in again.");
         return;
       }
 
-      if (isFetching.current) return;
-      isFetching.current = true;
+      const uid = await resolveMyUserId(token);
+      const me = String(uid || "");
 
-      try {
+      const res = await fetch(`${API}/chat/conversations`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const json = await readJson(res);
+
+      if (json?.success) {
+        const list: Conversation[] = Array.isArray(json.data) ? json.data : [];
+
+        const sellerChats = list
+          .filter((conv) => {
+            // Seller role only — never show buyer-side threads here
+            if (conv.myRole === "seller") return true;
+            const sellerId = asId(conv.seller);
+            return !!me && sellerId === me;
+          })
+          .map((conv) => {
+            const unread =
+              typeof conv.unreadCount === "number" && conv.myRole === "seller"
+                ? conv.unreadCount
+                : conv.unreadBySeller || 0;
+
+            return {
+              ...conv,
+              myRole: "seller" as const,
+              unreadCount: unread,
+            };
+          })
+          // No empty opens; 2-day inactivity
+          .filter(isActiveConversation);
+
+        if (mountedRef.current) setConversations(sellerChats);
+      } else {
         if (mountedRef.current) {
-          setError(null);
-          if (isRefresh) setRefreshing(true);
+          setConversations([]);
+          setError(json?.message || "Failed to load chats");
         }
-
-        const token = await getTokenRef.current();
-        if (!token) {
-          if (mountedRef.current) setError("Please sign in again.");
-          return;
-        }
-
-        let uid = myUserId;
-        if (!uid) {
-          uid = await resolveMyUserId(token);
-        }
-
-        const res = await fetch(`${API}/chat/conversations`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        const json = await readJson(res);
-
-        if (json?.success) {
-          const list: Conversation[] = Array.isArray(json.data) ? json.data : [];
-          const me = String(uid || "");
-
-          const sellerChats = list
-            .filter((conv) => {
-              if (conv.myRole === "seller") return true;
-              const sellerId = String(
-                (conv.seller as any)?._id || conv.seller || ""
-              );
-              return !!me && sellerId === me;
-            })
-            .map((conv) => {
-              const unread =
-                typeof conv.unreadCount === "number" && conv.myRole === "seller"
-                  ? conv.unreadCount
-                  : conv.unreadBySeller || 0;
-
-              return {
-                ...conv,
-                myRole: "seller" as const,
-                unreadCount: unread,
-              };
-            })
-            .filter(isActiveConversation);
-
-          if (mountedRef.current) setConversations(sellerChats);
-        } else {
-          if (mountedRef.current) {
-            setConversations([]);
-            setError(json?.message || "Failed to load chats");
-          }
-        }
-      } catch (err: any) {
-        console.error("Seller chat fetch error:", err);
-        if (mountedRef.current) {
-          const msg = err?.message || "Network error. Please try again.";
-          if (/network/i.test(String(msg))) {
-            setError(
-              "No internet connection. Check your network and try again."
-            );
-          } else {
-            setError(msg);
-          }
-        }
-      } finally {
-        if (mountedRef.current) {
-          setBooted(true);
-          setRefreshing(false);
-        }
-        isFetching.current = false;
       }
-    },
-    [isSignedIn, myUserId, resolveMyUserId]
-  );
+    } catch (err: unknown) {
+      if (mountedRef.current) {
+        const msg = err instanceof Error ? err.message : "Network error. Please try again.";
+        if (/network/i.test(String(msg))) {
+          setError("No internet connection. Check your network and try again.");
+        } else {
+          setError(msg);
+        }
+      }
+    } finally {
+      if (mountedRef.current) {
+        setBooted(true);
+        setRefreshing(false);
+      }
+      isFetching.current = false;
+    }
+  }, [isSignedIn, resolveMyUserId]);
 
+  // Boot once when auth is ready — stable, no loading loop
   useEffect(() => {
     if (!isLoaded) return;
     fetchConversations(false);
-  }, [isLoaded, isSignedIn, fetchConversations]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLoaded, isSignedIn]);
 
-  // Soft poll while page is open
+  // Silent soft poll
   useEffect(() => {
     if (!isSignedIn) return;
     const t = setInterval(() => fetchConversations(false), 15000);
     return () => clearInterval(t);
-  }, [isSignedIn, fetchConversations]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSignedIn]);
 
   const sorted = useMemo(
     () =>
       [...conversations].sort((a, b) => getActivityTime(b) - getActivityTime(a)),
-    [conversations]
+    [conversations],
   );
 
   const getUnread = (conv: Conversation) =>
     typeof conv.unreadCount === "number"
       ? conv.unreadCount
       : conv.unreadBySeller || 0;
+
+  const chatHref = (conv: Conversation) => {
+    const productId = asId(conv.product);
+    const qs = new URLSearchParams();
+    qs.set("from", "seller");
+    if (productId) qs.set("productId", productId);
+    return `/chat/${conv._id}?${qs.toString()}`;
+  };
 
   if (!isLoaded) {
     return (
@@ -265,8 +282,8 @@ export default function SellerMessagesPage() {
           </p>
           <h1 className="text-2xl font-extrabold tracking-tight">Buyer messages</h1>
           <p className="mt-2.5 text-[13px] leading-[19px] text-[#A7ADB8]">
-            Only chats about your products. Threads with no activity for 2 days
-            leave this list automatically.
+            Only chats about your products after a real message is sent. Threads with no
+            activity for 2 days leave this list automatically.
           </p>
         </div>
       </header>
@@ -307,8 +324,9 @@ export default function SellerMessagesPage() {
             </div>
             <p className="text-lg font-bold tracking-tight">No buyer messages</p>
             <p className="mt-2 text-[13px] leading-5 text-[#A7ADB8]">
-              When someone messages you about one of your products, it will
-              appear here — only on this storefront.
+              When a buyer sends a real message about one of your products, it shows
+              here with the product context. Opening chat without sending does not
+              create a thread.
             </p>
           </div>
         ) : (
@@ -316,9 +334,9 @@ export default function SellerMessagesPage() {
             {sorted.map((item) => {
               const unread = getUnread(item);
               const product = item.product;
-              const lastText = item.lastMessage?.text || "No messages yet";
+              const lastText = String(item.lastMessage?.text || "").trim() || "—";
               const time = formatTime(
-                item.lastMessage?.createdAt || item.updatedAt || item.createdAt
+                item.lastMessage?.createdAt || item.updatedAt || item.createdAt,
               );
               const hasUnread = unread > 0;
               const buyerName = item.buyer?.name || "Buyer";
@@ -326,11 +344,9 @@ export default function SellerMessagesPage() {
               return (
                 <li key={item._id}>
                   <Link
-                    href={`/chat/${item._id}`}
+                    href={chatHref(item)}
                     className={`flex items-center border bg-[#11141A] p-3 transition hover:border-[#10B981]/30 ${
-                      hasUnread
-                        ? "border-[#10B981]/40"
-                        : "border-[#252A33]"
+                      hasUnread ? "border-[#10B981]/40" : "border-[#252A33]"
                     }`}
                   >
                     <div className="relative shrink-0">
@@ -361,9 +377,7 @@ export default function SellerMessagesPage() {
                     <div className="ml-3 min-w-0 flex-1">
                       <div className="flex items-center justify-between gap-2">
                         <p className="truncate text-[15px] font-bold">{buyerName}</p>
-                        <span className="shrink-0 text-[11px] text-[#737A86]">
-                          {time}
-                        </span>
+                        <span className="shrink-0 text-[11px] text-[#737A86]">{time}</span>
                       </div>
                       <p className="mt-0.5 truncate text-xs text-[#737A86]">
                         {product?.name || "Product conversation"}

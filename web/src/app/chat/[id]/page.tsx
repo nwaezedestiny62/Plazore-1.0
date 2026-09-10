@@ -109,26 +109,42 @@ export default function ChatPage() {
   const params = useParams<{ id: string }>();
   const search = useSearchParams();
   const conversationId = asId(params?.id);
-  const productHint = search.get("product");
+  const productHint =
+    search.get("productId") || search.get("product") || search.get("product_id") || null;
+  const fromParam = (search.get("from") || "").toLowerCase();
   const router = useRouter();
   const { getToken, isSignedIn, isLoaded } = useAuth();
   const { region: marketplaceRegion } = useMarketplace();
   const displayRegion = marketplaceRegion || DEFAULT_REGION;
+
   const getTokenRef = useRef(getToken);
   getTokenRef.current = getToken;
 
-  const [conversation, setConversation] = useState<Conversation | null>(null);
+  const [conversation, setConversation] = useState<Conversation | null>(() =>
+    conversationId ? readCache(conversationId) : null,
+  );
   const [messages, setMessages] = useState<Message[]>([]);
   const [myUserId, setMyUserId] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [booting, setBooting] = useState(true);
   const [sending, setSending] = useState(false);
   const [text, setText] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [focused, setFocused] = useState(false);
+
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const mounted = useRef(true);
   const inFlight = useRef(false);
+  const hydratedProduct = useRef(false);
+  const myUserIdRef = useRef<string | null>(null);
+  const conversationRef = useRef<Conversation | null>(conversation);
+  const productHintRef = useRef(productHint);
+  const messagesRef = useRef<Message[]>([]);
+
+  myUserIdRef.current = myUserId;
+  conversationRef.current = conversation;
+  productHintRef.current = productHint;
+  messagesRef.current = messages;
 
   useEffect(() => {
     mounted.current = true;
@@ -138,37 +154,42 @@ export default function ChatPage() {
   }, []);
 
   useEffect(() => {
-    if (!conversationId) return;
-    const cached = readCache(conversationId);
-    if (cached) setConversation((prev) => prev || cached);
+    hydratedProduct.current = false;
+    setBooting(true);
+    setError(null);
+    setMessages([]);
+    if (conversationId) {
+      setConversation(readCache(conversationId));
+    } else {
+      setConversation(null);
+    }
   }, [conversationId]);
 
-  const scrollEnd = () => {
+  const goBackSafe = useCallback(() => {
+    if (typeof window !== "undefined" && window.history.length > 1) {
+      router.back();
+      return;
+    }
+    if (fromParam === "product" && productHint) {
+      router.replace(`/product/${productHint}`);
+      return;
+    }
+    if (fromParam === "notif" || fromParam === "notifications") {
+      router.replace("/notifications");
+      return;
+    }
+    if (fromParam === "seller") {
+      router.replace("/seller/chat");
+      return;
+    }
+    router.replace("/messages");
+  }, [fromParam, productHint, router]);
+
+  const scrollEnd = useCallback(() => {
     requestAnimationFrame(() => {
       listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: "smooth" });
     });
-  };
-
-  const resolveMyUserId = useCallback(async (token: string) => {
-    if (myUserId) return myUserId;
-    for (const endpoint of ["/users/me", "/users/profile", "/user/me"]) {
-      try {
-        const res = await fetch(`${API}${endpoint}`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        const json = await res.json();
-        const id = json?.data?._id || json?._id;
-        if (id) {
-          const sid = String(id);
-          if (mounted.current) setMyUserId(sid);
-          return sid;
-        }
-      } catch {
-        /* next */
-      }
-    }
-    return null;
-  }, [myUserId]);
+  }, []);
 
   const resolveRole = useCallback(
     (conv: Conversation | null, uid: string | null): "buyer" | "seller" | null => {
@@ -190,128 +211,177 @@ export default function ChatPage() {
         ...next,
         myRole: resolveRole(next, uid),
       };
-      if (mounted.current) {
-        setConversation((prev) => {
-          const product =
-            pickProduct(merged) || pickProduct(prev) || (productHint ? { _id: productHint } : undefined);
-          const out = { ...prev, ...merged, product: product || merged.product };
-          writeCache(conversationId, out);
-          return out;
-        });
-      }
+      if (!mounted.current) return;
+      setConversation((prev) => {
+        const product =
+          pickProduct(merged) ||
+          pickProduct(prev) ||
+          (productHintRef.current ? { _id: productHintRef.current } : undefined);
+        const out = { ...prev, ...merged, product: product || merged.product };
+        if (conversationId) writeCache(conversationId, out);
+        conversationRef.current = out;
+        return out;
+      });
     },
-    [conversationId, productHint, resolveRole],
+    [conversationId, resolveRole],
   );
 
-  const hydrateProduct = useCallback(
-    async (token: string, uid: string | null) => {
-      const pid = productHint || asId(readCache(conversationId)?.product);
-      if (!pid) return;
+  const loadChat = useCallback(
+    async (opts?: { silent?: boolean }) => {
+      const silent = !!opts?.silent;
+      if (!conversationId) {
+        if (mounted.current) {
+          setBooting(false);
+          setError("Invalid chat.");
+        }
+        return;
+      }
+      if (!isSignedIn) {
+        if (mounted.current) {
+          setBooting(false);
+          setError("Please sign in to view this chat.");
+        }
+        return;
+      }
+      if (inFlight.current) return;
+      inFlight.current = true;
+
       try {
-        const res = await fetch(`${API}/chat/start`, {
-          method: "POST",
+        if (!silent && mounted.current) setError(null);
+
+        const token = await getTokenRef.current();
+        if (!token) {
+          if (mounted.current) {
+            setError("Please sign in again.");
+            setBooting(false);
+          }
+          return;
+        }
+
+        let uid = myUserIdRef.current;
+        if (!uid) {
+          for (const endpoint of ["/users/me", "/users/profile", "/user/me"]) {
+            try {
+              const res = await fetch(`${API}${endpoint}`, {
+                headers: { Authorization: `Bearer ${token}` },
+              });
+              const json = await res.json();
+              const id = json?.data?._id || json?._id;
+              if (id) {
+                uid = String(id);
+                myUserIdRef.current = uid;
+                if (mounted.current) setMyUserId(uid);
+                break;
+              }
+            } catch {
+              /* next */
+            }
+          }
+        }
+
+        const messagesRes = await fetch(`${API}/chat/${conversationId}/messages`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const messagesJson = await messagesRes.json();
+        if (messagesJson?.success && mounted.current) {
+          const serverList: Message[] = (messagesJson.data || []).map((m: Message) => ({
+            ...m,
+            status: "sent" as const,
+          }));
+          const locals = messagesRef.current.filter(
+            (m) => m.status === "sending" || m.status === "failed",
+          );
+          const serverIds = new Set(serverList.map((m) => m._id));
+          const keepLocals = locals.filter((m) => !m._id || !serverIds.has(m._id));
+          setMessages([...serverList, ...keepLocals]);
+        }
+
+        let found: Conversation | null = null;
+        try {
+          const convRes = await fetch(`${API}/chat/conversations`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          const convJson = await convRes.json();
+          if (convJson?.success) {
+            found =
+              (convJson.data || []).find(
+                (c: Conversation) => asId(c._id) === conversationId,
+              ) || null;
+            if (found) mergeConversation(found, uid);
+          }
+        } catch {
+          /* meta optional */
+        }
+
+        const hint = productHintRef.current;
+        const hasProduct =
+          !!pickProduct(found) ||
+          !!pickProduct(conversationRef.current) ||
+          !!pickProduct(readCache(conversationId), hint);
+
+        if ((!hasProduct || hint) && !hydratedProduct.current) {
+          const pid = hint || asId(conversationRef.current?.product) || asId(found?.product);
+          if (pid) {
+            hydratedProduct.current = true;
+            try {
+              const res = await fetch(`${API}/chat/start`, {
+                method: "POST",
+                headers: {
+                  Authorization: `Bearer ${token}`,
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({ productId: pid }),
+              });
+              const json = await res.json();
+              if (json?.success && json.data) mergeConversation(json.data, uid);
+            } catch {
+              hydratedProduct.current = false;
+            }
+          }
+        }
+
+        fetch(`${API}/chat/${conversationId}/read`, {
+          method: "PATCH",
           headers: {
             Authorization: `Bearer ${token}`,
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({ productId: pid }),
-        });
-        const json = await res.json();
-        if (json?.success && json.data) mergeConversation(json.data, uid);
+          body: "{}",
+        }).catch(() => {});
       } catch {
-        /* keep cache */
+        if (mounted.current && !silent) setError("Could not load this chat.");
+      } finally {
+        inFlight.current = false;
+        if (mounted.current) setBooting(false);
       }
     },
-    [conversationId, mergeConversation, productHint],
+    [conversationId, isSignedIn, mergeConversation],
   );
-
-  const loadChat = useCallback(async () => {
-    if (!conversationId) {
-      setLoading(false);
-      setError("Invalid chat.");
-      return;
-    }
-    if (!isSignedIn) {
-      setLoading(false);
-      setError("Please sign in to view this chat.");
-      return;
-    }
-    if (inFlight.current) return;
-    inFlight.current = true;
-    try {
-      setError(null);
-      const token = await getTokenRef.current();
-      if (!token) {
-        setError("Please sign in again.");
-        setLoading(false);
-        return;
-      }
-      const uid = await resolveMyUserId(token);
-
-      const messagesRes = await fetch(`${API}/chat/${conversationId}/messages`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const messagesJson = await messagesRes.json();
-      if (messagesJson?.success && mounted.current) {
-        const list: Message[] = (messagesJson.data || []).map((m: Message) => ({
-          ...m,
-          status: "sent" as const,
-        }));
-        setMessages(list);
-      }
-
-      let found: Conversation | null = null;
-      try {
-        const convRes = await fetch(`${API}/chat/conversations`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        const convJson = await convRes.json();
-        if (convJson?.success) {
-          found =
-            (convJson.data || []).find(
-              (c: Conversation) => asId(c._id) === conversationId,
-            ) || null;
-          if (found) mergeConversation(found, uid);
-        }
-      } catch {
-        /* meta optional */
-      }
-
-      const hasProduct = !!pickProduct(found) || !!pickProduct(readCache(conversationId));
-      if (!hasProduct) await hydrateProduct(token, uid);
-
-      fetch(`${API}/chat/${conversationId}/read`, {
-        method: "PATCH",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: "{}",
-      }).catch(() => {});
-    } catch {
-      if (mounted.current) setError("Could not load this chat.");
-    } finally {
-      inFlight.current = false;
-      if (mounted.current) setLoading(false);
-    }
-  }, [conversationId, hydrateProduct, isSignedIn, mergeConversation, resolveMyUserId]);
 
   useEffect(() => {
     if (!isLoaded) return;
     if (!isSignedIn) {
-      router.replace(`/sign-in?redirect_url=${encodeURIComponent(`/chat/${conversationId}`)}`);
+      router.replace(
+        `/sign-in?redirect_url=${encodeURIComponent(`/chat/${conversationId}`)}`,
+      );
       return;
     }
-    setLoading(true);
-    loadChat();
-  }, [isLoaded, isSignedIn, conversationId, loadChat, router]);
+    loadChat({ silent: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLoaded, isSignedIn, conversationId]);
 
   useEffect(() => {
-    if (loading) return;
-    const t = setInterval(() => loadChat(), 8000);
+    if (!isLoaded || !isSignedIn || !conversationId) return;
+    const t = setInterval(() => {
+      loadChat({ silent: true });
+    }, 8000);
     return () => clearInterval(t);
-  }, [loading, loadChat]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLoaded, isSignedIn, conversationId]);
 
   useEffect(() => {
     scrollEnd();
-  }, [messages.length]);
+  }, [messages.length, scrollEnd]);
 
   const handleSend = async () => {
     if (!text.trim() || sending || !conversationId) return;
@@ -324,10 +394,10 @@ export default function ChatPage() {
       _id: localId,
       localId,
       text: messageText,
-      sender: { _id: myUserId || "me" },
+      sender: { _id: myUserIdRef.current || "me" },
       createdAt: new Date().toISOString(),
       status: "sending",
-      readBy: myUserId ? [myUserId] : [],
+      readBy: myUserIdRef.current ? [myUserIdRef.current] : [],
     };
     setMessages((prev) => [...prev, optimistic]);
     scrollEnd();
@@ -342,7 +412,10 @@ export default function ChatPage() {
       const json = await res.json();
       if (json?.success && json.data) {
         const real: Message = { ...json.data, status: "sent" };
-        if (real.sender?._id) setMyUserId(String(real.sender._id));
+        if (real.sender?._id) {
+          myUserIdRef.current = String(real.sender._id);
+          setMyUserId(String(real.sender._id));
+        }
         setMessages((prev) => prev.map((m) => (m.localId === localId ? real : m)));
       } else {
         throw new Error(json?.message || "Failed to send");
@@ -423,19 +496,21 @@ export default function ChatPage() {
       !!otherId &&
       Array.isArray(message.readBy) &&
       message.readBy.some((id) => String(id) === String(otherId));
-    return <CheckCheck className={`h-3.5 w-3.5 ${readByOther ? "text-[#10B981]" : "text-white/45"}`} />;
+    return (
+      <CheckCheck className={`h-3.5 w-3.5 ${readByOther ? "text-[#10B981]" : "text-white/45"}`} />
+    );
   };
 
   const product = pickProduct(conversation, productHint);
 
-  if (!isLoaded || loading) return <OrbLoader />;
+  if (!isLoaded || booting) return <OrbLoader />;
 
   return (
     <div className="flex h-[100dvh] min-h-0 flex-col overflow-hidden bg-[#090B0F] text-[#F5F7FA]">
       <header className="flex shrink-0 items-center gap-2.5 border-b border-[#252A33] px-3 py-3 sm:px-5">
         <button
           type="button"
-          onClick={() => router.push("/messages")}
+          onClick={goBackSafe}
           className="flex h-10 w-10 shrink-0 items-center justify-center border border-[#252A33] bg-[#11141A]"
           aria-label="Back"
         >
@@ -443,7 +518,11 @@ export default function ChatPage() {
         </button>
         {otherParty.image ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={otherParty.image} alt="" className="h-10 w-10 shrink-0 object-cover bg-[#171B22]" />
+          <img
+            src={otherParty.image}
+            alt=""
+            className="h-10 w-10 shrink-0 object-cover bg-[#171B22]"
+          />
         ) : (
           <div className="flex h-10 w-10 shrink-0 items-center justify-center border border-[#252A33] bg-[#171B22]">
             <User className="h-[18px] w-[18px] text-[#737A86]" />
@@ -469,7 +548,11 @@ export default function ChatPage() {
         >
           {product.images?.[0] ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={product.images[0]} alt="" className="h-12 w-12 shrink-0 object-cover bg-[#171B22]" />
+            <img
+              src={product.images[0]}
+              alt=""
+              className="h-12 w-12 shrink-0 object-cover bg-[#171B22]"
+            />
           ) : (
             <div className="flex h-12 w-12 shrink-0 items-center justify-center bg-[#171B22]">
               <ImageIcon className="h-[18px] w-[18px] text-[#737A86]" />
@@ -491,8 +574,8 @@ export default function ChatPage() {
           <button
             type="button"
             onClick={() => {
-              setLoading(true);
-              loadChat();
+              setBooting(true);
+              loadChat({ silent: false });
             }}
             className="mt-2 text-[13px] font-semibold text-[#3B82F6]"
           >
@@ -510,8 +593,8 @@ export default function ChatPage() {
             <h2 className="text-[17px] font-bold">Start the conversation</h2>
             <p className="mt-2 max-w-sm text-[13px] leading-5 text-[#A7ADB8]">
               {product?.name
-                ? `Ask about ${product.name} — condition, shipping, or anything else.`
-                : "Ask about condition, shipping, or anything else about this piece."}
+                ? `Ask about ${product.name} — condition, shipping, or anything else. This chat only appears in both inboxes after the first message is sent.`
+                : "Ask about condition, shipping, or anything else. This chat only appears in both inboxes after the first message is sent."}
             </p>
           </div>
         ) : (
@@ -522,14 +605,18 @@ export default function ChatPage() {
                 key={item.localId || item._id}
                 type="button"
                 onClick={() => item.status === "failed" && retryFailed(item.localId)}
-                className={`mb-3 flex max-w-[80%] flex-col ${mine ? "ml-auto items-end" : "mr-auto items-start"}`}
+                className={`mb-3 flex max-w-[80%] flex-col ${
+                  mine ? "ml-auto items-end" : "mr-auto items-start"
+                }`}
               >
                 <div
                   className={`px-3.5 py-2.5 ${
                     mine ? "bg-[#3B82F6]" : "border border-[#252A33] bg-[#11141A]"
                   }`}
                 >
-                  <p className="text-left text-[15px] leading-[21px] whitespace-pre-wrap">{item.text}</p>
+                  <p className="text-left text-[15px] leading-[21px] whitespace-pre-wrap">
+                    {item.text}
+                  </p>
                 </div>
                 <div className={`mt-1 flex items-center gap-1 ${mine ? "justify-end" : ""}`}>
                   <span className="text-[10px] text-[#737A86]">

@@ -1,15 +1,20 @@
-import express from 'express';
-import { createOrder, getAllOrders, getOrder, getOrders, updateOrderStatus } from '../controllers/ordersController.js';
-import { authorize, protect } from '../middleware/auth.js';
+import express from "express";
+import { protect, authorize } from "../middleware/auth.js";
+import { createOrder, getMyOrders, getOrder, getSellerOrders, shipOrder, deliverOrder, confirmDelivery, reportDeliveryIssue, getAllOrders, cancelOrderBySeller, // ← import this from ordersController
+ } from "../controllers/ordersController.js";
 const OrderRouter = express.Router();
-// Get user orders
-OrderRouter.get('/', protect, getOrders);
-// Get single order
-OrderRouter.get('/:id', protect, getOrder);
-// Create order from cart
-OrderRouter.post('/', protect, createOrder);
-// Update order status (Admin)
-OrderRouter.put('/:id/status', protect, authorize("admin"), updateOrderStatus);
-// Get all orders
-OrderRouter.get('/:id/all', protect, authorize("admin"), getAllOrders);
+// Specific paths FIRST (before /:id)
+OrderRouter.post("/", protect, createOrder);
+OrderRouter.get("/", protect, getMyOrders);
+OrderRouter.get("/seller/my", protect, authorize("seller", "admin"), getSellerOrders);
+OrderRouter.get("/admin/all", protect, authorize("admin"), getAllOrders);
+// Param routes AFTER
+OrderRouter.get("/:id", protect, getOrder);
+OrderRouter.put("/:id/ship", protect, authorize("seller", "admin"), shipOrder);
+// after deliver route:
+OrderRouter.put("/:id/confirm-delivery", protect, confirmDelivery);
+OrderRouter.put("/:id/report-delivery-issue", protect, reportDeliveryIssue);
+OrderRouter.put("/:id/deliver", protect, authorize("seller", "admin"), deliverOrder);
+// NEW — seller cancel
+OrderRouter.put("/:id/cancel", protect, authorize("seller", "admin"), cancelOrderBySeller);
 export default OrderRouter;
