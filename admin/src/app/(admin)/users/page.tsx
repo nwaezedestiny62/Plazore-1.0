@@ -27,6 +27,11 @@ import {
 } from "@/components/ui";
 import { REGION_LIST } from "@/lib/region";
 import { FULFILLMENT_COUNTRIES, getStatesForCountry } from "@/lib/location";
+import {
+  ACTIVITY_CONFIG,
+  ACTIVITY_SPOT_OPTIONS,
+  getActivityState,
+} from "@/lib/activityConfig";
 
 const poppins = Poppins({
   subsets: ["latin"],
@@ -114,16 +119,6 @@ function fmtDate(d?: string) {
   } catch {
     return "—";
   }
-}
-
-function activityState(lastSeen?: string) {
-  if (!lastSeen) return { label: "Unknown", tone: "neutral" as const };
-  const hrs = (Date.now() - new Date(lastSeen).getTime()) / 3600000;
-  if (Number.isNaN(hrs)) return { label: "Unknown", tone: "neutral" as const };
-  if (hrs < 24) return { label: "Active", tone: "green" as const };
-  if (hrs < 24 * 7) return { label: "Quiet", tone: "warn" as const };
-  if (hrs < 24 * 30) return { label: "Idle", tone: "neutral" as const };
-  return { label: "Dormant", tone: "error" as const };
 }
 
 function Field({
@@ -463,7 +458,7 @@ export default function UsersPage() {
   const startContactThroughPlazore = async () => {
     if (!detail?.user || contactBusy || showOffline) return;
 
-    const u = detail.user;
+    const user = detail.user;
     const msg = contactMessage.trim();
     if (!msg) {
       setContactError("Write a short message.");
@@ -491,15 +486,15 @@ export default function UsersPage() {
       await adminFetch(`/admin/contacts/reach-out`, token, {
         method: "POST",
         body: JSON.stringify({
-          targetUserId: u._id,
-          contactAs: u.role === "seller" ? "seller" : "buyer",
-          contextType: u.role === "seller" ? "seller" : "buyer",
+          targetUserId: user._id,
+          contactAs: user.role === "seller" ? "seller" : "buyer",
+          contextType: user.role === "seller" ? "seller" : "buyer",
           category: "account",
           subject:
             contactSubject.trim() ||
-            `Message from Plazore · ${u.storeName || u.name || "Account"}`,
+            `Message from Plazore · ${user.storeName || user.name || "Account"}`,
           message: msg,
-          storeId: u.role === "seller" ? u._id : undefined,
+          storeId: user.role === "seller" ? user._id : undefined,
           allowsReply: contactAllowsReply,
         }),
       });
@@ -514,7 +509,13 @@ export default function UsersPage() {
   };
 
   const u = detail?.user;
-  const lastSeen = u?.lastSeenAt || u?.updatedAt;
+  const detailActivity = u
+    ? getActivityState({
+        lastSeenAt: u.lastSeenAt,
+        updatedAt: u.updatedAt,
+      })
+    : null;
+
   const filtersActive = !!(
     role ||
     region ||
@@ -574,8 +575,14 @@ export default function UsersPage() {
               Users & sellers
             </h1>
             <p className="mt-2 max-w-xl text-sm leading-relaxed text-[#A7ADB8]">
-              Search, filter, and inspect accounts. Contact is always mediated
-              by Plazore. You choose whether the user can text back.
+              Search, filter, and inspect accounts. Activity is computed from{" "}
+              <span className="text-[#F5F7FA]">lastSeenAt</span>
+              {ACTIVITY_CONFIG.FALLBACK_TO_UPDATED_AT
+                ? " (falls back to updatedAt if missing)"
+                : ""}
+              . Thresholds: active {ACTIVITY_CONFIG.ACTIVE_HOURS}h · quiet{" "}
+              {ACTIVITY_CONFIG.QUIET_HOURS / 24}d · idle{" "}
+              {ACTIVITY_CONFIG.IDLE_HOURS / 24}d+.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -752,13 +759,11 @@ export default function UsersPage() {
               onChange={(e) => setSpot(e.target.value)}
               disabled={showOffline && !cacheRef.current}
             >
-              <option value="">All accounts</option>
-              <option value="active">Active (24h)</option>
-              <option value="unverified">Unverified sellers</option>
-              <option value="suspended">Suspended sellers</option>
-              <option value="new">Joined last 7 days</option>
-              <option value="dormant">Dormant (30d+)</option>
-              <option value="no-region">Missing region</option>
+              {ACTIVITY_SPOT_OPTIONS.map((o) => (
+                <option key={o.value || "all"} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
             </Select>
           </div>
         </div>
@@ -786,7 +791,10 @@ export default function UsersPage() {
       ) : view === "grid" ? (
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {items.map((row) => {
-            const act = activityState(row.lastSeenAt);
+            const act = getActivityState({
+              lastSeenAt: row.lastSeenAt,
+              updatedAt: row.updatedAt,
+            });
             return (
               <button
                 key={row._id}
@@ -829,8 +837,9 @@ export default function UsersPage() {
                   )}
                 </div>
                 <p className="mt-3 text-[11px] text-[#737A86]">
-                  Last seen {fmtDate(row.lastSeenAt)}
+                  {act.relative}
                   {row.lastSeenPlatform ? ` · ${row.lastSeenPlatform}` : ""}
+                  {act.source === "updatedAt" ? " · via updatedAt" : ""}
                 </p>
               </button>
             );
@@ -852,7 +861,10 @@ export default function UsersPage() {
             </thead>
             <tbody>
               {items.map((row) => {
-                const act = activityState(row.lastSeenAt);
+                const act = getActivityState({
+                  lastSeenAt: row.lastSeenAt,
+                  updatedAt: row.updatedAt,
+                });
                 const loc = [
                   row.shippingDefaults?.address?.state,
                   row.shippingDefaults?.address?.country,
@@ -901,13 +913,23 @@ export default function UsersPage() {
                     </td>
                     <td className="px-4 py-3 text-[#A7ADB8]">{loc || "—"}</td>
                     <td className="px-4 py-3">
-                      <Badge tone={act.tone}>{act.label}</Badge>
+                      <div className="flex flex-col gap-0.5">
+                        <Badge tone={act.tone}>{act.label}</Badge>
+                        <span className="text-[10px] text-[#737A86]">
+                          {act.relative}
+                        </span>
+                      </div>
                     </td>
                     <td className="px-4 py-3 text-xs text-[#A7ADB8]">
-                      {fmtDate(row.lastSeenAt)}
+                      {row.lastSeenAt ? fmtDate(row.lastSeenAt) : "—"}
                       {row.lastSeenPlatform
                         ? ` · ${row.lastSeenPlatform}`
                         : ""}
+                      {!row.lastSeenAt && act.source === "updatedAt" ? (
+                        <span className="block text-[10px] text-[#737A86]">
+                          fallback updatedAt
+                        </span>
+                      ) : null}
                     </td>
                     <td className="px-4 py-3 text-[#A7ADB8]">
                       {row.createdAt
@@ -947,7 +969,8 @@ export default function UsersPage() {
       {health && (
         <div
           className={cn(
-            "fixed bottom-4 right-4 z-30 max-w-[min(100vw-2rem,280px)] border px-3 py-2.5 shadow-2xl backdrop-blur-md",
+            "fixed bottom-4 left-4 z-30 max-w-[min(100vw-2rem,280px)] border px-3 py-2.5 shadow-2xl backdrop-blur-md",
+            "max-sm:bottom-16",
             health.tone === "green" &&
               "border-[#00E575]/30 bg-[#041412]/95 text-[#00E575]",
             health.tone === "warn" &&
@@ -964,7 +987,8 @@ export default function UsersPage() {
           </p>
           <p className="mt-1 text-[10px] leading-relaxed opacity-80">
             {health.active24h} active · {health.quiet7d} quiet ·{" "}
-            {health.dormant} dormant · {health.total} accounts
+            {health.idle30d} idle · {health.dormant} dormant · {health.total}{" "}
+            accounts
           </p>
         </div>
       )}
@@ -1005,7 +1029,7 @@ export default function UsersPage() {
 
         <div className="flex-1 overflow-y-auto px-4 py-5">
           {detailLoading && !detail && <OrbLoader label="Loading profile" />}
-          {detail && u && (
+          {detail && u && detailActivity && (
             <div className="space-y-6">
               <div className="flex gap-3">
                 <Avatar name={u.name} image={u.image} size="lg" />
@@ -1029,8 +1053,8 @@ export default function UsersPage() {
                     <Badge tone="neutral">
                       {u.marketplaceRegion || "No region"}
                     </Badge>
-                    <Badge tone={activityState(lastSeen).tone}>
-                      {activityState(lastSeen).label}
+                    <Badge tone={detailActivity.tone}>
+                      {detailActivity.label}
                     </Badge>
                   </div>
                 </div>
@@ -1041,13 +1065,21 @@ export default function UsersPage() {
                   <p className="text-[10px] uppercase tracking-[0.14em] text-[#737A86]">
                     Last seen
                   </p>
-                  <p className="mt-1 text-sm">{fmtDate(lastSeen)}</p>
+                  <p className="mt-1 text-sm">
+                    {u.lastSeenAt ? fmtDate(u.lastSeenAt) : "—"}
+                  </p>
                   <p className="mt-1 text-[11px] text-[#737A86]">
+                    {detailActivity.relative}
                     {u.lastSeenPlatform === "app"
-                      ? "Mobile app"
+                      ? " · Mobile app"
                       : u.lastSeenPlatform === "web"
-                        ? "Web"
-                        : "Profile activity"}
+                        ? " · Web"
+                        : u.lastSeenPlatform === "admin"
+                          ? " · Admin"
+                          : ""}
+                    {detailActivity.source === "updatedAt"
+                      ? " · from updatedAt"
+                      : ""}
                   </p>
                 </div>
                 <div className="border border-[#252A33] bg-[#11141A] p-3">

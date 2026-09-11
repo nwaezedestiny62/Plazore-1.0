@@ -23,6 +23,7 @@ import SavedStoreRouter from "./routes/savedStoreRoutes.js";
 import PaymentMethodRouter from "./routes/paymentMethodRoutes.js";
 import ModerationRouter from "./routes/moderationRoutes.js";
 import AnnouncementRouter from "./routes/announcementRoutes.js";
+import { telemetryMiddleware } from "./middleware/telemetry.js";
 import ContactRouter from "./routes/contactRoutes.js";
 
 const app = express();
@@ -78,6 +79,7 @@ app.use("/api/payment-methods", PaymentMethodRouter);
 app.use("/api/contact", ContactRouter);
 app.use("/api/content", ContentRouter);
 app.use("/api/announcements", AnnouncementRouter);
+app.use(telemetryMiddleware);
 
 // Single moderation mount (covers /me + admin actions)
 app.use("/api/moderation", ModerationRouter);

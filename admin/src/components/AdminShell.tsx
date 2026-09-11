@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { UserButton } from "@clerk/nextjs";
 import { useState } from "react";
 import { Menu, X } from "lucide-react";
+import { PerformanceFloat } from "@/components/PerformanceFloat";
 
 const NAV = [
   {
@@ -28,6 +29,12 @@ const NAV = [
     ],
   },
   {
+    section: "Database Performance",
+    items: [
+      { href: "/performance", label: "Data & Plazore Performance" },
+    ],
+  },
+  {
     section: "Intelligence",
     items: [
       { href: "/showroom", label: "Showroom" },
@@ -40,7 +47,6 @@ const NAV = [
     items: [
       { href: "/content", label: "Content" },
       { href: "/announcements", label: "Announcements" },
-      { href: "/experience", label: "Music" },
     ],
   },
 ];
@@ -126,6 +132,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
 
         <main className="min-h-[calc(100dvh-3.5rem)] min-w-0 flex-1 p-4 md:p-6 lg:p-8">
           {children}
+          <PerformanceFloat />
         </main>
       </div>
     </div>

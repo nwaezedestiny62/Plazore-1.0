@@ -18,6 +18,12 @@ import {
   updateAdminReport,
   pingPresence,
 } from "../controllers/adminController.js";
+import {
+  getPerformanceOverview,
+  getPerformanceHealthSummary,
+  updateIncidentStatus,
+  ingestClientError,
+} from "../controllers/performanceController.js";
 import { uploadBannerImage } from "../controllers/contentController.js";
 import upload from "../middleware/upload.js";
 import {
@@ -100,6 +106,14 @@ AdminRouter.get("/announcements", ...adminOnly, getAdminAnnouncements);
 AdminRouter.post("/announcements", ...adminOnly, createAdminAnnouncement);
 AdminRouter.get("/announcements/:id", ...adminOnly, getAdminAnnouncement);
 AdminRouter.patch("/announcements/:id", ...adminOnly, updateAdminAnnouncement);
+AdminRouter.get("/performance", ...adminOnly, getPerformanceOverview);
+AdminRouter.get("/performance/summary", ...adminOnly, getPerformanceHealthSummary);
+AdminRouter.patch(
+  "/performance/incidents/:id",
+  ...adminOnly,
+  updateIncidentStatus
+);
+AdminRouter.post("/performance/client-error", protect, ingestClientError);
 AdminRouter.post(
   "/announcements/:id/publish",
   ...adminOnly,

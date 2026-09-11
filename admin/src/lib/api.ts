@@ -9,6 +9,7 @@ export async function adminFetch<T>(
     ...init,
     headers: {
       "Content-Type": "application/json",
+      "x-plazore-surface": "admin",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(init?.headers || {}),
     },
