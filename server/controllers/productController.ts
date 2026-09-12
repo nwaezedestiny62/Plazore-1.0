@@ -8,27 +8,61 @@ import { trackProductPerformance } from "../utils/performance.js";
 import cloudinary from "../config/cloudinary.js";
 import { enqueueProductAI } from "../services/jobs/generateProductAI.js";
 import { generateProductFingerprint } from "../services/plazoreAI/index.js";
-import { generateShowroom, rankProductsForSearch } from "../services/showroomRanker.js";
+import {
+  generateShowroom,
+  rankProductsForSearch,
+} from "../services/showroomRanker.js";
 
 const getUser = (req: Request) => (req as any).user;
 
-/** Public seller fields — includes shippingDefaults for Shipping Route */
 const SELLER_PUBLIC_FIELDS =
   "name storeName storeLogo storeDescription isSellerVerified marketplaceRegion shippingDefaults";
 
-/** Parse structured fulfillment location from form body (multipart or JSON) */
+/** Parse JSON that may arrive as a string from multipart FormData */
+function parseJsonField<T = any>(raw: unknown, fallback: T): T {
+  if (raw === undefined || raw === null || raw === "") return fallback;
+  if (typeof raw === "object") return raw as T;
+  if (typeof raw === "string") {
+    try {
+      return JSON.parse(raw) as T;
+    } catch {
+      return fallback;
+    }
+  }
+  return fallback;
+}
+
 function parseFulfillmentLocation(body: any) {
+  // Prefer nested JSON blob from edit form
+  if (body.fulfillmentLocation !== undefined) {
+    const fl = parseJsonField<any>(body.fulfillmentLocation, null);
+    if (fl && typeof fl === "object") {
+      const countryCode = String(fl.countryCode || "").trim();
+      const country = String(fl.country || "").trim();
+      const stateCode = String(fl.stateCode || "").trim();
+      const state = String(fl.state || "").trim();
+      const city = String(fl.city || "").trim();
+      if (countryCode && country && city) {
+        return {
+          countryCode,
+          country,
+          stateCode,
+          state,
+          city,
+          displayLabel:
+            String(fl.displayLabel || "").trim() || `${city}, ${country}`,
+        };
+      }
+    }
+  }
+
   const countryCode = String(body.fulfillmentCountryCode || "").trim();
   const country = String(body.fulfillmentCountry || "").trim();
   const stateCode = String(body.fulfillmentStateCode || "").trim();
   const state = String(body.fulfillmentState || "").trim();
   const city = String(body.fulfillmentCity || "").trim();
 
-  if (!countryCode || !country || !city) {
-    return null;
-  }
-
-  const displayLabel = `${city}, ${country}`;
+  if (!countryCode || !country || !city) return null;
 
   return {
     countryCode,
@@ -36,11 +70,10 @@ function parseFulfillmentLocation(body: any) {
     stateCode,
     state,
     city,
-    displayLabel,
+    displayLabel: `${city}, ${country}`,
   };
 }
 
-/** Client sends specifications as JSON string or object */
 function parseSpecifications(body: any): Record<string, string> {
   let raw = body?.specifications;
   if (!raw) return {};
@@ -66,7 +99,6 @@ function parseSpecifications(body: any): Record<string, string> {
   return out;
 }
 
-/** Support both upload.array (legacy) and upload.fields */
 function getImageFiles(req: Request): Express.Multer.File[] {
   const f = req.files as
     | { [fieldname: string]: Express.Multer.File[] }
@@ -90,11 +122,17 @@ function getDocumentFiles(req: Request): Express.Multer.File[] {
 function uploadToCloudinary(
   buffer: Buffer,
   folder: string,
-  resourceType: "image" | "auto" = "image"
+  resourceType: "image" | "raw" | "auto" = "image"
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     const stream = cloudinary.uploader.upload_stream(
-      { folder, resource_type: resourceType },
+      {
+        folder,
+        resource_type: resourceType,
+        // Keep original filename accessible for docs
+        use_filename: true,
+        unique_filename: true,
+      },
       (error, result) => {
         if (error) reject(error);
         else if (!result?.secure_url) {
@@ -108,37 +146,50 @@ function uploadToCloudinary(
   });
 }
 
-/** Upload verification docs — store only name, type, secureUrl */
+function isImageMime(m?: string) {
+  return !!m && m.startsWith("image/");
+}
+
+/** Read documentTypes[i] / documentNames[i] from multipart body safely */
+function fieldAt(body: any, base: string, i: number): string {
+  if (Array.isArray(body[base])) return String(body[base][i] ?? "");
+  if (body[base] && typeof body[base] === "object") {
+    return String(body[base][i] ?? body[base][String(i)] ?? "");
+  }
+  const bracket = body[`${base}[${i}]`];
+  if (bracket != null) return String(bracket);
+  if (i === 0 && typeof body[base] === "string") return body[base];
+  return "";
+}
+
+/**
+ * Upload verification docs.
+ * Images → resource_type image; PDFs/other → raw so secure_url opens in browser.
+ */
 async function uploadVerificationDocs(
   files: Express.Multer.File[],
   body: any
 ): Promise<{ documentName: string; documentType: string; secureUrl: string }[]> {
   if (!files || files.length === 0) return [];
 
-  const types = Array.isArray(body.documentTypes)
-    ? body.documentTypes
-    : body.documentTypes
-      ? [body.documentTypes]
-      : [];
-
-  const names = Array.isArray(body.documentNames)
-    ? body.documentNames
-    : body.documentNames
-      ? [body.documentNames]
-      : [];
-
   const results = await Promise.all(
     files.map(async (file, i) => {
+      const resourceType: "image" | "raw" = isImageMime(file.mimetype)
+        ? "image"
+        : "raw";
+
       const secureUrl = await uploadToCloudinary(
         file.buffer,
         "plazore/documents",
-        "auto"
+        resourceType
       );
+
+      const nameFromBody = fieldAt(body, "documentNames", i).trim();
+      const typeFromBody = fieldAt(body, "documentTypes", i).trim();
+
       return {
-        documentName: String(
-          names[i] || file.originalname || `Document ${i + 1}`
-        ).trim(),
-        documentType: String(types[i] || "other").trim(),
+        documentName: nameFromBody || file.originalname || `Document ${i + 1}`,
+        documentType: typeFromBody || "other",
         secureUrl,
       };
     })
@@ -164,7 +215,8 @@ function parseExistingDocuments(body: any, fallback: any[] = []): any[] {
           d &&
           typeof d.documentName === "string" &&
           typeof d.documentType === "string" &&
-          typeof d.secureUrl === "string"
+          typeof d.secureUrl === "string" &&
+          String(d.secureUrl).startsWith("http")
       )
       .map((d) => ({
         documentName: String(d.documentName).trim(),
@@ -176,8 +228,64 @@ function parseExistingDocuments(body: any, fallback: any[] = []): any[] {
   }
 }
 
+/** existingImages from FormData is almost always a JSON string — never treat the whole string as one URL */
+function parseExistingImageUrls(body: any): string[] {
+  const raw =
+    body.existingImages !== undefined
+      ? body.existingImages
+      : body.keepImages !== undefined
+        ? body.keepImages
+        : body.imagesToKeep;
+
+  if (raw === undefined || raw === null || raw === "") return [];
+
+  let list: unknown = raw;
+
+  if (typeof raw === "string") {
+    const trimmed = raw.trim();
+    if (!trimmed) return [];
+    if (trimmed.startsWith("[")) {
+      try {
+        list = JSON.parse(trimmed);
+      } catch {
+        return trimmed.startsWith("http") ? [trimmed] : [];
+      }
+    } else if (trimmed.startsWith("http")) {
+      return [trimmed];
+    } else {
+      return [];
+    }
+  }
+
+  if (!Array.isArray(list)) return [];
+
+  return list
+    .map((u) => {
+      if (typeof u === "string") return u.trim();
+      if (u && typeof u === "object") {
+        const o = u as any;
+        return String(
+          o.secure_url || o.secureUrl || o.url || o.uri || ""
+        ).trim();
+      }
+      return "";
+    })
+    .filter((u) => u.startsWith("http"));
+}
+
+function dedupeUrls(urls: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const u of urls) {
+    if (!u || seen.has(u)) continue;
+    seen.add(u);
+    out.push(u);
+  }
+  return out;
+}
+
 // ======================================================
-// PUBLIC - Get products (regional prioritization + sort)
+// PUBLIC - Get products
 // ======================================================
 export const getProducts = async (req: Request, res: Response) => {
   try {
@@ -188,15 +296,11 @@ export const getProducts = async (req: Request, res: Response) => {
 
     const baseQuery: any = { isActive: true };
 
-    if (req.query.seller) {
-      baseQuery.seller = req.query.seller;
-    }
-    if (req.query.category) {
+    if (req.query.seller) baseQuery.seller = req.query.seller;
+    if (req.query.category)
       baseQuery.category = String(req.query.category).trim();
-    }
-    if (req.query.subCategory) {
+    if (req.query.subCategory)
       baseQuery.subCategory = String(req.query.subCategory).trim();
-    }
 
     const localQuery = {
       ...baseQuery,
@@ -212,14 +316,8 @@ export const getProducts = async (req: Request, res: Response) => {
       region: { $nin: [buyerRegion, null] },
     };
 
-    // Default sort: featured first, then newest
     let mongoSort: any = { isFeatured: -1, createdAt: -1 };
-
-    if (sortParam === "newest") {
-      mongoSort = { createdAt: -1 };
-    }
-    // For "trending" we still fetch with a reasonable sort,
-    // then re-rank in memory using ProductPerformance + wishlistCount
+    if (sortParam === "newest") mongoSort = { createdAt: -1 };
 
     const [localProducts, total, localCount] = await Promise.all([
       Product.find(localQuery)
@@ -242,12 +340,9 @@ export const getProducts = async (req: Request, res: Response) => {
         .sort(mongoSort)
         .limit(remaining)
         .lean();
-
       products = [...products, ...otherProducts];
     }
 
-    // ── Trending re-rank (real performance data + wishlist) ──
-        // ── Rank by commerce / interest / search when requested ──
     const wantsRank =
       sortParam === "trending" ||
       sortParam === "relevant" ||
@@ -304,11 +399,21 @@ export const getProduct = async (req: Request, res: Response) => {
         .json({ success: false, message: "Product not found" });
     }
 
-    // Normalize Map → plain object for client
     if (product.specifications instanceof Map) {
       (product as any).specifications = Object.fromEntries(
         product.specifications as Map<string, string>
       );
+    }
+
+    // Ensure docs always expose openable URLs
+    if (Array.isArray((product as any).verificationDocuments)) {
+      (product as any).verificationDocuments = (
+        product as any
+      ).verificationDocuments.map((d: any) => ({
+        documentName: d.documentName || d.name || "Document",
+        documentType: d.documentType || d.type || "other",
+        secureUrl: d.secureUrl || d.url || "",
+      }));
     }
 
     const actor = getUser(req);
@@ -341,7 +446,6 @@ export const createProduct = async (req: Request, res: Response) => {
       });
     }
 
-    // ── Images ──
     let images: string[] = [];
     const imageFiles = getImageFiles(req);
 
@@ -372,7 +476,6 @@ export const createProduct = async (req: Request, res: Response) => {
       });
     }
 
-    // ── Verification documents (optional) ──
     let verificationDocuments: {
       documentName: string;
       documentType: string;
@@ -392,6 +495,22 @@ export const createProduct = async (req: Request, res: Response) => {
       });
     }
 
+    // Shipping: JSON blob or flat
+    let shippingMethod = req.body.shippingMethod;
+    let courierCompany = req.body.courierCompany || req.body.courier;
+    let deliveryFee = req.body.deliveryFee;
+
+    if (req.body.shipping !== undefined) {
+      const ship = parseJsonField<any>(req.body.shipping, null);
+      if (ship && typeof ship === "object") {
+        shippingMethod = ship.method ?? shippingMethod;
+        courierCompany =
+          ship.courierCompany || ship.courier || courierCompany;
+        deliveryFee =
+          ship.deliveryFee !== undefined ? ship.deliveryFee : deliveryFee;
+      }
+    }
+
     const {
       name,
       description,
@@ -400,9 +519,6 @@ export const createProduct = async (req: Request, res: Response) => {
       category,
       subCategory,
       brand,
-      shippingMethod,
-      courierCompany,
-      deliveryFee,
     } = req.body;
 
     if (!name?.trim() || !description?.trim()) {
@@ -456,7 +572,10 @@ export const createProduct = async (req: Request, res: Response) => {
     const seller = await User.findById(user._id)
       .select("marketplaceRegion")
       .lean();
-    const region = seller?.marketplaceRegion || "NG";
+    const region =
+      String(req.body.region || "").trim() ||
+      seller?.marketplaceRegion ||
+      "NG";
 
     const product = await Product.create({
       name: String(name).trim(),
@@ -482,7 +601,6 @@ export const createProduct = async (req: Request, res: Response) => {
       verificationDocuments,
     });
 
-    // ── Plazore AI: enqueue generation (non-blocking) ──
     enqueueProductAI(String(product._id));
 
     res.status(201).json({ success: true, data: product });
@@ -525,24 +643,18 @@ export const updateProduct = async (req: Request, res: Response) => {
       });
     }
 
-    // ── Images: keep existing + optional new uploads ──
-    let images: string[] = [];
-
-    if (req.body.existingImages) {
-      images = Array.isArray(req.body.existingImages)
-        ? [...req.body.existingImages]
-        : [req.body.existingImages];
-    }
-
+    // ── Images: parse kept URLs correctly + optional new uploads ──
+    const keptUrls = parseExistingImageUrls(req.body);
     const imageFiles = getImageFiles(req);
+
+    let uploadedUrls: string[] = [];
     if (imageFiles.length > 0) {
       try {
-        const newImages = await Promise.all(
+        uploadedUrls = await Promise.all(
           imageFiles.map((file) =>
             uploadToCloudinary(file.buffer, "plazore/products", "image")
           )
         );
-        images = [...images, ...newImages];
       } catch (uploadErr: any) {
         console.error("Cloudinary image upload error:", uploadErr);
         return res.status(502).json({
@@ -550,6 +662,39 @@ export const updateProduct = async (req: Request, res: Response) => {
           message: "Image upload failed. Please try again.",
         });
       }
+    }
+
+    const orderRaw = parseJsonField<any[]>(req.body.imageOrder, []);
+    let finalImages: string[] = [];
+
+    if (Array.isArray(orderRaw) && orderRaw.length > 0) {
+      for (const step of orderRaw) {
+        if (!step || typeof step !== "object") continue;
+        if (step.kind === "existing" && typeof step.url === "string") {
+          const u = step.url.trim();
+          if (u.startsWith("http")) finalImages.push(u);
+        } else if (step.kind === "new") {
+          const idx = Number(step.index);
+          if (Number.isFinite(idx) && uploadedUrls[idx]) {
+            finalImages.push(uploadedUrls[idx]);
+          }
+        }
+      }
+      for (const u of uploadedUrls) {
+        if (!finalImages.includes(u)) finalImages.push(u);
+      }
+    } else {
+      finalImages = [...keptUrls, ...uploadedUrls];
+    }
+
+    finalImages = dedupeUrls(finalImages);
+
+    const coverRaw = String(req.body.coverImage || "").trim();
+    if (coverRaw.startsWith("http")) {
+      finalImages = [
+        coverRaw,
+        ...finalImages.filter((u) => u !== coverRaw),
+      ];
     }
 
     const updates: any = {};
@@ -592,81 +737,125 @@ export const updateProduct = async (req: Request, res: Response) => {
     if (req.body.brand !== undefined) {
       updates.brand = String(req.body.brand).trim();
     }
+    if (req.body.region !== undefined) {
+      updates.region = String(req.body.region).trim() || product.region;
+    }
 
-    // ── Visibility (hide / show in mall) — MUST be before findByIdAndUpdate ──
     if (req.body.isActive !== undefined) {
       const raw = req.body.isActive;
       updates.isActive =
-        raw === true ||
-        raw === "true" ||
-        raw === 1 ||
-        raw === "1";
+        raw === true || raw === "true" || raw === 1 || raw === "1";
     }
 
-    if (
-      req.body.shippingMethod !== undefined ||
-      req.body.courierCompany !== undefined ||
-      req.body.deliveryFee !== undefined
-    ) {
-      const method =
-        req.body.shippingMethod === "self"
-          ? "self"
-          : req.body.shippingMethod === "courier"
-            ? "courier"
-            : product.shipping?.method || "courier";
+    // ── Shipping: JSON blob OR flat fields ──
+    {
+      let shipBody: any = null;
+      if (req.body.shipping !== undefined) {
+        shipBody = parseJsonField(req.body.shipping, null);
+      }
 
-      const fee =
-        req.body.deliveryFee !== undefined
-          ? Number(req.body.deliveryFee)
-          : product.shipping?.deliveryFee || 0;
+      const hasFlatShip =
+        req.body.shippingMethod !== undefined ||
+        req.body.courierCompany !== undefined ||
+        req.body.courier !== undefined ||
+        req.body.deliveryFee !== undefined;
 
-      updates.shipping = {
-        method,
-        courierCompany:
-          method === "courier"
-            ? String(
-                req.body.courierCompany ??
-                  product.shipping?.courierCompany ??
-                  ""
-              ).trim()
-            : "",
-        deliveryFee: Number.isFinite(fee) && fee >= 0 ? fee : 0,
-      };
+      if (shipBody && typeof shipBody === "object") {
+        const method =
+          shipBody.method === "self"
+            ? "self"
+            : shipBody.method === "courier"
+              ? "courier"
+              : product.shipping?.method || "courier";
+        const fee = Number(
+          shipBody.deliveryFee ?? product.shipping?.deliveryFee ?? 0
+        );
+        updates.shipping = {
+          method,
+          courierCompany:
+            method === "courier"
+              ? String(
+                  shipBody.courierCompany ||
+                    shipBody.courier ||
+                    product.shipping?.courierCompany ||
+                    ""
+                ).trim()
+              : "",
+          deliveryFee: Number.isFinite(fee) && fee >= 0 ? fee : 0,
+        };
+      } else if (hasFlatShip) {
+        const method =
+          req.body.shippingMethod === "self"
+            ? "self"
+            : req.body.shippingMethod === "courier"
+              ? "courier"
+              : product.shipping?.method || "courier";
+        const fee =
+          req.body.deliveryFee !== undefined
+            ? Number(req.body.deliveryFee)
+            : product.shipping?.deliveryFee || 0;
+        updates.shipping = {
+          method,
+          courierCompany:
+            method === "courier"
+              ? String(
+                  req.body.courierCompany ??
+                    req.body.courier ??
+                    product.shipping?.courierCompany ??
+                    ""
+                ).trim()
+              : "",
+          deliveryFee: Number.isFinite(fee) && fee >= 0 ? fee : 0,
+        };
+      }
     }
 
-    if (
-      req.body.fulfillmentCountryCode !== undefined ||
-      req.body.fulfillmentCountry !== undefined ||
-      req.body.fulfillmentCity !== undefined
-    ) {
-      const fulfillmentLocation = parseFulfillmentLocation(req.body);
-      if (!fulfillmentLocation) {
+    // ── Fulfillment ──
+    {
+      const hasFulfillmentTouch =
+        req.body.fulfillmentLocation !== undefined ||
+        req.body.fulfillmentCountryCode !== undefined ||
+        req.body.fulfillmentCountry !== undefined ||
+        req.body.fulfillmentCity !== undefined;
+
+      if (hasFulfillmentTouch) {
+        const fulfillmentLocation = parseFulfillmentLocation(req.body);
+        if (!fulfillmentLocation) {
+          return res.status(400).json({
+            success: false,
+            message:
+              "Invalid fulfillment location — country and city are required",
+          });
+        }
+        updates.fulfillmentLocation = fulfillmentLocation;
+      }
+    }
+
+    const clientTouchedImages =
+      req.body.existingImages !== undefined ||
+      req.body.keepImages !== undefined ||
+      req.body.imagesToKeep !== undefined ||
+      req.body.imageOrder !== undefined ||
+      imageFiles.length > 0;
+
+    if (clientTouchedImages) {
+      if (finalImages.length === 0) {
         return res.status(400).json({
           success: false,
-          message:
-            "Invalid fulfillment location — country and city are required",
+          message: "At least one product image is required",
         });
       }
-      updates.fulfillmentLocation = fulfillmentLocation;
+      updates.images = finalImages;
     }
 
-    if (images.length > 0) {
-      updates.images = images;
-    }
-
-    // ── Specifications ──
     if (req.body.specifications !== undefined) {
       updates.specifications = parseSpecifications(req.body);
     }
 
-    // ── Verification documents: keep selected existing + new uploads ──
-    // Only touch docs when the client is actually editing them (multipart edit),
-    // so a plain JSON hide/show { isActive } does not wipe documents.
+    // Docs only when explicitly editing docs (not on every name-only save)
     const isDocEdit =
       req.body.existingDocuments !== undefined ||
-      req.body.specifications !== undefined ||
-      getDocumentFiles(req).length > 0 ||
-      req.body.name !== undefined;
+      getDocumentFiles(req).length > 0;
 
     if (isDocEdit) {
       const existingDocs = parseExistingDocuments(
@@ -694,7 +883,6 @@ export const updateProduct = async (req: Request, res: Response) => {
       runValidators: true,
     });
 
-    // ── Plazore AI: only regenerate if meaningful fields changed ──
     if (updated) {
       const onlyVisibility =
         Object.keys(updates).length === 1 && updates.isActive !== undefined;
@@ -759,10 +947,7 @@ export const deleteProduct = async (req: Request, res: Response) => {
               .slice(1)
               .join("/")
               .replace(/\.[^/.]+$/, "");
-
-            if (publicId) {
-              await cloudinary.uploader.destroy(publicId);
-            }
+            if (publicId) await cloudinary.uploader.destroy(publicId);
           } catch (err) {
             console.error("Failed to delete image from Cloudinary:", err);
           }
@@ -770,7 +955,6 @@ export const deleteProduct = async (req: Request, res: Response) => {
       );
     }
 
-    // Best-effort cleanup of verification docs on Cloudinary
     if (product.verificationDocuments?.length) {
       await Promise.all(
         product.verificationDocuments.map(async (doc: any) => {
@@ -805,8 +989,9 @@ export const deleteProduct = async (req: Request, res: Response) => {
     });
   }
 };
+
 // ======================================================
-// PUBLIC - Showroom (ranked rooms)
+// PUBLIC - Showroom
 // ======================================================
 export const getShowroom = async (req: Request, res: Response) => {
   try {
@@ -828,7 +1013,6 @@ export const getShowroom = async (req: Request, res: Response) => {
       forceRefresh,
     });
 
-    // Flat list also returned for backward compatibility with AdaptiveShowroom
     const flat = [
       ...(result.rooms[1] || []),
       ...(result.rooms[2] || []),
@@ -836,7 +1020,6 @@ export const getShowroom = async (req: Request, res: Response) => {
       ...(result.rooms[4] || []),
     ];
 
-    // Dedupe while preserving order (rooms may reuse when inventory is tiny)
     const seen = new Set<string>();
     const data: any[] = [];
     for (const p of flat) {
@@ -857,7 +1040,7 @@ export const getShowroom = async (req: Request, res: Response) => {
         3: result.rooms[3],
         4: result.rooms[4],
       },
-      data, // flat ranked list (AdaptiveShowroom can still use this)
+      data,
       meta: (result as any).meta || {},
     });
   } catch (error: any) {
@@ -870,12 +1053,13 @@ export const getShowroom = async (req: Request, res: Response) => {
 };
 
 // ======================================================
-// PUBLIC - Track showroom behavioural events
+// PUBLIC - Track showroom events
 // ======================================================
 export const trackShowroomEvent = async (req: Request, res: Response) => {
   try {
     const user = getUser(req);
-    const { sessionId, productId, type, room, position, region } = req.body || {};
+    const { sessionId, productId, type, room, position, region } =
+      req.body || {};
 
     const allowed = [
       "impression",
@@ -887,7 +1071,6 @@ export const trackShowroomEvent = async (req: Request, res: Response) => {
     ] as const;
 
     type EventType = (typeof allowed)[number];
-
     const eventType = String(type || "") as EventType;
 
     if (!sessionId || !productId || !allowed.includes(eventType)) {
@@ -908,7 +1091,6 @@ export const trackShowroomEvent = async (req: Request, res: Response) => {
       region: String(region || "NG").trim() || "NG",
     });
 
-    // Also feed ProductPerformance for commerce signals
     if (eventType === "open") {
       trackProductPerformance({
         productId: String(productId),
@@ -948,12 +1130,16 @@ export const setProductVisibility = async (req: Request, res: Response) => {
   try {
     const user = getUser(req);
     if (!user?._id) {
-      return res.status(401).json({ success: false, message: "Not authorized" });
+      return res
+        .status(401)
+        .json({ success: false, message: "Not authorized" });
     }
 
     const product = await Product.findById(req.params.id);
     if (!product) {
-      return res.status(404).json({ success: false, message: "Product not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Product not found" });
     }
 
     if (
@@ -974,10 +1160,8 @@ export const setProductVisibility = async (req: Request, res: Response) => {
     }
 
     const raw = req.body.isActive;
-    const next =
+    product.isActive =
       raw === true || raw === "true" || raw === 1 || raw === "1";
-
-    product.isActive = next;
     await product.save();
 
     return res.json({

@@ -676,7 +676,7 @@ export default function AboutPlazore() {
           >
                         <Image source={LOGO} style={styles.closingLogo} resizeMode="contain" />
             <Text style={styles.closingTag}>THE NEW WAY TO SHOP AND EARN.</Text>
-            <Text style={styles.closing2040}>DO COMMERCE LIKE IT’S 2040.</Text>
+            <Text style={styles.closing2040}>BUY AND SELL LIKE IT’S 2040.</Text>
             <Text style={styles.closingLine}>
               Discover differently. Buy confidently. Sell intelligently.
             </Text>

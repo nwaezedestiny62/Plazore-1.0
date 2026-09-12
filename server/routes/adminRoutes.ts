@@ -27,6 +27,11 @@ import {
 import { uploadBannerImage } from "../controllers/contentController.js";
 import upload from "../middleware/upload.js";
 import {
+  getAdminCurrencyRates,
+  getAdminCurrencyHistory,
+  patchAdminCurrencyRate,
+} from "../controllers/currencyController.js";
+import {
   getAdminShowroom,
   refreshAdminShowroom,
   getAdminIntelligence,
@@ -88,6 +93,10 @@ AdminRouter.patch("/reports/:id", ...adminOnly, updateAdminReport);
 
 AdminRouter.get("/showroom", ...adminOnly, getAdminShowroom);
 AdminRouter.post("/showroom/refresh", ...adminOnly, refreshAdminShowroom);
+
+AdminRouter.get("/currency/rates", ...adminOnly, getAdminCurrencyRates);
+AdminRouter.get("/currency/rates/:code/history", ...adminOnly, getAdminCurrencyHistory);
+AdminRouter.patch("/currency/rates/:code", ...adminOnly, patchAdminCurrencyRate);
 
 AdminRouter.get("/intelligence", ...adminOnly, getAdminIntelligence);
 AdminRouter.get(

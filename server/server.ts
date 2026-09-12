@@ -11,7 +11,9 @@ import CartRouter from "./routes/cartRoutes.js";
 import ContentRouter from "./routes/contentRoutes.js";
 import OrderRouter from "./routes/ordersRoutes.js";
 import AddressRouter from "./routes/addressRoutes.js";
+import CurrencyRouter from "./routes/currencyRoutes.js";
 import AdminRouter from "./routes/adminRoutes.js";
+import { startBuyerConfidenceScheduler } from "./services/jobs/refreshBuyerConfidence.js";
 import SellerRouter from "./routes/sellerRoutes.js";
 import NotificationRouter from "./routes/notificationRoutes.js";
 import UserRouter from "./routes/userRoutes.js";
@@ -79,6 +81,7 @@ app.use("/api/payment-methods", PaymentMethodRouter);
 app.use("/api/contact", ContactRouter);
 app.use("/api/content", ContentRouter);
 app.use("/api/announcements", AnnouncementRouter);
+app.use("/api/currency", CurrencyRouter);
 app.use(telemetryMiddleware);
 
 // Single moderation mount (covers /me + admin actions)
@@ -88,5 +91,5 @@ await makeAdmin();
 
 app.listen(port, () => {
   console.log(`Server is running at http://localhost:${port}`);
-  console.log(`Test it at: http://localhost:${port}/api/test`);
+  startBuyerConfidenceScheduler();
 });

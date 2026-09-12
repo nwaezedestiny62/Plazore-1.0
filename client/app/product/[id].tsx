@@ -506,8 +506,8 @@ export default function ProductDetails() {
         ? formatProduct(Number(product.price), product.region)
         : "";
     return price
-      ? `${name} · ${price}\nOn Plazore — THE NEW WAY TO SHOP AND EARN.\n${productUrl}`
-      : `${name}\nOn Plazore — THE NEW WAY TO SHOP AND EARN.\n${productUrl}`;
+      ? `${name} · ${price}\nOn Plazore — THE NEW WAY TO SHOP AND EARN 🛒🛍️.\n${productUrl}`
+      : `${name}\nOn Plazore — THE NEW WAY TO SHOP AND EARN 🛒🛍️.\n${productUrl}`;
   }, [product, productUrl, formatProduct]);
 
   const seller = product?.seller || {};

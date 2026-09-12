@@ -174,7 +174,7 @@ export default function ContactConversationPage() {
               Conversation with Plazore
             </h1>
             <p className="truncate text-[11px] text-[#6B7280]">
-             Shop the New Way
+             Shop and Earn the New Way
             </p>
           </div>
         </div>

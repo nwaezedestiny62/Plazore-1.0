@@ -16,17 +16,24 @@ import {
   formatProductPrice,
   getRegion,
   REGIONS,
+  REGION_ALIASES,
+  type ClientRateMap,
 } from "@/lib/regions";
 
 const STORAGE_KEY = "plazore_marketplace_region";
+const RATES_CACHE_KEY = "plazore_currency_rates_v1";
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000/api";
 
 function isValidRegion(code?: string | null): code is string {
-  return !!code && Object.prototype.hasOwnProperty.call(REGIONS, code);
+  if (!code) return false;
+  const resolved = REGION_ALIASES[code] || code;
+  return Object.prototype.hasOwnProperty.call(REGIONS, resolved);
 }
 
 function normalizeRegion(code?: string | null): string {
-  return isValidRegion(code) ? code : DEFAULT_REGION;
+  if (!code) return DEFAULT_REGION;
+  const resolved = REGION_ALIASES[code] || code;
+  return isValidRegion(resolved) ? resolved : DEFAULT_REGION;
 }
 
 type MarketplaceContextType = {
@@ -34,11 +41,19 @@ type MarketplaceContextType = {
   currencySymbol: string;
   currencyCode: string;
   loading: boolean;
+  ratesToNgn: ClientRateMap | null;
+  ratesLoaded: boolean;
   refreshRegion: () => Promise<void>;
+  refreshRates: () => Promise<void>;
   setRegionLocal: (code: string) => void;
-  /** Local + server (when signed in) */
+  /** Persist region locally and, when signed in, on the user profile */
   setRegion: (code: string) => Promise<void>;
   format: (amount: number) => string;
+  /**
+   * Presentation only. Active rates convert for display.
+   * Missing rates → canonical product currency (no fabricated FX).
+   * Must never rewrite stored order, payment, refund, or payout amounts.
+   */
   formatProduct: (amount: number, productRegion?: string | null) => string;
 };
 
@@ -47,34 +62,46 @@ const MarketplaceContext = createContext<MarketplaceContextType>({
   currencySymbol: getRegion(DEFAULT_REGION).currency.symbol,
   currencyCode: getRegion(DEFAULT_REGION).currency.code,
   loading: true,
+  ratesToNgn: null,
+  ratesLoaded: false,
   refreshRegion: async () => {},
+  refreshRates: async () => {},
   setRegionLocal: () => {},
   setRegion: async () => {},
   format: (a) => formatMoney(a, DEFAULT_REGION),
   formatProduct: (a, pr) => formatProductPrice(a, pr, DEFAULT_REGION),
 });
 
-export function MarketplaceProvider({ children }: { children: React.ReactNode }) {
+export function MarketplaceProvider({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   const { getToken, isSignedIn, isLoaded } = useAuth();
   const [region, setRegionState] = useState(DEFAULT_REGION);
   const [loading, setLoading] = useState(true);
+  const [ratesToNgn, setRatesToNgn] = useState<ClientRateMap | null>(null);
+  const [ratesLoaded, setRatesLoaded] = useState(false);
   const localOverrideUntil = useRef(0);
   const bootstrapped = useRef(false);
 
-  const applyRegion = useCallback((code: string, opts?: { sticky?: boolean }) => {
-    const next = normalizeRegion(code);
-    setRegionState(next);
-    try {
-      localStorage.setItem(STORAGE_KEY, next);
-    } catch {
-      /* ignore */
-    }
-    if (opts?.sticky) localOverrideUntil.current = Date.now() + 8000;
-  }, []);
+  const applyRegion = useCallback(
+    (code: string, opts?: { sticky?: boolean }) => {
+      const next = normalizeRegion(code);
+      setRegionState(next);
+      try {
+        localStorage.setItem(STORAGE_KEY, next);
+      } catch {
+        /* ignore */
+      }
+      if (opts?.sticky) localOverrideUntil.current = Date.now() + 8000;
+    },
+    []
+  );
 
   const setRegionLocal = useCallback(
     (code: string) => applyRegion(code, { sticky: true }),
-    [applyRegion],
+    [applyRegion]
   );
 
   const setRegion = useCallback(
@@ -94,11 +121,48 @@ export function MarketplaceProvider({ children }: { children: React.ReactNode })
           body: JSON.stringify({ marketplaceRegion: next }),
         });
       } catch {
-        /* keep local choice */
+        /* keep local selection */
       }
     },
-    [applyRegion, getToken, isSignedIn],
+    [applyRegion, getToken, isSignedIn]
   );
+
+  const refreshRates = useCallback(async () => {
+    try {
+      const res = await fetch(`${API}/currency/config`, { cache: "no-store" });
+      const json = await res.json();
+      const list = json?.data?.currencies || [];
+      const map: ClientRateMap = {};
+      for (const c of list) {
+        const code = String(c.code || "").toUpperCase();
+        const rate = Number(c.rateToNgn);
+        if (code && Number.isFinite(rate) && rate > 0) map[code] = rate;
+      }
+      if (Object.keys(map).length) {
+        map.NGN = map.NGN ?? 1;
+        setRatesToNgn(map);
+        setRatesLoaded(true);
+        try {
+          localStorage.setItem(RATES_CACHE_KEY, JSON.stringify(map));
+        } catch {
+          /* ignore */
+        }
+      }
+    } catch {
+      try {
+        const cached = localStorage.getItem(RATES_CACHE_KEY);
+        if (cached) {
+          const parsed = JSON.parse(cached) as ClientRateMap;
+          if (parsed && typeof parsed === "object") {
+            setRatesToNgn(parsed);
+            setRatesLoaded(true);
+          }
+        }
+      } catch {
+        /* keep previous */
+      }
+    }
+  }, []);
 
   const refreshRegion = useCallback(async () => {
     if (Date.now() < localOverrideUntil.current) {
@@ -132,7 +196,7 @@ export function MarketplaceProvider({ children }: { children: React.ReactNode })
         applyRegion(json.data?.marketplaceRegion || DEFAULT_REGION);
       }
     } catch {
-      /* keep current */
+      /* retain current region */
     } finally {
       setLoading(false);
     }
@@ -144,12 +208,22 @@ export function MarketplaceProvider({ children }: { children: React.ReactNode })
     (async () => {
       try {
         const cached = localStorage.getItem(STORAGE_KEY);
-        if (!cancelled && isValidRegion(cached)) setRegionState(cached);
+        if (!cancelled && isValidRegion(cached)) {
+          setRegionState(normalizeRegion(cached));
+        }
+        const ratesCached = localStorage.getItem(RATES_CACHE_KEY);
+        if (!cancelled && ratesCached) {
+          const parsed = JSON.parse(ratesCached) as ClientRateMap;
+          if (parsed && typeof parsed === "object") {
+            setRatesToNgn(parsed);
+            setRatesLoaded(true);
+          }
+        }
       } catch {
         /* ignore */
       }
       if (!cancelled) {
-        await refreshRegion();
+        await Promise.all([refreshRegion(), refreshRates()]);
         bootstrapped.current = true;
       }
     })();
@@ -163,17 +237,29 @@ export function MarketplaceProvider({ children }: { children: React.ReactNode })
     refreshRegion();
   }, [isSignedIn, isLoaded]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      refreshRates();
+    }, 5 * 60 * 1000);
+    return () => window.clearInterval(id);
+  }, [refreshRates]);
+
   const regionConfig = useMemo(() => getRegion(region), [region]);
 
   const format = useCallback(
     (amount: number) => formatMoney(Number(amount) || 0, region),
-    [region],
+    [region]
   );
 
   const formatProduct = useCallback(
     (amount: number, productRegion?: string | null) =>
-      formatProductPrice(Number(amount) || 0, productRegion, region),
-    [region],
+      formatProductPrice(
+        Number(amount) || 0,
+        productRegion,
+        region,
+        ratesToNgn || undefined
+      ),
+    [region, ratesToNgn]
   );
 
   const value = useMemo<MarketplaceContextType>(
@@ -182,7 +268,10 @@ export function MarketplaceProvider({ children }: { children: React.ReactNode })
       currencySymbol: regionConfig.currency.symbol,
       currencyCode: regionConfig.currency.code,
       loading,
+      ratesToNgn,
+      ratesLoaded,
       refreshRegion,
+      refreshRates,
       setRegionLocal,
       setRegion,
       format,
@@ -192,16 +281,21 @@ export function MarketplaceProvider({ children }: { children: React.ReactNode })
       region,
       regionConfig,
       loading,
+      ratesToNgn,
+      ratesLoaded,
       refreshRegion,
+      refreshRates,
       setRegionLocal,
       setRegion,
       format,
       formatProduct,
-    ],
+    ]
   );
 
   return (
-    <MarketplaceContext.Provider value={value}>{children}</MarketplaceContext.Provider>
+    <MarketplaceContext.Provider value={value}>
+      {children}
+    </MarketplaceContext.Provider>
   );
 }
 

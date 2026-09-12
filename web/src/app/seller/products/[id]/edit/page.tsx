@@ -34,14 +34,15 @@ import {
 } from "@/lib/productSpecs";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000/api";
+const API_ORIGIN = API.replace(/\/api\/?$/, "");
 const CURRENT_PLAN = "free" as keyof typeof PLAN_IMAGE_LIMITS;
 
 type OverlayTone = "info" | "success" | "danger";
 type Overlay = { title: string; message?: string; tone?: OverlayTone } | null;
 
 type ImageItem =
-  | { type: "remote"; uri: string }
-  | { type: "local"; uri: string; file: File };
+  | { id: string; type: "remote"; uri: string }
+  | { id: string; type: "local"; uri: string; file: File };
 
 type ExistingDoc = {
   documentName: string;
@@ -50,6 +51,87 @@ type ExistingDoc = {
 };
 
 type LocalDoc = { file: File; name: string; type: string };
+
+function uid() {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+function normalizeImageUrl(raw: unknown): string {
+  if (raw == null) return "";
+  if (typeof raw === "string") {
+    const s = raw.trim();
+    if (!s) return "";
+    if (
+      s.startsWith("http://") ||
+      s.startsWith("https://") ||
+      s.startsWith("blob:") ||
+      s.startsWith("data:")
+    ) {
+      return s;
+    }
+    if (s.startsWith("//")) return `https:${s}`;
+    if (s.startsWith("/")) return `${API_ORIGIN}${s}`;
+    return s;
+  }
+  if (typeof raw === "object") {
+    const o = raw as Record<string, unknown>;
+    return normalizeImageUrl(
+      o.secure_url ??
+        o.secureUrl ??
+        o.url ??
+        o.uri ??
+        o.path ??
+        o.src ??
+        o.image ??
+        o.original
+    );
+  }
+  return "";
+}
+
+/** First URL in the returned list is always the cover. */
+function extractImageList(p: any): string[] {
+  if (!p || typeof p !== "object") return [];
+
+  const candidates = [
+    p.images,
+    p.imageUrls,
+    p.photos,
+    p.gallery,
+    p.media,
+  ];
+
+  let list: unknown[] = [];
+  for (const c of candidates) {
+    if (Array.isArray(c) && c.length) {
+      list = c;
+      break;
+    }
+  }
+
+  const urls = list.map(normalizeImageUrl).filter(Boolean);
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const u of urls) {
+    if (seen.has(u)) continue;
+    seen.add(u);
+    out.push(u);
+  }
+
+  if (out.length === 0) {
+    const single = normalizeImageUrl(
+      p.coverImage ||
+        p.cover ||
+        p.image ||
+        p.thumbnail ||
+        p.mainImage ||
+        p.primaryImage
+    );
+    if (single) out.push(single);
+  }
+
+  return out;
+}
 
 function normalizeSpecs(raw: any): Record<string, string> {
   if (!raw) return {};
@@ -163,6 +245,41 @@ const pillCls = (on: boolean) =>
       : "border-line bg-[#0A121C] text-[#737A86]"
   }`;
 
+function SafeImg({
+  src,
+  alt = "",
+  className,
+}: {
+  src?: string | null;
+  alt?: string;
+  className?: string;
+}) {
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    setFailed(false);
+  }, [src]);
+
+  if (!src || failed) {
+    return (
+      <div
+        className={`flex items-center justify-center bg-[#E5E7EB] ${className || ""}`}
+      >
+        <ImagePlus className="h-6 w-6 text-[#9CA3AF]" />
+      </div>
+    );
+  }
+
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={src}
+      alt={alt}
+      className={className}
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
 type BuyerPreviewProps = {
   images: string[];
   name: string;
@@ -194,9 +311,10 @@ function BuyerLivePreview({
   courierCompany,
   deliveryFeeLabel,
 }: BuyerPreviewProps) {
-  const cover = images[0];
+  const cover = images[0] || "";
   const [idx, setIdx] = useState(0);
-  const shown = images[Math.min(idx, Math.max(images.length - 1, 0))] || cover;
+  const shown =
+    images[Math.min(idx, Math.max(images.length - 1, 0))] || cover || "";
 
   useEffect(() => {
     setIdx(0);
@@ -211,18 +329,11 @@ function BuyerLivePreview({
 
       <div className="mb-4 border border-line bg-[#0A121C] p-3.5">
         <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.8px] text-[#737A86]">
-          Showroom card
+          Showroom card · cover = first photo
         </p>
         <div className="w-[150px]">
-          <div className="relative aspect-[1/1.35] bg-[#F1F1F1]">
-            {cover ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={cover} alt="" className="h-full w-full object-cover" />
-            ) : (
-              <div className="flex h-full items-center justify-center bg-[#E5E7EB]">
-                <ImagePlus className="h-6 w-6 text-[#9CA3AF]" />
-              </div>
-            )}
+          <div className="relative aspect-[1/1.35] overflow-hidden bg-[#F1F1F1]">
+            <SafeImg src={cover} className="h-full w-full object-cover" />
             <div className="absolute bottom-[11px] right-[11px] flex h-[34px] w-[34px] items-center justify-center bg-white shadow">
               <span className="text-[10px] font-bold text-[#111]">Bag</span>
             </div>
@@ -248,15 +359,8 @@ function BuyerLivePreview({
       <div className="overflow-hidden rounded-[28px] border-[3px] border-[#2C313A] bg-[#12141A] p-2 shadow-2xl">
         <div className="mx-auto mb-1 h-3.5 w-[78px] rounded-lg bg-black" />
         <div className="max-h-[520px] overflow-y-auto rounded-[22px] bg-bg [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          <div className="relative aspect-[1/1.05] bg-[#07080C]">
-            {shown ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={shown} alt="" className="h-full w-full object-cover" />
-            ) : (
-              <div className="flex h-full items-center justify-center">
-                <ImagePlus className="h-8 w-8 text-[#3A3F4A]" />
-              </div>
-            )}
+          <div className="relative aspect-[1/1.05] overflow-hidden bg-[#07080C]">
+            <SafeImg src={shown} className="h-full w-full object-cover" />
             {images.length > 1 && (
               <div className="absolute bottom-2 left-0 right-0 flex justify-center gap-1">
                 {images.slice(0, 6).map((_, i) => (
@@ -408,6 +512,7 @@ export default function EditProductPage() {
 
   const imageInputRef = useRef<HTMLInputElement>(null);
   const docInputRef = useRef<HTMLInputElement>(null);
+  const blobUrlsRef = useRef<Set<string>>(new Set());
 
   const toast = useCallback(
     (title: string, message?: string, tone: OverlayTone = "info") => {
@@ -416,54 +521,126 @@ export default function EditProductPage() {
     []
   );
 
-  const applyProduct = useCallback((p: any) => {
-    setName(p.name || "");
-    setBrand(p.brand || "");
-    setPrice(p.price != null ? String(p.price) : "");
-    setStock(p.stock != null ? String(p.stock) : "1");
-    setDescription(p.description || "");
-    setCategory(p.category || "");
-    setSubCategory(p.subCategory || "");
-    setSpecs(normalizeSpecs(p.specifications));
-
-    setImages(
-      (p.images || []).map((uri: string) => ({
-        type: "remote" as const,
-        uri,
-      }))
-    );
-
-    setExistingDocs(
-      (p.documents || p.verificationDocuments || []).map((d: any) => ({
-        documentName: d.documentName || d.name || "Document",
-        documentType: d.documentType || d.type || "other",
-        secureUrl: d.secureUrl || d.url || "",
-      }))
-    );
-
-    const ship = p.shipping || {};
-    const method = ship.method || ship.deliveryMethod || null;
-    setShippingMethod(method === "self" || method === "courier" ? method : null);
-    setCourierCompany(
-      String(ship.courier || ship.courierCompany || ship.courierName || "")
-    );
-    setDeliveryFee(
-      ship.deliveryFee != null && ship.deliveryFee !== ""
-        ? String(ship.deliveryFee)
-        : ""
-    );
-
-    const loc = p.fulfillmentLocation || p.shipsFromLocation || {};
-    const countryCode =
-      loc.countryCode ||
-      FULFILLMENT_COUNTRIES.find(
-        (c) => c.name === loc.country || c.code === loc.country
-      )?.code ||
-      "";
-    setFulfillCountryCode(countryCode);
-    setFulfillStateCode(loc.stateCode || "");
-    setFulfillCity(loc.city || "");
+  const revokeBlobUri = useCallback((uri: string) => {
+    if (!uri?.startsWith("blob:")) return;
+    try {
+      URL.revokeObjectURL(uri);
+    } catch {
+      /* ignore */
+    }
+    blobUrlsRef.current.delete(uri);
   }, []);
+
+  useEffect(() => {
+    return () => {
+      blobUrlsRef.current.forEach((u) => {
+        try {
+          URL.revokeObjectURL(u);
+        } catch {
+          /* ignore */
+        }
+      });
+      blobUrlsRef.current.clear();
+    };
+  }, []);
+
+  const applyProduct = useCallback(
+    (p: any, opts?: { allowEmptyImages?: boolean }) => {
+      setName(p.name || "");
+      setBrand(p.brand || "");
+      setPrice(p.price != null ? String(p.price) : "");
+      setStock(p.stock != null ? String(p.stock) : "1");
+      setDescription(p.description || "");
+      setCategory(p.category || "");
+      setSubCategory(p.subCategory || "");
+      setSpecs(normalizeSpecs(p.specifications));
+
+      const urls = extractImageList(p);
+      setImages((prev) => {
+        // Never wipe a working gallery with an empty server payload
+        if (!urls.length && prev.length && !opts?.allowEmptyImages) {
+          return prev;
+        }
+        prev.forEach((item) => {
+          if (item.type === "local") revokeBlobUri(item.uri);
+        });
+        return urls.map((uri) => ({
+          id: uid(),
+          type: "remote" as const,
+          uri,
+        }));
+      });
+
+      setExistingDocs(
+        (p.documents || p.verificationDocuments || [])
+          .map((d: any) => ({
+            documentName: d.documentName || d.name || "Document",
+            documentType: d.documentType || d.type || "other",
+            secureUrl: normalizeImageUrl(
+              d.secureUrl || d.url || d.secure_url || ""
+            ),
+          }))
+          .filter((d: ExistingDoc) => d.documentName)
+      );
+
+      const ship = p.shipping || {};
+      const method = ship.method || ship.deliveryMethod || null;
+      setShippingMethod(
+        method === "self" || method === "courier" ? method : null
+      );
+      setCourierCompany(
+        String(ship.courier || ship.courierCompany || ship.courierName || "")
+      );
+      setDeliveryFee(
+        ship.deliveryFee != null && ship.deliveryFee !== ""
+          ? String(ship.deliveryFee)
+          : ""
+      );
+
+      const loc = p.fulfillmentLocation || p.shipsFromLocation || {};
+      const countryCode =
+        loc.countryCode ||
+        FULFILLMENT_COUNTRIES.find(
+          (c) => c.name === loc.country || c.code === loc.country
+        )?.code ||
+        "";
+      setFulfillCountryCode(countryCode);
+      setFulfillStateCode(loc.stateCode || "");
+      setFulfillCity(loc.city || "");
+    },
+    [revokeBlobUri]
+  );
+
+  const fetchProduct = useCallback(
+    async (token: string) => {
+      let product: any = null;
+      try {
+        const prodRaw = await fetch(`${API}/seller/products/${id}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (prodRaw.ok) {
+          const prodRes = await readJson(prodRaw);
+          product = prodRes?.data || prodRes?.product || prodRes;
+          if (prodRes?.success === false) product = null;
+        }
+      } catch (e) {
+        console.warn("GET /seller/products/:id failed", e);
+      }
+
+      if (!product) {
+        const listRaw = await fetch(`${API}/seller/products`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const listRes = await readJson(listRaw);
+        const list = Array.isArray(listRes?.data)
+          ? listRes.data
+          : listRes?.data?.products || [];
+        product = list.find((x: any) => String(x._id || x.id) === String(id));
+      }
+      return product;
+    },
+    [id]
+  );
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -485,37 +662,12 @@ export default function EditProductPage() {
         /* ignore */
       }
 
-      let product: any = null;
-      try {
-        const prodRaw = await fetch(`${API}/seller/products/${id}`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (prodRaw.ok) {
-          const prodRes = await readJson(prodRaw);
-          product = prodRes?.data || prodRes?.product || prodRes;
-          if (prodRes?.success === false) product = null;
-        }
-      } catch (e) {
-        console.warn("GET /seller/products/:id failed, trying list", e);
-      }
-
-      if (!product) {
-        const listRaw = await fetch(`${API}/seller/products`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        const listRes = await readJson(listRaw);
-        const list = Array.isArray(listRes?.data)
-          ? listRes.data
-          : listRes?.data?.products || [];
-        product = list.find((x: any) => String(x._id || x.id) === String(id));
-      }
-
+      const product = await fetchProduct(token);
       if (!product) {
         toast("Error", "Product not found", "danger");
         return;
       }
-
-      applyProduct(product);
+      applyProduct(product, { allowEmptyImages: true });
     } catch (e: any) {
       console.error(e);
       toast(
@@ -526,7 +678,7 @@ export default function EditProductPage() {
     } finally {
       setPageLoading(false);
     }
-  }, [id, getToken, toast, applyProduct]);
+  }, [id, getToken, toast, applyProduct, fetchProduct]);
 
   useEffect(() => {
     if (!isLoaded || !isSignedIn) {
@@ -549,7 +701,10 @@ export default function EditProductPage() {
     [fulfillCountryCode, fulfillStateCode]
   );
 
-  const previewImages = images.map((i) => i.uri);
+  const previewImages = useMemo(
+    () => images.map((i) => i.uri).filter(Boolean),
+    [images]
+  );
 
   const shipsFrom = useMemo(() => {
     if (!fulfillCountryCode || !fulfillCity) return null;
@@ -608,17 +763,32 @@ export default function EditProductPage() {
       for (const f of Array.from(files)) {
         if (next.length >= maxImages) break;
         if (!f.type.startsWith("image/")) continue;
-        next.push({ type: "local", uri: URL.createObjectURL(f), file: f });
+        const uri = URL.createObjectURL(f);
+        blobUrlsRef.current.add(uri);
+        next.push({ id: uid(), type: "local", uri, file: f });
       }
       return next;
     });
+    if (imageInputRef.current) imageInputRef.current.value = "";
   };
 
   const removeImage = (i: number) => {
     setImages((prev) => {
       const item = prev[i];
-      if (item?.type === "local") URL.revokeObjectURL(item.uri);
+      if (item?.type === "local") revokeBlobUri(item.uri);
       return prev.filter((_, idx) => idx !== i);
+    });
+  };
+
+  /** First slot is always cover — move any photo to front. */
+  const setAsCover = (i: number) => {
+    if (i <= 0) return;
+    setImages((prev) => {
+      if (i >= prev.length) return prev;
+      const next = [...prev];
+      const [item] = next.splice(i, 1);
+      next.unshift(item);
+      return next;
     });
   };
 
@@ -636,10 +806,12 @@ export default function EditProductPage() {
       }
       return next;
     });
+    if (docInputRef.current) docInputRef.current.value = "";
   };
 
   const validate = () => {
     if (!images.length) return "Add at least one product image";
+    if (!images[0]?.uri) return "Cover image is missing — add a photo";
     if (!name.trim()) return "Product name is required";
     if (!priceN || priceN <= 0) return "Enter a valid price";
     if (!category) return "Select a category";
@@ -699,18 +871,71 @@ export default function EditProductPage() {
         )
       );
 
-      const keepUrls = images
-        .filter((i) => i.type === "remote")
-        .map((i) => i.uri);
-      fd.append("existingImages", JSON.stringify(keepUrls));
+            // Flat fields so backend never misses shipping / fulfillment
+      if (shippingMethod) {
+        fd.append("shippingMethod", shippingMethod);
+        fd.append("courierCompany", courierCompany.trim());
+        fd.append("courier", courierCompany.trim());
+        fd.append("deliveryFee", String(feeN));
+      }
 
-      images.forEach((item) => {
-        if (item.type === "local") fd.append("images", item.file);
+      fd.append("fulfillmentCountryCode", fulfillCountryCode);
+      fd.append(
+        "fulfillmentCountry",
+        FULFILLMENT_COUNTRIES.find((c) => c.code === fulfillCountryCode)?.name ||
+          ""
+      );
+      fd.append("fulfillmentStateCode", fulfillStateCode);
+      fd.append(
+        "fulfillmentState",
+        fulfillStates.find((s) => s.code === fulfillStateCode)?.name || ""
+      );
+      fd.append("fulfillmentCity", fulfillCity);
+
+      /**
+       * Preserve visual order. Index 0 = cover.
+       * existingImages = remote URLs still kept (same order as on screen among remotes).
+       * imageOrder = full sequence so backend can interleave new uploads correctly.
+       */
+      const keepUrls: string[] = [];
+      const newFiles: File[] = [];
+      const imageOrder: Array<
+        | { kind: "existing"; url: string }
+        | { kind: "new"; index: number }
+      > = [];
+
+      for (const item of images) {
+        if (item.type === "remote" && item.uri) {
+          keepUrls.push(item.uri);
+          imageOrder.push({ kind: "existing", url: item.uri });
+        } else if (item.type === "local" && item.file) {
+          const index = newFiles.length;
+          newFiles.push(item.file);
+          imageOrder.push({ kind: "new", index });
+        }
+      }
+
+      const cover =
+        images[0]?.type === "remote"
+          ? images[0].uri
+          : images[0]?.type === "local"
+            ? "__new_0__"
+            : "";
+
+      fd.append("existingImages", JSON.stringify(keepUrls));
+      fd.append("keepImages", JSON.stringify(keepUrls));
+      fd.append("imagesToKeep", JSON.stringify(keepUrls));
+      fd.append("imageOrder", JSON.stringify(imageOrder));
+      fd.append("coverImage", cover);
+      fd.append("coverIndex", "0");
+
+      newFiles.forEach((file, i) => {
+        fd.append("images", file, file.name || `image-${i}.jpg`);
       });
 
       fd.append("existingDocuments", JSON.stringify(existingDocs));
       newDocuments.forEach((d, i) => {
-        fd.append("documents", d.file);
+        fd.append("documents", d.file, d.file.name);
         fd.append(`documentTypes[${i}]`, d.type);
         fd.append(`documentNames[${i}]`, d.name);
       });
@@ -723,12 +948,27 @@ export default function EditProductPage() {
 
       const json = await readJson(res);
 
-      if (json?.success) {
-        toast("Saved", "Product updated", "success");
-        setTimeout(() => router.push("/seller/products"), 800);
-      } else {
-        toast("Error", json?.message || "Could not save product", "danger");
+      if (!res.ok || json?.success === false) {
+        toast(
+          "Error",
+          json?.message || `Could not save product (${res.status})`,
+          "danger"
+        );
+        return;
       }
+
+      // Always re-fetch so list/cover match what Mongo actually stored
+      const fresh = await fetchProduct(token);
+      if (fresh) {
+        applyProduct(fresh, { allowEmptyImages: true });
+        setNewDocuments([]);
+      } else if (json?.data || json?.product) {
+        applyProduct(json.data || json.product);
+        setNewDocuments([]);
+      }
+
+      toast("Saved", "Product updated — cover is the first photo", "success");
+      setTimeout(() => router.push("/seller/products"), 700);
     } catch (e: any) {
       console.error(e);
       toast("Error", e?.message || "Could not save product", "danger");
@@ -792,23 +1032,41 @@ export default function EditProductPage() {
               <BuyerLivePreview {...previewProps} />
             </div>
 
-            <Section step="01" title="Images" subtitle={`Up to ${maxImages} photos`}>
+            <Section
+              step="01"
+              title="Images"
+              subtitle={`Up to ${maxImages} · first photo is always the cover`}
+            >
               <div className="flex flex-wrap gap-2">
                 {images.map((item, i) => (
                   <div
-                    key={`${item.uri}-${i}`}
-                    className="relative h-[104px] w-[104px] overflow-hidden rounded-[14px]"
+                    key={item.id}
+                    className={`relative h-[104px] w-[104px] overflow-hidden rounded-[14px] bg-[#0A121C] ${
+                      i === 0 ? "ring-2 ring-[#00E575]" : ""
+                    }`}
                   >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
+                    <SafeImg
                       src={item.uri}
-                      alt=""
                       className="h-full w-full object-cover"
                     />
+                    {i === 0 ? (
+                      <span className="absolute left-1 top-1 rounded bg-[#00E575] px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-[#041412]">
+                        Cover
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setAsCover(i)}
+                        className="absolute left-1 top-1 rounded bg-black/70 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-white"
+                      >
+                        Make cover
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => removeImage(i)}
                       className="absolute right-1 top-1 rounded bg-black/70 p-1 text-white"
+                      aria-label="Remove image"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
@@ -833,6 +1091,10 @@ export default function EditProductPage() {
                 className="hidden"
                 onChange={(e) => onImages(e.target.files)}
               />
+              <p className="mt-2 text-[12px] text-[#737A86]">
+                The first image is the cover on the product list and showroom.
+                Use “Make cover” to move another photo to the front.
+              </p>
             </Section>
 
             <Section step="02" title="Basics">

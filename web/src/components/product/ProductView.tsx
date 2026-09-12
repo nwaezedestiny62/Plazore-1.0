@@ -28,15 +28,49 @@ import { addToCart, cartCount } from "@/lib/cart";
 import { fetchProductAI } from "@/lib/api";
 import type { PlazoreAIData } from "@/lib/plazoreAI";
 import { useMarketplace } from "@/context/MarketplaceContext";
-import { DEFAULT_REGION, formatProductPrice } from "@/lib/regions";
+import {
+  DEFAULT_REGION,
+  formatMoney,
+  formatProductPrice,
+  getRegion,
+} from "@/lib/regions";
 import type { Product } from "@/lib/types";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000/api";
 const GRAD = "linear-gradient(90deg,#10B981,#14B8A6,#3B82F6)";
-const GOOGLE_G = "https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg";
+const GOOGLE_G =
+  "https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg";
 const PENDING_KEY = "plazore_product_pending";
 
 type PendingAction = "bag" | "buy" | "message" | "wishlist";
+
+/**
+ * Deterministic money string (no locale / SSR drift).
+ * Always same on server and first client paint.
+ */
+function formatMoneyFixed(
+  amount: number,
+  regionCode?: string | null
+): string {
+  const region = getRegion(regionCode);
+  const code = region.currency.code;
+  const n = Number(amount) || 0;
+  const zeroDecimal = code === "XOF" || code === "XAF" || code === "NGN";
+  const decimals = zeroDecimal ? 0 : 2;
+  const fixed = Math.abs(n).toFixed(decimals);
+  const [intPart, frac] = fixed.split(".");
+  const withCommas = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  const sign = n < 0 ? "-" : "";
+  const body =
+    decimals > 0 ? `${withCommas}.${frac}` : withCommas;
+
+  if (code === "XOF") return `${sign}CFA ${body}`;
+  if (code === "XAF") return `${sign}FCFA ${body}`;
+
+  return region.currency.position === "before"
+    ? `${sign}${region.currency.symbol}${body}`
+    : `${sign}${body}${region.currency.symbol}`;
+}
 
 function formatSpecKey(key: string) {
   return key
@@ -59,7 +93,9 @@ function readShipping(product: Product) {
   return {
     deliveryFee,
     deliveryMethodLabel:
-      method === "self" ? "Direct Merchant Delivery" : courierName || "Courier Delivery",
+      method === "self"
+        ? "Direct Merchant Delivery"
+        : courierName || "Courier Delivery",
   };
 }
 
@@ -67,7 +103,7 @@ function productKey(product: Product) {
   return String(
     (product as { _id?: string; id?: string })._id ||
       (product as { id?: string }).id ||
-      "",
+      ""
   );
 }
 
@@ -79,7 +115,11 @@ function stashReturnTo(path: string) {
   }
 }
 
-function stashChatProduct(conversationId: string, product: Product, extra?: unknown) {
+function stashChatProduct(
+  conversationId: string,
+  product: Product,
+  extra?: unknown
+) {
   try {
     sessionStorage.setItem(
       `plazore_conv_${conversationId}`,
@@ -92,8 +132,8 @@ function stashChatProduct(conversationId: string, product: Product, extra?: unkn
             price: product.price,
             region: product.region,
           },
-        },
-      ),
+        }
+      )
     );
   } catch {
     /* ignore */
@@ -143,13 +183,19 @@ function ExpandableText({
 
 function GradientLabel({ children }: { children: string }) {
   return (
-    <span className="bg-clip-text text-transparent" style={{ backgroundImage: GRAD }}>
+    <span
+      className="bg-clip-text text-transparent"
+      style={{ backgroundImage: GRAD }}
+    >
       {children}
     </span>
   );
 }
 
-async function buildShareCard(imageUrl: string, title: string): Promise<Blob | null> {
+async function buildShareCard(
+  imageUrl: string,
+  title: string
+): Promise<Blob | null> {
   try {
     const img = new Image();
     img.crossOrigin = "anonymous";
@@ -187,14 +233,21 @@ async function buildShareCard(imageUrl: string, title: string): Promise<Blob | n
     ctx.fillStyle = "rgba(245,247,250,0.55)";
     ctx.font = "24px system-ui,sans-serif";
     ctx.fillText("Discover this piece on Plazore", 48, h - 48);
-    return await new Promise((res) => canvas.toBlob((b) => res(b), "image/jpeg", 0.92));
+    return await new Promise((res) =>
+      canvas.toBlob((b) => res(b), "image/jpeg", 0.92)
+    );
   } catch {
     return null;
   }
 }
 
-function BrandMark({ brand }: { brand: "whatsapp" | "x" | "telegram" | "facebook" }) {
-  const box = "flex h-10 w-10 shrink-0 items-center justify-center rounded-full";
+function BrandMark({
+  brand,
+}: {
+  brand: "whatsapp" | "x" | "telegram" | "facebook";
+}) {
+  const box =
+    "flex h-10 w-10 shrink-0 items-center justify-center rounded-full";
   if (brand === "whatsapp") {
     return (
       <span className={`${box} bg-[#25D366]`}>
@@ -264,7 +317,7 @@ function Gallery({ images, name }: { images: string[]; name: string }) {
       if (!count) return;
       setSlide((i + count) % count);
     },
-    [count],
+    [count]
   );
 
   useEffect(() => {
@@ -299,7 +352,9 @@ function Gallery({ images, name }: { images: string[]; name: string }) {
                 type="button"
                 onClick={() => go(i)}
                 className={`relative h-16 w-16 shrink-0 overflow-hidden border ${
-                  i === slide ? "border-text" : "border-line opacity-70 hover:opacity-100"
+                  i === slide
+                    ? "border-text"
+                    : "border-line opacity-70 hover:opacity-100"
                 }`}
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -326,13 +381,16 @@ function Gallery({ images, name }: { images: string[]; name: string }) {
               draggable={false}
             />
           ) : (
-            <div className="flex h-full items-center justify-center text-muted">No image</div>
+            <div className="flex h-full items-center justify-center text-muted">
+              No image
+            </div>
           )}
 
           {hasMany ? (
             <>
               <p className="absolute right-2.5 top-2.5 border border-white/15 bg-black/55 px-2 py-0.5 text-[10px] font-bold text-white backdrop-blur-sm">
-                {String(slide + 1).padStart(2, "0")} / {String(count).padStart(2, "0")}
+                {String(slide + 1).padStart(2, "0")} /{" "}
+                {String(count).padStart(2, "0")}
               </p>
               <button
                 type="button"
@@ -394,9 +452,17 @@ export function ProductView({ product }: { product: Product }) {
   const { getToken, isSignedIn, userId, isLoaded } = useAuth();
   const { user } = useUser();
   const { signIn } = useSignIn();
-  const { region: marketplaceRegion } = useMarketplace();
-  const displayRegion = marketplaceRegion || DEFAULT_REGION;
+  const marketplace = useMarketplace() as {
+    region?: string;
+    formatProduct?: (
+      amount: number,
+      productRegion?: string | null
+    ) => string;
+    ratesToNgn?: Record<string, number> | null;
+  };
+  const displayRegion = marketplace.region || DEFAULT_REGION;
 
+  const [mounted, setMounted] = useState(false);
   const [ai, setAi] = useState<PlazoreAIData | null>(null);
   const [aiReady, setAiReady] = useState(false);
   const [prompt, setPrompt] = useState<AppFeature | null>(null);
@@ -411,6 +477,10 @@ export function ProductView({ product }: { product: Product }) {
   const [googleBusy, setGoogleBusy] = useState(false);
   const ranPending = useRef(false);
 
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
   const images = product.images?.length ? product.images : [];
   const seller = typeof product.seller === "object" ? product.seller : null;
   const sellerId =
@@ -420,9 +490,13 @@ export function ProductView({ product }: { product: Product }) {
         ? product.seller
         : null;
 
+  // Only clerk/user ids on first paint — no sessionStorage (avoids SSR drift)
   const isOwnListing = useMemo(() => {
     if (!isSignedIn || !userId) return false;
-    const s = seller && typeof seller === "object" ? (seller as Record<string, unknown>) : null;
+    const s =
+      seller && typeof seller === "object"
+        ? (seller as Record<string, unknown>)
+        : null;
     const ids = [
       s?.clerkId,
       s?.userId,
@@ -436,20 +510,19 @@ export function ProductView({ product }: { product: Product }) {
       .map((v) => (v != null ? String(v) : ""))
       .filter(Boolean);
     if (ids.some((id) => id === userId || id === user?.id)) return true;
-    const mySellerId =
-      typeof window !== "undefined" ? sessionStorage.getItem("plazore_seller_id") || "" : "";
-    if (sellerId && mySellerId && sellerId === mySellerId) return true;
     return false;
-  }, [isSignedIn, userId, seller, sellerId, product, user?.id]);
+  }, [isSignedIn, userId, seller, product, user?.id]);
 
   const { deliveryFee, deliveryMethodLabel } = readShipping(product);
   const categoryLabel =
-    typeof product.category === "string" ? product.category : product.category?.name;
+    typeof product.category === "string"
+      ? product.category
+      : product.category?.name;
   const inStock = Number(product.stock) > 0;
   const wishlistCount = Number(
     (product as { wishlistCount?: number; saves?: number }).wishlistCount ??
       (product as { saves?: number }).saves ??
-      0,
+      0
   );
 
   const specs = useMemo(() => {
@@ -472,15 +545,54 @@ export function ProductView({ product }: { product: Product }) {
       .join(", ") ||
     null;
 
-  const productUrl =
-    typeof window !== "undefined"
-      ? `${window.location.origin}/product/${product._id}`
-      : `/product/${product._id}`;
-
   const returnTo = pathname || `/product/${product._id}`;
   const signInHref = `/sign-in?redirect_url=${encodeURIComponent(returnTo)}`;
   const signUpHref = `/sign-in?mode=signup&redirect_url=${encodeURIComponent(returnTo)}`;
   const shareText = `Found this on Plazore — ${product.name}. Clean listing, clear details. Take a look:`;
+
+  /**
+   * Hydration-safe price:
+   * - Server + first client paint: always canonical product-region money (fixed formatter)
+   * - After mount: buyer-region conversion (France → €, etc.)
+   */
+  const priceLabel = useMemo(() => {
+    const amount = Number(product.price) || 0;
+    const productRegion = product.region || DEFAULT_REGION;
+    if (!mounted) {
+      return formatMoneyFixed(amount, productRegion);
+    }
+    if (typeof marketplace.formatProduct === "function") {
+      return marketplace.formatProduct(amount, productRegion);
+    }
+    return formatProductPrice(
+      amount,
+      productRegion,
+      displayRegion,
+      marketplace.ratesToNgn || undefined
+    );
+  }, [
+    mounted,
+    product.price,
+    product.region,
+    displayRegion,
+    marketplace,
+  ]);
+
+  const feeLabel = useMemo(() => {
+    const productRegion = product.region || DEFAULT_REGION;
+    if (!mounted) {
+      return formatMoneyFixed(deliveryFee, productRegion);
+    }
+    if (typeof marketplace.formatProduct === "function") {
+      return marketplace.formatProduct(deliveryFee, productRegion);
+    }
+    return formatProductPrice(
+      deliveryFee,
+      productRegion,
+      displayRegion,
+      marketplace.ratesToNgn || undefined
+    );
+  }, [mounted, deliveryFee, product.region, displayRegion, marketplace]);
 
   const doBag = useCallback(() => {
     addToCart(product);
@@ -532,7 +644,9 @@ export function ProductView({ product }: { product: Product }) {
       }
       setMsgError(
         json?.message ||
-          (res.status === 401 ? "Please sign in again." : "Could not start this conversation."),
+          (res.status === 401
+            ? "Please sign in again."
+            : "Could not start this conversation.")
       );
     } catch {
       setMsgError("Could not start this conversation.");
@@ -548,7 +662,7 @@ export function ProductView({ product }: { product: Product }) {
       else if (action === "message") void messageSeller();
       else doWishlist();
     },
-    [doBag, doBuy, doWishlist, messageSeller],
+    [doBag, doBuy, doWishlist, messageSeller]
   );
 
   const requireAccount = (action: PendingAction) => {
@@ -561,7 +675,7 @@ export function ProductView({ product }: { product: Product }) {
     try {
       sessionStorage.setItem(
         PENDING_KEY,
-        JSON.stringify({ action, productId: String(product._id) }),
+        JSON.stringify({ action, productId: String(product._id) })
       );
     } catch {
       /* ignore */
@@ -570,11 +684,12 @@ export function ProductView({ product }: { product: Product }) {
   };
 
   useEffect(() => {
+    if (!mounted) return;
     setBagCount(cartCount());
     const sync = () => setBagCount(cartCount());
     window.addEventListener("plazore-cart", sync);
     return () => window.removeEventListener("plazore-cart", sync);
-  }, []);
+  }, [mounted]);
 
   useEffect(() => {
     fetchProductAI(product._id).then(setAi);
@@ -583,11 +698,14 @@ export function ProductView({ product }: { product: Product }) {
   }, [product._id]);
 
   useEffect(() => {
-    if (!isLoaded || !isSignedIn || ranPending.current) return;
+    if (!mounted || !isLoaded || !isSignedIn || ranPending.current) return;
     try {
       const raw = sessionStorage.getItem(PENDING_KEY);
       if (!raw) return;
-      const parsed = JSON.parse(raw) as { action?: PendingAction; productId?: string };
+      const parsed = JSON.parse(raw) as {
+        action?: PendingAction;
+        productId?: string;
+      };
       if (parsed.productId && parsed.productId !== String(product._id)) return;
       if (!parsed.action) return;
       ranPending.current = true;
@@ -598,7 +716,14 @@ export function ProductView({ product }: { product: Product }) {
     } catch {
       /* ignore */
     }
-  }, [isLoaded, isSignedIn, product._id, runAction]);
+  }, [mounted, isLoaded, isSignedIn, product._id, runAction]);
+
+  const productUrl = useMemo(() => {
+    if (!mounted || typeof window === "undefined") {
+      return `/product/${product._id}`;
+    }
+    return `${window.location.origin}/product/${product._id}`;
+  }, [mounted, product._id]);
 
   const copyLink = async () => {
     try {
@@ -613,7 +738,9 @@ export function ProductView({ product }: { product: Product }) {
   const shareNative = async () => {
     setShareBusy(true);
     try {
-      const blob = images[0] ? await buildShareCard(images[0], product.name) : null;
+      const blob = images[0]
+        ? await buildShareCard(images[0], product.name)
+        : null;
       const file =
         blob &&
         new File([blob], "plazore-product.jpg", {
@@ -663,7 +790,10 @@ export function ProductView({ product }: { product: Product }) {
       sessionStorage.setItem("plazore_return_to", returnTo);
       sessionStorage.setItem(
         PENDING_KEY,
-        JSON.stringify({ action: pending || "bag", productId: String(product._id) }),
+        JSON.stringify({
+          action: pending || "bag",
+          productId: String(product._id),
+        })
       );
     } catch {
       /* ignore */
@@ -688,13 +818,6 @@ export function ProductView({ product }: { product: Product }) {
       setGoogleBusy(false);
     }
   };
-
-  const priceLabel = formatProductPrice(
-    Number(product.price) || 0,
-    product.region,
-    displayRegion,
-  );
-  const feeLabel = formatProductPrice(deliveryFee, product.region, displayRegion);
 
   const authCopy: Record<PendingAction, { title: string; body: string }> = {
     bag: {
@@ -729,7 +852,10 @@ export function ProductView({ product }: { product: Product }) {
           <ChromeBtn onClick={() => setShareOpen(true)} label="Share">
             <Share2 className="h-[15px] w-[15px]" strokeWidth={2.25} />
           </ChromeBtn>
-          <ChromeBtn onClick={() => requireAccount("wishlist")} label="Wishlist">
+          <ChromeBtn
+            onClick={() => requireAccount("wishlist")}
+            label="Wishlist"
+          >
             <Heart className="h-[15px] w-[15px]" strokeWidth={2.2} />
             {wishlistCount > 0 ? (
               <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 rounded-full bg-black/80 px-1 text-[9px] font-extrabold leading-none">
@@ -756,7 +882,12 @@ export function ProductView({ product }: { product: Product }) {
           </h1>
 
           <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-            <p className="text-[22px] font-bold tracking-tight sm:text-[25px]">{priceLabel}</p>
+            <p
+              className="text-[22px] font-bold tracking-tight sm:text-[25px]"
+              suppressHydrationWarning
+            >
+              {priceLabel}
+            </p>
             <span
               className={`inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-xs font-semibold ${
                 inStock
@@ -764,7 +895,11 @@ export function ProductView({ product }: { product: Product }) {
                   : "border-error/30 bg-error/10 text-error"
               }`}
             >
-              <span className={`h-1.5 w-1.5 rounded-full ${inStock ? "bg-ai-green" : "bg-error"}`} />
+              <span
+                className={`h-1.5 w-1.5 rounded-full ${
+                  inStock ? "bg-ai-green" : "bg-error"
+                }`}
+              />
               {inStock ? (
                 <GradientLabel>{`Available · ${product.stock}`}</GradientLabel>
               ) : (
@@ -788,11 +923,12 @@ export function ProductView({ product }: { product: Product }) {
             </div>
           )}
 
-          {/* Plazore AI — butter smooth fade */}
           <div className="relative mt-5 overflow-hidden rounded-[20px] border border-ai-green/20 bg-[#11141A]/80">
             <div
               className={`flex h-[108px] items-center justify-center transition-opacity duration-700 ease-out ${
-                aiReady ? "pointer-events-none absolute inset-0 opacity-0" : "opacity-100"
+                aiReady
+                  ? "pointer-events-none absolute inset-0 opacity-0"
+                  : "opacity-100"
               }`}
             >
               <div className="relative flex h-14 w-14 items-center justify-center">
@@ -829,7 +965,9 @@ export function ProductView({ product }: { product: Product }) {
                 />
                 <p className="font-display text-[17px]">Plazore AI</p>
               </div>
-              <p className="font-display text-sm text-white/88">Quick AI Insights</p>
+              <p className="font-display text-sm text-white/88">
+                Quick AI Insights
+              </p>
               <ExpandableText
                 className="mt-3 text-[15px] leading-6"
                 text={
@@ -851,12 +989,13 @@ export function ProductView({ product }: { product: Product }) {
                 </div>
               )}
               <button
-  type="button"
-  onClick={() => router.push(`/product/${product._id}/ai`)}
-  className="mt-3 flex w-full items-center justify-center gap-1 rounded-full border border-white/13 bg-white/4 py-2.5 text-[13.5px]"
->
-  See more <ChevronDown className="h-3.5 w-3.5 text-secondary" />
-</button>
+                type="button"
+                onClick={() => router.push(`/product/${product._id}/ai`)}
+                className="mt-3 flex w-full items-center justify-center gap-1 rounded-full border border-white/13 bg-white/4 py-2.5 text-[13.5px]"
+              >
+                See more{" "}
+                <ChevronDown className="h-3.5 w-3.5 text-secondary" />
+              </button>
             </div>
           </div>
 
@@ -864,7 +1003,9 @@ export function ProductView({ product }: { product: Product }) {
             <div className="mb-1.5 flex items-center gap-2">
               <span
                 className="flex h-[22px] w-[22px] items-center justify-center rounded-[7px]"
-                style={{ backgroundImage: "linear-gradient(135deg,#10B981,#3B82F6)" }}
+                style={{
+                  backgroundImage: "linear-gradient(135deg,#10B981,#3B82F6)",
+                }}
               >
                 <ShieldCheck className="h-3 w-3 text-white" />
               </span>
@@ -887,7 +1028,9 @@ export function ProductView({ product }: { product: Product }) {
 
           {product.description && (
             <div className="mt-7">
-              <p className="mb-2 text-sm font-semibold uppercase tracking-[0.14em]">Description</p>
+              <p className="mb-2 text-sm font-semibold uppercase tracking-[0.14em]">
+                Description
+              </p>
               <ExpandableText
                 className="text-[15.5px] leading-6 text-secondary"
                 text={String(product.description)}
@@ -903,8 +1046,12 @@ export function ProductView({ product }: { product: Product }) {
                   key={k}
                   className="flex justify-between gap-3 border-b border-line py-2.5 last:border-0"
                 >
-                  <span className="max-w-[42%] text-[13.5px] text-muted">{formatSpecKey(k)}</span>
-                  <span className="min-w-0 text-right text-[13.5px] font-medium break-words">{v}</span>
+                  <span className="max-w-[42%] text-[13.5px] text-muted">
+                    {formatSpecKey(k)}
+                  </span>
+                  <span className="min-w-0 break-words text-right text-[13.5px] font-medium">
+                    {v}
+                  </span>
                 </div>
               ))}
             </div>
@@ -912,24 +1059,28 @@ export function ProductView({ product }: { product: Product }) {
 
           {docs.length > 0 && (
             <div className="mt-6 rounded-[20px] border border-line bg-surface p-4 sm:p-[18px]">
-              <p className="mb-3 text-base font-semibold">Verification Documents</p>
+              <p className="mb-3 text-base font-semibold">
+                Verification Documents
+              </p>
               {docs.map((doc, i) => (
                 <a
-                  key={`${doc.secureUrl}-${i}`}
-                  href={doc.secureUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="flex items-center gap-3 border-b border-line py-2.5 last:border-0"
-                >
+  href={doc.secureUrl}
+  target="_blank"
+  rel="noopener noreferrer"
+  className="text-sm font-semibold text-[#00E575] underline"
+>
                   <span className="flex h-[38px] w-[38px] items-center justify-center rounded-xl border border-line bg-surface-2">
                     <FileText className="h-4 w-4 text-secondary" />
                   </span>
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-[14.5px] font-medium">
-                      {doc.documentName || "Document"}
+                     Open {doc.documentName || "document"}
                     </span>
                     <span className="text-[11.5px] capitalize text-muted">
-                      {String(doc.documentType || "document").replace(/_/g, " ")}
+                      {String(doc.documentType || "document").replace(
+                        /_/g,
+                        " "
+                      )}
                     </span>
                   </span>
                 </a>
@@ -949,12 +1100,16 @@ export function ProductView({ product }: { product: Product }) {
                 <p className="text-[10.5px] font-semibold uppercase tracking-widest text-muted">
                   Delivery
                 </p>
-                <p className="text-[15.5px] font-semibold">{deliveryMethodLabel}</p>
+                <p className="text-[15.5px] font-semibold">
+                  {deliveryMethodLabel}
+                </p>
               </div>
             </div>
             <div className="flex justify-between border-t border-line pt-3 text-[14.5px]">
               <span className="text-secondary">Delivery fee</span>
-              <span className="font-semibold">{feeLabel}</span>
+              <span className="font-semibold" suppressHydrationWarning>
+                {feeLabel}
+              </span>
             </div>
           </div>
 
@@ -972,7 +1127,9 @@ export function ProductView({ product }: { product: Product }) {
             </div>
           )}
 
-          <p className="mb-2 mt-7 text-sm font-semibold uppercase tracking-[0.14em]">Sold By</p>
+          <p className="mb-2 mt-7 text-sm font-semibold uppercase tracking-[0.14em]">
+            Sold By
+          </p>
           <div className="mb-4 overflow-hidden rounded-[20px] border border-line bg-surface">
             <Link
               href={sellerId ? `/store/${sellerId}` : "#"}
@@ -1015,12 +1172,16 @@ export function ProductView({ product }: { product: Product }) {
                   {messaging ? "Opening chat…" : "Message seller"}
                 </button>
                 {msgError ? (
-                  <p className="mt-2 text-center text-[12px] text-error">{msgError}</p>
+                  <p className="mt-2 text-center text-[12px] text-error">
+                    {msgError}
+                  </p>
                 ) : null}
               </div>
             ) : (
               <div className="border-t border-line px-4 py-3 sm:px-[18px]">
-                <p className="text-center text-[12px] text-muted">This is your listing</p>
+                <p className="text-center text-[12px] text-muted">
+                  This is your listing
+                </p>
                 <Link
                   href={`/seller/products/${product._id}/edit`}
                   className="mt-2 flex h-11 w-full items-center justify-center border border-white/12 bg-surface-2 text-sm font-bold"
@@ -1031,10 +1192,9 @@ export function ProductView({ product }: { product: Product }) {
             )}
           </div>
 
-          {/* Report Product — OUTSIDE Sold By, reddish */}
           {!isOwnListing ? (
             <div className="mb-4 mt-2">
-              <p className="mb-2 text-sm font-semibold uppercase tracking-[0.14em] text-[#FFFF]/90">
+              <p className="mb-2 text-sm font-semibold uppercase tracking-[0.14em] text-white/90">
                 Support
               </p>
               <button
@@ -1052,7 +1212,9 @@ export function ProductView({ product }: { product: Product }) {
                     productId: String(product._id || ""),
                     productName: String(product.name || ""),
                     storeId: sellerId || "",
-                    storeName: String(seller?.storeName || seller?.name || ""),
+                    storeName: String(
+                      seller?.storeName || seller?.name || ""
+                    ),
                   });
                   router.push(`/contact?${q.toString()}`);
                 }}
@@ -1092,14 +1254,14 @@ export function ProductView({ product }: { product: Product }) {
           <button
             type="button"
             onClick={() => requireAccount("bag")}
-            className="h-11 min-w-0 flex-1 rounded-full border border-white/12 bg-surface-2 px-2 text-[12px] font-bold whitespace-nowrap sm:h-12 sm:text-sm"
+            className="h-11 min-w-0 flex-1 whitespace-nowrap rounded-full border border-white/12 bg-surface-2 px-2 text-[12px] font-bold sm:h-12 sm:text-sm"
           >
             Add to Bag
           </button>
           <button
             type="button"
             onClick={() => requireAccount("buy")}
-            className="h-11 min-w-0 flex-1 rounded-full bg-white px-2 text-[12px] font-extrabold whitespace-nowrap text-bg sm:h-12 sm:text-sm"
+            className="h-11 min-w-0 flex-1 whitespace-nowrap rounded-full bg-white px-2 text-[12px] font-extrabold text-bg sm:h-12 sm:text-sm"
           >
             Buy Now
           </button>
@@ -1119,7 +1281,7 @@ export function ProductView({ product }: { product: Product }) {
 
       {shareOpen ? (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/75 sm:items-center sm:p-6">
-          <div className="w-full max-w-md max-h-[90dvh] overflow-y-auto border border-white/10 bg-[#11141A] sm:rounded-2xl">
+          <div className="max-h-[90dvh] w-full max-w-md overflow-y-auto border border-white/10 bg-[#11141A] sm:rounded-2xl">
             <div className="flex items-center justify-between border-b border-white/8 px-4 py-3.5">
               <p className="text-[15px] font-bold">Share product</p>
               <button
@@ -1147,7 +1309,9 @@ export function ProductView({ product }: { product: Product }) {
                   className="flex flex-col items-center gap-2"
                 >
                   <BrandMark brand={item.id} />
-                  <span className="text-[11px] font-medium text-white/55">{item.label}</span>
+                  <span className="text-[11px] font-medium text-white/55">
+                    {item.label}
+                  </span>
                 </button>
               ))}
             </div>
@@ -1183,11 +1347,15 @@ export function ProductView({ product }: { product: Product }) {
 
       {authOpen ? (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/75 sm:items-center sm:p-6">
-          <div className="w-full max-w-md max-h-[90dvh] overflow-y-auto border border-white/10 bg-[#11141A] sm:rounded-2xl">
+          <div className="max-h-[90dvh] w-full max-w-md overflow-y-auto border border-white/10 bg-[#11141A] sm:rounded-2xl">
             <div className="flex items-start justify-between gap-3 px-5 pt-5">
               <div className="min-w-0">
-                <p className="text-[16px] font-extrabold leading-snug">{gate.title}</p>
-                <p className="mt-1.5 text-[13px] leading-5 text-white/55">{gate.body}</p>
+                <p className="text-[16px] font-extrabold leading-snug">
+                  {gate.title}
+                </p>
+                <p className="mt-1.5 text-[13px] leading-5 text-white/55">
+                  {gate.body}
+                </p>
               </div>
               <button
                 type="button"
@@ -1222,7 +1390,8 @@ export function ProductView({ product }: { product: Product }) {
                 Create a Plazore account
               </Link>
               <p className="pt-1 text-center text-[11px] leading-4 text-white/38">
-                Already on Plazore? Sign in and you’ll land back on this product.
+                Already on Plazore? Sign in and you’ll land back on this
+                product.
               </p>
             </div>
           </div>
@@ -1241,7 +1410,10 @@ export function ProductMissing() {
         <Package className="h-6 w-6 text-ai-green" />
       </span>
       <p className="mt-4 font-semibold">Piece not found</p>
-      <Link href="/" className="mt-6 rounded-full bg-text px-6 py-2.5 text-sm font-bold text-bg">
+      <Link
+        href="/"
+        className="mt-6 rounded-full bg-text px-6 py-2.5 text-sm font-bold text-bg"
+      >
         Return
       </Link>
     </div>

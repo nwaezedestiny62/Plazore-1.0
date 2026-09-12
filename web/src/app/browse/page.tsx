@@ -707,16 +707,38 @@ function BrowseInner() {
               Browse
             </Link>
 
-            <Link
-              href="/lounge"
-              className="relative inline-flex items-center gap-2.5 rounded-full border border-[#00E575]/40 bg-gradient-to-b from-[#00E575]/18 to-[#00E575]/06 px-4 py-2 text-[11px] font-bold tracking-[0.2em] uppercase text-[#00E575] shadow-[0_0_24px_rgba(0,229,117,0.12)] transition hover:border-[#00E575]/60 hover:from-[#00E575]/24 hover:to-[#00E575]/10 hover:shadow-[0_0_28px_rgba(0,229,117,0.2)]"
-            >
-              Lounge
-              <span className="relative flex h-2 w-2">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#00E575] opacity-40" />
-                <span className="relative inline-flex h-2 w-2 rounded-full bg-[#00E575]" />
-              </span>
-            </Link>
+            {/* Lounge — Plazore brand badge (green → blue, sharp, light 3D) */}
+<Link
+  href="/lounge"
+  className="group relative inline-flex items-center gap-2.5 overflow-hidden border border-white/15 px-4 py-2 text-[11px] font-extrabold tracking-[0.22em] uppercase text-white transition duration-200 hover:brightness-110 active:translate-y-[1px]"
+  style={{
+    background:
+      "linear-gradient(135deg, #00E575 0%, #0ECF7A 38%, #2B6DE8 72%, #3B82F6 100%)",
+    boxShadow:
+      "0 1px 0 rgba(255,255,255,0.35) inset, 0 -2px 0 rgba(0,0,0,0.28) inset, 0 6px 18px rgba(59,130,246,0.28), 0 2px 0 rgba(0,0,0,0.35)",
+  }}
+>
+  {/* top sheen */}
+  <span
+    aria-hidden
+    className="pointer-events-none absolute inset-x-0 top-0 h-[45%] bg-gradient-to-b from-white/25 to-transparent"
+  />
+  {/* left green / right blue edge accent like the mark */}
+  <span
+    aria-hidden
+    className="pointer-events-none absolute left-0 top-0 h-full w-[3px] bg-[#00E575]"
+  />
+  <span
+    aria-hidden
+    className="pointer-events-none absolute right-0 top-0 h-full w-[3px] bg-[#3B82F6]"
+  />
+
+  <span className="relative">Lounge</span>
+  <span className="relative flex h-1.5 w-1.5 shrink-0">
+    <span className="absolute inline-flex h-full w-full animate-ping bg-white/80 opacity-45" />
+    <span className="relative inline-flex h-1.5 w-1.5 bg-white shadow-[0_0_8px_rgba(255,255,255,0.8)]" />
+  </span>
+</Link>
 
             <button
               type="button"

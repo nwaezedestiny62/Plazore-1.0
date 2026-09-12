@@ -13,6 +13,20 @@ export interface IBuyerConfidence {
   factors: string[];
 }
 
+export interface ICommerceSlice {
+  orders: number;
+  delivered: number;
+  confirmed: number;
+  issues: number;
+  sellerCancelled: number;
+}
+
+export interface ICommerceEvidence {
+  seller: ICommerceSlice;
+  product: ICommerceSlice;
+  gatheredAt?: Date;
+}
+
 export interface IProductAI extends Document {
   productId: mongoose.Types.ObjectId;
   fingerprint: string;
@@ -21,19 +35,24 @@ export interface IProductAI extends Document {
   promptVersion: number;
   generatedAt?: Date;
 
-  // AI content
-  summary: string; // Quick Insights (60–100 words)
+  summary: string;
   overview: string;
   highlights: string[];
   bestFor: string[];
   shippingSummary: string;
   thingsToConsider: string[];
 
-  // Buyer Confidence (backend only)
   buyerConfidence: IBuyerConfidence;
   confidenceExplanation: string;
 
+  /** Snapshot of order-derived evidence used for confidence (not shown raw to buyers). */
+  commerceEvidence?: ICommerceEvidence;
+  /** Last algorithm-only refresh (daily maintenance, no AI). */
+  lastAlgorithmAt?: Date;
+
   error?: string;
+  createdAt?: Date;
+  updatedAt?: Date;
 }
 
 const buyerConfidenceSchema = new Schema<IBuyerConfidence>(
@@ -45,6 +64,26 @@ const buyerConfidenceSchema = new Schema<IBuyerConfidence>(
     },
     score: { type: Number, required: true, min: 0, max: 100 },
     factors: [{ type: String }],
+  },
+  { _id: false }
+);
+
+const commerceSliceSchema = new Schema(
+  {
+    orders: { type: Number, default: 0 },
+    delivered: { type: Number, default: 0 },
+    confirmed: { type: Number, default: 0 },
+    issues: { type: Number, default: 0 },
+    sellerCancelled: { type: Number, default: 0 },
+  },
+  { _id: false }
+);
+
+const commerceEvidenceSchema = new Schema(
+  {
+    seller: { type: commerceSliceSchema, default: () => ({}) },
+    product: { type: commerceSliceSchema, default: () => ({}) },
+    gatheredAt: { type: Date },
   },
   { _id: false }
 );
@@ -82,12 +121,17 @@ const productAISchema = new Schema<IProductAI>(
     },
     confidenceExplanation: { type: String, default: "" },
 
+    commerceEvidence: {
+      type: commerceEvidenceSchema,
+      required: false,
+    },
+    lastAlgorithmAt: { type: Date },
+
     error: { type: String },
   },
   { timestamps: true }
 );
 
-// Helpful compound index for monitoring
 productAISchema.index({ status: 1, generatedAt: -1 });
 
 const ProductAI = mongoose.model<IProductAI>("ProductAI", productAISchema);

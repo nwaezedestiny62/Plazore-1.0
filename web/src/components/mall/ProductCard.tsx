@@ -1,12 +1,16 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@clerk/nextjs";
 import { ShoppingCart, X } from "lucide-react";
 import { useShowroomFlyCart } from "./ShowroomFlyCart";
 import { useMarketplace } from "@/context/MarketplaceContext";
-import { DEFAULT_REGION, formatProductPrice } from "@/lib/regions";
+import {
+  DEFAULT_REGION,
+  formatMoney,
+  formatProductPrice,
+} from "@/lib/regions";
 import type { Product } from "@/lib/types";
 import { trackShowroomEvent } from "@/lib/showroomEvents";
 
@@ -55,8 +59,14 @@ export function ProductCard({
 }) {
   const { isSignedIn, isLoaded } = useAuth();
   const fly = useShowroomFlyCart();
-  const marketplace = useMarketplace() as { region?: string } | null;
+  const marketplace = useMarketplace() as {
+    region?: string;
+    formatProduct?: (amount: number, productRegion?: string | null) => string;
+    ratesToNgn?: Record<string, number> | null;
+  } | null;
+
   const displayRegion = marketplace?.region || DEFAULT_REGION;
+  const [mounted, setMounted] = useState(false);
 
   const btnRef = useRef<HTMLButtonElement>(null);
   const impressed = useRef(false);
@@ -64,7 +74,10 @@ export function ProductCard({
   const [imgIdx, setImgIdx] = useState(0);
   const images = product.images?.length ? product.images : [];
 
-  // Impression once when card mounts
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
   useEffect(() => {
     if (impressed.current || !product?._id) return;
     impressed.current = true;
@@ -85,16 +98,32 @@ export function ProductCard({
     return () => clearInterval(id);
   }, [images.length]);
 
-  const image = images[imgIdx] || images[0];
   const light = tone === "light";
 
   const widthClass = compact
     ? "min-w-[160px] w-[42vw] max-w-[200px] sm:min-w-[180px] sm:w-[200px]"
     : "min-w-[180px] w-[48vw] max-w-[240px] sm:min-w-[220px] sm:w-[240px] md:max-w-[280px]";
 
-  const returnPath =
-    typeof window !== "undefined" ? window.location.pathname : "/";
-  const authQs = `redirect_url=${encodeURIComponent(returnPath)}`;
+  /**
+   * SSR + first client paint: product-region only (stable).
+   * After mount: buyer-region conversion (FR → €, etc.).
+   */
+  const priceLabel = useMemo(() => {
+    const amount = Number(product.price) || 0;
+    const productRegion = product.region || DEFAULT_REGION;
+    if (!mounted) {
+      return formatMoney(amount, productRegion);
+    }
+    if (typeof marketplace?.formatProduct === "function") {
+      return marketplace.formatProduct(amount, productRegion);
+    }
+    return formatProductPrice(
+      amount,
+      productRegion,
+      displayRegion,
+      marketplace?.ratesToNgn || undefined
+    );
+  }, [mounted, product.price, product.region, displayRegion, marketplace]);
 
   const trackOpen = () => {
     if (!product?._id) return;
@@ -146,7 +175,9 @@ export function ProductCard({
 
   const goAuth = (path: "/sign-in" | "/sign-up") => {
     stashReturn(product._id);
-    window.location.href = `${path}?${authQs}`;
+    const returnPath =
+      typeof window !== "undefined" ? window.location.pathname : "/";
+    window.location.href = `${path}?redirect_url=${encodeURIComponent(returnPath)}`;
   };
 
   return (
@@ -199,12 +230,9 @@ export function ProductCard({
             className={`mt-1 text-[13px] font-semibold ${
               light ? "text-chamber-ink" : "text-secondary"
             }`}
+            suppressHydrationWarning
           >
-            {formatProductPrice(
-              Number(product.price),
-              product.region,
-              displayRegion
-            )}
+            {priceLabel}
           </p>
         </Link>
 

@@ -41,11 +41,20 @@ function toneForStatus(s?: string) {
   return "neutral" as const;
 }
 
-function toneForConf(s?: string) {
+function toneForConf(level?: string) {
+  const s = String(level || "");
   if (s === "High Confidence") return "green" as const;
   if (s === "Growing Confidence") return "blue" as const;
   if (s === "Limited Confidence") return "warn" as const;
   return "neutral" as const;
+}
+
+function shortConf(level?: string) {
+  const s = String(level || "");
+  if (s === "High Confidence") return "High";
+  if (s === "Growing Confidence") return "Growing";
+  if (s === "Limited Confidence") return "Limited";
+  return s || "—";
 }
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
@@ -105,6 +114,69 @@ function BulletList({ items }: { items?: string[] | null }) {
   );
 }
 
+function ScoreBar({ score }: { score?: number | null }) {
+  const n =
+    typeof score === "number" && Number.isFinite(score)
+      ? Math.max(0, Math.min(100, score))
+      : null;
+  if (n == null) return null;
+  return (
+    <div className="mt-2">
+      <div className="flex items-center justify-between text-[11px] text-[#737A86]">
+        <span>Evidence score</span>
+        <span className="tabular-nums text-[#A7ADB8]">{n}/100</span>
+      </div>
+      <div className="mt-1.5 h-1.5 overflow-hidden bg-[#171B22]">
+        <div
+          className="h-full bg-gradient-to-r from-[#00E575] to-[#3B82F6] transition-all"
+          style={{ width: `${n}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function CommerceSliceCard({
+  title,
+  slice,
+}: {
+  title: string;
+  slice?: {
+    orders?: number;
+    delivered?: number;
+    confirmed?: number;
+    issues?: number;
+    sellerCancelled?: number;
+  } | null;
+}) {
+  const s = slice || {};
+  const rows: [string, number][] = [
+    ["Orders", Number(s.orders) || 0],
+    ["Delivered", Number(s.delivered) || 0],
+    ["Buyer confirmed", Number(s.confirmed) || 0],
+    ["Issues reported", Number(s.issues) || 0],
+    ["Seller cancelled", Number(s.sellerCancelled) || 0],
+  ];
+  return (
+    <div className="border border-[#252A33] bg-[#11141A] px-3 py-3">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#737A86]">
+        {title}
+      </p>
+      <div className="mt-2 space-y-1.5">
+        {rows.map(([label, n]) => (
+          <div
+            key={label}
+            className="flex items-center justify-between text-xs text-[#A7ADB8]"
+          >
+            <span>{label}</span>
+            <span className="tabular-nums text-[#F5F7FA]">{n}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function IntelligencePage() {
   const { getToken } = useAuth();
   const searchParams = useSearchParams();
@@ -148,7 +220,10 @@ export default function IntelligencePage() {
         if (q.trim()) params.set("q", q.trim());
         if (status) params.set("status", status);
         if (confidence) params.set("confidence", confidence);
-        const json = await adminFetch<any>(`/admin/intelligence?${params}`, token);
+        const json = await adminFetch<any>(
+          `/admin/intelligence?${params}`,
+          token
+        );
         setOverview(json.data.overview);
         setItems(json.data.items || []);
         setPages(json.data.pagination?.pages || 1);
@@ -165,7 +240,7 @@ export default function IntelligencePage() {
 
   useEffect(() => {
     load(1);
-  }, [status, confidence]); // eslint-disable-line
+  }, [status, confidence]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadDetail = useCallback(
     async (id: string) => {
@@ -209,7 +284,7 @@ export default function IntelligencePage() {
     if (deepOpened.current === deepId) return;
     deepOpened.current = deepId;
     void openPane(deepId);
-  }, [deepId]); // eslint-disable-line
+  }, [deepId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => () => stopPoll(), []);
 
@@ -252,13 +327,24 @@ export default function IntelligencePage() {
   const src = detail?.source;
   const gen = detail?.generated;
   const pipe = detail?.pipeline;
+  const conf = gen?.buyerConfidence;
+  const commerce = gen?.commerceEvidence || detail?.commerceEvidence || null;
   const specs =
     src?.specifications && typeof src.specifications === "object"
       ? Object.entries(src.specifications as Record<string, unknown>)
       : [];
 
+  const confHigh = ov?.buyerConfidence?.high ?? 0;
+  const confGrowing = ov?.buyerConfidence?.growing ?? 0;
+  const confLimited = ov?.buyerConfidence?.limited ?? 0;
+
   return (
-    <div className={cn(poppins.className, "relative min-h-[70vh] pb-24 text-[#F5F7FA]")}>
+    <div
+      className={cn(
+        poppins.className,
+        "relative min-h-[70vh] pb-24 text-[#F5F7FA]"
+      )}
+    >
       <header className="mb-6 border-b border-[#252A33] pb-5">
         <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-[#00E575]">
           Intelligence
@@ -269,7 +355,11 @@ export default function IntelligencePage() {
               Product Intelligence
             </h1>
             <p className="mt-2 max-w-2xl text-sm leading-relaxed text-[#A7ADB8]">
-              Full generated copy for each product. After a listing edit, the previous generation stays visible until the new one is saved — then this pane shows the complete replacement.
+              Generated product interpretation and Buyer Confidence. Confidence
+              reflects the strength of Plazore commerce evidence for the seller
+              and this product — not a rating, popularity score, or guarantee.
+              After a listing edit, prior copy remains until the new generation
+              is saved.
             </p>
           </div>
           <Button
@@ -278,22 +368,25 @@ export default function IntelligencePage() {
             disabled={loading}
             onClick={() => load(page)}
           >
-            <RefreshCw className={cn("h-3.5 w-3.5", loading && "animate-spin")} />
+            <RefreshCw
+              className={cn("h-3.5 w-3.5", loading && "animate-spin")}
+            />
             Refresh
           </Button>
         </div>
       </header>
 
       {ov ? (
-        <div className="mb-4 grid grid-cols-2 gap-px overflow-hidden border border-[#252A33] bg-[#252A33] sm:grid-cols-4 xl:grid-cols-7">
+        <div className="mb-4 grid grid-cols-2 gap-px overflow-hidden border border-[#252A33] bg-[#252A33] sm:grid-cols-4 xl:grid-cols-8">
           {[
             ["Ready", ov.withIntelligence],
             ["Pending", ov.pending],
             ["Failed", ov.failed],
             ["Missing", ov.missing],
             ["Updated 7d", ov.recentlyUpdated7d],
-            ["High", ov.buyerConfidence.high],
-            ["Limited", ov.buyerConfidence.limited],
+            ["High", confHigh],
+            ["Growing", confGrowing],
+            ["Limited", confLimited],
           ].map(([label, n]) => (
             <div key={String(label)} className="bg-[#11141A] px-3 py-3.5">
               <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#737A86]">
@@ -323,11 +416,14 @@ export default function IntelligencePage() {
             <option value="failed">Failed</option>
             <option value="missing">Missing</option>
           </Select>
-          <Select value={confidence} onChange={(e) => setConfidence(e.target.value)}>
+          <Select
+            value={confidence}
+            onChange={(e) => setConfidence(e.target.value)}
+          >
             <option value="">All confidence</option>
             <option value="High Confidence">High Confidence</option>
-            <option value="Growing Confidence">Growing</option>
-            <option value="Limited Confidence">Limited</option>
+            <option value="Growing Confidence">Growing Confidence</option>
+            <option value="Limited Confidence">Limited Confidence</option>
           </Select>
           <Button onClick={() => load(1)} disabled={loading}>
             {loading ? "Searching…" : "Search"}
@@ -348,17 +444,18 @@ export default function IntelligencePage() {
       ) : items.length === 0 ? (
         <EmptyState
           title="No intelligence rows"
-          body="Try another filter or generate from a product update."
+          body="Try another filter, or queue generation after a product update."
         />
       ) : (
         <Panel className="overflow-x-auto">
-          <table className="w-full min-w-[860px] text-left text-sm">
+          <table className="w-full min-w-[920px] text-left text-sm">
             <thead className="border-b border-[#252A33] text-[11px] uppercase tracking-[0.12em] text-[#737A86]">
               <tr>
                 <th className="px-4 py-3">Product</th>
                 <th className="px-4 py-3">Seller</th>
                 <th className="px-4 py-3">Status</th>
                 <th className="px-4 py-3">Buyer Confidence</th>
+                <th className="px-4 py-3">Score</th>
                 <th className="px-4 py-3">Generated</th>
               </tr>
             </thead>
@@ -369,7 +466,9 @@ export default function IntelligencePage() {
                   onClick={() => openPane(row.productId)}
                   className={cn(
                     "cursor-pointer border-b border-[#252A33]/70 hover:bg-[#171B22]/80",
-                    openId === row.productId && paneOpen && "bg-[#00E575]/[0.06]"
+                    openId === row.productId &&
+                      paneOpen &&
+                      "bg-[#00E575]/[0.06]"
                   )}
                 >
                   <td className="px-4 py-3">
@@ -377,12 +476,18 @@ export default function IntelligencePage() {
                       <div className="h-11 w-11 overflow-hidden border border-[#252A33] bg-[#171B22]">
                         {row.image ? (
                           // eslint-disable-next-line @next/next/no-img-element
-                          <img src={row.image} alt="" className="h-full w-full object-cover" />
+                          <img
+                            src={row.image}
+                            alt=""
+                            className="h-full w-full object-cover"
+                          />
                         ) : null}
                       </div>
                       <div className="min-w-0">
                         <p className="truncate font-medium">{row.name}</p>
-                        <p className="truncate text-xs text-[#737A86]">{row.category}</p>
+                        <p className="truncate text-xs text-[#737A86]">
+                          {row.category}
+                        </p>
                       </div>
                     </div>
                   </td>
@@ -390,18 +495,27 @@ export default function IntelligencePage() {
                     {row.seller?.storeName || row.seller?.name || "—"}
                   </td>
                   <td className="px-4 py-3">
-                    <Badge tone={toneForStatus(row.status)}>{row.status}</Badge>
+                    <Badge tone={toneForStatus(row.status)}>
+                      {row.status}
+                    </Badge>
                   </td>
                   <td className="px-4 py-3">
                     {row.buyerConfidence?.level ? (
                       <Badge tone={toneForConf(row.buyerConfidence.level)}>
-                        {row.buyerConfidence.level.replace(" Confidence", "")}
+                        {shortConf(row.buyerConfidence.level)}
                       </Badge>
                     ) : (
                       "—"
                     )}
                   </td>
-                  <td className="px-4 py-3 text-xs text-[#737A86]">{fmt(row.generatedAt)}</td>
+                  <td className="px-4 py-3 text-xs tabular-nums text-[#A7ADB8]">
+                    {typeof row.buyerConfidence?.score === "number"
+                      ? `${row.buyerConfidence.score}/100`
+                      : "—"}
+                  </td>
+                  <td className="px-4 py-3 text-xs text-[#737A86]">
+                    {fmt(row.generatedAt)}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -411,13 +525,21 @@ export default function IntelligencePage() {
 
       {pages > 1 && (
         <div className="mt-4 flex items-center gap-2">
-          <Button tone="ghost" disabled={page <= 1 || loading} onClick={() => load(page - 1)}>
+          <Button
+            tone="ghost"
+            disabled={page <= 1 || loading}
+            onClick={() => load(page - 1)}
+          >
             Previous
           </Button>
           <span className="text-xs text-[#737A86]">
             Page {page} of {pages} · {total.toLocaleString()}
           </span>
-          <Button tone="ghost" disabled={page >= pages || loading} onClick={() => load(page + 1)}>
+          <Button
+            tone="ghost"
+            disabled={page >= pages || loading}
+            onClick={() => load(page + 1)}
+          >
             Next
           </Button>
         </div>
@@ -426,7 +548,9 @@ export default function IntelligencePage() {
       <div
         className={cn(
           "fixed inset-0 z-40 bg-black/50 transition-opacity duration-300",
-          paneOpen ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"
+          paneOpen
+            ? "pointer-events-auto opacity-100"
+            : "pointer-events-none opacity-0"
         )}
         onClick={closePane}
       />
@@ -459,7 +583,9 @@ export default function IntelligencePage() {
           ) : src ? (
             <div className="space-y-7">
               <div>
-                <h2 className="text-lg font-semibold leading-snug">{src.name}</h2>
+                <h2 className="text-lg font-semibold leading-snug">
+                  {src.name}
+                </h2>
                 <p className="mt-1 text-sm text-[#A7ADB8]">
                   {[src.brand, src.category, src.subCategory, src.region]
                     .filter(Boolean)
@@ -469,22 +595,101 @@ export default function IntelligencePage() {
                   <Badge tone={toneForStatus(gen?.status || "missing")}>
                     {gen?.status || "missing"}
                   </Badge>
-                  {gen?.buyerConfidence?.level ? (
-                    <Badge tone={toneForConf(gen.buyerConfidence.level)}>
-                      {gen.buyerConfidence.level}
+                  {conf?.level ? (
+                    <Badge tone={toneForConf(conf.level)}>
+                      {conf.level}
                     </Badge>
                   ) : null}
-                  {pipe?.needsRefresh ? <Badge tone="warn">Fingerprint stale</Badge> : null}
-                  {gen?.status === "pending" ? <Badge tone="warn">Refreshing</Badge> : null}
+                  {pipe?.needsRefresh ? (
+                    <Badge tone="warn">Fingerprint stale</Badge>
+                  ) : null}
+                  {gen?.status === "pending" ? (
+                    <Badge tone="warn">Refreshing</Badge>
+                  ) : null}
                 </div>
               </div>
 
-              <p className="text-xs leading-relaxed text-[#A7ADB8]">{pipe?.note}</p>
+              {pipe?.note ? (
+                <p className="text-xs leading-relaxed text-[#A7ADB8]">
+                  {pipe.note}
+                </p>
+              ) : null}
               <p className="text-[11px] leading-relaxed text-[#737A86]">
-                One saved generation per product. If the listing is edited, the current text stays until the new generation is ready — then this pane shows the new copy in full.
+                Buyer Confidence is evidence-based. It combines listing clarity
+                with seller-level and product-level commerce history (orders,
+                deliveries, confirmations, issues). It is not a star rating or
+                authenticity guarantee. One saved generation is stored per
+                product; after an edit, prior text remains until the new run is
+                ready.
               </p>
 
-              {/* GENERATED — full, no truncation */}
+              {/* Buyer Confidence — primary */}
+              <div className="space-y-4 border-t border-[#252A33] pt-5">
+                <SectionLabel>Buyer Confidence</SectionLabel>
+                <div className="border border-[#252A33] bg-[#11141A] px-3 py-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    {conf?.level ? (
+                      <Badge tone={toneForConf(conf.level)}>
+                        {conf.level}
+                      </Badge>
+                    ) : (
+                      <span className="text-sm text-[#737A86]">Not set</span>
+                    )}
+                    {typeof conf?.score === "number" ? (
+                      <span className="text-xs tabular-nums text-[#A7ADB8]">
+                        {conf.score}/100
+                      </span>
+                    ) : null}
+                  </div>
+                  <ScoreBar score={conf?.score} />
+                  <p className="mt-3 text-[11px] leading-relaxed text-[#737A86]">
+                    States: Limited · Growing · High — based on volume and
+                    quality of commerce evidence available on Plazore.
+                  </p>
+                </div>
+
+                <Field label="Buyer-facing explanation">
+                  <FullText value={gen?.confidenceExplanation} />
+                </Field>
+
+                <Field label="Evidence factors">
+                  <BulletList items={conf?.factors} />
+                </Field>
+
+                {commerce ? (
+                  <div>
+                    <SectionLabel>Commerce evidence snapshot</SectionLabel>
+                    <p className="mt-1 text-[11px] text-[#737A86]">
+                      Gathered {fmt(commerce.gatheredAt)} · used for this
+                      confidence state
+                    </p>
+                    <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      <CommerceSliceCard
+                        title="Seller history"
+                        slice={commerce.seller}
+                      />
+                      <CommerceSliceCard
+                        title="This product"
+                        slice={commerce.product}
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-xs text-[#737A86]">
+                    No commerce evidence snapshot stored on this generation yet.
+                    It appears after the next intelligence run with the updated
+                    confidence pipeline.
+                  </p>
+                )}
+
+                {gen?.lastAlgorithmAt ? (
+                  <p className="text-[11px] text-[#737A86]">
+                    Last algorithm maintenance {fmt(gen.lastAlgorithmAt)}
+                  </p>
+                ) : null}
+              </div>
+
+              {/* Generated copy */}
               <div className="space-y-5 border-t border-[#252A33] pt-5">
                 <SectionLabel>Generated intelligence</SectionLabel>
                 {gen ? (
@@ -507,30 +712,17 @@ export default function IntelligencePage() {
                     <Field label="Things to consider">
                       <BulletList items={gen.thingsToConsider} />
                     </Field>
-                    <Field label="Buyer confidence explanation">
-                      <FullText value={gen.confidenceExplanation} />
-                    </Field>
-                    <Field label="Buyer confidence">
-                      <p className="text-sm text-[#F5F7FA]">
-                        {gen.buyerConfidence?.level || "—"}
-                        {typeof gen.buyerConfidence?.score === "number"
-                          ? ` · ${gen.buyerConfidence.score}/100`
-                          : ""}
-                      </p>
-                      {gen.buyerConfidence?.factors?.length ? (
-                        <div className="mt-2">
-                          <BulletList items={gen.buyerConfidence.factors} />
-                        </div>
-                      ) : null}
-                    </Field>
                     <div className="space-y-1 text-[11px] leading-relaxed text-[#737A86]">
                       <p>Generated {fmt(gen.generatedAt)}</p>
                       <p>Updated {fmt(gen.updatedAt)}</p>
                       <p>
-                        Model {gen.modelVersion || "—"} · prompt v{gen.promptVersion ?? "—"}
+                        Model {gen.modelVersion || "—"} · prompt v
+                        {gen.promptVersion ?? "—"}
                       </p>
                       {gen.fingerprint ? (
-                        <p className="break-all font-mono">Fingerprint {gen.fingerprint}</p>
+                        <p className="break-all font-mono">
+                          Fingerprint {gen.fingerprint}
+                        </p>
                       ) : null}
                       {pipe?.currentFingerprint ? (
                         <p className="break-all font-mono">
@@ -545,11 +737,13 @@ export default function IntelligencePage() {
                     ) : null}
                   </div>
                 ) : (
-                  <p className="text-sm text-[#737A86]">No saved intelligence yet.</p>
+                  <p className="text-sm text-[#737A86]">
+                    No saved intelligence yet.
+                  </p>
                 )}
               </div>
 
-              {/* SOURCE — full listing used for generation */}
+              {/* Source product */}
               <div className="space-y-4 border-t border-[#252A33] pt-5">
                 <SectionLabel>Source product</SectionLabel>
                 {Array.isArray(src.images) && src.images.length ? (
@@ -560,7 +754,11 @@ export default function IntelligencePage() {
                         className="h-16 w-16 shrink-0 overflow-hidden border border-[#252A33] bg-[#171B22]"
                       >
                         {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={img} alt="" className="h-full w-full object-cover" />
+                        <img
+                          src={img}
+                          alt=""
+                          className="h-full w-full object-cover"
+                        />
                       </div>
                     ))}
                   </div>
@@ -569,13 +767,15 @@ export default function IntelligencePage() {
                   <FullText value={src.description} />
                 </Field>
                 <p className="text-sm">
-                  Price {Number(src.price || 0).toLocaleString()} · stock {src.stock} ·{" "}
-                  {src.isActive ? "active" : "inactive"}
+                  Price {Number(src.price || 0).toLocaleString()} · stock{" "}
+                  {src.stock} · {src.isActive ? "active" : "inactive"}
                 </p>
                 {src.shipping ? (
                   <p className="text-xs leading-relaxed text-[#737A86]">
                     Shipping {src.shipping.method || "—"}
-                    {src.shipping.courierCompany ? ` · ${src.shipping.courierCompany}` : ""}
+                    {src.shipping.courierCompany
+                      ? ` · ${src.shipping.courierCompany}`
+                      : ""}
                     {src.shipping.deliveryFee != null
                       ? ` · fee ${src.shipping.deliveryFee}`
                       : ""}
@@ -600,7 +800,10 @@ export default function IntelligencePage() {
                     <SectionLabel>Specifications</SectionLabel>
                     <div className="mt-2 space-y-1.5">
                       {specs.map(([k, v]) => (
-                        <p key={k} className="text-xs leading-relaxed text-[#A7ADB8]">
+                        <p
+                          key={k}
+                          className="text-xs leading-relaxed text-[#A7ADB8]"
+                        >
                           <span className="text-[#737A86]">{k}: </span>
                           {String(v ?? "—")}
                         </p>
@@ -612,15 +815,20 @@ export default function IntelligencePage() {
                   Seller {src.seller?.storeName || src.seller?.name || "—"}
                 </p>
                 <p className="text-xs text-[#737A86]">
-                  Activity {src.activity?.views ?? 0} views · {src.activity?.cartAdds ?? 0} carts ·{" "}
+                  Activity {src.activity?.views ?? 0} views ·{" "}
+                  {src.activity?.cartAdds ?? 0} carts ·{" "}
                   {src.activity?.purchases ?? 0} purchases
                 </p>
                 <p className="text-xs text-[#737A86]">
                   Seller {src.sellerActivity?.productsListed ?? 0} listings ·{" "}
                   {src.sellerActivity?.ordersGenerated ?? 0} orders
                 </p>
-                <p className="text-xs text-[#737A86]">Listed {fmt(src.createdAt)}</p>
-                <p className="text-xs text-[#737A86]">Product updated {fmt(src.updatedAt)}</p>
+                <p className="text-xs text-[#737A86]">
+                  Listed {fmt(src.createdAt)}
+                </p>
+                <p className="text-xs text-[#737A86]">
+                  Product updated {fmt(src.updatedAt)}
+                </p>
               </div>
 
               <div className="flex flex-col gap-2 border-t border-[#252A33] pt-4">
@@ -642,13 +850,15 @@ export default function IntelligencePage() {
                   {busy
                     ? "Queuing…"
                     : gen?.status === "pending"
-                    ? "Refresh queued…"
-                    : "Queue intelligence refresh"}
+                      ? "Refresh queued…"
+                      : "Queue intelligence refresh"}
                 </Button>
               </div>
             </div>
           ) : (
-            <p className="py-16 text-center text-sm text-[#A7ADB8]">Select a row.</p>
+            <p className="py-16 text-center text-sm text-[#A7ADB8]">
+              Select a row.
+            </p>
           )}
         </div>
       </aside>

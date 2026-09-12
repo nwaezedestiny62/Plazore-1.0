@@ -508,7 +508,7 @@ export default function AboutPage() {
             THE NEW WAY TO SHOP AND EARN.
           </p>
           <p className="mt-4 text-base font-bold tracking-wide">
-            DO COMMERCE LIKE IT’S 2040.
+            BUY AND SELL LIKE IT’S 2040.
           </p>
           <p className="mt-5 text-sm text-[#A7ADB8]">
             Discover differently. Buy confidently. Sell intelligently.

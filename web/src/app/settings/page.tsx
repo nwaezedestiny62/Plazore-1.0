@@ -72,6 +72,12 @@ const PLAZORE_LINKS = [
     subtitle: "What Plazore is",
     icon: Info,
   },
+  {
+    href: "/help",
+    title: "Help & Support",
+    subtitle: "Get assistance and answers to your questions",
+    icon: Info,
+  },
 ] as const;
 
 function LinkList({
@@ -159,12 +165,6 @@ export default function SettingsPage() {
           ACCOUNT
         </p>
         <LinkList items={ACCOUNT_LINKS} />
-
-        {/* Preferences */}
-        <p className="mb-3 mt-8 text-[11px] font-extrabold tracking-[0.14em] text-[#6B7280]">
-          PREFERENCES
-        </p>
-        <LinkList items={PREFERENCE_LINKS} />
 
         {/* Plazore */}
         <p className="mb-3 mt-8 text-[11px] font-extrabold tracking-[0.14em] text-[#6B7280]">

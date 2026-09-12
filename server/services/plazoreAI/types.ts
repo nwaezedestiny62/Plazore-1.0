@@ -2,7 +2,7 @@ import { IBuyerConfidence } from "../../models/ProductAI.js";
 
 /**
  * Everything the AI is allowed to see about a product listing.
- * Only information provided by the seller (or calculated by the backend) belongs here.
+ * Only seller-provided data + backend-calculated confidence belong here.
  * Nothing is invented. Nothing is assumed.
  */
 export interface AIGenerationInput {
@@ -26,6 +26,16 @@ export interface AIGenerationInput {
     city?: string;
     displayLabel?: string;
   };
+  /** Category-specific fields from the seller (size, color, year, mileage, etc.). */
+  specifications?: Record<string, string>;
+  /**
+   * Name/type only — never file contents.
+   * On Plazore these mainly apply to cars and other high-value items.
+   */
+  verificationDocuments?: Array<{
+    documentName?: string;
+    documentType?: string;
+  }>;
   seller?: {
     storeName?: string;
     storeLogo?: string;
@@ -33,17 +43,16 @@ export interface AIGenerationInput {
     isSellerVerified?: boolean;
   };
   /**
-   * Buyer Confidence is already calculated by the Plazore backend.
-   * The AI must never calculate, modify, or question this value —
-   * it only explains what the provided level represents.
+   * Calculated by the Plazore backend from listing + commerce evidence.
+   * The AI must never calculate, modify, or override this —
+   * it only explains what the given level means.
    */
   buyerConfidence: IBuyerConfidence;
 }
 
 /**
- * The exact shape the AI must return.
+ * Exact shape the AI must return.
  * No extra keys. No missing keys. No renamed keys.
- * Every field should feel calm, clear, and genuinely helpful.
  */
 export interface AIGenerationResult {
   summary: string;
@@ -57,7 +66,7 @@ export interface AIGenerationResult {
 
 /**
  * Any model provider that can generate a response
- * using a system prompt and a user prompt.
+ * from a system prompt and a user prompt.
  */
 export interface AIModelProvider {
   generate(

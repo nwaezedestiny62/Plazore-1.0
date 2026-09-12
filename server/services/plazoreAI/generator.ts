@@ -2,7 +2,10 @@ import Product from "../../models/Products.js";
 import ProductAI from "../../models/ProductAI.js";
 import User from "../../models/User.js";
 import { generateProductFingerprint } from "./fingerprint.js";
-import { calculateBuyerConfidence } from "./confidence.js";
+import {
+  calculateBuyerConfidence,
+  gatherCommerceEvidence,
+} from "./confidence.js";
 import {
   buildSystemPrompt,
   buildUserPrompt,
@@ -34,9 +37,9 @@ function normalizeSpecifications(raw: any): Record<string, string> {
 }
 
 /**
- * Main entry point used by the background job.
- * Quietly generates (or regenerates) Plazore AI for a product listing.
- * Goal: help buyers understand — never decide for them.
+ * Main entry used by the background job / product create-edit path.
+ * Generates or regenerates Plazore AI for a listing.
+ * Commerce evidence is gathered first so confidence is never reset to “new” on edit.
  */
 export async function generateProductAI(productId: string): Promise<void> {
   const product = await Product.findById(productId).lean();
@@ -52,6 +55,7 @@ export async function generateProductAI(productId: string): Promise<void> {
 
   let aiDoc = await ProductAI.findOne({ productId });
 
+  // Unchanged content + already ready → skip
   if (
     aiDoc &&
     aiDoc.fingerprint === fingerprint &&
@@ -73,15 +77,35 @@ export async function generateProductAI(productId: string): Promise<void> {
       }))
     : [];
 
-  const buyerConfidence = calculateBuyerConfidence({
-    description: product.description,
-    images: product.images,
-    shipping: product.shipping,
-    fulfillmentLocation: product.fulfillmentLocation,
-    seller: seller || undefined,
-    specifications,
-    verificationDocuments,
-  });
+  const commerce = await gatherCommerceEvidence(
+    product._id,
+    product.seller as any
+  );
+
+  const confidenceResult = calculateBuyerConfidence(
+    {
+      description: product.description,
+      images: product.images,
+      shipping: product.shipping,
+      fulfillmentLocation: product.fulfillmentLocation,
+      seller: seller || undefined,
+      specifications,
+      verificationDocuments,
+    },
+    commerce
+  );
+
+  const buyerConfidence = {
+    level: confidenceResult.level,
+    score: confidenceResult.score,
+    factors: confidenceResult.factors,
+  };
+
+  const commerceEvidence = {
+    seller: { ...commerce.seller },
+    product: { ...commerce.product },
+    gatheredAt: commerce.gatheredAt || new Date(),
+  };
 
   const input: AIGenerationInput = {
     productId: String(product._id),
@@ -104,6 +128,8 @@ export async function generateProductAI(productId: string): Promise<void> {
     aiDoc.status = "pending";
     aiDoc.fingerprint = fingerprint;
     aiDoc.error = undefined;
+    aiDoc.buyerConfidence = buyerConfidence as any;
+    aiDoc.commerceEvidence = commerceEvidence as any;
     await aiDoc.save();
   } else {
     aiDoc = await ProductAI.create({
@@ -113,6 +139,7 @@ export async function generateProductAI(productId: string): Promise<void> {
       modelVersion: process.env.PLAZORE_AI_MODEL || "gemini-2.5-flash",
       promptVersion: PROMPT_VERSION,
       buyerConfidence,
+      commerceEvidence,
       summary: "",
       overview: "",
       highlights: [],
@@ -142,7 +169,8 @@ export async function generateProductAI(productId: string): Promise<void> {
     aiDoc.shippingSummary = result.shippingSummary;
     aiDoc.thingsToConsider = result.thingsToConsider;
     aiDoc.confidenceExplanation = result.confidenceExplanation;
-    aiDoc.buyerConfidence = buyerConfidence;
+    aiDoc.buyerConfidence = buyerConfidence as any;
+    aiDoc.commerceEvidence = commerceEvidence as any;
     aiDoc.modelVersion = process.env.PLAZORE_AI_MODEL || "gemini-2.5-flash";
     aiDoc.promptVersion = PROMPT_VERSION;
     aiDoc.generatedAt = new Date();
@@ -157,6 +185,9 @@ export async function generateProductAI(productId: string): Promise<void> {
 
     aiDoc.status = "failed";
     aiDoc.error = err.message || "Unknown generation error";
+    // Keep confidence + commerce snapshot even on failed generation
+    aiDoc.buyerConfidence = buyerConfidence as any;
+    aiDoc.commerceEvidence = commerceEvidence as any;
     await aiDoc.save();
 
     throw err;
