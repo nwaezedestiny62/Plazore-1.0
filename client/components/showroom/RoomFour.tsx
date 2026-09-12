@@ -9,10 +9,9 @@ import {
   View,
 } from 'react-native'
 import ShowroomProductCard from './ShowroomProductCard'
-import ScrollFadeUp from './ScrollFadeUp'
 
 const CARD_GAP = 10
-const ROOM_CAPACITY = 33
+const ROOM_CAPACITY = 30
 const SIDE = 20
 
 interface RoomFourProps {
@@ -39,10 +38,18 @@ export default function RoomFour({
   const cardW = Math.min(Math.round(width * 0.62), 236)
   const bannerH = Math.round(width * 0.52)
 
-  const products = useMemo(
-    () => (incoming || []).slice(0, ROOM_CAPACITY),
-    [incoming]
-  )
+  const products = useMemo(() => {
+    const seen = new Set<string>()
+    const list: Product[] = []
+    for (const p of incoming || []) {
+      const id = String(p?._id || '')
+      if (!id || seen.has(id)) continue
+      seen.add(id)
+      list.push(p)
+      if (list.length >= ROOM_CAPACITY) break
+    }
+    return list
+  }, [incoming])
 
   const heroUri = firstUri(products[0])
 

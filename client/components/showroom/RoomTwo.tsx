@@ -5,6 +5,7 @@ import ShowroomProductCard from './ShowroomProductCard'
 import ScrollFadeUp from './ScrollFadeUp'
 
 const { width: SCREEN_W } = Dimensions.get('window')
+const ROOM_CAP = 14
 
 interface RoomTwoProps {
   products: Product[]
@@ -18,11 +19,19 @@ export default function RoomTwo({
   subtitle = 'Private Selection',
 }: RoomTwoProps) {
   const { left, right, rest } = useMemo(() => {
-    const list = products || []
+    const seen = new Set<string>()
+    const list: Product[] = []
+    for (const p of products || []) {
+      const id = String(p?._id || '')
+      if (!id || seen.has(id)) continue
+      seen.add(id)
+      list.push(p)
+      if (list.length >= ROOM_CAP) break
+    }
     return {
       left: list[0],
       right: list[1],
-      rest: list.slice(2, 14),
+      rest: list.slice(2, ROOM_CAP),
     }
   }, [products])
 

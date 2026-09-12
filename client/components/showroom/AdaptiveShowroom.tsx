@@ -20,11 +20,15 @@ interface AdaptiveShowroomProps {
   onRoomLayout?: (roomNumber: number, y: number) => void
 }
 
+/**
+ * Official visible capacities (must match server showroomRanker)
+ * R1: 50 unique · R2: 14 unique · R1+R2 unique · R3: 16 · R4: 30
+ */
 const ROOM_CAPACITY = {
   1: 50,
   2: 14,
   3: 16,
-  4: 33,
+  4: 30,
 } as const
 
 function uniqueCount(rooms?: ShowroomRooms | null, products?: Product[]) {
@@ -40,6 +44,24 @@ function uniqueCount(rooms?: ShowroomRooms | null, products?: Product[]) {
   return ids.size
 }
 
+/** Prefer server order; drop empty rooms; never invent duplicates client-side */
+function takeRoom(
+  list: Product[] | undefined,
+  cap: number
+): Product[] {
+  if (!list?.length) return []
+  const seen = new Set<string>()
+  const out: Product[] = []
+  for (const p of list) {
+    if (out.length >= cap) break
+    const id = String(p?._id || '')
+    if (!id || seen.has(id)) continue
+    seen.add(id)
+    out.push(p)
+  }
+  return out
+}
+
 export default function AdaptiveShowroom({
   products,
   rooms,
@@ -50,67 +72,38 @@ export default function AdaptiveShowroom({
 
   const sections = useMemo(() => {
     const p = products || []
-    const serverRooms = rooms && (rooms[1]?.length || rooms[2]?.length || rooms[3]?.length || rooms[4]?.length)
+    const hasServerRooms = !!(
+      rooms &&
+      (rooms[1]?.length ||
+        rooms[2]?.length ||
+        rooms[3]?.length ||
+        rooms[4]?.length)
+    )
 
-    // Tiny catalog → reuse the same products in every room
-    const tinyPool =
-      (rooms?.[1]?.length ? rooms[1] : p).slice(0, 4)
-
-    if (count > 0 && count <= 4) {
-      const pool = tinyPool.length ? tinyPool : p
+    // Server is source of truth (inventory-first + adaptive threshold)
+    if (hasServerRooms) {
       return [
         {
           type: 'one' as const,
-          products: pool,
+          products: takeRoom(rooms?.[1], ROOM_CAPACITY[1]),
           title: 'THE HORIZON',
           subtitle: 'Expanded View',
         },
         {
           type: 'two' as const,
-          products: pool,
+          products: takeRoom(rooms?.[2], ROOM_CAPACITY[2]),
           title: 'THE CHAMBER',
           subtitle: 'Private Selection',
         },
         {
           type: 'three' as const,
-          products: pool,
+          products: takeRoom(rooms?.[3], ROOM_CAPACITY[3]),
           title: 'THE SIGNAL',
           subtitle: 'Worth Your Attention',
         },
         {
           type: 'four' as const,
-          products: pool,
-          title: 'THE LOCALE',
-          subtitle: 'From Your Region',
-          regionLabel: "A look at what's around you",
-        },
-      ]
-    }
-
-    // Preferred path: use server-ranked rooms as-is
-    if (serverRooms) {
-      return [
-        {
-          type: 'one' as const,
-          products: (rooms?.[1] || []).slice(0, ROOM_CAPACITY[1]),
-          title: 'THE HORIZON',
-          subtitle: 'Expanded View',
-        },
-        {
-          type: 'two' as const,
-          products: (rooms?.[2] || []).slice(0, ROOM_CAPACITY[2]),
-          title: 'THE CHAMBER',
-          subtitle: 'Private Selection',
-        },
-        {
-          type: 'three' as const,
-          products: (rooms?.[3] || []).slice(0, ROOM_CAPACITY[3]),
-          title: 'THE SIGNAL',
-          subtitle: 'Worth Your Attention',
-        },
-        {
-          type: 'four' as const,
-          products: (rooms?.[4] || []).slice(0, ROOM_CAPACITY[4]),
+          products: takeRoom(rooms?.[4], ROOM_CAPACITY[4]),
           title: 'THE LOCALE',
           subtitle: 'From Your Region',
           regionLabel: "A look at what's around you",
@@ -118,11 +111,17 @@ export default function AdaptiveShowroom({
       ].filter((s) => s.products.length > 0)
     }
 
-    // Fallback: slice the flat list
-    let cursor = 0
+    // Flat fallback: sequential unique slices — no cross-room padding
+    const seen = new Set<string>()
     const take = (n: number) => {
-      const slice = p.slice(cursor, cursor + n)
-      cursor += slice.length
+      const slice: Product[] = []
+      for (const item of p) {
+        if (slice.length >= n) break
+        const id = String(item?._id || '')
+        if (!id || seen.has(id)) continue
+        seen.add(id)
+        slice.push(item)
+      }
       return slice
     }
 
@@ -153,7 +152,7 @@ export default function AdaptiveShowroom({
         regionLabel: "A look at what's around you",
       },
     ].filter((s) => s.products.length > 0)
-  }, [products, rooms, count])
+  }, [products, rooms])
 
   if (loading) {
     return (

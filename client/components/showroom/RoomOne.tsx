@@ -14,6 +14,8 @@ import ScrollFadeUp from './ScrollFadeUp'
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window')
 const CARD_W = Math.min(SCREEN_W * 0.58, 220)
 const CARD_GAP = 8
+const RAIL_CAP = 25
+const ROOM_CAP = 50
 
 interface RoomOneProps {
   products: Product[]
@@ -27,13 +29,19 @@ export default function RoomOne({
   subtitle = 'Expanded View',
 }: RoomOneProps) {
   const { railA, railB, featureImage } = useMemo(() => {
-    const list = products || []
-    const mid = Math.ceil(list.length / 2)
-
+    const seen = new Set<string>()
+    const list: Product[] = []
+    for (const p of products || []) {
+      const id = String(p?._id || '')
+      if (!id || seen.has(id)) continue
+      seen.add(id)
+      list.push(p)
+      if (list.length >= ROOM_CAP) break
+    }
     return {
       featureImage: list[0]?.images?.[0],
-      railA: list.slice(0, Math.min(mid, 25)),
-      railB: list.slice(mid, mid + 25),
+      railA: list.slice(0, RAIL_CAP),
+      railB: list.slice(RAIL_CAP, RAIL_CAP * 2),
     }
   }, [products])
 
@@ -43,22 +51,15 @@ export default function RoomOne({
         <View style={styles.banner}>
           {featureImage ? (
             <Image
-              source={{ uri: featureImage }}
-              style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 }}
+              source={{ uri: featureImage as string }}
+              style={styles.fill}
               contentFit="cover"
               transition={500}
             />
           ) : (
-            <View
-              style={[
-                {position:'absolute',top:0,right:0,bottom:0,left:0},
-                { backgroundColor: '#151A22' },
-              ]}
-            />
+            <View style={[styles.fill, { backgroundColor: '#151A22' }]} />
           )}
-
           <View style={styles.bannerOverlay} />
-
           <View style={styles.bannerContent}>
             <Text style={styles.bannerKicker}>{title}</Text>
             <Text style={styles.bannerTitle}>{subtitle}</Text>
@@ -71,7 +72,6 @@ export default function RoomOne({
           <ScrollFadeUp delay={160} duration={550} distance={18}>
             <Text style={styles.railLabel}>NOW SHOWING</Text>
           </ScrollFadeUp>
-
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
@@ -145,8 +145,19 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     position: 'relative',
   },
+  fill: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+  },
   bannerOverlay: {
-    ...{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 },
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
     backgroundColor: 'rgba(6,8,12,0.58)',
   },
   bannerContent: {

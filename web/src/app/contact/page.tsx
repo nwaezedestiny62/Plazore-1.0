@@ -4,7 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth, useUser } from "@clerk/nextjs";
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import {
   ChevronLeft,
   CheckCircle2,
@@ -81,11 +81,25 @@ function wordCount(text: string) {
     .filter(Boolean).length;
 }
 
-export default function ContactPage() {
+function ContactBoot() {
+  return (
+    <div className="flex min-h-dvh items-center justify-center bg-[#090B0F]">
+      <div className="h-8 w-8 animate-spin rounded-full border-2 border-[#00E575] border-t-transparent" />
+    </div>
+  );
+}
+
+function ContactPageInner() {
   const router = useRouter();
   const search = useSearchParams();
   const { isSignedIn, getToken } = useAuth();
   const { user } = useUser();
+
+  /** Avoid SSR/client HTML mismatch (Clerk + extensions + searchParams) */
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   const mode = (search.get("mode") || "contact").toLowerCase();
   const contextTypeParam = (
@@ -110,27 +124,27 @@ export default function ContactPage() {
   const roleMeta = (user?.publicMetadata?.role as string) || "buyer";
   const canSeller = roleMeta === "seller" || roleMeta === "admin";
 
-  const [contactAs, setContactAs] = useState<"buyer" | "seller">(
-    canSeller ? "seller" : "buyer"
-  );
+  // Stable first paint — do not branch on Clerk user during SSR
+  const [contactAs, setContactAs] = useState<"buyer" | "seller">("buyer");
   const [category, setCategory] = useState(() => {
     if (isOrderContext) return "delivery";
-    if (categoryParam && CONTACT_CATEGORIES.some((c) => c.value === categoryParam))
+    if (
+      categoryParam &&
+      CONTACT_CATEGORIES.some((c) => c.value === categoryParam)
+    )
       return categoryParam;
     return "other";
   });
   const [deliveryIssue, setDeliveryIssue] = useState("");
   const [reason, setReason] = useState("");
   const [message, setMessage] = useState("");
-  const [email, setEmail] = useState(
-    user?.primaryEmailAddress?.emailAddress || ""
-  );
+  // Empty on first paint; filled after mount from Clerk
+  const [email, setEmail] = useState("");
   const [country, setCountry] = useState("NG");
   const [state, setState] = useState("");
   const [city, setCity] = useState("");
   const [street, setStreet] = useState("");
 
-  const [contextLabel, setContextLabel] = useState<string | null>(null);
   const [storeName, setStoreName] = useState<string | null>(null);
   const [productName, setProductName] = useState<string | null>(null);
   const [orderLabel, setOrderLabel] = useState<string | null>(
@@ -142,6 +156,23 @@ export default function ContactPage() {
   const [error, setError] = useState("");
 
   const words = useMemo(() => wordCount(message), [message]);
+
+  // Deterministic — same on server + client, no delayed state
+  const contextLabel = useMemo(() => {
+    if (isReport) {
+      if (isProductContext) return "Reporting product";
+      if (isStoreContext) return "Reporting store";
+      return "Report to Plazore";
+    }
+    if (isOrderContext) return "Delivery / order issue";
+    if (isStoreContext || isProductContext)
+      return "Contact Store through Plazore";
+    return "Talk to Plazore";
+  }, [isReport, isStoreContext, isProductContext, isOrderContext]);
+
+  useEffect(() => {
+    if (canSeller) setContactAs("seller");
+  }, [canSeller]);
 
   useEffect(() => {
     if (user?.primaryEmailAddress?.emailAddress) {
@@ -203,24 +234,6 @@ export default function ContactPage() {
       alive = false;
     };
   }, [productId, storeId, orderId, isSignedIn, getToken, subjectParam]);
-
-  useEffect(() => {
-    if (isReport) {
-      setContextLabel(
-        isProductContext
-          ? "Reporting product"
-          : isStoreContext
-            ? "Reporting store"
-            : "Report to Plazore"
-      );
-    } else if (isOrderContext) {
-      setContextLabel("Delivery / order issue");
-    } else if (isStoreContext || isProductContext) {
-      setContextLabel("Contact Store through Plazore");
-    } else {
-      setContextLabel("Talk to Plazore");
-    }
-  }, [isReport, isStoreContext, isProductContext, isOrderContext]);
 
   const reasons = isProductContext
     ? PRODUCT_REPORT_REASONS
@@ -343,6 +356,8 @@ export default function ContactPage() {
       setSubmitting(false);
     }
   };
+
+  if (!mounted) return <ContactBoot />;
 
   if (done) {
     return (
@@ -557,6 +572,7 @@ export default function ContactPage() {
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
+              autoComplete="email"
               className="h-12 w-full border border-white/[0.08] bg-[#11141A] px-4 text-[14px] outline-none focus:border-[#00E575]/40"
             />
           </Field>
@@ -566,6 +582,7 @@ export default function ContactPage() {
               <input
                 value={country}
                 onChange={(e) => setCountry(e.target.value)}
+                autoComplete="country-name"
                 className="h-12 w-full border border-white/[0.08] bg-[#11141A] px-4 text-[14px] outline-none focus:border-[#00E575]/40"
               />
             </Field>
@@ -573,6 +590,7 @@ export default function ContactPage() {
               <input
                 value={state}
                 onChange={(e) => setState(e.target.value)}
+                autoComplete="address-level1"
                 className="h-12 w-full border border-white/[0.08] bg-[#11141A] px-4 text-[14px] outline-none focus:border-[#00E575]/40"
               />
             </Field>
@@ -580,6 +598,7 @@ export default function ContactPage() {
               <input
                 value={city}
                 onChange={(e) => setCity(e.target.value)}
+                autoComplete="address-level2"
                 className="h-12 w-full border border-white/[0.08] bg-[#11141A] px-4 text-[14px] outline-none focus:border-[#00E575]/40"
               />
             </Field>
@@ -589,6 +608,7 @@ export default function ContactPage() {
             <input
               value={street}
               onChange={(e) => setStreet(e.target.value)}
+              autoComplete="street-address"
               className="h-12 w-full border border-white/[0.08] bg-[#11141A] px-4 text-[14px] outline-none focus:border-[#00E575]/40"
             />
           </Field>
@@ -642,5 +662,13 @@ function Field({
       </span>
       {children}
     </label>
+  );
+}
+
+export default function ContactPage() {
+  return (
+    <Suspense fallback={<ContactBoot />}>
+      <ContactPageInner />
+    </Suspense>
   );
 }

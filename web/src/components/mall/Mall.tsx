@@ -18,10 +18,7 @@ import { cartCount } from "@/lib/cart";
 import { useMarketplace } from "@/context/MarketplaceContext";
 import { DEFAULT_REGION, formatProductPrice } from "@/lib/regions";
 import type { Product } from "@/lib/types";
-import {
-  fetchShowroom,
-  type ShowroomRooms,
-} from "@/lib/api";
+import { fetchShowroom, type ShowroomRooms } from "@/lib/api";
 import {
   getShowroomSessionId,
   saveShowroomSessionId,
@@ -31,6 +28,16 @@ import { ShowroomFlyCartProvider, useShowroomFlyCart } from "./ShowroomFlyCart";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000/api";
 const PENDING_KEY = "plazore_pending_action";
+
+/** Must match server/services/showroomRanker.ts */
+const ROOM_CAPACITY = {
+  1: 50,
+  2: 14,
+  3: 16,
+  4: 30,
+} as const;
+
+const RAIL_CAP = 25;
 
 type RoomTitlePair = readonly [string, string];
 
@@ -46,13 +53,6 @@ const ROOM_TITLES: RoomTitles = {
   two: ["THE CHAMBER", "Private Selection"],
   three: ["THE SIGNAL", "Worth Your Attention"],
   four: ["THE LOCALE", "From Your Region"],
-};
-
-const TINY_TITLES: RoomTitles = {
-  one: ["THE SHOWROOM", "Take a look around"],
-  two: ["THE EDIT", "Side by Side"],
-  three: ["THE SIGNAL", "Worth Your Attention"],
-  four: ["THE LOCALE", "From Around You"],
 };
 
 type SplitRooms = {
@@ -79,24 +79,27 @@ function heroSubSize(text: string): string {
   return "text-[14px] sm:text-[16px]";
 }
 
-function uniqueCount(rooms?: ShowroomRooms | null, products?: Product[]) {
-  const ids = new Set<string>();
-  const add = (list?: Product[]) => {
-    (list || []).forEach((p) => p?._id && ids.add(String(p._id)));
-  };
-  add(rooms?.[1]);
-  add(rooms?.[2]);
-  add(rooms?.[3]);
-  add(rooms?.[4]);
-  add(products);
-  return ids.size;
+function takeUnique(
+  list: Product[] | undefined,
+  cap: number,
+  seen?: Set<string>
+): Product[] {
+  const used = seen ?? new Set<string>();
+  const out: Product[] = [];
+  for (const p of list || []) {
+    if (out.length >= cap) break;
+    const id = String(p?._id || "");
+    if (!id || used.has(id)) continue;
+    used.add(id);
+    out.push(p);
+  }
+  return out;
 }
 
 function buildRooms(
   products: Product[],
   serverRooms?: ShowroomRooms | null
 ): SplitRooms {
-  const count = uniqueCount(serverRooms, products);
   const hasServerRooms =
     !!serverRooms &&
     ((serverRooms[1]?.length || 0) > 0 ||
@@ -104,33 +107,21 @@ function buildRooms(
       (serverRooms[3]?.length || 0) > 0 ||
       (serverRooms[4]?.length || 0) > 0);
 
-  if (count > 0 && count <= 4) {
-    const pool =
-      (serverRooms?.[1]?.length ? serverRooms[1] : products).slice(0, 4);
-    return {
-      one: pool,
-      two: pool,
-      three: pool,
-      four: pool,
-      titles: TINY_TITLES,
-    };
-  }
-
   if (hasServerRooms && serverRooms) {
-    return {
-      one: serverRooms[1] || [],
-      two: serverRooms[2] || [],
-      three: serverRooms[3] || [],
-      four: serverRooms[4] || [],
-      titles: ROOM_TITLES,
-    };
+    const seen12 = new Set<string>();
+    const one = takeUnique(serverRooms[1], ROOM_CAPACITY[1], seen12);
+    const two = takeUnique(serverRooms[2], ROOM_CAPACITY[2], seen12);
+    const three = takeUnique(serverRooms[3], ROOM_CAPACITY[3]);
+    const four = takeUnique(serverRooms[4], ROOM_CAPACITY[4]);
+    return { one, two, three, four, titles: ROOM_TITLES };
   }
 
+  const seen = new Set<string>();
   return {
-    one: products.slice(0, 50),
-    two: products.slice(50, 64),
-    three: products.slice(64, 80),
-    four: products.slice(80, 113),
+    one: takeUnique(products, ROOM_CAPACITY[1], seen),
+    two: takeUnique(products, ROOM_CAPACITY[2], seen),
+    three: takeUnique(products, ROOM_CAPACITY[3], seen),
+    four: takeUnique(products, ROOM_CAPACITY[4], seen),
     titles: ROOM_TITLES,
   };
 }
@@ -193,7 +184,6 @@ function MallChrome({
 
   return (
     <>
-      {/* Desktop / large canvas */}
       <header
         className={`fixed inset-x-0 top-0 z-50 hidden h-16 items-center justify-between px-6 transition-all duration-500 md:flex lg:px-10 ${
           solid ? "bg-[#090B0F]/80 backdrop-blur-xl" : "bg-transparent"
@@ -230,38 +220,34 @@ function MallChrome({
             Browse
           </Link>
 
-          {/* Lounge — Plazore brand badge (green → blue, sharp, light 3D) */}
-<Link
-  href="/lounge"
-  className="group relative inline-flex items-center gap-2.5 overflow-hidden border border-white/15 px-4 py-2 text-[11px] font-extrabold tracking-[0.22em] uppercase text-white transition duration-200 hover:brightness-110 active:translate-y-[1px]"
-  style={{
-    background:
-      "linear-gradient(135deg, #00E575 0%, #0ECF7A 38%, #2B6DE8 72%, #3B82F6 100%)",
-    boxShadow:
-      "0 1px 0 rgba(255,255,255,0.35) inset, 0 -2px 0 rgba(0,0,0,0.28) inset, 0 6px 18px rgba(59,130,246,0.28), 0 2px 0 rgba(0,0,0,0.35)",
-  }}
->
-  {/* top sheen */}
-  <span
-    aria-hidden
-    className="pointer-events-none absolute inset-x-0 top-0 h-[45%] bg-gradient-to-b from-white/25 to-transparent"
-  />
-  {/* left green / right blue edge accent like the mark */}
-  <span
-    aria-hidden
-    className="pointer-events-none absolute left-0 top-0 h-full w-[3px] bg-[#00E575]"
-  />
-  <span
-    aria-hidden
-    className="pointer-events-none absolute right-0 top-0 h-full w-[3px] bg-[#3B82F6]"
-  />
-
-  <span className="relative">Lounge</span>
-  <span className="relative flex h-1.5 w-1.5 shrink-0">
-    <span className="absolute inline-flex h-full w-full animate-ping bg-white/80 opacity-45" />
-    <span className="relative inline-flex h-1.5 w-1.5 bg-white shadow-[0_0_8px_rgba(255,255,255,0.8)]" />
-  </span>
-</Link>
+          <Link
+            href="/lounge"
+            className="group relative inline-flex items-center gap-2.5 overflow-hidden border border-white/15 px-4 py-2 text-[11px] font-extrabold tracking-[0.22em] uppercase text-white transition duration-200 hover:brightness-110 active:translate-y-[1px]"
+            style={{
+              background:
+                "linear-gradient(135deg, #00E575 0%, #0ECF7A 38%, #2B6DE8 72%, #3B82F6 100%)",
+              boxShadow:
+                "0 1px 0 rgba(255,255,255,0.35) inset, 0 -2px 0 rgba(0,0,0,0.28) inset, 0 6px 18px rgba(59,130,246,0.28), 0 2px 0 rgba(0,0,0,0.35)",
+            }}
+          >
+            <span
+              aria-hidden
+              className="pointer-events-none absolute inset-x-0 top-0 h-[45%] bg-gradient-to-b from-white/25 to-transparent"
+            />
+            <span
+              aria-hidden
+              className="pointer-events-none absolute left-0 top-0 h-full w-[3px] bg-[#00E575]"
+            />
+            <span
+              aria-hidden
+              className="pointer-events-none absolute right-0 top-0 h-full w-[3px] bg-[#3B82F6]"
+            />
+            <span className="relative">Lounge</span>
+            <span className="relative flex h-1.5 w-1.5 shrink-0">
+              <span className="absolute inline-flex h-full w-full animate-ping bg-white/80 opacity-45" />
+              <span className="relative inline-flex h-1.5 w-1.5 bg-white shadow-[0_0_8px_rgba(255,255,255,0.8)]" />
+            </span>
+          </Link>
 
           <button
             type="button"
@@ -330,7 +316,6 @@ function MallChrome({
         </div>
       </header>
 
-      {/* Mobile / responsive only */}
       <header
         className={`fixed inset-x-0 top-0 z-50 flex h-14 items-center justify-between px-3.5 transition-all duration-400 md:hidden ${
           solid ? "bg-[#090B0F]/88 backdrop-blur-xl" : "bg-transparent"
@@ -684,6 +669,19 @@ function MallInner({
     [products, serverRooms]
   );
 
+  const railA = useMemo(() => rooms.one.slice(0, RAIL_CAP), [rooms.one]);
+  const railB = useMemo(
+    () => rooms.one.slice(RAIL_CAP, ROOM_CAPACITY[1]),
+    [rooms.one]
+  );
+
+  const showroomHasItems =
+    rooms.one.length +
+      rooms.two.length +
+      rooms.three.length +
+      rooms.four.length >
+    0;
+
   const roomCount = useMemo(() => {
     let n = 0;
     if (rooms.one.length) n++;
@@ -693,7 +691,6 @@ function MallInner({
     return Math.max(n, 1);
   }, [rooms]);
 
-  // Cart badge — both event names
   useEffect(() => {
     const sync = () => setBagN(cartCount());
     sync();
@@ -705,7 +702,6 @@ function MallInner({
     };
   }, []);
 
-  // Unread notifications — robust parse + fallback list
   useEffect(() => {
     if (!isSignedIn) {
       setNotifN(0);
@@ -757,7 +753,6 @@ function MallInner({
           Accept: "application/json",
         };
 
-        // 1) dedicated count
         try {
           const res = await fetch(`${API}/notifications/unread-count`, {
             headers,
@@ -772,7 +767,6 @@ function MallInner({
           /* fall through */
         }
 
-        // 2) list fallback
         try {
           const res2 = await fetch(`${API}/notifications?limit=50`, {
             headers,
@@ -996,7 +990,7 @@ function MallInner({
           <div className="flex h-[50vh] items-center justify-center text-muted">
             Loading the mall…
           </div>
-        ) : products.length === 0 ? (
+        ) : !showroomHasItems ? (
           <div className="flex h-[40vh] items-center justify-center text-secondary">
             The showroom is quiet right now.
           </div>
@@ -1029,33 +1023,38 @@ function MallInner({
                   </div>
                 </div>
 
-                <div className="pt-8">
-                  <p className="mb-4 px-5 text-[11px] font-semibold tracking-[0.22em] text-white/38 sm:px-8">
-                    NOW SHOWING
-                  </p>
-                  <div className="flex gap-2 overflow-x-auto px-5 pb-2 sm:gap-3 sm:px-8 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-                    {rooms.one.map((p) => (
-                      <ProductCard
-                        key={`r1a-${p._id}`}
-                        product={p}
-                        compact
-                        room={1}
-                      />
-                    ))}
+                {railA.length > 0 ? (
+                  <div className="pt-8">
+                    <p className="mb-4 px-5 text-[11px] font-semibold tracking-[0.22em] text-white/38 sm:px-8">
+                      NOW SHOWING
+                    </p>
+                    <div className="flex gap-2 overflow-x-auto px-5 pb-2 sm:gap-3 sm:px-8 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                      {railA.map((p) => (
+                        <ProductCard
+                          key={`r1a-${p._id}`}
+                          product={p}
+                          compact
+                          room={1}
+                        />
+                      ))}
+                    </div>
                   </div>
-                </div>
-                <div className="pt-7">
-                  <div className="flex gap-2 overflow-x-auto px-5 pb-2 sm:gap-3 sm:px-8 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-                    {[...rooms.one].reverse().map((p) => (
-                      <ProductCard
-                        key={`r1b-${p._id}`}
-                        product={p}
-                        compact
-                        room={1}
-                      />
-                    ))}
+                ) : null}
+
+                {railB.length > 0 ? (
+                  <div className="pt-7">
+                    <div className="flex gap-2 overflow-x-auto px-5 pb-2 sm:gap-3 sm:px-8 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                      {railB.map((p) => (
+                        <ProductCard
+                          key={`r1b-${p._id}`}
+                          product={p}
+                          compact
+                          room={1}
+                        />
+                      ))}
+                    </div>
                   </div>
-                </div>
+                ) : null}
               </section>
             ) : null}
 
@@ -1087,7 +1086,7 @@ function MallInner({
 
                 {rooms.two.length > 2 ? (
                   <div className="mx-auto mt-8 grid max-w-[720px] grid-cols-2 gap-3 sm:gap-5 lg:max-w-[800px]">
-                    {rooms.two.slice(2).map((p) => (
+                    {rooms.two.slice(2, ROOM_CAPACITY[2]).map((p) => (
                       <div
                         key={p._id}
                         className="mx-auto w-full max-w-[340px] min-w-0 [&_.group]:!max-w-none [&_.group]:!w-full [&_.group]:!min-w-0"

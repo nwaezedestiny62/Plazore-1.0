@@ -1,20 +1,51 @@
 /**
  * Plazore Showroom Ranker (V1)
- * Deterministic, explainable, commerce-first ranking.
- * No AI / embeddings / vector DB.
+ * FULLNESS FIRST · ADAPTABILITY SECOND
+ *
+ * Capacities:
+ *   Room 1 = 50 unique
+ *   Room 2 = 14 unique
+ *   Room 1 + Room 2 = 64 unique (no overlap)
+ *   Room 3 = 16
+ *   Room 4 = 30
+ *   Full mall = 110 slots
+ *
+ * Eligible = isActive === true AND stock > 0
+ *
+ * Adaptive ON  only when eligibleCount >= 110
+ * Adaptive OFF when eligibleCount < 110
+ *   → show every real eligible product
+ *   → never pad / never duplicate just to look full
+ *   → no seller / category caps that hide inventory
+ *
+ * Rooms 3 & 4 may reuse Room 1/2 products ONLY when adaptive is ON
+ * and a real ranking signal justifies another appearance.
  */
 
+import crypto from "crypto";
 import Product from "../models/Products.js";
 import ProductPerformance from "../models/ProductPerformance.js";
 import ShowroomSession from "../models/ShowroomSession.js";
 import ShowroomEvent from "../models/ShowroomEvent.js";
-import crypto from "crypto";
 
-export const ROOM_CAPACITY = { 1: 50, 2: 14, 3: 16, 4: 33 } as const;
+export const ROOM_CAPACITY = {
+  1: 50,
+  2: 14,
+  3: 16,
+  4: 30,
+} as const;
+
+export const FULL_SHOWROOM_SLOTS =
+  ROOM_CAPACITY[1] + ROOM_CAPACITY[2] + ROOM_CAPACITY[3] + ROOM_CAPACITY[4]; // 110
+
+export const ADAPTIVE_THRESHOLD = FULL_SHOWROOM_SLOTS;
+
 export const SESSION_TTL_MS = 1000 * 60 * 60 * 6;
 
 const SELLER_PUBLIC_FIELDS =
   "name storeName storeLogo storeDescription isSellerVerified marketplaceRegion shippingDefaults";
+
+const ELIGIBLE_FILTER = { isActive: true, stock: { $gt: 0 } } as const;
 
 type ScoredProduct = {
   product: any;
@@ -47,7 +78,10 @@ function clamp(n: number, min = 0, max = 1) {
   return Math.max(min, Math.min(max, n));
 }
 
-/** Build lightweight interest profile from recent ShowroomEvents */
+function productId(p: any): string {
+  return String(p?._id || p || "");
+}
+
 async function buildInterestProfile(
   userId: string | null,
   sessionId: string
@@ -76,7 +110,6 @@ async function buildInterestProfile(
     const product: any = ev.product;
     if (!product) continue;
 
-    // Recency decay: half-life ~ 3 days
     const ageHours =
       (now - new Date((ev as any).createdAt).getTime()) / (1000 * 60 * 60);
     const decay = Math.exp(-ageHours / 72);
@@ -132,25 +165,32 @@ function scoreProduct(opts: {
   interest: InterestProfile;
   exposureCount: number;
   searchQuery?: string;
+  softInterest?: boolean;
 }): ScoredProduct {
-  const { product, perf, region, interest, exposureCount, searchQuery } = opts;
+  const {
+    product,
+    perf,
+    region,
+    interest,
+    exposureCount,
+    searchQuery,
+    softInterest = true,
+  } = opts;
   const reasons: string[] = [];
   let score = 0;
 
-  // ── 1. Regional relevance ──────────────────────────────
   const pRegion = String(product.region || "").toUpperCase();
   const uRegion = String(region || "NG").toUpperCase();
-  let regional = 0.35;
+  let regional = 0.4;
   if (pRegion === uRegion) {
     regional = 1;
     reasons.push("local_region");
   } else if (pRegion && uRegion && pRegion.slice(0, 2) === uRegion.slice(0, 2)) {
-    regional = 0.65;
+    regional = 0.7;
     reasons.push("nearby_region");
   }
-  score += regional * 1.4;
+  score += regional * 1.35;
 
-  // ── 2. Commerce health (normalized, conversion-aware) ──
   const views = perf?.views || 0;
   const carts = perf?.cartAdds || 0;
   const purchases = perf?.purchases || 0;
@@ -160,18 +200,15 @@ function scoreProduct(opts: {
     views > 0 ? (purchases * 3 + carts) / Math.max(views, 1) : 0;
   const commerceRaw =
     purchases * 15 + carts * 5 + views * 0.4 + wishlist * 2 + conversion * 40;
-  // Soft log so big numbers don't dominate forever
-  const commerce = Math.log10(1 + commerceRaw) / 3; // ~0–1 range for typical early marketplace
-  score += clamp(commerce) * 1.2;
+  const commerce = Math.log10(1 + commerceRaw) / 3;
+  score += clamp(commerce) * 1.15;
   if (purchases > 0 || carts > 2) reasons.push("commerce_signal");
 
-  // ── 3. Freshness (decays ~21 days) ─────────────────────
   const age = daysSince(product.createdAt);
   const freshness = clamp(1 - age / 21);
   score += freshness * 1.0;
   if (age <= 7) reasons.push("fresh");
 
-  // ── 4. User interest ───────────────────────────────────
   let interestScore = 0;
   const cat = String(product.category || "").trim();
   const sub = String(product.subCategory || "").trim();
@@ -190,10 +227,10 @@ function scoreProduct(opts: {
   if (band && interest.priceBands.has(band)) {
     interestScore += clamp(interest.priceBands.get(band)! / 15) * 0.15;
   }
-  score += clamp(interestScore) * 1.6;
+  const interestWeight = softInterest ? 1.15 : 1.6;
+  score += clamp(interestScore) * interestWeight;
   if (interestScore > 0.15) reasons.push("matches_interest");
 
-  // ── 5. Exploration boost (new / underexposed) ──────────
   let exploration = 0;
   if (age <= 14 && (views < 30 || purchases === 0)) {
     exploration += 0.55;
@@ -205,7 +242,6 @@ function scoreProduct(opts: {
   }
   score += exploration * 0.9;
 
-  // ── 6. Quality / availability ──────────────────────────
   let quality = 0.3;
   if (product.isActive !== false) quality += 0.2;
   if ((product.stock || 0) > 0) quality += 0.25;
@@ -213,7 +249,6 @@ function scoreProduct(opts: {
   if (product.isFeatured) quality += 0.2;
   score += quality * 0.5;
 
-  // ── 7. Search relevance (when query present) ───────────
   if (searchQuery && searchQuery.trim()) {
     const q = searchQuery.toLowerCase().trim();
     const name = String(product.name || "").toLowerCase();
@@ -229,8 +264,6 @@ function scoreProduct(opts: {
     if (searchHit > 0) reasons.push("search_match");
   }
 
-  // ── 8. Exposure penalty (repetition control) ───────────
-  // Positive interactions reduce the penalty
   const positiveSignal = purchases * 3 + carts * 2 + wishlist;
   const rawPenalty = Math.max(0, exposureCount - positiveSignal * 0.5);
   const exposurePenalty = Math.min(1.4, rawPenalty * 0.22);
@@ -240,18 +273,44 @@ function scoreProduct(opts: {
   return { product, score, reasons };
 }
 
-/** Soft diversity selection */
+/** Unique sequential pick. No seller/category hiding. Never fabricates rows. */
+function takeUnique(
+  scored: ScoredProduct[],
+  capacity: number,
+  exclude: Set<string>
+): ScoredProduct[] {
+  if (capacity <= 0) return [];
+  const selected: ScoredProduct[] = [];
+  const used = new Set<string>();
+
+  for (const item of scored) {
+    if (selected.length >= capacity) break;
+    const id = productId(item.product);
+    if (!id || used.has(id) || exclude.has(id)) continue;
+    selected.push(item);
+    used.add(id);
+  }
+
+  return selected;
+}
+
+/**
+ * Adaptive-mode diversity pick.
+ * Second pass relaxes caps so we still fill from real inventory, never clones.
+ */
 function selectWithDiversity(
   scored: ScoredProduct[],
   capacity: number,
   opts: {
     maxPerCategory?: number;
     maxPerSeller?: number;
-    allowReuseIds?: Set<string>;
+    excludeIds?: Set<string>;
   } = {}
 ): ScoredProduct[] {
+  if (capacity <= 0) return [];
   const maxPerCategory = opts.maxPerCategory ?? 12;
   const maxPerSeller = opts.maxPerSeller ?? 6;
+  const exclude = opts.excludeIds || new Set<string>();
   const selected: ScoredProduct[] = [];
   const catCount = new Map<string, number>();
   const sellerCount = new Map<string, number>();
@@ -260,8 +319,8 @@ function selectWithDiversity(
   const tryPick = (relax: boolean) => {
     for (const item of scored) {
       if (selected.length >= capacity) break;
-      const id = String(item.product._id);
-      if (used.has(id)) continue;
+      const id = productId(item.product);
+      if (!id || used.has(id) || exclude.has(id)) continue;
 
       const cat = String(item.product.category || "other");
       const seller = String(
@@ -280,12 +339,199 @@ function selectWithDiversity(
     }
   };
 
-  // First pass: strict diversity
   tryPick(false);
-  // Second pass: relax if not full
   if (selected.length < capacity) tryPick(true);
 
   return selected;
+}
+
+function hasReuseReason(s: ScoredProduct): boolean {
+  return (
+    s.reasons.includes("matches_interest") ||
+    s.reasons.includes("commerce_signal") ||
+    s.reasons.includes("local_region") ||
+    s.reasons.includes("fresh") ||
+    s.reasons.includes("exploration_new") ||
+    s.reasons.includes("search_match")
+  );
+}
+
+/**
+ * Rooms 3/4 reuse of Room 1/2 — only when adaptive is ON
+ * and the product actually earned another look.
+ */
+function selectAdaptiveWithControlledReuse(
+  scored: ScoredProduct[],
+  capacity: number,
+  usedEarlier: Set<string>,
+  opts: {
+    maxPerCategory?: number;
+    maxPerSeller?: number;
+    reuseMinScoreRatio?: number;
+  } = {}
+): ScoredProduct[] {
+  if (capacity <= 0 || scored.length === 0) return [];
+
+  const maxPerCategory = opts.maxPerCategory ?? 8;
+  const maxPerSeller = opts.maxPerSeller ?? 4;
+  const ratio = opts.reuseMinScoreRatio ?? 0.72;
+  const topScore = scored[0]?.score || 1;
+  const reuseFloor = topScore * ratio;
+
+  const fresh = scored.filter((s) => !usedEarlier.has(productId(s.product)));
+  const reuseCandidates = scored.filter((s) => {
+    const id = productId(s.product);
+    if (!usedEarlier.has(id)) return false;
+    if (s.score < reuseFloor) return false;
+    return hasReuseReason(s);
+  });
+
+  const pool: ScoredProduct[] = [
+    ...fresh,
+    ...reuseCandidates.map((s) => ({
+      ...s,
+      score: s.score * 0.82,
+      reasons: [...s.reasons, "controlled_reuse"],
+    })),
+  ].sort((a, b) => b.score - a.score);
+
+  return selectWithDiversity(pool, capacity, {
+    maxPerCategory,
+    maxPerSeller,
+  });
+}
+
+/**
+ * INVENTORY FIRST (eligibleCount < 110)
+ *
+ * Put every unique eligible product on the floor.
+ * Room 1 fills first (up to 50), leftover unique items go 2 → 3 → 4.
+ * Zero seller/category caps. Zero padding. Zero clones.
+ *
+ * 5 products from one seller → Room 1 shows all 5.
+ */
+function distributeInventoryFirst(scored: ScoredProduct[]): {
+  room1: ScoredProduct[];
+  room2: ScoredProduct[];
+  room3: ScoredProduct[];
+  room4: ScoredProduct[];
+} {
+  const n = scored.length;
+  if (n === 0) {
+    return { room1: [], room2: [], room3: [], room4: [] };
+  }
+
+  const used = new Set<string>();
+
+  const room1 = takeUnique(scored, Math.min(ROOM_CAPACITY[1], n), used);
+  room1.forEach((s) => used.add(productId(s.product)));
+
+  const room2 = takeUnique(
+    scored,
+    Math.min(ROOM_CAPACITY[2], n - used.size),
+    used
+  );
+  room2.forEach((s) => used.add(productId(s.product)));
+
+  const room3 = takeUnique(
+    scored,
+    Math.min(ROOM_CAPACITY[3], n - used.size),
+    used
+  );
+  room3.forEach((s) => used.add(productId(s.product)));
+
+  const room4 = takeUnique(
+    scored,
+    Math.min(ROOM_CAPACITY[4], n - used.size),
+    used
+  );
+
+  return { room1, room2, room3, room4 };
+}
+
+/**
+ * ADAPTIVE ON (eligibleCount >= 110)
+ * Fill 50 / 14 / 16 / 30. Rooms 1+2 unique. 3/4 may carefully reuse.
+ */
+function distributeAdaptive(scored: ScoredProduct[]): {
+  room1: ScoredProduct[];
+  room2: ScoredProduct[];
+  room3: ScoredProduct[];
+  room4: ScoredProduct[];
+} {
+  const room1 = selectWithDiversity(scored, ROOM_CAPACITY[1], {
+    maxPerCategory: 14,
+    maxPerSeller: 7,
+  });
+  const used1 = new Set(room1.map((s) => productId(s.product)));
+
+  const room2 = selectWithDiversity(
+    scored.filter((s) => !used1.has(productId(s.product))),
+    ROOM_CAPACITY[2],
+    {
+      maxPerCategory: 8,
+      maxPerSeller: 4,
+      excludeIds: used1,
+    }
+  );
+  const used12 = new Set([
+    ...used1,
+    ...room2.map((s) => productId(s.product)),
+  ]);
+
+  const room3 = selectAdaptiveWithControlledReuse(
+    scored,
+    ROOM_CAPACITY[3],
+    used12,
+    {
+      maxPerCategory: 6,
+      maxPerSeller: 3,
+      reuseMinScoreRatio: 0.75,
+    }
+  );
+
+  const room4 = selectAdaptiveWithControlledReuse(
+    scored,
+    ROOM_CAPACITY[4],
+    used12,
+    {
+      maxPerCategory: 10,
+      maxPerSeller: 5,
+      reuseMinScoreRatio: 0.7,
+    }
+  );
+
+  const fillUniqueOnly = (
+    room: ScoredProduct[],
+    cap: number,
+    exclude: Set<string>
+  ) => {
+    if (room.length >= cap) return room;
+    const have = new Set(room.map((r) => productId(r.product)));
+    for (const s of scored) {
+      if (room.length >= cap) break;
+      const id = productId(s.product);
+      if (!id || have.has(id) || exclude.has(id)) continue;
+      room.push(s);
+      have.add(id);
+    }
+    return room;
+  };
+
+  fillUniqueOnly(room3, ROOM_CAPACITY[3], used12);
+  fillUniqueOnly(room4, ROOM_CAPACITY[4], new Set());
+
+  return { room1, room2, room3, room4 };
+}
+
+function cachedUniqueIds(session: any): string[] {
+  const allIds = [
+    ...(session.productIdsByRoom?.[1] || []),
+    ...(session.productIdsByRoom?.[2] || []),
+    ...(session.productIdsByRoom?.[3] || []),
+    ...(session.productIdsByRoom?.[4] || []),
+  ];
+  return [...new Set(allIds.map(String).filter(Boolean))];
 }
 
 export async function generateShowroom(opts: {
@@ -297,103 +543,105 @@ export async function generateShowroom(opts: {
 }) {
   const region = (opts.region || "NG").trim().toUpperCase() || "NG";
   const sessionId =
-    opts.sessionId ||
-    crypto.randomBytes(16).toString("hex");
+    opts.sessionId || crypto.randomBytes(16).toString("hex");
   const userId = opts.userId || null;
   const searchQuery = opts.searchQuery?.trim() || "";
 
-  // ── Load or create session ─────────────────────────────
   let session = await ShowroomSession.findOne({ sessionId });
   const now = new Date();
 
-  if (
+  const eligibleCountLive = await Product.countDocuments(ELIGIBLE_FILTER);
+
+  const cacheIsFresh =
     session &&
     !opts.forceRefresh &&
     session.expiresAt > now &&
-    !searchQuery // search always recalculates
-  ) {
-    // Return cached room product IDs → hydrate
-    const allIds = [
-      ...(session.productIdsByRoom?.[1] || []),
-      ...(session.productIdsByRoom?.[2] || []),
-      ...(session.productIdsByRoom?.[3] || []),
-      ...(session.productIdsByRoom?.[4] || []),
-    ];
-    const uniqueIds = [...new Set(allIds.map(String))];
+    !searchQuery;
 
-    const products = await Product.find({
-      _id: { $in: uniqueIds },
-      isActive: true,
-      stock: { $gt: 0 },
-    })
-      .populate("seller", SELLER_PUBLIC_FIELDS)
-      .lean();
+  if (cacheIsFresh) {
+    const uniqueIds = cachedUniqueIds(session);
 
-    const map = new Map(products.map((p: any) => [String(p._id), p]));
+    // Inventory grew (e.g. 4 cached, 5 listed) → rebuild. Do not serve a stale mall.
+    const inventoryGrew = eligibleCountLive > uniqueIds.length;
 
-    const hydrate = (ids: string[]) =>
-      ids.map((id) => map.get(String(id))).filter(Boolean);
+    if (!inventoryGrew && uniqueIds.length > 0) {
+      const products = await Product.find({
+        _id: { $in: uniqueIds },
+        ...ELIGIBLE_FILTER,
+      })
+        .populate("seller", SELLER_PUBLIC_FIELDS)
+        .lean();
 
-    return {
-      sessionId,
-      region: session.region || region,
-      rooms: {
-        1: hydrate(session.productIdsByRoom?.[1] || []),
-        2: hydrate(session.productIdsByRoom?.[2] || []),
-        3: hydrate(session.productIdsByRoom?.[3] || []),
-        4: hydrate(session.productIdsByRoom?.[4] || []),
-      },
-      cached: true,
-    };
+      const map = new Map(products.map((p: any) => [String(p._id), p]));
+      const hydrate = (ids: string[]) =>
+        (ids || []).map((id) => map.get(String(id))).filter(Boolean);
+
+      return {
+        sessionId,
+        region: session.region || region,
+        rooms: {
+          1: hydrate(session.productIdsByRoom?.[1] || []),
+          2: hydrate(session.productIdsByRoom?.[2] || []),
+          3: hydrate(session.productIdsByRoom?.[3] || []),
+          4: hydrate(session.productIdsByRoom?.[4] || []),
+        },
+        cached: true,
+        meta: {
+          adaptive: eligibleCountLive >= ADAPTIVE_THRESHOLD,
+          fromCache: true,
+          eligibleCount: eligibleCountLive,
+          adaptiveThreshold: ADAPTIVE_THRESHOLD,
+        },
+      };
+    }
   }
 
-  // ── Candidate pool ─────────────────────────────────────
-  // Prefer local, then expand. Never hard-exclude global.
-  const baseFilter: any = { isActive: true, stock: { $gt: 0 } };
-
   const localProducts = await Product.find({
-    ...baseFilter,
+    ...ELIGIBLE_FILTER,
     region,
   })
     .populate("seller", SELLER_PUBLIC_FIELDS)
     .sort({ isFeatured: -1, createdAt: -1 })
-    .limit(400)
+    .limit(800)
     .lean();
 
   let candidates = [...localProducts];
 
-  if (candidates.length < 120) {
-    const extra = await Product.find({
-      ...baseFilter,
-      region: { $ne: region },
-    })
-      .populate("seller", SELLER_PUBLIC_FIELDS)
-      .sort({ isFeatured: -1, createdAt: -1 })
-      .limit(300)
-      .lean();
-    candidates = [...candidates, ...extra];
-  }
+  const extra = await Product.find({
+    ...ELIGIBLE_FILTER,
+    ...(localProducts.length
+      ? { _id: { $nin: localProducts.map((p: any) => p._id) } }
+      : {}),
+  })
+    .populate("seller", SELLER_PUBLIC_FIELDS)
+    .sort({ isFeatured: -1, createdAt: -1 })
+    .limit(1200)
+    .lean();
 
-  // Tiny inventory: still proceed with whatever exists
-  if (candidates.length === 0) {
+  candidates = [...candidates, ...extra];
+
+  const eligibleCount = candidates.length;
+
+  if (eligibleCount === 0) {
     return {
       sessionId,
       region,
       rooms: { 1: [], 2: [], 3: [], 4: [] },
       cached: false,
+      meta: {
+        adaptive: false,
+        eligibleCount: 0,
+        adaptiveThreshold: ADAPTIVE_THRESHOLD,
+      },
     };
   }
 
-  // Performance map
   const ids = candidates.map((p: any) => p._id);
   const perfs = await ProductPerformance.find({ product: { $in: ids } })
     .select("product views cartAdds purchases score")
     .lean();
-  const perfMap = new Map(
-    perfs.map((p: any) => [String(p.product), p])
-  );
+  const perfMap = new Map(perfs.map((p: any) => [String(p.product), p]));
 
-  // Interest + exposure
   const interest = await buildInterestProfile(userId, sessionId);
   const exposureCounts: Record<string, number> = {};
   if (session?.exposureCounts) {
@@ -404,7 +652,8 @@ export async function generateShowroom(opts: {
     Object.assign(exposureCounts, raw || {});
   }
 
-  // Score everything
+  const adaptiveOn = eligibleCount >= ADAPTIVE_THRESHOLD;
+
   const scored = candidates
     .map((product: any) =>
       scoreProduct({
@@ -414,91 +663,25 @@ export async function generateShowroom(opts: {
         interest,
         exposureCount: Number(exposureCounts[String(product._id)] || 0),
         searchQuery,
+        softInterest: true,
       })
     )
     .sort((a, b) => b.score - a.score);
 
-  // ── Room selection with different philosophies ─────────
-  // Room 1: broad discovery
-  const room1 = selectWithDiversity(scored, ROOM_CAPACITY[1], {
-    maxPerCategory: 14,
-    maxPerSeller: 7,
-  });
+  const { room1, room2, room3, room4 } = adaptiveOn
+    ? distributeAdaptive(scored)
+    : distributeInventoryFirst(scored);
 
-  const used1 = new Set(room1.map((s) => String(s.product._id)));
-
-  // Room 2: tighter / higher score preference
-  const room2Pool = scored.filter((s) => !used1.has(String(s.product._id)));
-  const room2 = selectWithDiversity(room2Pool, ROOM_CAPACITY[2], {
-    maxPerCategory: 5,
-    maxPerSeller: 3,
-  });
-  const used2 = new Set([
-    ...used1,
-    ...room2.map((s) => String(s.product._id)),
-  ]);
-
-  // Room 3: more exploration + allow light reuse if needed
-  const room3Pool = scored.filter((s) => {
-    const id = String(s.product._id);
-    if (!used2.has(id)) return true;
-    // allow reuse of strong exploration candidates when inventory is thin
-    return s.reasons.includes("exploration_new") || candidates.length < 40;
-  });
-  const room3 = selectWithDiversity(room3Pool, ROOM_CAPACITY[3], {
-    maxPerCategory: 6,
-    maxPerSeller: 3,
-  });
-  const used3 = new Set([
-    ...used2,
-    ...room3.map((s) => String(s.product._id)),
-  ]);
-
-  // Room 4: broader surface, allow more reuse when inventory is limited
-  const room4Pool =
-    candidates.length < 80
-      ? scored // allow reuse
-      : scored.filter((s) => !used3.has(String(s.product._id)));
-  const room4 = selectWithDiversity(room4Pool, ROOM_CAPACITY[4], {
-    maxPerCategory: 10,
-    maxPerSeller: 5,
-  });
-
-  // Absolute inventory rule: if still short, fill from top scored
-  const fillShort = (room: ScoredProduct[], cap: number) => {
-    if (room.length >= cap || scored.length === 0) return room;
-    const have = new Set(room.map((r) => String(r.product._id)));
-    for (const s of scored) {
-      if (room.length >= cap) break;
-      const id = String(s.product._id);
-      if (have.has(id)) continue;
-      room.push(s);
-      have.add(id);
-    }
-    // last resort: pure reuse
-    if (room.length < cap && scored.length > 0) {
-      let i = 0;
-      while (room.length < cap) {
-        room.push(scored[i % scored.length]);
-        i++;
-      }
-    }
-    return room;
-  };
-
-  const final1 = fillShort(room1, Math.min(ROOM_CAPACITY[1], scored.length));
-  const final2 = fillShort(room2, Math.min(ROOM_CAPACITY[2], scored.length));
-  const final3 = fillShort(room3, Math.min(ROOM_CAPACITY[3], scored.length));
-  const final4 = fillShort(room4, Math.min(ROOM_CAPACITY[4], scored.length));
+  const ids1 = new Set(room1.map((s) => productId(s.product)));
+  const final2 = room2.filter((s) => !ids1.has(productId(s.product)));
 
   const productIdsByRoom = {
-    1: final1.map((s) => String(s.product._id)),
-    2: final2.map((s) => String(s.product._id)),
-    3: final3.map((s) => String(s.product._id)),
-    4: final4.map((s) => String(s.product._id)),
+    1: room1.map((s) => productId(s.product)),
+    2: final2.map((s) => productId(s.product)),
+    3: room3.map((s) => productId(s.product)),
+    4: room4.map((s) => productId(s.product)),
   };
 
-  // Update exposure counts
   const nextExposure = { ...exposureCounts };
   for (const id of [
     ...productIdsByRoom[1],
@@ -506,6 +689,7 @@ export async function generateShowroom(opts: {
     ...productIdsByRoom[3],
     ...productIdsByRoom[4],
   ]) {
+    if (!id) continue;
     nextExposure[id] = (nextExposure[id] || 0) + 1;
   }
 
@@ -517,32 +701,43 @@ export async function generateShowroom(opts: {
       sessionId,
       user: userId || null,
       region,
-      behaviorSig: searchQuery ? `search:${searchQuery}` : "default",
+      behaviorSig: searchQuery
+        ? `search:${searchQuery}`
+        : adaptiveOn
+          ? "adaptive"
+          : "inventory_first",
       productIdsByRoom,
       exposureCounts: nextExposure,
       expiresAt,
     },
-    { upsert: true, new: true }
+    { upsert: true, returnDocument: "after" }
   );
 
   return {
     sessionId,
     region,
     rooms: {
-      1: final1.map((s) => s.product),
+      1: room1.map((s) => s.product),
       2: final2.map((s) => s.product),
-      3: final3.map((s) => s.product),
-      4: final4.map((s) => s.product),
+      3: room3.map((s) => s.product),
+      4: room4.map((s) => s.product),
     },
     cached: false,
     meta: {
-      candidateCount: candidates.length,
+      adaptive: adaptiveOn,
+      eligibleCount,
+      adaptiveThreshold: ADAPTIVE_THRESHOLD,
       localCount: localProducts.length,
+      roomSizes: {
+        1: room1.length,
+        2: final2.length,
+        3: room3.length,
+        4: room4.length,
+      },
     },
   };
 }
 
-/** Shared scorer for search / product listing */
 export async function rankProductsForSearch(opts: {
   products: any[];
   region?: string;
@@ -571,6 +766,7 @@ export async function rankProductsForSearch(opts: {
         interest,
         exposureCount: 0,
         searchQuery: opts.searchQuery,
+        softInterest: true,
       })
     )
     .sort((a, b) => b.score - a.score);
