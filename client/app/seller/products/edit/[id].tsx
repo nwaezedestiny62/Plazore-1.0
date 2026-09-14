@@ -16,7 +16,12 @@ import {
   getDocTypes,
   getSpecFields,
 } from '@/constants/productSpecs'
-import { getRegion } from '@/constants/regions'
+import {
+  convertWithNgnRates,
+  getRegion,
+  regionCurrencyCode,
+  resolveRegionCode,
+} from '@/constants/regions'
 import { useMarketplace } from '@/context/MarketplaceContext'
 import { useAuth } from '@clerk/clerk-expo'
 import { Ionicons } from '@expo/vector-icons'
@@ -127,7 +132,7 @@ function PlazoreOrb({ size = 110 }: { size?: number }) {
         duration: 2600,
         easing: Easing.linear,
         useNativeDriver: true,
-      })
+      }),
     )
     loop.start()
     return () => loop.stop()
@@ -232,7 +237,11 @@ function TopOverlay({
 
   if (!state) return null
   const accent =
-    state.tone === 'danger' ? '#EF4444' : state.tone === 'success' ? GREEN : BLUE
+    state.tone === 'danger'
+      ? '#EF4444'
+      : state.tone === 'success'
+        ? GREEN
+        : BLUE
 
   return (
     <Animated.View
@@ -498,7 +507,7 @@ function ProductPagePreview({
   }
 
   const specEntries = Object.entries(data.specifications || {}).filter(
-    ([, v]) => v?.trim()
+    ([, v]) => v?.trim(),
   )
 
   return (
@@ -510,7 +519,11 @@ function ProductPagePreview({
         bounces={false}
       >
         <View
-          style={{ width: PHONE_W, height: galleryH, backgroundColor: '#07080C' }}
+          style={{
+            width: PHONE_W,
+            height: galleryH,
+            backgroundColor: '#07080C',
+          }}
         >
           {images.length > 0 ? (
             <ScrollView
@@ -532,7 +545,11 @@ function ProductPagePreview({
             </ScrollView>
           ) : (
             <View
-              style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}
+              style={{
+                flex: 1,
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
             >
               <Ionicons name="image-outline" size={32} color="#3A3F4A" />
             </View>
@@ -557,9 +574,13 @@ function ProductPagePreview({
         </View>
 
         <View
-          style={{ paddingHorizontal: 14, paddingTop: 14, paddingBottom: 28 }}
+          style={{
+            paddingHorizontal: 14,
+            paddingTop: 14,
+            paddingBottom: 28,
+          }}
         >
-          {(data.category || data.subCategory) ? (
+          {data.category || data.subCategory ? (
             <Text style={styles.pageEyebrow} numberOfLines={1}>
               {[data.category, data.subCategory].filter(Boolean).join(' · ')}
             </Text>
@@ -688,7 +709,11 @@ function ProductPagePreview({
             ]}
           >
             <View style={styles.storeIcon}>
-              <Ionicons name="storefront-outline" size={16} color={SECONDARY} />
+              <Ionicons
+                name="storefront-outline"
+                size={16}
+                color={SECONDARY}
+              />
             </View>
             <View style={{ marginLeft: 10, flex: 1 }}>
               <Text style={styles.shipLabel}>Visit storefront</Text>
@@ -719,35 +744,43 @@ function ProductPagePreview({
   )
 }
 
+/* ══════════════════════════════════════════════
+   EDIT PRODUCT
+   Rules:
+   1. product.region is LOCKED forever (creation region)
+   2. Price input shown in seller's current marketplace currency
+      (converted if seller region ≠ product region)
+   3. On save: convert price back to product.region currency
+   4. First image = cover
+══════════════════════════════════════════════ */
 export default function EditProduct() {
   const { id: rawId } = useLocalSearchParams<{ id: string | string[] }>()
   const id = Array.isArray(rawId) ? rawId[0] : rawId
   const { getToken } = useAuth()
   const router = useRouter()
-  const { region, currencySymbol, formatProduct } = useMarketplace()
-  const regionInfo = getRegion(region)
+  const insets = useSafeAreaInsets()
+  const { region, formatProduct, ratesToNgn } = useMarketplace()
 
-  const maxImages = PLAN_IMAGE_LIMITS[CURRENT_PLAN]
-  const feePct = PLAN_FEES[CURRENT_PLAN]
+  const maxImages = PLAN_IMAGE_LIMITS[CURRENT_PLAN] ?? 6
+  const feePct = PLAN_FEES[CURRENT_PLAN] ?? 8
 
   const [pageLoading, setPageLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [overlay, setOverlay] = useState<OverlayState>(null)
+  const [storeName, setStoreName] = useState('')
+
+  // LOCKED creation region — never overwritten on save
+  const [productRegion, setProductRegion] = useState('NG')
 
   const [images, setImages] = useState<ImageItem[]>([])
   const [name, setName] = useState('')
+  const [brand, setBrand] = useState('')
+  // price input is always in SELLER's current marketplace currency
   const [price, setPrice] = useState('')
+  const [stock, setStock] = useState('1')
   const [description, setDescription] = useState('')
   const [category, setCategory] = useState('')
   const [subCategory, setSubCategory] = useState('')
-  const [brand, setBrand] = useState('')
-  const [stock, setStock] = useState('')
-  const [shippingMethod, setShippingMethod] = useState<
-    'self' | 'courier' | null
-  >(null)
-  const [courierCompany, setCourierCompany] = useState('')
-  const [deliveryFee, setDeliveryFee] = useState('')
-
   const [specs, setSpecs] = useState<Record<string, string>>({})
   const [existingDocs, setExistingDocs] = useState<ExistingDoc[]>([])
   const [newDocuments, setNewDocuments] = useState<LocalDoc[]>([])
@@ -755,168 +788,278 @@ export default function EditProduct() {
   const [fulfillCountryCode, setFulfillCountryCode] = useState('')
   const [fulfillStateCode, setFulfillStateCode] = useState('')
   const [fulfillCity, setFulfillCity] = useState('')
+  const [shippingMethod, setShippingMethod] = useState<
+    'self' | 'courier' | null
+  >(null)
+  const [courierCompany, setCourierCompany] = useState('')
+  const [deliveryFee, setDeliveryFee] = useState('')
 
   const nameRef = useRef<TextInput>(null)
-  const priceRef = useRef<TextInput>(null)
-  const descRef = useRef<TextInput>(null)
   const brandRef = useRef<TextInput>(null)
+  const priceRef = useRef<TextInput>(null)
   const stockRef = useRef<TextInput>(null)
+  const descRef = useRef<TextInput>(null)
   const courierRef = useRef<TextInput>(null)
   const feeRef = useRef<TextInput>(null)
-
-  const fulfillCountry = FULFILLMENT_COUNTRIES.find(
-    (c) => c.code === fulfillCountryCode
-  )
-  const fulfillStates = getStatesForCountry(fulfillCountryCode)
-  const fulfillCities = getCitiesForState(fulfillCountryCode, fulfillStateCode)
-
-  const subCategories = useMemo(
-    () => (category ? PRODUCT_CATEGORIES[category] || ['Other'] : []),
-    [category]
-  )
-  const specFields = useMemo(() => getSpecFields(category), [category])
-  const needsDocs = categoryNeedsDocs(category)
-  const docTypes = useMemo(() => getDocTypes(category), [category])
 
   const toast = useCallback(
     (
       title: string,
       message?: string,
-      tone: 'info' | 'success' | 'danger' = 'info'
-    ) => setOverlay({ title, message, tone, durationMs: 3800 }),
-    []
+      tone: 'info' | 'success' | 'danger' = 'info',
+    ) => {
+      setOverlay({ title, message, tone })
+    },
+    [],
   )
 
-  // ── Load existing product (do not wipe carelessly) ──
+  const sellerRegion = resolveRegionCode(region)
+  const sellerCurrency = regionCurrencyCode(sellerRegion)
+  const productCurrency = regionCurrencyCode(productRegion)
+  const regionMismatch = sellerRegion !== productRegion
+
+  /**
+   * Convert stored product price (productRegion) → seller region for the input field.
+   */
+  const toSellerCurrency = useCallback(
+    (amount: number) => {
+      if (!regionMismatch) return amount
+      const converted = convertWithNgnRates(
+        amount,
+        productCurrency,
+        sellerCurrency,
+        ratesToNgn,
+      )
+      return converted ?? amount
+    },
+    [regionMismatch, productCurrency, sellerCurrency, ratesToNgn],
+  )
+
+  /**
+   * Convert seller input price → productRegion currency for storage.
+   */
+  const toProductCurrency = useCallback(
+    (amount: number) => {
+      if (!regionMismatch) return amount
+      const converted = convertWithNgnRates(
+        amount,
+        sellerCurrency,
+        productCurrency,
+        ratesToNgn,
+      )
+      return converted ?? amount
+    },
+    [regionMismatch, sellerCurrency, productCurrency, ratesToNgn],
+  )
+
+  /* ── Load product ── */
   useEffect(() => {
-    const load = async () => {
-      if (!id) {
-        setPageLoading(false)
-        return
-      }
+    if (!id) {
+      setPageLoading(false)
+      return
+    }
+    ;(async () => {
       try {
+        setPageLoading(true)
         const token = await getToken()
-        const res = await api.get(`/products/${id}`, {
-          headers: { Authorization: `Bearer ${token}` },
-        })
-        if (!res.data.success || !res.data.data) {
-          toast('Error', 'Product not found', 'danger')
-          setTimeout(() => router.back(), 1200)
+        const headers = token
+          ? { Authorization: `Bearer ${token}` }
+          : undefined
+
+        const [prodRes, storeRes] = await Promise.all([
+          api.get(`/products/${id}`, { headers }),
+          api
+            .get('/seller/store', { headers })
+            .catch(() => ({ data: null })),
+        ])
+
+        if (storeRes?.data?.success && storeRes.data.data?.storeName) {
+          setStoreName(storeRes.data.data.storeName)
+        }
+
+        if (!prodRes.data?.success || !prodRes.data.data) {
+          toast('Not found', 'Product could not be loaded', 'danger')
+          setPageLoading(false)
           return
         }
-        const p = res.data.data
-        setName(p.name || '')
-        setPrice(String(p.price ?? ''))
-        setDescription(p.description || '')
-        setCategory(p.category || '')
-        setSubCategory(p.subCategory || '')
-        setBrand(p.brand || '')
-        setStock(String(p.stock ?? ''))
-        setShippingMethod(
-          p.shipping?.method === 'self'
-            ? 'self'
-            : p.shipping?.method === 'courier'
-              ? 'courier'
-              : p.shipping?.method
-                ? 'courier'
-                : null
-        )
-        setCourierCompany(p.shipping?.courierCompany || '')
-        setDeliveryFee(
-          p.shipping?.deliveryFee !== undefined &&
-            p.shipping?.deliveryFee !== null
-            ? String(p.shipping.deliveryFee)
-            : '0'
-        )
-        setImages(
-          (p.images || []).map((uri: string) => ({
-            type: 'remote' as const,
-            uri,
-          }))
-        )
+
+        const p = prodRes.data.data
+        const locked = resolveRegionCode(p.region || 'NG')
+        setProductRegion(locked)
+
+        const storedPrice = Number(p.price) || 0
+        // Show converted price if seller is in a different marketplace
+        const displayPrice =
+          locked === resolveRegionCode(region)
+            ? storedPrice
+            : convertWithNgnRates(
+                storedPrice,
+                regionCurrencyCode(locked),
+                regionCurrencyCode(region),
+                ratesToNgn,
+              ) ?? storedPrice
+
+        setName(String(p.name || ''))
+        setBrand(String(p.brand || ''))
+        setPrice(storedPrice ? String(displayPrice) : '')
+        setStock(String(p.stock ?? 1))
+        setDescription(String(p.description || ''))
+        setCategory(String(p.category || ''))
+        setSubCategory(String(p.subCategory || ''))
         setSpecs(normalizeSpecs(p.specifications))
-        setExistingDocs(
+
+        const imgs: ImageItem[] = (
+          Array.isArray(p.images) ? p.images : []
+        )
+          .map((u: any) => {
+            const uri =
+              typeof u === 'string'
+                ? u
+                : u?.secure_url || u?.secureUrl || u?.url || ''
+            return uri ? ({ type: 'remote' as const, uri } as ImageItem) : null
+          })
+          .filter(Boolean) as ImageItem[]
+        setImages(imgs)
+
+        const docs: ExistingDoc[] = (
           Array.isArray(p.verificationDocuments)
-            ? p.verificationDocuments.map((d: any) => ({
-                documentName: String(d.documentName || ''),
-                documentType: String(d.documentType || 'other'),
-                secureUrl: String(d.secureUrl || ''),
-              }))
+            ? p.verificationDocuments
             : []
         )
-        setNewDocuments([])
+          .filter((d: any) => d?.secureUrl)
+          .map((d: any) => ({
+            documentName: String(d.documentName || d.name || 'Document'),
+            documentType: String(d.documentType || d.type || 'other'),
+            secureUrl: String(d.secureUrl),
+          }))
+        setExistingDocs(docs)
 
         const fl = p.fulfillmentLocation
         if (fl) {
-          setFulfillCountryCode(fl.countryCode || '')
-          setFulfillStateCode(fl.stateCode || '')
-          setFulfillCity(fl.city || '')
+          setFulfillCountryCode(String(fl.countryCode || ''))
+          setFulfillStateCode(String(fl.stateCode || ''))
+          setFulfillCity(String(fl.city || ''))
         }
+
+        const ship = p.shipping || {}
+        const method =
+          ship.method === 'self' || ship.method === 'courier'
+            ? ship.method
+            : null
+        setShippingMethod(method)
+        setCourierCompany(
+          String(ship.courierCompany || ship.courier || ''),
+        )
+        setDeliveryFee(
+          ship.deliveryFee != null ? String(ship.deliveryFee) : '',
+        )
       } catch (e: any) {
-        console.log(e.response?.data || e.message)
-        toast('Error', 'Could not load product', 'danger')
-        setTimeout(() => router.back(), 1200)
+        console.error(e)
+        toast(
+          'Error',
+          e?.response?.data?.message || 'Failed to load product',
+          'danger',
+        )
       } finally {
         setPageLoading(false)
       }
-    }
-    load()
+    })()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
 
-  const productPreviewData: ProductPreviewData = useMemo(() => {
-    const priceNum = Number(String(price).replace(/,/g, '').trim()) || 0
-    const stockNum = Number(String(stock).trim()) || 0
-    const feeNum = Number(String(deliveryFee).replace(/,/g, '').trim()) || 0
-    let shipsFrom: string | null = null
-    if (fulfillCity && fulfillCountry) {
-      shipsFrom = `${fulfillCity}, ${fulfillCountry.name}`
-    }
-    return {
-      name: name.trim(),
-      brand: brand.trim(),
-      price: priceNum,
-      description: description.trim(),
+  const subCats = category ? PRODUCT_CATEGORIES[category] || [] : []
+  const specFields = useMemo(() => getSpecFields(category), [category])
+  const needsDocs = categoryNeedsDocs(category)
+  const docTypes = useMemo(() => getDocTypes(category), [category])
+  const fulfillStates = useMemo(
+    () => getStatesForCountry(fulfillCountryCode),
+    [fulfillCountryCode],
+  )
+  const fulfillCities = useMemo(
+    () => getCitiesForState(fulfillCountryCode, fulfillStateCode),
+    [fulfillCountryCode, fulfillStateCode],
+  )
+
+  const shipsFrom = useMemo(() => {
+    if (!fulfillCountryCode || !fulfillCity) return null
+    const c = FULFILLMENT_COUNTRIES.find((x) => x.code === fulfillCountryCode)
+    return buildFulfillmentLocation({
+      countryCode: fulfillCountryCode,
+      country: c?.name || '',
+      stateCode: fulfillStateCode,
+      state:
+        fulfillStates.find((s) => s.code === fulfillStateCode)?.name || '',
+      city: fulfillCity,
+    }).displayLabel
+  }, [fulfillCountryCode, fulfillStateCode, fulfillCity, fulfillStates])
+
+  const priceN = Number(price) || 0
+  const stockN = Math.max(0, parseInt(stock || '0', 10) || 0)
+  const feeN = Number(deliveryFee) || 0
+
+  // Canonical price in product.region currency (what gets stored)
+  const canonicalPrice = useMemo(
+    () => toProductCurrency(priceN),
+    [toProductCurrency, priceN],
+  )
+
+  /**
+   * Buyer-facing preview: amount is in productRegion, formatProduct
+   * converts to the current marketplace region (seller's view of buyer price).
+   */
+  const formatPreviewPrice = useCallback(
+    (n: number) => {
+      try {
+        return formatProduct(n, productRegion)
+      } catch {
+        return String(n)
+      }
+    },
+    [formatProduct, productRegion],
+  )
+
+  const productPreviewData: ProductPreviewData = useMemo(
+    () => ({
+      name,
+      brand,
+      price: canonicalPrice,
+      description,
       images: images.map((i) => i.uri),
-      stock: stockNum,
+      stock: stockN,
       category,
       subCategory,
-      region,
-      storeName: brand.trim() || 'Your store',
+      region: productRegion,
+      storeName,
       shipsFrom,
       shippingMethod,
       courierCompany,
-      deliveryFee: feeNum,
+      deliveryFee: feeN,
       specifications: specs,
-    }
-  }, [
-    name,
-    brand,
-    price,
-    description,
-    images,
-    stock,
-    category,
-    subCategory,
-    region,
-    fulfillCity,
-    fulfillCountry,
-    shippingMethod,
-    courierCompany,
-    deliveryFee,
-    specs,
-  ])
+    }),
+    [
+      name,
+      brand,
+      canonicalPrice,
+      description,
+      images,
+      stockN,
+      category,
+      subCategory,
+      productRegion,
+      storeName,
+      shipsFrom,
+      shippingMethod,
+      courierCompany,
+      feeN,
+      specs,
+    ],
+  )
 
-  const formatPreviewPrice = (n: number) => {
-    try {
-      if (typeof formatProduct === 'function') return formatProduct(n, region)
-    } catch {}
-    return `${currencySymbol}${n.toLocaleString()}`
-  }
-
+  /* ── Images ── */
   const pickImages = async () => {
     const remaining = maxImages - images.length
     if (remaining <= 0) {
-      toast('Limit reached', `Up to ${maxImages} images on this plan.`, 'danger')
+      toast('Limit reached', `Max ${maxImages} images on your plan`, 'danger')
       return
     }
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -925,181 +1068,174 @@ export default function EditProduct() {
       quality: 0.85,
       selectionLimit: remaining,
     })
-    if (!result.canceled) {
-      const next = result.assets.map((a) => ({
-        type: 'local' as const,
-        uri: a.uri,
-      }))
-      setImages((prev) => [...prev, ...next].slice(0, maxImages))
-    }
+    if (result.canceled || !result.assets?.length) return
+    const next: ImageItem[] = result.assets
+      .map((a) =>
+        a.uri ? ({ type: 'local' as const, uri: a.uri } as ImageItem) : null,
+      )
+      .filter(Boolean) as ImageItem[]
+    setImages((prev) => [...prev, ...next].slice(0, maxImages))
   }
 
   const removeImage = (index: number) => {
     setImages((prev) => prev.filter((_, i) => i !== index))
   }
 
-  const moveImage = (index: number, dir: -1 | 1) => {
-    const next = index + dir
-    if (next < 0 || next >= images.length) return
+  const makeCover = (index: number) => {
+    if (index <= 0) return
     setImages((prev) => {
-      const copy = [...prev]
-      ;[copy[index], copy[next]] = [copy[next], copy[index]]
-      return copy
+      const next = [...prev]
+      const [item] = next.splice(index, 1)
+      next.unshift(item)
+      return next
     })
   }
 
   const pickDocuments = async () => {
-    const total = existingDocs.length + newDocuments.length
-    if (total >= 5) {
-      toast('Limit', 'Up to 5 documents', 'danger')
+    if (existingDocs.length + newDocuments.length >= 5) {
+      toast('Limit', 'Max 5 documents', 'danger')
       return
     }
-    try {
-      const result = await DocumentPicker.getDocumentAsync({
-        type: ['application/pdf', 'image/*'],
-        copyToCacheDirectory: true,
-        multiple: true,
-      })
-      if (result.canceled) return
-      const defaultType = docTypes[0]?.id || 'other'
-      const room = 5 - total
-      const next: LocalDoc[] = result.assets.slice(0, room).map((a) => ({
-        uri: a.uri,
-        name: a.name || 'Document',
-        type: defaultType,
-        mimeType: a.mimeType || undefined,
-      }))
-      setNewDocuments((prev) => [...prev, ...next])
-    } catch {
-      toast('Error', 'Could not open document picker', 'danger')
-    }
+    const result = await DocumentPicker.getDocumentAsync({
+      type: ['image/*', 'application/pdf'],
+      multiple: true,
+      copyToCacheDirectory: true,
+    })
+    if (result.canceled || !result.assets?.length) return
+    setNewDocuments((prev) => {
+      const next = [...prev]
+      for (const a of result.assets) {
+        if (existingDocs.length + next.length >= 5) break
+        next.push({
+          uri: a.uri,
+          name: a.name || 'Document',
+          type: docTypes[0]?.id || 'other',
+          mimeType: a.mimeType,
+        })
+      }
+      return next
+    })
+  }
+
+  const validate = () => {
+    if (!images.length) return 'Add at least one product image'
+    if (!name.trim()) return 'Product name is required'
+    if (!priceN || priceN <= 0) return 'Enter a valid price'
+    if (!category) return 'Select a category'
+    if (!fulfillCountryCode || !fulfillCity) return 'Set fulfillment location'
+    if (!shippingMethod) return 'Choose a shipping method'
+    if (shippingMethod === 'courier' && !courierCompany.trim())
+      return 'Courier company is required'
+    if (deliveryFee === '' || feeN < 0) return 'Enter delivery fee (0 allowed)'
+    return null
   }
 
   const handleSave = async () => {
-    if (!name.trim() || !description.trim() || !price || !stock) {
-      toast('Missing fields', 'Complete product information', 'danger')
-      nameRef.current?.focus()
+    const err = validate()
+    if (err) {
+      toast('Check form', err, 'danger')
       return
     }
-    if (!category || !subCategory) {
-      toast('Category', 'Select category and subcategory', 'danger')
-      return
-    }
-    if (images.length === 0) {
-      toast('Images', 'Keep at least one product image', 'danger')
-      return
-    }
-    if (!fulfillCountryCode || !fulfillCity) {
-      toast('Fulfillment', 'Select ship-from country and city', 'danger')
-      return
-    }
-    if (fulfillStates.length > 0 && !fulfillStateCode) {
-      toast('Fulfillment', 'Select a state / province', 'danger')
-      return
-    }
-    if (!shippingMethod) {
-      toast('Shipping', 'Choose Self Delivery or Courier', 'danger')
-      return
-    }
-    if (shippingMethod === 'courier' && !courierCompany.trim()) {
-      toast('Courier', 'Enter courier company name', 'danger')
-      courierRef.current?.focus()
-      return
-    }
-    const cleanedFee = String(deliveryFee).replace(/,/g, '').trim()
-    const feeNum = Number(cleanedFee)
-    if (cleanedFee === '' || Number.isNaN(feeNum) || feeNum < 0) {
-      toast('Delivery fee', 'Enter a valid fee (0 allowed)', 'danger')
-      feeRef.current?.focus()
-      return
-    }
-    const cleanedPrice = String(price).replace(/,/g, '').trim()
-    const priceNum = Number(cleanedPrice)
-    if (!Number.isFinite(priceNum) || priceNum < 0) {
-      toast('Price', 'Enter a valid product price', 'danger')
-      priceRef.current?.focus()
-      return
-    }
-
     try {
       setSaving(true)
       const token = await getToken()
-      const formData = new FormData()
+      if (!token) throw new Error('Not signed in')
 
-      formData.append('name', name.trim())
-      formData.append('description', description.trim())
-      formData.append('price', String(priceNum))
-      formData.append('stock', stock)
-      formData.append('category', category)
-      formData.append('subCategory', subCategory)
-      formData.append('brand', brand.trim())
-      formData.append('shippingMethod', shippingMethod)
-      formData.append('courierCompany', courierCompany.trim())
-      formData.append('deliveryFee', String(feeNum))
-      formData.append('specifications', JSON.stringify(specs))
-      formData.append('existingDocuments', JSON.stringify(existingDocs))
+      const fd = new FormData()
+      fd.append('name', name.trim())
+      fd.append('brand', brand.trim())
+      // Store price in the LOCKED product region currency
+      fd.append('price', String(canonicalPrice))
+      fd.append('stock', String(stockN))
+      fd.append('description', description.trim())
+      fd.append('category', category)
+      fd.append('subCategory', subCategory)
+      // NEVER change the creation region
+      fd.append('region', productRegion)
+      fd.append('specifications', JSON.stringify(specs))
+      fd.append(
+        'shipping',
+        JSON.stringify({
+          method: shippingMethod,
+          courier: courierCompany.trim(),
+          courierCompany: courierCompany.trim(),
+          deliveryFee: feeN,
+        }),
+      )
+      const country = FULFILLMENT_COUNTRIES.find(
+        (c) => c.code === fulfillCountryCode,
+      )
+      fd.append(
+        'fulfillmentLocation',
+        JSON.stringify(
+          buildFulfillmentLocation({
+            countryCode: fulfillCountryCode,
+            country: country?.name || '',
+            stateCode: fulfillStateCode,
+            state:
+              fulfillStates.find((s) => s.code === fulfillStateCode)?.name ||
+              '',
+            city: fulfillCity,
+          }),
+        ),
+      )
 
-      const loc = buildFulfillmentLocation({
-        countryCode: fulfillCountryCode,
-        country: fulfillCountry?.name || '',
-        stateCode: fulfillStateCode,
-        state:
-          fulfillStates.find((s) => s.code === fulfillStateCode)?.name || '',
-        city: fulfillCity,
-      })
-      formData.append('fulfillmentCountryCode', loc.countryCode)
-      formData.append('fulfillmentCountry', loc.country)
-      formData.append('fulfillmentStateCode', loc.stateCode || '')
-      formData.append('fulfillmentState', loc.state || '')
-      formData.append('fulfillmentCity', loc.city)
+      // Existing remote images (order = cover first)
+      const existingUrls = images
+        .filter((i) => i.type === 'remote')
+        .map((i) => i.uri)
+      fd.append('existingImages', JSON.stringify(existingUrls))
 
+      // New local images (appended in order)
       images
-        .filter((img) => img.type === 'remote')
-        .forEach((img) => {
-          formData.append('existingImages', img.uri)
-        })
-
-      images
-        .filter((img) => img.type === 'local')
-        .forEach((img, index) => {
-          const filename = img.uri.split('/').pop() || `image-${index}.jpg`
-          const match = /\.(\w+)$/.exec(filename)
-          formData.append('images', {
+        .filter((i) => i.type === 'local')
+        .forEach((img, i) => {
+          const nameGuess = img.uri.split('/').pop() || `image_${i}.jpg`
+          fd.append('images', {
             uri: img.uri,
-            name: filename,
-            type: match ? `image/${match[1]}` : 'image/jpeg',
+            name: nameGuess,
+            type: 'image/jpeg',
           } as any)
         })
 
-      newDocuments.forEach((doc) => {
-        formData.append('documentTypes', doc.type)
-        formData.append('documentNames', doc.name)
-        formData.append('documents', {
-          uri: doc.uri,
-          name: doc.name,
-          type: doc.mimeType || 'application/pdf',
+      // Existing docs kept
+      fd.append('existingDocuments', JSON.stringify(existingDocs))
+
+      newDocuments.forEach((d, i) => {
+        fd.append('documents', {
+          uri: d.uri,
+          name: d.name,
+          type: d.mimeType || 'application/octet-stream',
         } as any)
+        fd.append(`documentTypes[${i}]`, d.type)
+        fd.append(`documentNames[${i}]`, d.name)
       })
 
-      const res = await api.put(`/seller/products/${id}`, formData, {
+      const res = await api.put(`/seller/products/${id}`, fd, {
         headers: {
           Authorization: `Bearer ${token}`,
           'Content-Type': 'multipart/form-data',
         },
       })
 
-      if (res.data.success) {
-        toast('Updated', 'Product changes saved', 'success')
-        setTimeout(() => router.back(), 900)
+      if (res.data?.success) {
+        toast('Saved', 'Product updated', 'success')
+        setTimeout(() => {
+          router.back()
+        }, 900)
       } else {
-        toast('Error', res.data.message || 'Failed to update', 'danger')
+        toast(
+          'Error',
+          res.data?.message || 'Could not save product',
+          'danger',
+        )
       }
-    } catch (error: any) {
-      console.log(error.response?.data || error.message)
+    } catch (e: any) {
+      console.error(e)
       toast(
         'Error',
-        error.response?.data?.message || 'Failed to update product',
-        'danger'
+        e?.response?.data?.message || e?.message || 'Could not save product',
+        'danger',
       )
     } finally {
       setSaving(false)
@@ -1109,86 +1245,114 @@ export default function EditProduct() {
   if (pageLoading) {
     return (
       <View style={styles.loaderRoot}>
-        <PlazoreOrb size={110} />
+        <PlazoreOrb />
       </View>
     )
   }
 
+  const productRegionName = getRegion(productRegion).name
+  const sellerRegionName = getRegion(sellerRegion).name
+
   return (
     <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       style={{ flex: 1, backgroundColor: BG }}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       <TopOverlay state={overlay} onDismiss={() => setOverlay(null)} />
 
       <ScrollView
-        contentContainerStyle={{ padding: 18, paddingBottom: 56 }}
+        contentContainerStyle={{
+          paddingTop: insets.top + 12,
+          paddingBottom: insets.bottom + 40,
+          paddingHorizontal: 16,
+        }}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-        <Text style={styles.pageKicker}>Catalog</Text>
+        <Text style={styles.pageKicker}>Seller lounge</Text>
         <Text style={styles.pageTitle}>Edit product</Text>
         <Text style={styles.pageLead}>
-          Existing data is loaded. Preview updates as you change fields.
+          Listed in {productRegionName} ({productCurrency})
+          {regionMismatch
+            ? ` · editing in ${sellerRegionName} (${sellerCurrency})`
+            : ''}
         </Text>
 
-        {/* 01 Images — keep remote + local */}
+        {/* 01 Photos */}
         <Section
           step="01"
-          title="Product images"
-          subtitle={`${images.length} / ${maxImages} · ${CURRENT_PLAN} plan`}
+          title="Photos"
+          subtitle={`First photo is the cover · up to ${maxImages}`}
         >
           <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-            {images.map((img, index) => (
-              <View key={`${img.type}-${img.uri}-${index}`} style={{ marginRight: 12 }}>
-                <Image
-                  source={{ uri: img.uri }}
-                  style={{ width: 104, height: 104, borderRadius: 14 }}
-                />
+            {images.map((img, i) => (
+              <View key={`${img.uri}-${i}`} style={{ marginRight: 10 }}>
+                <View
+                  style={{
+                    width: 104,
+                    height: 104,
+                    borderRadius: 14,
+                    overflow: 'hidden',
+                    borderWidth: i === 0 ? 2 : StyleSheet.hairlineWidth,
+                    borderColor: i === 0 ? GREEN : LINE,
+                  }}
+                >
+                  <Image
+                    source={{ uri: img.uri }}
+                    style={{ width: '100%', height: '100%' }}
+                    resizeMode="cover"
+                  />
+                  {i === 0 && (
+                    <View
+                      style={{
+                        position: 'absolute',
+                        top: 6,
+                        left: 6,
+                        backgroundColor: GREEN,
+                        paddingHorizontal: 6,
+                        paddingVertical: 2,
+                        borderRadius: 4,
+                      }}
+                    >
+                      <Text
+                        style={{
+                          color: '#041412',
+                          fontSize: 9,
+                          fontWeight: '800',
+                        }}
+                      >
+                        COVER
+                      </Text>
+                    </View>
+                  )}
+                </View>
                 <View
                   style={{
                     flexDirection: 'row',
-                    justifyContent: 'center',
-                    marginTop: 8,
-                    gap: 8,
+                    marginTop: 6,
+                    gap: 6,
                   }}
                 >
+                  {i > 0 && (
+                    <TouchableOpacity
+                      onPress={() => makeCover(i)}
+                      style={styles.iconCircle}
+                    >
+                      <Ionicons name="star-outline" size={14} color={TEXT} />
+                    </TouchableOpacity>
+                  )}
                   <TouchableOpacity
-                    onPress={() => moveImage(index, -1)}
+                    onPress={() => removeImage(i)}
                     style={styles.iconCircle}
                   >
-                    <Ionicons name="chevron-back" size={16} color={TEXT} />
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    onPress={() => removeImage(index)}
-                    style={[styles.iconCircle, { backgroundColor: '#3A1F28' }]}
-                  >
-                    <Ionicons name="trash-outline" size={14} color="#FF8A9A" />
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    onPress={() => moveImage(index, 1)}
-                    style={styles.iconCircle}
-                  >
-                    <Ionicons name="chevron-forward" size={16} color={TEXT} />
+                    <Ionicons name="trash-outline" size={14} color="#EF4444" />
                   </TouchableOpacity>
                 </View>
-                {index === 0 && (
-                  <Text
-                    style={{
-                      color: MUTED,
-                      fontSize: 10,
-                      textAlign: 'center',
-                      marginTop: 4,
-                    }}
-                  >
-                    Cover
-                  </Text>
-                )}
               </View>
             ))}
             {images.length < maxImages && (
               <TouchableOpacity onPress={pickImages} style={styles.addImage}>
-                <Ionicons name="add" size={26} color={MUTED} />
+                <Ionicons name="image-outline" size={22} color={MUTED} />
                 <Text style={{ color: MUTED, fontSize: 11, marginTop: 4 }}>
                   Add
                 </Text>
@@ -1197,183 +1361,184 @@ export default function EditProduct() {
           </ScrollView>
         </Section>
 
-        {/* 02 Info */}
-        <Section step="02" title="Product information">
-          <Label onPress={() => nameRef.current?.focus()}>Product name *</Label>
+        {/* 02 Basics */}
+        <Section step="02" title="Basics">
+          <Label onPress={() => nameRef.current?.focus()}>Name *</Label>
           <TextInput
             ref={nameRef}
             value={name}
             onChangeText={setName}
-            placeholder="Clear, buyer-friendly title"
+            placeholder="Product name"
+            placeholderTextColor="#3D5268"
+            style={styles.input}
+          />
+
+          <Label onPress={() => brandRef.current?.focus()}>Brand</Label>
+          <TextInput
+            ref={brandRef}
+            value={brand}
+            onChangeText={setBrand}
+            placeholder="Brand (optional)"
             placeholderTextColor="#3D5268"
             style={styles.input}
           />
 
           <Label onPress={() => priceRef.current?.focus()}>
-            Price ({currencySymbol}) *
+            Price * ({sellerCurrency}
+            {regionMismatch ? ` · stores as ${productCurrency}` : ''})
           </Label>
           <TextInput
             ref={priceRef}
             value={price}
-            onChangeText={setPrice}
+            onChangeText={(t) => setPrice(t.replace(/[^0-9.]/g, ''))}
             placeholder="0.00"
             keyboardType="decimal-pad"
             placeholderTextColor="#3D5268"
             style={styles.input}
           />
-          <Text style={styles.hint}>
-            {regionInfo.name} · {regionInfo.currency.code}
-          </Text>
+          {regionMismatch ? (
+            <Text style={styles.hint}>
+              You are editing in {sellerRegionName}. Amount is converted back to{' '}
+              {productRegionName} ({productCurrency}) on save. Region stays
+              locked.
+            </Text>
+          ) : (
+            <Text style={styles.hint}>
+              Locked to {productRegionName} marketplace.
+            </Text>
+          )}
 
-          <Label onPress={() => descRef.current?.focus()}>Description *</Label>
+          <Label onPress={() => stockRef.current?.focus()}>Stock *</Label>
+          <TextInput
+            ref={stockRef}
+            value={stock}
+            onChangeText={(t) => setStock(t.replace(/[^0-9]/g, ''))}
+            placeholder="1"
+            keyboardType="number-pad"
+            placeholderTextColor="#3D5268"
+            style={styles.input}
+          />
+
+          <Label onPress={() => descRef.current?.focus()}>Description</Label>
           <TextInput
             ref={descRef}
             value={description}
             onChangeText={setDescription}
-            placeholder="Materials, fit, what’s included…"
-            multiline
+            placeholder="Tell buyers about this product"
             placeholderTextColor="#3D5268"
-            style={[styles.input, { minHeight: 100, textAlignVertical: 'top' }]}
+            style={[styles.input, { minHeight: 90, textAlignVertical: 'top' }]}
+            multiline
           />
+        </Section>
 
+        {/* 03 Category */}
+        <Section step="03" title="Category">
           <Label>Category *</Label>
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
             style={{ marginBottom: 14 }}
           >
-            {CATEGORY_LIST.map((cat) => (
+            {CATEGORY_LIST.map((c) => (
               <TouchableOpacity
-                key={cat}
+                key={c}
                 onPress={() => {
-                  const prev = category
-                  setCategory(cat)
-                  if (!(PRODUCT_CATEGORIES[cat] || []).includes(subCategory)) {
-                    setSubCategory('')
-                  }
-                  // Only reset specs/docs when category actually changes
-                  if (cat !== prev) {
-                    setSpecs({})
-                    if (!categoryNeedsDocs(cat)) {
-                      setExistingDocs([])
-                      setNewDocuments([])
-                    }
-                  }
+                  setCategory(c)
+                  setSubCategory('')
+                  setSpecs({})
                 }}
-                style={[styles.pill, category === cat && styles.pillOn]}
+                style={[styles.pill, category === c && styles.pillOn]}
               >
                 <Text
-                  style={[styles.pillText, category === cat && styles.pillTextOn]}
+                  style={[
+                    styles.pillText,
+                    category === c && styles.pillTextOn,
+                  ]}
                 >
-                  {cat}
+                  {c}
                 </Text>
               </TouchableOpacity>
             ))}
           </ScrollView>
 
-          {!!category && (
+          {subCats.length > 0 && (
             <>
-              <Label>Subcategory *</Label>
-              <View
-                style={{
-                  flexDirection: 'row',
-                  flexWrap: 'wrap',
-                  gap: 8,
-                  marginBottom: 14,
-                }}
+              <Label>Sub-category</Label>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={{ marginBottom: 14 }}
               >
-                {subCategories.map((sub) => (
+                {subCats.map((s: string) => (
                   <TouchableOpacity
-                    key={sub}
-                    onPress={() => setSubCategory(sub)}
-                    style={[styles.pill, subCategory === sub && styles.pillOn]}
+                    key={s}
+                    onPress={() => setSubCategory(s)}
+                    style={[styles.pill, subCategory === s && styles.pillOn]}
                   >
                     <Text
                       style={[
                         styles.pillText,
-                        subCategory === sub && styles.pillTextOn,
+                        subCategory === s && styles.pillTextOn,
                       ]}
                     >
-                      {sub}
+                      {s}
                     </Text>
                   </TouchableOpacity>
                 ))}
-              </View>
+              </ScrollView>
             </>
           )}
 
-          <Label onPress={() => brandRef.current?.focus()}>
-            Brand (recommended)
-          </Label>
-          <TextInput
-            ref={brandRef}
-            value={brand}
-            onChangeText={setBrand}
-            placeholder="Brand name"
-            placeholderTextColor="#3D5268"
-            style={styles.input}
-          />
-
-          <Label onPress={() => stockRef.current?.focus()}>
-            Stock quantity *
-          </Label>
-          <TextInput
-            ref={stockRef}
-            value={stock}
-            onChangeText={setStock}
-            placeholder="0"
-            keyboardType="number-pad"
-            placeholderTextColor="#3D5268"
-            style={styles.input}
-          />
+          {specFields.length > 0 && (
+            <>
+              <Label>Specifications</Label>
+              {specFields.map((f: { key: string; label: string }) => (
+                <View key={f.key}>
+                  <Text
+                    style={{
+                      color: MUTED,
+                      fontSize: 11,
+                      marginBottom: 4,
+                    }}
+                  >
+                    {f.label}
+                  </Text>
+                  <TextInput
+                    value={specs[f.key] || ''}
+                    onChangeText={(t) =>
+                      setSpecs((prev) => ({ ...prev, [f.key]: t }))
+                    }
+                    placeholder={f.label}
+                    placeholderTextColor="#3D5268"
+                    style={styles.input}
+                  />
+                </View>
+              ))}
+            </>
+          )}
         </Section>
 
-        {!!category && specFields.length > 0 && (
-          <Section
-            step="03"
-            title="Specifications"
-            subtitle="Fields for this category"
-          >
-            {specFields.map((field) => (
-              <View key={field.key} style={{ marginBottom: 14 }}>
-                <Label>
-                  {field.label}
-                  {field.optional ? ' (optional)' : ''}
-                </Label>
-                <TextInput
-                  value={specs[field.key] || ''}
-                  onChangeText={(t) =>
-                    setSpecs((prev) => ({ ...prev, [field.key]: t }))
-                  }
-                  placeholder={field.placeholder || field.label}
-                  placeholderTextColor="#3D5268"
-                  style={styles.input}
-                />
-              </View>
-            ))}
-          </Section>
-        )}
-
+        {/* 04 Docs */}
         {needsDocs && (
           <Section
             step="04"
-            title="Verification documents"
-            subtitle="Saved docs stay unless you remove them"
+            title="Documents"
+            subtitle="Required for this category"
           >
             {existingDocs.map((doc, index) => (
-              <View
-                key={`ex-${doc.secureUrl}-${index}`}
-                style={styles.docBox}
-              >
+              <View key={`ex-${doc.secureUrl}-${index}`} style={styles.docBox}>
                 <View
                   style={{
                     flexDirection: 'row',
                     alignItems: 'center',
-                    marginBottom: 4,
+                    justifyContent: 'space-between',
                   }}
                 >
-                  <View style={{ flex: 1, marginRight: 8 }}>
-                    <Text style={{ color: TEXT, fontSize: 13 }} numberOfLines={1}>
+                  <View style={{ flex: 1 }}>
+                    <Text
+                      style={{ color: TEXT, fontSize: 13 }}
+                      numberOfLines={1}
+                    >
                       {doc.documentName}
                     </Text>
                     <Text
@@ -1390,7 +1555,7 @@ export default function EditProduct() {
                   <TouchableOpacity
                     onPress={() =>
                       setExistingDocs((prev) =>
-                        prev.filter((_, i) => i !== index)
+                        prev.filter((_, i) => i !== index),
                       )
                     }
                   >
@@ -1418,7 +1583,7 @@ export default function EditProduct() {
                   <TouchableOpacity
                     onPress={() =>
                       setNewDocuments((prev) =>
-                        prev.filter((_, i) => i !== index)
+                        prev.filter((_, i) => i !== index),
                       )
                     }
                   >
@@ -1426,14 +1591,14 @@ export default function EditProduct() {
                   </TouchableOpacity>
                 </View>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                  {docTypes.map((t) => (
+                  {docTypes.map((t: { id: string; label: string }) => (
                     <TouchableOpacity
                       key={t.id}
                       onPress={() =>
                         setNewDocuments((prev) =>
                           prev.map((d, i) =>
-                            i === index ? { ...d, type: t.id } : d
-                          )
+                            i === index ? { ...d, type: t.id } : d,
+                          ),
                         )
                       }
                       style={[
@@ -1471,6 +1636,7 @@ export default function EditProduct() {
           </Section>
         )}
 
+        {/* Fulfillment */}
         <Section
           step={needsDocs ? '05' : '04'}
           title="Fulfillment location"
@@ -1557,7 +1723,10 @@ export default function EditProduct() {
                     <TouchableOpacity
                       key={city}
                       onPress={() => setFulfillCity(city)}
-                      style={[styles.pill, fulfillCity === city && styles.pillOn]}
+                      style={[
+                        styles.pill,
+                        fulfillCity === city && styles.pillOn,
+                      ]}
                     >
                       <Text
                         style={[
@@ -1574,6 +1743,7 @@ export default function EditProduct() {
             )}
         </Section>
 
+        {/* Shipping */}
         <Section step={needsDocs ? '06' : '05'} title="Shipping method">
           <View style={{ flexDirection: 'row', gap: 10, marginBottom: 14 }}>
             {(['self', 'courier'] as const).map((m) => {
@@ -1640,12 +1810,13 @@ export default function EditProduct() {
           )}
         </Section>
 
-        {/* Live preview — before save */}
+        {/* Live preview */}
         <View style={{ marginBottom: 8, marginTop: 4 }}>
           <Text style={styles.pageKicker}>Live preview</Text>
           <Text style={styles.previewHead}>What buyers will see</Text>
           <Text style={styles.pageLead}>
-            Reflects your current edits. Card = showroom. Page = product screen.
+            Price locked to {productRegionName}. Buyers in other regions see the
+            converted amount.
           </Text>
         </View>
 
@@ -1695,7 +1866,8 @@ export default function EditProduct() {
             </Text>
           </View>
           <Text style={[styles.hint, { marginBottom: 0 }]}>
-            Fee applies only to product price — never delivery.
+            Region stays {productRegion}. Fee applies only to product price —
+            never delivery.
           </Text>
         </Section>
 

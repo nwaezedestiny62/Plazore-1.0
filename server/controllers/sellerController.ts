@@ -159,7 +159,7 @@ export const getMyStore = async (req: Request, res: Response) => {
   try {
     const user = getUser(req);
     const full = await User.findById(user._id).select(
-      "name email phone storeName storeDescription businessGoal storeLogo storeBanner payout shippingDefaults isSellerVerified sellerAppliedAt role"
+      "name email phone storeName storeDescription businessGoal storeLogo storeBanner payout shippingDefaults isSellerVerified sellerAppliedAt role marketplaceRegion"
     );
 
     if (!full) {
@@ -253,7 +253,7 @@ export const updateMyStore = async (req: Request, res: Response) => {
       new: true,
       runValidators: true,
     }).select(
-      "name email phone storeName storeDescription businessGoal storeLogo storeBanner payout shippingDefaults isSellerVerified sellerAppliedAt role"
+      "name email phone storeName storeDescription businessGoal storeLogo storeBanner payout shippingDefaults isSellerVerified sellerAppliedAt role marketplaceRegion"
     );
 
     res.json({ success: true, data: updated });
@@ -263,33 +263,39 @@ export const updateMyStore = async (req: Request, res: Response) => {
   }
 };
 
+/**
+ * PUBLIC storefront
+ * Critical: products MUST include `region` so clients can convert
+ * product.price (locked at creation) → buyer's marketplace currency.
+ * Same pattern as product page: formatProduct(price, product.region)
+ */
 export const getPublicStorefront = async (req: Request, res: Response) => {
   try {
-    const { id } = req.params
+    const { id } = req.params;
 
     if (!id) {
       return res.status(400).json({
         success: false,
-        message: 'Store id is required',
-      })
+        message: "Store id is required",
+      });
     }
 
     const seller = await User.findById(id).select(
-      'storeName storeDescription businessGoal storeLogo storeBanner role isSellerVerified name shippingDefaults'
-    )
+      "storeName storeDescription businessGoal storeLogo storeBanner role isSellerVerified name shippingDefaults marketplaceRegion"
+    );
 
     if (!seller) {
       return res.status(404).json({
         success: false,
-        message: 'Store not found',
-      })
+        message: "Store not found",
+      });
     }
 
-    if (seller.role !== 'seller' && seller.role !== 'admin') {
+    if (seller.role !== "seller" && seller.role !== "admin") {
       return res.status(404).json({
         success: false,
-        message: 'This user does not have a public store',
-      })
+        message: "This user does not have a public store",
+      });
     }
 
     const products = await Product.find({
@@ -297,27 +303,28 @@ export const getPublicStorefront = async (req: Request, res: Response) => {
       isActive: true,
     })
       .select(
-        'name price images category subCategory brand shipping isFeatured createdAt'
+        "name price images category subCategory brand shipping isFeatured createdAt region"
       )
       .sort({ createdAt: -1 })
-      .limit(60)
+      .limit(60);
 
-    const addr = seller.shippingDefaults?.address
+    const addr = seller.shippingDefaults?.address;
 
     res.json({
       success: true,
       data: {
         store: {
           id: seller._id,
-          storeName: seller.storeName || seller.name || 'Store',
-          storeDescription: seller.storeDescription || '',
-          businessGoal: seller.businessGoal || '',
-          storeLogo: seller.storeLogo || '',
-          storeBanner: seller.storeBanner || '',
+          storeName: seller.storeName || seller.name || "Store",
+          storeDescription: seller.storeDescription || "",
+          businessGoal: seller.businessGoal || "",
+          storeLogo: seller.storeLogo || "",
+          storeBanner: seller.storeBanner || "",
           isVerified: !!seller.isSellerVerified,
+          marketplaceRegion: seller.marketplaceRegion || "NG",
           location: {
-            state: addr?.state || '',
-            country: addr?.country || '',
+            state: addr?.state || "",
+            country: addr?.country || "",
           },
         },
         products,
@@ -327,11 +334,11 @@ export const getPublicStorefront = async (req: Request, res: Response) => {
           recommendations: null,
         },
       },
-    })
+    });
   } catch (error: any) {
-    res.status(500).json({ success: false, message: error.message })
+    res.status(500).json({ success: false, message: error.message });
   }
-}
+};
 
 // Get seller's own products
 export const getMyProducts = async (req: Request, res: Response) => {
@@ -353,7 +360,7 @@ export const getMyOrders = async (req: Request, res: Response) => {
       .populate("items.product", "name images")
       .sort({ createdAt: -1 });
 
-    // Filter items to only this seller's items (optional, for cleaner UI)
+    // Filter items to only this seller's items
     const filtered = orders.map((order) => {
       const sellerItems = order.items.filter(
         (item: any) => item.seller.toString() === req.user._id.toString()

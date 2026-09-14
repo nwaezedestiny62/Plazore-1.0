@@ -16,7 +16,6 @@ import {
   getDocTypes,
   getSpecFields,
 } from '@/constants/productSpecs'
-import { getRegion } from '@/constants/regions'
 import { useMarketplace } from '@/context/MarketplaceContext'
 import { useAuth } from '@clerk/clerk-expo'
 import { Ionicons } from '@expo/vector-icons'
@@ -103,7 +102,7 @@ type OverlayState = {
   durationMs?: number
 } | null
 
-/* ── Top overlay (replaces Alert) ── */
+/* ── Top overlay ── */
 function TopOverlay({
   state,
   onDismiss,
@@ -149,7 +148,7 @@ function TopOverlay({
     if (!state.actions?.length) {
       timer.current = setTimeout(
         () => onDismiss(),
-        state.durationMs ?? 4000
+        state.durationMs ?? 4000,
       )
     }
     return () => {
@@ -159,7 +158,11 @@ function TopOverlay({
 
   if (!state) return null
   const accent =
-    state.tone === 'danger' ? '#EF4444' : state.tone === 'success' ? GREEN : BLUE
+    state.tone === 'danger'
+      ? '#EF4444'
+      : state.tone === 'success'
+        ? GREEN
+        : BLUE
   const hasActions = !!state.actions?.length
 
   return (
@@ -258,7 +261,10 @@ function TopOverlay({
                       : a.destructive
                         ? '#EF4444'
                         : SURFACE_2,
-                    borderWidth: a.primary || a.destructive ? 0 : StyleSheet.hairlineWidth,
+                    borderWidth:
+                      a.primary || a.destructive
+                        ? 0
+                        : StyleSheet.hairlineWidth,
                     borderColor: LINE,
                   }}
                 >
@@ -266,7 +272,11 @@ function TopOverlay({
                     style={{
                       fontSize: 13,
                       fontWeight: '700',
-                      color: a.primary ? BG : a.destructive ? '#FFF' : TEXT,
+                      color: a.primary
+                        ? BG
+                        : a.destructive
+                          ? '#FFF'
+                          : TEXT,
                     }}
                   >
                     {a.label}
@@ -321,9 +331,7 @@ function Label({
   children: React.ReactNode
   onPress?: () => void
 }) {
-  const body = (
-    <Text style={styles.label}>{children}</Text>
-  )
+  const body = <Text style={styles.label}>{children}</Text>
   if (onPress) {
     return (
       <Pressable onPress={onPress} hitSlop={6}>
@@ -334,6 +342,7 @@ function Label({
   return body
 }
 
+/* ── Showroom card preview (matches real showroom) ── */
 function ProductCardPreview({
   data,
   formatPrice,
@@ -347,7 +356,6 @@ function ProductCardPreview({
 
   return (
     <View style={{ width: CARD_W }}>
-      {/* Image — same as ShowroomProductCard */}
       <View
         style={{
           width: '100%',
@@ -380,7 +388,6 @@ function ProductCardPreview({
         </View>
       </View>
 
-      {/* Info — dark-mode showroom colours (readable on dark form) */}
       <View style={{ paddingTop: 11, paddingHorizontal: 2 }}>
         <Text
           style={{
@@ -426,18 +433,14 @@ function ProductCardPreview({
   )
 }
 
-/* ── Phone frame + product page (no AI) ── */
+/* ── Phone frame + product page preview ── */
 function PhoneFrame({ children }: { children: React.ReactNode }) {
   return (
     <View style={styles.phoneOuter}>
-      {/* soft glow behind device */}
       <View style={styles.phoneGlow} />
       <View style={styles.phoneBezel}>
-        {/* side button hints */}
         <View style={styles.phoneSideBtnTop} />
         <View style={styles.phoneSideBtnVol} />
-
-        {/* status / dynamic island */}
         <View style={styles.phoneStatusRow}>
           <Text style={styles.phoneTime}>9:41</Text>
           <View style={styles.phoneIsland} />
@@ -446,10 +449,7 @@ function PhoneFrame({ children }: { children: React.ReactNode }) {
             <View style={styles.phoneBattery} />
           </View>
         </View>
-
         <View style={styles.phoneScreen}>{children}</View>
-
-        {/* home indicator */}
         <View style={styles.phoneHome} />
       </View>
     </View>
@@ -485,7 +485,7 @@ function ProductPagePreview({
   }
 
   const specEntries = Object.entries(data.specifications || {}).filter(
-    ([, v]) => v?.trim()
+    ([, v]) => v?.trim(),
   )
 
   return (
@@ -496,7 +496,13 @@ function ProductPagePreview({
         nestedScrollEnabled
         bounces={false}
       >
-        <View style={{ width: PHONE_W, height: galleryH, backgroundColor: '#07080C' }}>
+        <View
+          style={{
+            width: PHONE_W,
+            height: galleryH,
+            backgroundColor: '#07080C',
+          }}
+        >
           {images.length > 0 ? (
             <ScrollView
               horizontal
@@ -516,7 +522,13 @@ function ProductPagePreview({
               ))}
             </ScrollView>
           ) : (
-            <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+            <View
+              style={{
+                flex: 1,
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
               <Ionicons name="image-outline" size={32} color="#3A3F4A" />
             </View>
           )}
@@ -539,16 +551,20 @@ function ProductPagePreview({
           )}
         </View>
 
-        <View style={{ paddingHorizontal: 14, paddingTop: 14, paddingBottom: 28 }}>
-          {(data.category || data.subCategory) ? (
+        <View
+          style={{
+            paddingHorizontal: 14,
+            paddingTop: 14,
+            paddingBottom: 28,
+          }}
+        >
+          {data.category || data.subCategory ? (
             <Text style={styles.pageEyebrow} numberOfLines={1}>
               {[data.category, data.subCategory].filter(Boolean).join(' · ')}
             </Text>
           ) : null}
 
-          <Text style={styles.pageName}>
-            {data.name || 'Product name'}
-          </Text>
+          <Text style={styles.pageName}>{data.name || 'Product name'}</Text>
 
           <View style={styles.pagePriceRow}>
             <Text style={styles.pagePrice} numberOfLines={1}>
@@ -574,9 +590,7 @@ function ProductPagePreview({
                 }}
                 numberOfLines={1}
               >
-                {inStock
-                  ? `Available · ${stockN}`
-                  : 'Unavailable'}
+                {inStock ? `Available · ${stockN}` : 'Unavailable'}
               </Text>
             </View>
           </View>
@@ -654,7 +668,9 @@ function ProductPagePreview({
                     <Text style={{ color: SECONDARY, fontSize: 13 }}>
                       Delivery fee
                     </Text>
-                    <Text style={{ color: TEXT, fontWeight: '600', fontSize: 14 }}>
+                    <Text
+                      style={{ color: TEXT, fontWeight: '600', fontSize: 14 }}
+                    >
                       {formatPrice(data.deliveryFee)}
                     </Text>
                   </View>
@@ -664,13 +680,25 @@ function ProductPagePreview({
           )}
 
           <Text style={styles.pageSection}>Sold by</Text>
-          <View style={[styles.pageCard, { flexDirection: 'row', alignItems: 'center' }]}>
+          <View
+            style={[
+              styles.pageCard,
+              { flexDirection: 'row', alignItems: 'center' },
+            ]}
+          >
             <View style={styles.storeIcon}>
-              <Ionicons name="storefront-outline" size={16} color={SECONDARY} />
+              <Ionicons
+                name="storefront-outline"
+                size={16}
+                color={SECONDARY}
+              />
             </View>
             <View style={{ marginLeft: 10, flex: 1 }}>
               <Text style={styles.shipLabel}>Visit storefront</Text>
-              <Text style={{ color: TEXT, fontWeight: '700', fontSize: 14 }} numberOfLines={1}>
+              <Text
+                style={{ color: TEXT, fontWeight: '700', fontSize: 14 }}
+                numberOfLines={1}
+              >
                 {data.storeName || data.brand || 'Your store'}
               </Text>
             </View>
@@ -694,7 +722,7 @@ function ProductPagePreview({
   )
 }
 
-/* ── Success screen after publish ── */
+/* ── Success screen ── */
 function PublishedScreen({
   productId,
   name,
@@ -732,6 +760,7 @@ function PublishedScreen({
           transform: [{ scale }],
           alignItems: 'center',
           paddingHorizontal: 28,
+          width: '100%',
         }}
       >
         <LinearGradient
@@ -744,14 +773,14 @@ function PublishedScreen({
             <Ionicons name="checkmark" size={36} color={GREEN} />
           </View>
         </LinearGradient>
-        <Text style={styles.successTitle}>Published</Text>
+        <Text style={styles.successTitle}>Product published</Text>
         <Text style={styles.successSub}>
-          {name.trim() || 'Your product'} is live in the mall.
+          {name || 'Your product'} is live on Plazore.
         </Text>
         <TouchableOpacity
           onPress={onView}
           activeOpacity={0.9}
-          style={{ width: '100%', marginTop: 28 }}
+          style={{ width: '100%', marginTop: 28, overflow: 'hidden' }}
         >
           <LinearGradient
             colors={[GREEN, BLUE]}
@@ -774,123 +803,171 @@ function PublishedScreen({
   )
 }
 
+/* ══════════════════════════════════════════════
+   MAIN — Add Product (same rules as web add)
+══════════════════════════════════════════════ */
 export default function AddProduct() {
-  const { getToken } = useAuth()
   const router = useRouter()
-  const { region, currencySymbol, formatProduct } = useMarketplace()
-  const regionInfo = getRegion(region)
+  const insets = useSafeAreaInsets()
+  const { getToken, isLoaded, isSignedIn } = useAuth()
+  // SAME as web: lock region at creation time
+  const { region, formatProduct } = useMarketplace()
 
-  const maxImages = PLAN_IMAGE_LIMITS[CURRENT_PLAN]
-  const feePct = PLAN_FEES[CURRENT_PLAN]
+  const maxImages = PLAN_IMAGE_LIMITS[CURRENT_PLAN] ?? 6
+  const feePct = PLAN_FEES[CURRENT_PLAN] ?? 8
 
+  const [overlay, setOverlay] = useState<OverlayState>(null)
+  const [loading, setLoading] = useState(false)
+  const [publishedId, setPublishedId] = useState<string | null>(null)
+  const [storeName, setStoreName] = useState('')
+
+  // Images — first index is COVER (same as web FormData order)
   const [images, setImages] = useState<string[]>([])
+
   const [name, setName] = useState('')
+  const [brand, setBrand] = useState('')
   const [price, setPrice] = useState('')
+  const [stock, setStock] = useState('1')
   const [description, setDescription] = useState('')
   const [category, setCategory] = useState('')
   const [subCategory, setSubCategory] = useState('')
-  const [brand, setBrand] = useState('')
-  const [stock, setStock] = useState('')
-  const [shippingMethod, setShippingMethod] = useState<'self' | 'courier' | null>(
-    null
-  )
-  const [courierCompany, setCourierCompany] = useState('')
-  const [deliveryFee, setDeliveryFee] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [overlay, setOverlay] = useState<OverlayState>(null)
-  const [publishedId, setPublishedId] = useState<string | null>(null)
-
   const [specs, setSpecs] = useState<Record<string, string>>({})
   const [documents, setDocuments] = useState<LocalDoc[]>([])
+
   const [fulfillCountryCode, setFulfillCountryCode] = useState('')
   const [fulfillStateCode, setFulfillStateCode] = useState('')
   const [fulfillCity, setFulfillCity] = useState('')
+  const [shippingMethod, setShippingMethod] = useState<
+    'self' | 'courier' | null
+  >(null)
+  const [courierCompany, setCourierCompany] = useState('')
+  const [deliveryFee, setDeliveryFee] = useState('')
 
   const nameRef = useRef<TextInput>(null)
-  const priceRef = useRef<TextInput>(null)
-  const descRef = useRef<TextInput>(null)
   const brandRef = useRef<TextInput>(null)
+  const priceRef = useRef<TextInput>(null)
   const stockRef = useRef<TextInput>(null)
+  const descRef = useRef<TextInput>(null)
   const courierRef = useRef<TextInput>(null)
   const feeRef = useRef<TextInput>(null)
-
-  const fulfillCountry = FULFILLMENT_COUNTRIES.find(
-    (c) => c.code === fulfillCountryCode
-  )
-  const fulfillStates = getStatesForCountry(fulfillCountryCode)
-  const fulfillCities = getCitiesForState(fulfillCountryCode, fulfillStateCode)
-
-  const subCategories = useMemo(
-    () => (category ? PRODUCT_CATEGORIES[category] || ['Other'] : []),
-    [category]
-  )
-  const specFields = useMemo(() => getSpecFields(category), [category])
-  const needsDocs = categoryNeedsDocs(category)
-  const docTypes = useMemo(() => getDocTypes(category), [category])
-
-  const productPreviewData: ProductPreviewData = useMemo(() => {
-    const priceNum = Number(String(price).replace(/,/g, '').trim()) || 0
-    const stockNum = Number(String(stock).trim()) || 0
-    const feeNum = Number(String(deliveryFee).replace(/,/g, '').trim()) || 0
-    let shipsFrom: string | null = null
-    if (fulfillCity && fulfillCountry) {
-      shipsFrom = `${fulfillCity}, ${fulfillCountry.name}`
-    }
-    return {
-      name: name.trim(),
-      brand: brand.trim(),
-      price: priceNum,
-      description: description.trim(),
-      images,
-      stock: stockNum,
-      category,
-      subCategory,
-      region,
-      storeName: brand.trim() || 'Your store',
-      shipsFrom,
-      shippingMethod,
-      courierCompany,
-      deliveryFee: feeNum,
-      specifications: specs,
-    }
-  }, [
-    name,
-    brand,
-    price,
-    description,
-    images,
-    stock,
-    category,
-    subCategory,
-    region,
-    fulfillCity,
-    fulfillCountry,
-    shippingMethod,
-    courierCompany,
-    deliveryFee,
-    specs,
-  ])
-
-  const formatPreviewPrice = (n: number) => {
-    try {
-      if (typeof formatProduct === 'function') return formatProduct(n, region)
-    } catch {}
-    return `${currencySymbol}${n.toLocaleString()}`
-  }
 
   const toast = useCallback(
     (
       title: string,
       message?: string,
-      tone: OverlayState extends null ? never : NonNullable<OverlayState>['tone'] = 'info'
-    ) => setOverlay({ title, message, tone, durationMs: 3800 }),
-    []
+      tone: 'info' | 'success' | 'danger' = 'info',
+    ) => {
+      setOverlay({ title, message, tone })
+    },
+    [],
   )
 
+  useEffect(() => {
+    if (!isLoaded || !isSignedIn) return
+    ;(async () => {
+      try {
+        const token = await getToken()
+        if (!token) return
+        const res = await api.get('/seller/store', {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+        if (res.data?.success && res.data.data?.storeName) {
+          setStoreName(res.data.data.storeName)
+        }
+      } catch {
+        /* ignore */
+      }
+    })()
+  }, [isLoaded, isSignedIn, getToken])
+
+  const subCats = category ? PRODUCT_CATEGORIES[category] || [] : []
+  const specFields = useMemo(() => getSpecFields(category), [category])
+  const needsDocs = categoryNeedsDocs(category)
+  const docTypes = useMemo(() => getDocTypes(category), [category])
+  const fulfillStates = useMemo(
+    () => getStatesForCountry(fulfillCountryCode),
+    [fulfillCountryCode],
+  )
+  const fulfillCities = useMemo(
+    () => getCitiesForState(fulfillCountryCode, fulfillStateCode),
+    [fulfillCountryCode, fulfillStateCode],
+  )
+
+  const shipsFrom = useMemo(() => {
+    if (!fulfillCountryCode || !fulfillCity) return null
+    const c = FULFILLMENT_COUNTRIES.find((x) => x.code === fulfillCountryCode)
+    return buildFulfillmentLocation({
+      countryCode: fulfillCountryCode,
+      country: c?.name || '',
+      stateCode: fulfillStateCode,
+      state:
+        fulfillStates.find((s) => s.code === fulfillStateCode)?.name || '',
+      city: fulfillCity,
+    }).displayLabel
+  }, [fulfillCountryCode, fulfillStateCode, fulfillCity, fulfillStates])
+
+  const priceN = Number(price) || 0
+  const stockN = Math.max(0, parseInt(stock || '0', 10) || 0)
+  const feeN = Number(deliveryFee) || 0
+
+  /**
+   * SAME as web add:
+   * Preview price uses seller's current marketplace region.
+   * On publish, that same region is locked into the product.
+   */
+  const formatPreviewPrice = useCallback(
+    (n: number) => {
+      try {
+        return formatProduct(n, region as any)
+      } catch {
+        return String(n)
+      }
+    },
+    [formatProduct, region],
+  )
+
+  const productPreviewData: ProductPreviewData = useMemo(
+    () => ({
+      name,
+      brand,
+      price: priceN,
+      description,
+      images,
+      stock: stockN,
+      category,
+      subCategory,
+      region: region || 'NG',
+      storeName,
+      shipsFrom,
+      shippingMethod,
+      courierCompany,
+      deliveryFee: feeN,
+      specifications: specs,
+    }),
+    [
+      name,
+      brand,
+      priceN,
+      description,
+      images,
+      stockN,
+      category,
+      subCategory,
+      region,
+      storeName,
+      shipsFrom,
+      shippingMethod,
+      courierCompany,
+      feeN,
+      specs,
+    ],
+  )
+
+  /* ── Images: first = cover ── */
   const pickImages = async () => {
     const remaining = maxImages - images.length
     if (remaining <= 0) {
-      toast('Limit reached', `Your plan allows up to ${maxImages} images.`, 'danger')
+      toast('Limit reached', `Max ${maxImages} images on your plan`, 'danger')
       return
     }
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -899,177 +976,207 @@ export default function AddProduct() {
       quality: 0.85,
       selectionLimit: remaining,
     })
-    if (!result.canceled) {
-      const uris = result.assets.map((a) => a.uri)
-      setImages((prev) => [...prev, ...uris].slice(0, maxImages))
-    }
+    if (result.canceled || !result.assets?.length) return
+    const uris = result.assets.map((a) => a.uri).filter(Boolean)
+    setImages((prev) => [...prev, ...uris].slice(0, maxImages))
   }
 
   const removeImage = (index: number) => {
     setImages((prev) => prev.filter((_, i) => i !== index))
   }
 
-  const moveImage = (index: number, dir: -1 | 1) => {
-    const next = index + dir
-    if (next < 0 || next >= images.length) return
+  /** Move image to index 0 → becomes cover */
+  const makeCover = (index: number) => {
+    if (index <= 0) return
     setImages((prev) => {
-      const copy = [...prev]
-      ;[copy[index], copy[next]] = [copy[next], copy[index]]
-      return copy
+      const next = [...prev]
+      const [item] = next.splice(index, 1)
+      next.unshift(item)
+      return next
     })
   }
 
   const pickDocuments = async () => {
     if (documents.length >= 5) {
-      toast('Limit', 'You can upload up to 5 documents', 'danger')
+      toast('Limit', 'Max 5 documents', 'danger')
       return
     }
-    try {
-      const result = await DocumentPicker.getDocumentAsync({
-        type: ['application/pdf', 'image/*'],
-        copyToCacheDirectory: true,
-        multiple: true,
-      })
-      if (result.canceled) return
-      const defaultType = docTypes[0]?.id || 'other'
-      const next: LocalDoc[] = result.assets.map((a) => ({
-        uri: a.uri,
-        name: a.name || 'Document',
-        type: defaultType,
-        mimeType: a.mimeType || undefined,
-      }))
-      setDocuments((prev) => [...prev, ...next].slice(0, 5))
-    } catch {
-      toast('Error', 'Could not open document picker', 'danger')
-    }
+    const result = await DocumentPicker.getDocumentAsync({
+      type: ['image/*', 'application/pdf'],
+      multiple: true,
+      copyToCacheDirectory: true,
+    })
+    if (result.canceled || !result.assets?.length) return
+    setDocuments((prev) => {
+      const next = [...prev]
+      for (const a of result.assets) {
+        if (next.length >= 5) break
+        next.push({
+          uri: a.uri,
+          name: a.name || 'Document',
+          type: docTypes[0]?.id || 'other',
+          mimeType: a.mimeType,
+        })
+      }
+      return next
+    })
+  }
+
+  const validate = () => {
+    if (!images.length) return 'Add at least one product image'
+    if (!name.trim()) return 'Product name is required'
+    if (!priceN || priceN <= 0) return 'Enter a valid price'
+    if (!category) return 'Select a category'
+    if (!fulfillCountryCode || !fulfillCity) return 'Set fulfillment location'
+    if (!shippingMethod) return 'Choose a shipping method'
+    if (shippingMethod === 'courier' && !courierCompany.trim())
+      return 'Courier company is required'
+    if (deliveryFee === '' || feeN < 0) return 'Enter delivery fee (0 allowed)'
+    return null
   }
 
   const handleSubmit = async () => {
-    if (!name.trim() || !description.trim() || !price || !stock) {
-      toast('Missing fields', 'Complete product information', 'danger')
-      nameRef.current?.focus()
+    const err = validate()
+    if (err) {
+      toast('Check form', err, 'danger')
       return
     }
-    if (!category || !subCategory) {
-      toast('Category', 'Select a category and subcategory', 'danger')
-      return
-    }
-    if (images.length === 0) {
-      toast('Images', 'Add at least one product image', 'danger')
-      return
-    }
-    if (!fulfillCountryCode || !fulfillCity) {
-      toast(
-        'Fulfillment',
-        'Select where this product ships from',
-        'danger'
-      )
-      return
-    }
-    if (fulfillStates.length > 0 && !fulfillStateCode) {
-      toast('Fulfillment', 'Select a state / province', 'danger')
-      return
-    }
-    if (!shippingMethod) {
-      toast('Shipping', 'Choose Self Delivery or Courier', 'danger')
-      return
-    }
-    if (shippingMethod === 'courier' && !courierCompany.trim()) {
-      toast('Courier', 'Enter the courier company name', 'danger')
-      courierRef.current?.focus()
-      return
-    }
-    const cleanedFee = String(deliveryFee).replace(/,/g, '').trim()
-    const feeNum = Number(cleanedFee)
-    if (cleanedFee === '' || Number.isNaN(feeNum) || feeNum < 0) {
-      toast('Delivery fee', 'Enter a valid fee (0 allowed)', 'danger')
-      feeRef.current?.focus()
-      return
-    }
-    const cleanedPrice = String(price).replace(/,/g, '').trim()
-    const priceNum = Number(cleanedPrice)
-    if (!Number.isFinite(priceNum) || priceNum < 0) {
-      toast('Price', 'Enter a valid product price', 'danger')
-      priceRef.current?.focus()
-      return
-    }
-
     try {
       setLoading(true)
       const token = await getToken()
-      const formData = new FormData()
-      formData.append('name', name.trim())
-      formData.append('description', description.trim())
-      formData.append('price', String(priceNum))
-      formData.append('stock', stock)
-      formData.append('category', category)
-      formData.append('subCategory', subCategory)
-      formData.append('brand', brand.trim())
-      formData.append('shippingMethod', shippingMethod)
-      formData.append('courierCompany', courierCompany.trim())
-      formData.append('deliveryFee', String(feeNum))
-      formData.append('specifications', JSON.stringify(specs))
+      if (!token) throw new Error('Not signed in')
 
-      const loc = buildFulfillmentLocation({
-        countryCode: fulfillCountryCode,
-        country: fulfillCountry?.name || '',
-        stateCode: fulfillStateCode,
-        state:
-          fulfillStates.find((s) => s.code === fulfillStateCode)?.name || '',
-        city: fulfillCity,
-      })
-      formData.append('fulfillmentCountryCode', loc.countryCode)
-      formData.append('fulfillmentCountry', loc.country)
-      formData.append('fulfillmentStateCode', loc.stateCode || '')
-      formData.append('fulfillmentState', loc.state || '')
-      formData.append('fulfillmentCity', loc.city)
+      const fd = new FormData()
+      fd.append('name', name.trim())
+      fd.append('brand', brand.trim())
+      fd.append('price', String(priceN))
+      fd.append('stock', String(stockN))
+      fd.append('description', description.trim())
+      fd.append('category', category)
+      fd.append('subCategory', subCategory)
+      // LOCK region at creation — same as web
+      fd.append('region', region || 'NG')
+      fd.append('specifications', JSON.stringify(specs))
+      fd.append(
+        'shipping',
+        JSON.stringify({
+          method: shippingMethod,
+          courier: courierCompany.trim(),
+          courierCompany: courierCompany.trim(),
+          deliveryFee: feeN,
+        }),
+      )
+      const country = FULFILLMENT_COUNTRIES.find(
+        (c) => c.code === fulfillCountryCode,
+      )
+      fd.append(
+        'fulfillmentLocation',
+        JSON.stringify(
+          buildFulfillmentLocation({
+            countryCode: fulfillCountryCode,
+            country: country?.name || '',
+            stateCode: fulfillStateCode,
+            state:
+              fulfillStates.find((s) => s.code === fulfillStateCode)?.name ||
+              '',
+            city: fulfillCity,
+          }),
+        ),
+      )
 
-      images.forEach((uri, index) => {
-        const filename = uri.split('/').pop() || `image-${index}.jpg`
-        const match = /\.(\w+)$/.exec(filename)
-        formData.append('images', {
+      // First image in FormData = cover (order preserved)
+      for (let i = 0; i < images.length; i++) {
+        const uri = images[i]
+        const nameGuess = uri.split('/').pop() || `image_${i}.jpg`
+        fd.append('images', {
           uri,
-          name: filename,
-          type: match ? `image/${match[1]}` : 'image/jpeg',
+          name: nameGuess,
+          type: 'image/jpeg',
         } as any)
+      }
+
+      documents.forEach((d, i) => {
+        fd.append('documents', {
+          uri: d.uri,
+          name: d.name,
+          type: d.mimeType || 'application/octet-stream',
+        } as any)
+        fd.append(`documentTypes[${i}]`, d.type)
+        fd.append(`documentNames[${i}]`, d.name)
       })
 
-      documents.forEach((doc) => {
-        formData.append('documentTypes', doc.type)
-        formData.append('documentNames', doc.name)
-        formData.append('documents', {
-          uri: doc.uri,
-          name: doc.name,
-          type: doc.mimeType || 'application/pdf',
-        } as any)
-      })
-
-      const res = await api.post('/seller/products', formData, {
+      const res = await api.post('/seller/products', fd, {
         headers: {
           Authorization: `Bearer ${token}`,
           'Content-Type': 'multipart/form-data',
         },
       })
 
-      if (res.data.success) {
+      if (res.data?.success) {
         const id =
           res.data.data?._id ||
           res.data.data?.id ||
-          res.data.product?._id ||
+          res.data.productId ||
           ''
-        setPublishedId(String(id || 'ok'))
+        setPublishedId(String(id))
+        toast('Published', 'Your product is live', 'success')
       } else {
-        toast('Error', res.data.message || 'Failed to publish', 'danger')
+        toast(
+          'Error',
+          res.data?.message || 'Could not publish product',
+          'danger',
+        )
       }
-    } catch (error: any) {
+    } catch (e: any) {
+      console.error(e)
       toast(
         'Error',
-        error.response?.data?.message || 'Failed to publish',
-        'danger'
+        e?.response?.data?.message || e?.message || 'Could not publish product',
+        'danger',
       )
     } finally {
       setLoading(false)
     }
+  }
+
+  if (!isLoaded) {
+    return (
+      <View style={{ flex: 1, backgroundColor: BG, alignItems: 'center', justifyContent: 'center' }}>
+        <ActivityIndicator color={GREEN} size="large" />
+      </View>
+    )
+  }
+
+  if (!isSignedIn) {
+    return (
+      <View
+        style={{
+          flex: 1,
+          backgroundColor: BG,
+          alignItems: 'center',
+          justifyContent: 'center',
+          paddingHorizontal: 28,
+        }}
+      >
+        <Text style={{ color: TEXT, fontWeight: '700', fontSize: 16 }}>
+          Sign in to add products
+        </Text>
+        <TouchableOpacity
+          onPress={() => router.push('/(auth)/sign-in' as any)}
+          style={{
+            marginTop: 18,
+            backgroundColor: TEXT,
+            paddingHorizontal: 24,
+            paddingVertical: 12,
+            borderRadius: 999,
+          }}
+        >
+          <Text style={{ color: BG, fontWeight: '800', fontSize: 14 }}>
+            Sign in
+          </Text>
+        </TouchableOpacity>
+      </View>
+    )
   }
 
   if (publishedId) {
@@ -1077,13 +1184,7 @@ export default function AddProduct() {
       <PublishedScreen
         productId={publishedId}
         name={name}
-        onView={() => {
-          if (publishedId && publishedId !== 'ok') {
-            router.replace(`/product/${publishedId}` as any)
-          } else {
-            router.replace('/seller/products' as any)
-          }
-        }}
+        onView={() => router.replace(`/product/${publishedId}` as any)}
         onLater={() => router.replace('/seller/products' as any)}
       />
     )
@@ -1091,80 +1192,101 @@ export default function AddProduct() {
 
   return (
     <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       style={{ flex: 1, backgroundColor: BG }}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       <TopOverlay state={overlay} onDismiss={() => setOverlay(null)} />
 
       <ScrollView
-        contentContainerStyle={{ padding: 18, paddingBottom: 56 }}
+        contentContainerStyle={{
+          paddingTop: insets.top + 12,
+          paddingBottom: insets.bottom + 40,
+          paddingHorizontal: 16,
+        }}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-
-        <Text style={styles.pageKicker}>Catalog</Text>
-        <Text style={styles.pageTitle}>New product</Text>
+        <Text style={styles.pageKicker}>Seller lounge</Text>
+        <Text style={styles.pageTitle}>Add product</Text>
         <Text style={styles.pageLead}>
-          Build the listing, watch the buyer view update live, then publish.
+          Listed in {region || 'NG'} marketplace · price locked to this region
         </Text>
 
-        {/* 01 Images */}
+        {/* 01 Images — first is cover */}
         <Section
           step="01"
-          title="Product images"
-          subtitle={`${images.length} / ${maxImages} · ${CURRENT_PLAN} plan`}
+          title="Photos"
+          subtitle={`First photo is the cover · up to ${maxImages}`}
         >
           <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-            {images.map((uri, index) => (
-              <View key={`${uri}-${index}`} style={{ marginRight: 12 }}>
-                <Image
-                  source={{ uri }}
-                  style={{ width: 104, height: 104, borderRadius: 14 }}
-                />
+            {images.map((uri, i) => (
+              <View key={`${uri}-${i}`} style={{ marginRight: 10 }}>
+                <View
+                  style={{
+                    width: 104,
+                    height: 104,
+                    borderRadius: 14,
+                    overflow: 'hidden',
+                    borderWidth: i === 0 ? 2 : StyleSheet.hairlineWidth,
+                    borderColor: i === 0 ? GREEN : LINE,
+                  }}
+                >
+                  <Image
+                    source={{ uri }}
+                    style={{ width: '100%', height: '100%' }}
+                    resizeMode="cover"
+                  />
+                  {i === 0 && (
+                    <View
+                      style={{
+                        position: 'absolute',
+                        top: 6,
+                        left: 6,
+                        backgroundColor: GREEN,
+                        paddingHorizontal: 6,
+                        paddingVertical: 2,
+                        borderRadius: 4,
+                      }}
+                    >
+                      <Text
+                        style={{
+                          color: '#041412',
+                          fontSize: 9,
+                          fontWeight: '800',
+                        }}
+                      >
+                        COVER
+                      </Text>
+                    </View>
+                  )}
+                </View>
                 <View
                   style={{
                     flexDirection: 'row',
-                    justifyContent: 'center',
-                    marginTop: 8,
-                    gap: 8,
+                    marginTop: 6,
+                    gap: 6,
                   }}
                 >
+                  {i > 0 && (
+                    <TouchableOpacity
+                      onPress={() => makeCover(i)}
+                      style={styles.iconCircle}
+                    >
+                      <Ionicons name="star-outline" size={14} color={TEXT} />
+                    </TouchableOpacity>
+                  )}
                   <TouchableOpacity
-                    onPress={() => moveImage(index, -1)}
+                    onPress={() => removeImage(i)}
                     style={styles.iconCircle}
                   >
-                    <Ionicons name="chevron-back" size={16} color={TEXT} />
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    onPress={() => removeImage(index)}
-                    style={[styles.iconCircle, { backgroundColor: '#3A1F28' }]}
-                  >
-                    <Ionicons name="trash-outline" size={14} color="#FF8A9A" />
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    onPress={() => moveImage(index, 1)}
-                    style={styles.iconCircle}
-                  >
-                    <Ionicons name="chevron-forward" size={16} color={TEXT} />
+                    <Ionicons name="trash-outline" size={14} color="#EF4444" />
                   </TouchableOpacity>
                 </View>
-                {index === 0 && (
-                  <Text
-                    style={{
-                      color: MUTED,
-                      fontSize: 10,
-                      textAlign: 'center',
-                      marginTop: 4,
-                    }}
-                  >
-                    Cover
-                  </Text>
-                )}
               </View>
             ))}
             {images.length < maxImages && (
               <TouchableOpacity onPress={pickImages} style={styles.addImage}>
-                <Ionicons name="add" size={26} color={MUTED} />
+                <Ionicons name="image-outline" size={22} color={MUTED} />
                 <Text style={{ color: MUTED, fontSize: 11, marginTop: 4 }}>
                   Add
                 </Text>
@@ -1173,157 +1295,165 @@ export default function AddProduct() {
           </ScrollView>
         </Section>
 
-        {/* 02 Info */}
-        <Section step="02" title="Product information">
-          <Label onPress={() => nameRef.current?.focus()}>Product name *</Label>
+        {/* 02 Basics */}
+        <Section step="02" title="Basics">
+          <Label onPress={() => nameRef.current?.focus()}>Name *</Label>
           <TextInput
             ref={nameRef}
             value={name}
             onChangeText={setName}
-            placeholder="Clear, buyer-friendly title"
+            placeholder="Product name"
+            placeholderTextColor="#3D5268"
+            style={styles.input}
+          />
+
+          <Label onPress={() => brandRef.current?.focus()}>Brand</Label>
+          <TextInput
+            ref={brandRef}
+            value={brand}
+            onChangeText={setBrand}
+            placeholder="Brand (optional)"
             placeholderTextColor="#3D5268"
             style={styles.input}
           />
 
           <Label onPress={() => priceRef.current?.focus()}>
-            Price ({currencySymbol}) *
+            Price * ({region || 'NG'})
           </Label>
           <TextInput
             ref={priceRef}
             value={price}
-            onChangeText={setPrice}
+            onChangeText={(t) => setPrice(t.replace(/[^0-9.]/g, ''))}
             placeholder="0.00"
             keyboardType="decimal-pad"
             placeholderTextColor="#3D5268"
             style={styles.input}
           />
           <Text style={styles.hint}>
-            {regionInfo.name} · {regionInfo.currency.code}
+            Locked to {region || 'NG'} marketplace. Buyers in other regions see
+            the converted amount.
           </Text>
 
-          <Label onPress={() => descRef.current?.focus()}>Description *</Label>
+          <Label onPress={() => stockRef.current?.focus()}>Stock *</Label>
+          <TextInput
+            ref={stockRef}
+            value={stock}
+            onChangeText={(t) => setStock(t.replace(/[^0-9]/g, ''))}
+            placeholder="1"
+            keyboardType="number-pad"
+            placeholderTextColor="#3D5268"
+            style={styles.input}
+          />
+
+          <Label onPress={() => descRef.current?.focus()}>Description</Label>
           <TextInput
             ref={descRef}
             value={description}
             onChangeText={setDescription}
-            placeholder="Materials, fit, what’s included…"
-            multiline
+            placeholder="Tell buyers about this product"
             placeholderTextColor="#3D5268"
-            style={[styles.input, { minHeight: 100, textAlignVertical: 'top' }]}
+            style={[styles.input, { minHeight: 90, textAlignVertical: 'top' }]}
+            multiline
           />
+        </Section>
 
+        {/* 03 Category */}
+        <Section step="03" title="Category">
           <Label>Category *</Label>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 14 }}>
-            {CATEGORY_LIST.map((cat) => (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={{ marginBottom: 14 }}
+          >
+            {CATEGORY_LIST.map((c) => (
               <TouchableOpacity
-                key={cat}
+                key={c}
                 onPress={() => {
-                  setCategory(cat)
+                  setCategory(c)
                   setSubCategory('')
                   setSpecs({})
-                  setDocuments([])
                 }}
-                style={[styles.pill, category === cat && styles.pillOn]}
+                style={[styles.pill, category === c && styles.pillOn]}
               >
-                <Text style={[styles.pillText, category === cat && styles.pillTextOn]}>
-                  {cat}
+                <Text
+                  style={[
+                    styles.pillText,
+                    category === c && styles.pillTextOn,
+                  ]}
+                >
+                  {c}
                 </Text>
               </TouchableOpacity>
             ))}
           </ScrollView>
 
-          {!!category && (
+          {subCats.length > 0 && (
             <>
-              <Label>Subcategory *</Label>
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 14 }}>
-                {subCategories.map((sub) => (
+              <Label>Sub-category</Label>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={{ marginBottom: 14 }}
+              >
+                {subCats.map((s: string) => (
                   <TouchableOpacity
-                    key={sub}
-                    onPress={() => setSubCategory(sub)}
-                    style={[styles.pill, subCategory === sub && styles.pillOn]}
+                    key={s}
+                    onPress={() => setSubCategory(s)}
+                    style={[styles.pill, subCategory === s && styles.pillOn]}
                   >
                     <Text
                       style={[
                         styles.pillText,
-                        subCategory === sub && styles.pillTextOn,
+                        subCategory === s && styles.pillTextOn,
                       ]}
                     >
-                      {sub}
+                      {s}
                     </Text>
                   </TouchableOpacity>
                 ))}
-              </View>
+              </ScrollView>
             </>
           )}
 
-          <Label onPress={() => brandRef.current?.focus()}>
-            Brand (recommended)
-          </Label>
-          <TextInput
-            ref={brandRef}
-            value={brand}
-            onChangeText={setBrand}
-            placeholder="Brand name"
-            placeholderTextColor="#3D5268"
-            style={styles.input}
-          />
-          <Text style={styles.hint}>
-            Helps buyers trust the listing in the showroom.
-          </Text>
-
-          <Label onPress={() => stockRef.current?.focus()}>
-            Stock quantity *
-          </Label>
-          <TextInput
-            ref={stockRef}
-            value={stock}
-            onChangeText={setStock}
-            placeholder="0"
-            keyboardType="number-pad"
-            placeholderTextColor="#3D5268"
-            style={styles.input}
-          />
+          {specFields.length > 0 && (
+            <>
+              <Label>Specifications</Label>
+              {specFields.map((f: { key: string; label: string }) => (
+                <View key={f.key}>
+                  <Text
+                    style={{
+                      color: MUTED,
+                      fontSize: 11,
+                      marginBottom: 4,
+                    }}
+                  >
+                    {f.label}
+                  </Text>
+                  <TextInput
+                    value={specs[f.key] || ''}
+                    onChangeText={(t) =>
+                      setSpecs((prev) => ({ ...prev, [f.key]: t }))
+                    }
+                    placeholder={f.label}
+                    placeholderTextColor="#3D5268"
+                    style={styles.input}
+                  />
+                </View>
+              ))}
+            </>
+          )}
         </Section>
 
-        {!!category && specFields.length > 0 && (
-          <Section
-            step="03"
-            title="Specifications"
-            subtitle="Fields for this category"
-          >
-            {specFields.map((field) => (
-              <View key={field.key} style={{ marginBottom: 14 }}>
-                <Label>
-                  {field.label}
-                  {field.optional ? ' (optional)' : ''}
-                </Label>
-                <TextInput
-                  value={specs[field.key] || ''}
-                  onChangeText={(t) =>
-                    setSpecs((prev) => ({ ...prev, [field.key]: t }))
-                  }
-                  placeholder={field.placeholder || field.label}
-                  placeholderTextColor="#3D5268"
-                  style={styles.input}
-                />
-              </View>
-            ))}
-          </Section>
-        )}
-
+        {/* 04 Docs (conditional) */}
         {needsDocs && (
-          <Section
-            step="04"
-            title="Verification documents"
-            subtitle="PDF or image · up to 5"
-          >
+          <Section step="04" title="Documents" subtitle="Required for this category">
             {documents.map((doc, index) => (
               <View key={`${doc.uri}-${index}`} style={styles.docBox}>
                 <View
                   style={{
                     flexDirection: 'row',
                     alignItems: 'center',
-                    marginBottom: 8,
+                    justifyContent: 'space-between',
                   }}
                 >
                   <Text
@@ -1334,21 +1464,27 @@ export default function AddProduct() {
                   </Text>
                   <TouchableOpacity
                     onPress={() =>
-                      setDocuments((prev) => prev.filter((_, i) => i !== index))
+                      setDocuments((prev) =>
+                        prev.filter((_, i) => i !== index),
+                      )
                     }
                   >
-                    <Ionicons name="trash-outline" size={18} color="#FF8A9A" />
+                    <Ionicons name="trash-outline" size={16} color="#EF4444" />
                   </TouchableOpacity>
                 </View>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                  {docTypes.map((t) => (
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  style={{ marginTop: 8 }}
+                >
+                  {docTypes.map((t: { id: string; label: string }) => (
                     <TouchableOpacity
                       key={t.id}
                       onPress={() =>
                         setDocuments((prev) =>
                           prev.map((d, i) =>
-                            i === index ? { ...d, type: t.id } : d
-                          )
+                            i === index ? { ...d, type: t.id } : d,
+                          ),
                         )
                       }
                       style={[
@@ -1385,6 +1521,7 @@ export default function AddProduct() {
           </Section>
         )}
 
+        {/* Fulfillment */}
         <Section
           step={needsDocs ? '05' : '04'}
           title="Fulfillment location"
@@ -1471,7 +1608,10 @@ export default function AddProduct() {
                     <TouchableOpacity
                       key={city}
                       onPress={() => setFulfillCity(city)}
-                      style={[styles.pill, fulfillCity === city && styles.pillOn]}
+                      style={[
+                        styles.pill,
+                        fulfillCity === city && styles.pillOn,
+                      ]}
                     >
                       <Text
                         style={[
@@ -1488,6 +1628,7 @@ export default function AddProduct() {
             )}
         </Section>
 
+        {/* Shipping */}
         <Section step={needsDocs ? '06' : '05'} title="Shipping method">
           <View style={{ flexDirection: 'row', gap: 10, marginBottom: 14 }}>
             {(['self', 'courier'] as const).map((m) => {
@@ -1554,12 +1695,12 @@ export default function AddProduct() {
           )}
         </Section>
 
-        {/* LIVE PREVIEW — before publish */}
+        {/* Live preview */}
         <View style={{ marginBottom: 8, marginTop: 4 }}>
           <Text style={styles.pageKicker}>Live preview</Text>
           <Text style={styles.previewHead}>What buyers will see</Text>
           <Text style={styles.pageLead}>
-            See your product as buyers will experience it.
+            Prices shown in your {region || 'NG'} marketplace currency.
           </Text>
         </View>
 
@@ -1590,7 +1731,7 @@ export default function AddProduct() {
         </Text>
 
         {/* Publish */}
-                <Section step={needsDocs ? '07' : '06'} title="Publish">
+        <Section step={needsDocs ? '07' : '06'} title="Publish">
           <View style={styles.feeRow}>
             <Text style={{ color: MUTED, fontSize: 13 }}>Plan</Text>
             <Text
@@ -1610,7 +1751,8 @@ export default function AddProduct() {
             </Text>
           </View>
           <Text style={[styles.hint, { marginBottom: 0 }]}>
-            Fee applies only to product price — never delivery.
+            Fee applies only to product price — never delivery. Region locked to{' '}
+            {region || 'NG'}.
           </Text>
         </Section>
 
@@ -1669,7 +1811,6 @@ const styles = StyleSheet.create({
     color: TEXT,
     marginTop: 2,
   },
-
   section: {
     backgroundColor: SURFACE,
     borderWidth: StyleSheet.hairlineWidth,
@@ -1692,7 +1833,6 @@ const styles = StyleSheet.create({
     backgroundColor: LINE,
     marginVertical: 14,
   },
-
   label: {
     color: MUTED,
     fontSize: 11,
@@ -1713,7 +1853,6 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   hint: { color: MUTED, fontSize: 11, marginTop: -6, marginBottom: 12 },
-
   pill: {
     marginRight: 8,
     paddingHorizontal: 12,
@@ -1729,7 +1868,6 @@ const styles = StyleSheet.create({
   },
   pillText: { fontSize: 12, color: MUTED, fontWeight: '500' },
   pillTextOn: { color: GREEN, fontWeight: '700' },
-
   iconCircle: {
     width: 32,
     height: 32,
@@ -1783,7 +1921,6 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: 6,
   },
-
   previewPad: {
     backgroundColor: '#0A121C',
     borderWidth: StyleSheet.hairlineWidth,
@@ -1792,7 +1929,6 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     alignItems: 'flex-start',
   },
-
   cardCart: {
     position: 'absolute',
     bottom: 11,
@@ -1808,16 +1944,6 @@ const styles = StyleSheet.create({
     shadowRadius: 3,
     elevation: 3,
   },
-  cardName: {
-    color: '#111',
-    fontSize: 13.5,
-    fontWeight: '500',
-    marginBottom: 3,
-  },
-  cardBrand: { color: '#6B7280', fontSize: 12 },
-  cardPrice: { color: '#111', fontSize: 12, fontWeight: '500' },
-  cardLoc: { color: '#9CA3AF', fontSize: 11, marginTop: 3 },
-
   phoneOuter: {
     alignItems: 'center',
     marginBottom: 12,
@@ -1871,7 +1997,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.5)',
   },
-phoneBezel: {
+  phoneBezel: {
     width: PHONE_W + 20,
     height: PHONE_H + 28,
     borderRadius: 40,
@@ -1882,28 +2008,18 @@ phoneBezel: {
     paddingBottom: 10,
     paddingHorizontal: 9,
     overflow: 'hidden',
-    // subtle depth
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 12 },
     shadowOpacity: 0.45,
     shadowRadius: 24,
     elevation: 16,
   },
-  phoneNotch: {
-    alignSelf: 'center',
-    width: 72,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#1A1D24',
-    marginBottom: 6,
-  },
- phoneScreen: {
+  phoneScreen: {
     flex: 1,
     borderRadius: 30,
     overflow: 'hidden',
     backgroundColor: BG,
   },
-  
   phoneHome: {
     alignSelf: 'center',
     width: 96,
@@ -1912,7 +2028,7 @@ phoneBezel: {
     backgroundColor: 'rgba(255,255,255,0.22)',
     marginTop: 8,
   },
-phoneSideBtnTop: {
+  phoneSideBtnTop: {
     position: 'absolute',
     right: -3,
     top: 96,
@@ -1930,7 +2046,6 @@ phoneSideBtnTop: {
     borderRadius: 2,
     backgroundColor: '#3A404C',
   },
-  
   dotsRow: {
     position: 'absolute',
     bottom: 12,
@@ -2078,7 +2193,6 @@ phoneSideBtnTop: {
     backgroundColor: '#FFF',
     alignItems: 'center',
   },
-
   publishBtn: {
     paddingVertical: 16,
     flexDirection: 'row',
@@ -2091,7 +2205,6 @@ phoneSideBtnTop: {
     fontWeight: '800',
     fontSize: 15,
   },
-
   successRoot: {
     flex: 1,
     backgroundColor: BG,

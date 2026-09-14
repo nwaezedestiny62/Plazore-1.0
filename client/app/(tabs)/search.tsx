@@ -768,9 +768,6 @@ export default function BrowseScreen() {
 
       <View style={[styles.section, { marginTop: 28 }]}>
         <Text style={styles.sectionLabel}>MOVING NOW</Text>
-        <Text style={styles.sectionSub}>
-          Highest viewed products on Plazore
-        </Text>
         {loading ? (
           <View style={{ height: 220 }}>
             <StorePreloader />

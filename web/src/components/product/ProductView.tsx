@@ -548,7 +548,7 @@ export function ProductView({ product }: { product: Product }) {
   const returnTo = pathname || `/product/${product._id}`;
   const signInHref = `/sign-in?redirect_url=${encodeURIComponent(returnTo)}`;
   const signUpHref = `/sign-in?mode=signup&redirect_url=${encodeURIComponent(returnTo)}`;
-  const shareText = `Found this on Plazore — ${product.name}. Clean listing, clear details. Take a look:`;
+  const shareText = `Found this on Plazore 🛒🛍️ — ${product.name}. Clean listing, clear details. Take a look:`;
 
   /**
    * Hydration-safe price:
@@ -1062,29 +1062,27 @@ export function ProductView({ product }: { product: Product }) {
               <p className="mb-3 text-base font-semibold">
                 Verification Documents
               </p>
-              {docs.map((doc, i) => (
-                <a
-  href={doc.secureUrl}
-  target="_blank"
-  rel="noopener noreferrer"
-  className="text-sm font-semibold text-[#00E575] underline"
->
-                  <span className="flex h-[38px] w-[38px] items-center justify-center rounded-xl border border-line bg-surface-2">
-                    <FileText className="h-4 w-4 text-secondary" />
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[14.5px] font-medium">
-                     Open {doc.documentName || "document"}
-                    </span>
-                    <span className="text-[11.5px] capitalize text-muted">
-                      {String(doc.documentType || "document").replace(
-                        /_/g,
-                        " "
-                      )}
-                    </span>
-                  </span>
-                </a>
-              ))}
+           {docs.map((doc, i) => (
+  <a
+    key={doc.secureUrl || doc.documentName || `doc-${i}`}   // ← add this
+    href={doc.secureUrl}
+    target="_blank"
+    rel="noopener noreferrer"
+    className="flex items-center gap-3 rounded-xl border border-line bg-surface-2 p-3 transition hover:border-white/15"
+  >
+    <span className="flex h-[38px] w-[38px] items-center justify-center rounded-xl border border-line bg-surface-2">
+      <FileText className="h-4 w-4 text-secondary" />
+    </span>
+    <span className="min-w-0 flex-1">
+      <span className="block truncate text-[14.5px] font-medium">
+        Open {doc.documentName || "document"}
+      </span>
+      <span className="text-[11.5px] capitalize text-muted">
+        {String(doc.documentType || "document").replace(/_/g, " ")}
+      </span>
+    </span>
+  </a>
+))}
             </div>
           )}
 

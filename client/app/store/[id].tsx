@@ -65,10 +65,11 @@ type StorePublic = {
   storeLogo: string;
   storeBanner: string;
   isVerified?: boolean;
-  seller?: string | { _id?: string; id?: string };
+  seller?: string | { _id?: string; id?: string; marketplaceRegion?: string };
   userId?: string;
   ownerId?: string;
   location?: { state?: string; country?: string };
+  marketplaceRegion?: string;
 };
 
 type PendingAction = "save" | "contact" | "report" | null;
@@ -82,6 +83,8 @@ function isOwnStore(store: StorePublic | null, userId?: string | null) {
     typeof store.seller === "string" ? store.seller : null,
     typeof store.seller === "object" ? store.seller?._id : null,
     typeof store.seller === "object" ? store.seller?.id : null,
+    store.id,
+    store._id,
   ];
   return candidates.some((c) => c && String(c) === uid);
 }
@@ -289,6 +292,19 @@ export default function PublicStorefront() {
   }, [store?.storeName, storeUrl]);
 
   const returnPath = `/store/${storeId || id}`;
+
+  /**
+   * EXACT same conversion as product page / web storefront:
+   * product.price is locked in product.region currency at creation.
+   * formatProduct converts to the buyer’s current marketplace region.
+   */
+  const priceOf = useCallback(
+    (p: any) => {
+      const amount = Number(p?.price) || 0;
+      return formatProduct(amount, p?.region);
+    },
+    [formatProduct],
+  );
 
   useEffect(() => {
     const load = async () => {
@@ -660,10 +676,13 @@ export default function PublicStorefront() {
   }
 
   const slideW = width - H_PAD * 2;
+  const featured = products.slice(0, 8);
+  const desc = String(store.storeDescription || "").trim();
+  const goal = String(store.businessGoal || "").trim();
 
   return (
     <View style={styles.root}>
-      <StatusBar barStyle="light-content" />
+      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
       <TopToast
         visible={!!toastMsg}
         message={toastMsg || ""}
@@ -672,94 +691,73 @@ export default function PublicStorefront() {
 
       <ScrollView
         showsVerticalScrollIndicator={false}
-        bounces={false}
-        contentContainerStyle={{ paddingBottom: 70 }}
+        contentContainerStyle={{ paddingBottom: 40 }}
+        bounces
       >
-        <Animated.View style={{ opacity: door }}>
-          <View style={{ height: ENTRANCE_H, backgroundColor: "#07080C" }}>
-            {store.storeBanner ? (
-              <Image
-                source={{ uri: store.storeBanner }}
-                style={{ width, height: ENTRANCE_H }}
-                resizeMode="cover"
-              />
-            ) : (
-              <LinearGradient
-                colors={["#0F172A", "#090B0F", "#111827"]}
-                style={{ width, height: ENTRANCE_H }}
-              />
-            )}
-            <LinearGradient
-              colors={[
-                "rgba(9,11,15,0.15)",
-                "transparent",
-                "rgba(9,11,15,0.85)",
-              ]}
-              style={{
-                position: "absolute",
-                top: 0,
-                right: 0,
-                bottom: 0,
-                left: 0,
-              }}
+        {/* Banner / entrance */}
+        <Animated.View style={{ opacity: door, height: ENTRANCE_H }}>
+          {store.storeBanner ? (
+            <Image
+              source={{ uri: store.storeBanner }}
+              style={{ width, height: ENTRANCE_H }}
+              resizeMode="cover"
             />
-            <SafeAreaView
-              edges={["top"]}
-              style={styles.topBar}
-              pointerEvents="box-none"
-            >
-              <TouchableOpacity
-                onPress={() => router.back()}
-                activeOpacity={0.85}
-                style={styles.backBtn}
-              >
-                <BlurView
-                  intensity={40}
-                  tint="dark"
-                  style={{
-                    position: "absolute",
-                    top: 0,
-                    right: 0,
-                    bottom: 0,
-                    left: 0,
-                  }}
-                />
-                <Ionicons name="chevron-back" size={20} color={TEXT} />
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={() => setShareOpen(true)}
-                activeOpacity={0.85}
-                style={styles.backBtn}
-              >
-                <BlurView
-                  intensity={40}
-                  tint="dark"
-                  style={{
-                    position: "absolute",
-                    top: 0,
-                    right: 0,
-                    bottom: 0,
-                    left: 0,
-                  }}
-                />
-                <Ionicons name="share-outline" size={18} color={TEXT} />
-              </TouchableOpacity>
-            </SafeAreaView>
-          </View>
+          ) : (
+            <LinearGradient
+              colors={["#0F1419", "#11141A", "#0A0C10"]}
+              style={{ width, height: ENTRANCE_H }}
+            />
+          )}
+          <LinearGradient
+            colors={["transparent", "rgba(9,11,15,0.55)", BG]}
+            style={{
+              position: "absolute",
+              left: 0,
+              right: 0,
+              bottom: 0,
+              height: ENTRANCE_H * 0.55,
+            }}
+          />
         </Animated.View>
 
+        {/* Top chrome */}
+        <SafeAreaView edges={["top"]} style={styles.topBar} pointerEvents="box-none">
+          <TouchableOpacity
+            onPress={() => router.back()}
+            style={styles.backBtn}
+            activeOpacity={0.85}
+          >
+            <BlurView intensity={28} tint="dark" style={StyleSheet.absoluteFill} />
+            <Ionicons name="chevron-back" size={22} color={TEXT} />
+          </TouchableOpacity>
+          <View style={{ flexDirection: "row", gap: 8 }}>
+            <TouchableOpacity
+              onPress={() => setShareOpen(true)}
+              style={styles.backBtn}
+              activeOpacity={0.85}
+            >
+              <BlurView intensity={28} tint="dark" style={StyleSheet.absoluteFill} />
+              <Ionicons name="share-outline" size={18} color={TEXT} />
+            </TouchableOpacity>
+          </View>
+        </SafeAreaView>
+
+        {/* Identity card */}
         <Animated.View
           style={{
+            marginTop: -48,
+            paddingHorizontal: H_PAD,
             opacity: content,
             transform: [{ translateY: identityLift }],
-            marginTop: -36,
-            paddingHorizontal: H_PAD,
           }}
         >
-          <LinearGradient
-            colors={["#141820", "#11141A"]}
-            style={styles.identityCard}
-          >
+          <View style={styles.identityCard}>
+            <LinearGradient
+              colors={["rgba(16,185,129,0.06)", "rgba(59,130,246,0.03)", "transparent"]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={StyleSheet.absoluteFill}
+            />
             <View style={styles.identityTop}>
               <View style={styles.logoWrap}>
                 {store.storeLogo ? (
@@ -769,84 +767,78 @@ export default function PublicStorefront() {
                     resizeMode="cover"
                   />
                 ) : (
-                  <Ionicons name="storefront-outline" size={28} color={MUTED} />
+                  <Ionicons name="storefront" size={28} color={MUTED} />
                 )}
               </View>
               <View style={{ flex: 1, marginLeft: 14, minWidth: 0 }}>
                 <View style={styles.nameRow}>
                   <Text style={styles.storeName} numberOfLines={2}>
-                    {store.storeName}
+                    {store.storeName || "Store"}
                   </Text>
                   {store.isVerified ? (
                     <View style={styles.verifiedBadge}>
-                      <Ionicons
-                        name="checkmark-circle"
-                        size={12}
-                        color={AI_GREEN}
-                      />
+                      <Ionicons name="checkmark-circle" size={12} color={AI_GREEN} />
                       <Text style={styles.verifiedText}>Verified</Text>
                     </View>
                   ) : null}
                 </View>
-                <Text style={styles.openLabel}>
-                  {ownerView ? "Your storefront" : "Explore this store"}
-                </Text>
-                {!!locationLabel && (
+                <Text style={styles.openLabel}>Open · Plazore storefront</Text>
+                {locationLabel ? (
                   <View style={styles.locationRow}>
                     <Ionicons name="location-outline" size={13} color={MUTED} />
                     <Text style={styles.locationText} numberOfLines={1}>
                       {locationLabel}
                     </Text>
                   </View>
-                )}
+                ) : null}
               </View>
             </View>
 
-            {!!store.storeDescription && (
-              <View style={{ marginTop: 14 }}>
+            {desc ? (
+              <View style={{ marginTop: 16 }}>
                 <Text
                   style={styles.desc}
                   numberOfLines={descExpanded ? undefined : 3}
                 >
-                  {store.storeDescription}
+                  {desc}
                 </Text>
-                {store.storeDescription.length > 110 && (
+                {desc.length > 120 ? (
                   <TouchableOpacity
                     onPress={() => setDescExpanded((v) => !v)}
-                    hitSlop={8}
+                    hitSlop={10}
                   >
                     <Text style={styles.seeMore}>
-                      {descExpanded ? "See less" : "See more"}
+                      {descExpanded ? "Show less" : "Read more"}
                     </Text>
                   </TouchableOpacity>
-                )}
+                ) : null}
               </View>
-            )}
+            ) : null}
 
-            {!!store.businessGoal && (
+            {goal ? (
               <View style={styles.goalBox}>
-                <Text style={styles.goalLabel}>Our goal</Text>
+                <Text style={styles.goalLabel}>Business goal</Text>
                 <Text
                   style={styles.goalText}
                   numberOfLines={goalExpanded ? undefined : 2}
                 >
-                  {store.businessGoal}
+                  {goal}
                 </Text>
-                {store.businessGoal.length > 80 && (
+                {goal.length > 90 ? (
                   <TouchableOpacity
                     onPress={() => setGoalExpanded((v) => !v)}
-                    hitSlop={8}
+                    hitSlop={10}
                   >
                     <Text style={styles.seeMore}>
-                      {goalExpanded ? "See less" : "See more"}
+                      {goalExpanded ? "Show less" : "Read more"}
                     </Text>
                   </TouchableOpacity>
-                )}
+                ) : null}
               </View>
-            )}
+            ) : null}
 
-            <View style={styles.actionRow}>
-              {!ownerView && (
+            {!ownerView ? (
+              <View style={styles.actionRow}>
                 <TouchableOpacity
                   onPress={handleToggleSave}
                   disabled={saveBusy}
@@ -855,8 +847,8 @@ export default function PublicStorefront() {
                 >
                   {saveBusy ? (
                     <ActivityIndicator
-                      color={saved ? BG : TEXT}
                       size="small"
+                      color={saved ? BG : TEXT}
                     />
                   ) : (
                     <>
@@ -877,180 +869,187 @@ export default function PublicStorefront() {
                     </>
                   )}
                 </TouchableOpacity>
-              )}
-              <View style={styles.countPill}>
-                <Text style={styles.countText}>
-                  {products.length} products
-                </Text>
+                <View style={styles.countPill}>
+                  <Text style={styles.countText}>
+                    {products.length} product{products.length === 1 ? "" : "s"}
+                  </Text>
+                </View>
               </View>
-            </View>
-          </LinearGradient>
+            ) : (
+              <View style={[styles.actionRow, { justifyContent: "flex-start" }]}>
+                <View style={styles.countPill}>
+                  <Text style={styles.countText}>
+                    {products.length} product{products.length === 1 ? "" : "s"} · Your store
+                  </Text>
+                </View>
+              </View>
+            )}
+          </View>
         </Animated.View>
 
-        {/* Closer look — horizontal carousel (one focused slide) */}
-        {products.length > 0 && (
+        {/* Featured carousel */}
+        {featured.length > 0 ? (
           <Animated.View
             style={{
               opacity: content,
-              paddingHorizontal: H_PAD,
               marginTop: 28,
+              paddingHorizontal: H_PAD,
             }}
           >
             <Text style={styles.sectionEyebrow}>Featured</Text>
-            <Text style={styles.sectionTitle}>A closer look</Text>
+            <Text style={styles.sectionTitle}>From this store</Text>
+
             <ScrollView
               ref={featuredRef}
               horizontal
               pagingEnabled
               showsHorizontalScrollIndicator={false}
-              decelerationRate="fast"
               onScrollBeginDrag={() => {
                 userTouching.current = true;
               }}
-              onMomentumScrollEnd={(e) => {
+              onScrollEndDrag={() => {
                 userTouching.current = false;
-                onFeaturedScrollEnd(e);
               }}
+              onMomentumScrollEnd={onFeaturedScrollEnd}
+              decelerationRate="fast"
               style={{ marginTop: 14 }}
+              contentContainerStyle={{ gap: 0 }}
             >
-              {products.map((p) => (
-                <TouchableOpacity
-                  key={String(p._id)}
-                  activeOpacity={0.92}
-                  onPress={() =>
-                    router.push(`/product/${p._id}` as any)
-                  }
-                  style={[styles.featuredCard, { width: slideW }]}
-                >
-                  {p.images?.[0] ? (
-                    <Image
-                      source={{ uri: p.images[0] }}
-                      style={{ width: slideW, height: FEATURED_H }}
-                      resizeMode="cover"
+              {featured.map((p, i) => {
+                const img = Array.isArray(p.images) && p.images[0] ? p.images[0] : null;
+                const pid = String(p._id || p.id || i);
+                return (
+                  <TouchableOpacity
+                    key={pid}
+                    activeOpacity={0.92}
+                    onPress={() =>
+                      router.push(`/product/${pid}` as any)
+                    }
+                    style={[styles.featuredCard, { width: slideW }]}
+                  >
+                    {img ? (
+                      <Image
+                        source={{ uri: img }}
+                        style={{ width: slideW, height: FEATURED_H }}
+                        resizeMode="cover"
+                      />
+                    ) : (
+                      <View
+                        style={[
+                          styles.noImg,
+                          { width: slideW, height: FEATURED_H, backgroundColor: SURFACE_2 },
+                        ]}
+                      >
+                        <Ionicons name="image-outline" size={32} color={MUTED} />
+                      </View>
+                    )}
+                    <LinearGradient
+                      colors={["transparent", "rgba(0,0,0,0.75)"]}
+                      style={styles.featuredFade}
                     />
-                  ) : (
-                    <View
-                      style={{
-                        width: slideW,
-                        height: FEATURED_H,
-                        backgroundColor: SURFACE_2,
-                      }}
-                    />
-                  )}
-                  <LinearGradient
-                    colors={["transparent", "rgba(9,11,15,0.92)"]}
-                    style={styles.featuredFade}
-                  />
-                  <View style={styles.featuredInfo}>
-                    <Text style={styles.featuredName} numberOfLines={2}>
-                      {p.name}
-                    </Text>
-                    <Text style={styles.featuredPrice}>
-                      {formatProduct(
-                        Number(p.price),
-                        p.region || store?.location?.country || "NG",
-                      )}
-                    </Text>
-                  </View>
-                </TouchableOpacity>
-              ))}
+                    <View style={styles.featuredInfo}>
+                      <Text style={styles.featuredName} numberOfLines={2}>
+                        {p.name}
+                      </Text>
+                      <Text style={styles.featuredPrice}>{priceOf(p)}</Text>
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
             </ScrollView>
-            {products.length > 1 && (
+
+            {featured.length > 1 ? (
               <View style={styles.dotsRow}>
-                {products.map((_, i) => (
+                {featured.map((_, i) => (
                   <View
-                    key={i}
+                    key={`dot-${i}`}
                     style={{
                       width: i === featuredIndex ? 18 : 6,
-                      height: 5,
+                      height: 6,
                       borderRadius: 3,
                       marginHorizontal: 3,
                       backgroundColor:
-                        i === featuredIndex
-                          ? AI_GREEN
-                          : "rgba(255,255,255,0.2)",
+                        i === featuredIndex ? AI_GREEN : "rgba(255,255,255,0.22)",
                     }}
                   />
                 ))}
               </View>
-            )}
+            ) : null}
           </Animated.View>
-        )}
+        ) : null}
 
         {/* Grid */}
         <Animated.View
           style={{
             opacity: content,
-            paddingHorizontal: H_PAD,
             marginTop: 28,
+            paddingHorizontal: H_PAD,
           }}
         >
           <Text style={styles.sectionEyebrow}>The store</Text>
           <Text style={styles.sectionTitle}>Explore the collection</Text>
+
           <View style={styles.dividerRow}>
             <View style={styles.dividerLine} />
             <Text style={styles.dividerText}>All products</Text>
             <View style={styles.dividerLine} />
           </View>
+
           {products.length === 0 ? (
             <View style={styles.emptyFloor}>
               <View style={styles.emptyFloorIcon}>
-                <Ionicons name="cube-outline" size={22} color={MUTED} />
+                <Ionicons name="cube-outline" size={24} color={MUTED} />
               </View>
               <Text style={styles.emptyFloorText}>
-                This storefront is still being set up.{"\n"}Check back soon.
+                No products listed yet.{"\n"}Check back soon.
               </Text>
             </View>
           ) : (
             <View style={styles.grid}>
-              {products.map((p) => (
-                <TouchableOpacity
-                  key={String(p._id)}
-                  activeOpacity={0.9}
-                  onPress={() => router.push(`/product/${p._id}` as any)}
-                  style={[styles.gridCard, { width: CARD_W }]}
-                >
-                  <View
-                    style={{
-                      width: CARD_W,
-                      height: CARD_W * 1.15,
-                      backgroundColor: SURFACE_2,
-                    }}
+              {products.map((p, i) => {
+                const img =
+                  Array.isArray(p.images) && p.images[0] ? p.images[0] : null;
+                const pid = String(p._id || p.id || i);
+                return (
+                  <TouchableOpacity
+                    key={pid}
+                    activeOpacity={0.9}
+                    onPress={() =>
+                      router.push(`/product/${pid}` as any)
+                    }
+                    style={[styles.gridCard, { width: CARD_W }]}
                   >
-                    {p.images?.[0] ? (
-                      <Image
-                        source={{ uri: p.images[0] }}
-                        style={{ width: "100%", height: "100%" }}
-                        resizeMode="cover"
-                      />
-                    ) : (
-                      <View style={styles.noImg}>
-                        <Ionicons
-                          name="image-outline"
-                          size={22}
-                          color={MUTED}
+                    <View style={{ width: CARD_W, height: CARD_W * 1.05 }}>
+                      {img ? (
+                        <Image
+                          source={{ uri: img }}
+                          style={{ width: "100%", height: "100%" }}
+                          resizeMode="cover"
                         />
-                      </View>
-                    )}
-                  </View>
-                  <View style={styles.gridInfo}>
-                    <Text style={styles.gridName} numberOfLines={2}>
-                      {p.name}
-                    </Text>
-                    <Text style={styles.gridPrice}>
-                      {formatProduct(
-                        Number(p.price),
-                        p.region || store?.location?.country || "NG",
+                      ) : (
+                        <View style={styles.noImg}>
+                          <Ionicons
+                            name="image-outline"
+                            size={22}
+                            color={MUTED}
+                          />
+                        </View>
                       )}
-                    </Text>
-                  </View>
-                </TouchableOpacity>
-              ))}
+                    </View>
+                    <View style={styles.gridInfo}>
+                      <Text style={styles.gridName} numberOfLines={2}>
+                        {p.name}
+                      </Text>
+                      <Text style={styles.gridPrice}>{priceOf(p)}</Text>
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
             </View>
           )}
         </Animated.View>
 
-        {/* Support — HIDDEN for store owner */}
+        {/* Support — hidden for owner */}
         {!ownerView && (
           <Animated.View
             style={{
@@ -1108,7 +1107,7 @@ export default function PublicStorefront() {
         </View>
       </ScrollView>
 
-      {/* Share + Auth modals — same as your paste */}
+      {/* Share sheet */}
       <Modal
         visible={shareOpen}
         transparent
@@ -1198,6 +1197,7 @@ export default function PublicStorefront() {
         </Pressable>
       </Modal>
 
+      {/* Auth sheet */}
       <Modal
         visible={authOpen}
         transparent
@@ -1387,6 +1387,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
+    zIndex: 20,
   },
   backBtn: {
     width: 42,
@@ -1405,6 +1406,7 @@ const styles = StyleSheet.create({
     borderColor: "rgba(255,255,255,0.08)",
     padding: 18,
     overflow: "hidden",
+    backgroundColor: SURFACE,
   },
   identityTop: { flexDirection: "row", alignItems: "center" },
   logoWrap: {

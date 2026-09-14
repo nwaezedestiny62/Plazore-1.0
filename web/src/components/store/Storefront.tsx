@@ -20,7 +20,6 @@ import {
 } from "lucide-react";
 import type { StorePublic } from "@/lib/api";
 import { useMarketplace } from "@/context/MarketplaceContext";
-import { DEFAULT_REGION, formatProductPrice } from "@/lib/regions";
 import type { Product } from "@/lib/types";
 
 const FEATURED_MS = 7000;
@@ -29,7 +28,7 @@ function storeKey(store: StorePublic) {
   return String(
     (store as { _id?: string; id?: string })._id ||
       (store as { id?: string }).id ||
-      "",
+      ""
   );
 }
 
@@ -104,8 +103,7 @@ export function Storefront({
   products: Product[];
 }) {
   const router = useRouter();
-  const { region: marketplaceRegion } = useMarketplace();
-  const displayRegion = marketplaceRegion || DEFAULT_REGION;
+  const { region, formatProduct, currencyCode } = useMarketplace();
   const { isSignedIn, isLoaded } = useAuth();
   const { user } = useUser();
 
@@ -130,7 +128,7 @@ export function Storefront({
     typeof window !== "undefined"
       ? `${window.location.origin}/store/${id}`
       : `/store/${id}`;
-  const shareText = `Shop ${store.storeName} on Plazore — a clean storefront, real products, no guesswork.`;
+  const shareText = `Shop ${store.storeName} on Plazore 🛒🛍️ — a clean storefront, real products, no guesswork.`;
 
   const isOwner = useMemo(() => {
     if (!user?.id || !store) return false;
@@ -154,8 +152,23 @@ export function Storefront({
     return candidates.some((c) => c === uid);
   }, [user?.id, store]);
 
-  const priceOf = (p: Product) =>
-    formatProductPrice(Number(p.price) || 0, p.region, displayRegion);
+  /**
+   * Correct regional price:
+   * - product.price is stored in product.region currency
+   * - formatProduct converts to the buyer's current marketplace region
+   *   using live rates (or falls back to product currency if rates missing)
+   */
+  const priceOf = useCallback(
+    (p: Product) => {
+      const amount = Number(p.price) || 0;
+      const productRegion =
+        p.region ||
+        (typeof p.seller === "object" && p.seller?.marketplaceRegion) ||
+        undefined;
+      return formatProduct(amount, productRegion);
+    },
+    [formatProduct]
+  );
 
   const scrollToIndex = useCallback((index: number, smooth = true) => {
     const el = trackRef.current;
@@ -247,6 +260,7 @@ export function Storefront({
 
   return (
     <div className="min-h-dvh overflow-x-hidden bg-[#090B0F] text-[#F5F7FA]">
+      {/* Banner */}
       <div className="relative h-[34vh] min-h-[220px] max-h-[280px] bg-[#07080C] lg:h-[42vh] lg:max-h-[420px]">
         {store.storeBanner ? (
           // eslint-disable-next-line @next/next/no-img-element
@@ -270,6 +284,7 @@ export function Storefront({
       </div>
 
       <div className="relative z-10 mx-auto -mt-9 w-full max-w-6xl px-5 pb-16 sm:px-6 lg:-mt-12 lg:px-8">
+        {/* Store header card */}
         <div className="overflow-hidden rounded-[26px] border border-white/8 bg-[#11141A]/95 p-[18px] lg:p-7">
           <div className="flex flex-col gap-5 lg:flex-row lg:items-start">
             <div className="flex h-[72px] w-[72px] shrink-0 items-center justify-center overflow-hidden rounded-[20px] border border-[#252A33] bg-[#171B22] lg:h-24 lg:w-24">
@@ -297,6 +312,8 @@ export function Storefront({
               </div>
               <p className="mt-1.5 text-xs tracking-wide text-[#737A86]">
                 {isOwner ? "Your storefront" : "Explore this store"}
+                {" · "}
+                <span className="text-white/40">Prices in {currencyCode}</span>
               </p>
               {locationLabel ? (
                 <p className="mt-2 flex items-center gap-1.5 text-[12.5px] text-[#A7ADB8]">
@@ -371,6 +388,7 @@ export function Storefront({
           </div>
         </div>
 
+        {/* Featured carousel */}
         {products.length > 0 ? (
           <section className="mt-9">
             <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#737A86]">
@@ -452,6 +470,7 @@ export function Storefront({
           </section>
         ) : null}
 
+        {/* Product grid */}
         <section className="mt-10">
           <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#737A86]">
             The store
@@ -559,6 +578,7 @@ export function Storefront({
         </footer>
       </div>
 
+      {/* Share sheet */}
       {shareOpen ? (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/75 sm:items-center sm:p-6">
           <div className="max-h-[90dvh] w-full max-w-md overflow-y-auto border border-white/10 bg-[#11141A] sm:rounded-2xl">
@@ -625,6 +645,7 @@ export function Storefront({
         </div>
       ) : null}
 
+      {/* Auth prompt */}
       {authOpen ? (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/75 sm:items-center sm:p-6">
           <div className="w-full max-w-md border border-white/10 bg-[#11141A] sm:rounded-2xl">

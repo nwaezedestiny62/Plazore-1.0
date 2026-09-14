@@ -32,6 +32,13 @@ import {
   getDocTypes,
   getSpecFields,
 } from "@/lib/productSpecs";
+import {
+  convertPrice,
+  formatMoney,
+  formatProductPrice,
+  getRegion,
+  resolveRegionCode,
+} from "@/lib/regions";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000/api";
 const API_ORIGIN = API.replace(/\/api\/?$/, "");
@@ -327,6 +334,7 @@ function BuyerLivePreview({
       </p>
       <p className="mb-3 text-lg font-extrabold text-text">What buyers will see</p>
 
+      {/* Showroom card – exact match */}
       <div className="mb-4 border border-line bg-[#0A121C] p-3.5">
         <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.8px] text-[#737A86]">
           Showroom card · cover = first photo
@@ -353,6 +361,7 @@ function BuyerLivePreview({
         </div>
       </div>
 
+      {/* Mobile product screen */}
       <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.8px] text-[#737A86]">
         Mobile product screen
       </p>
@@ -478,21 +487,27 @@ export default function EditProductPage() {
   const params = useParams();
   const id = String(params?.id || "");
   const { getToken, isLoaded, isSignedIn } = useAuth();
-  const { region, formatProduct } = useMarketplace();
+  const { region, formatProduct, ratesToNgn } = useMarketplace();
   const router = useRouter();
 
   const maxImages = PLAN_IMAGE_LIMITS[CURRENT_PLAN] ?? 6;
   const feePct = PLAN_FEES[CURRENT_PLAN] ?? 8;
+  const sellerRegion = resolveRegionCode(region);
+  const sellerRegionConfig = getRegion(sellerRegion);
 
   const [pageLoading, setPageLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [overlay, setOverlay] = useState<Overlay>(null);
   const [storeName, setStoreName] = useState("");
 
+  // Original product region + price (never changes unless seller intentionally changes it)
+  const [productRegion, setProductRegion] = useState<string>("NG");
+  const [originalPrice, setOriginalPrice] = useState<number>(0);
+
   const [images, setImages] = useState<ImageItem[]>([]);
   const [name, setName] = useState("");
   const [brand, setBrand] = useState("");
-  const [price, setPrice] = useState("");
+  const [price, setPrice] = useState(""); // this is the DISPLAY value (converted if needed)
   const [stock, setStock] = useState("1");
   const [description, setDescription] = useState("");
   const [category, setCategory] = useState("");
@@ -504,9 +519,7 @@ export default function EditProductPage() {
   const [fulfillCountryCode, setFulfillCountryCode] = useState("");
   const [fulfillStateCode, setFulfillStateCode] = useState("");
   const [fulfillCity, setFulfillCity] = useState("");
-  const [shippingMethod, setShippingMethod] = useState<"self" | "courier" | null>(
-    null
-  );
+  const [shippingMethod, setShippingMethod] = useState<"self" | "courier" | null>(null);
   const [courierCompany, setCourierCompany] = useState("");
   const [deliveryFee, setDeliveryFee] = useState("");
 
@@ -548,16 +561,30 @@ export default function EditProductPage() {
     (p: any, opts?: { allowEmptyImages?: boolean }) => {
       setName(p.name || "");
       setBrand(p.brand || "");
-      setPrice(p.price != null ? String(p.price) : "");
       setStock(p.stock != null ? String(p.stock) : "1");
       setDescription(p.description || "");
       setCategory(p.category || "");
       setSubCategory(p.subCategory || "");
       setSpecs(normalizeSpecs(p.specifications));
 
+      // Keep original region forever
+      const origRegion = resolveRegionCode(p.region || p.marketplaceRegion || "NG");
+      setProductRegion(origRegion);
+
+      const origPrice = Number(p.price) || 0;
+      setOriginalPrice(origPrice);
+
+      // Display price: same region → original numbers
+      // different region → converted to current seller region
+      const sameRegion = origRegion === sellerRegion;
+      const displayPrice = sameRegion
+        ? origPrice
+        : convertPrice(origPrice, origRegion, sellerRegion, ratesToNgn);
+
+      setPrice(displayPrice ? String(displayPrice) : "");
+
       const urls = extractImageList(p);
       setImages((prev) => {
-        // Never wipe a working gallery with an empty server payload
         if (!urls.length && prev.length && !opts?.allowEmptyImages) {
           return prev;
         }
@@ -608,7 +635,7 @@ export default function EditProductPage() {
       setFulfillStateCode(loc.stateCode || "");
       setFulfillCity(loc.city || "");
     },
-    [revokeBlobUri]
+    [revokeBlobUri, sellerRegion, ratesToNgn]
   );
 
   const fetchProduct = useCallback(
@@ -722,15 +749,16 @@ export default function EditProductPage() {
   const stockN = Math.max(0, parseInt(stock || "0", 10) || 0);
   const feeN = Number(deliveryFee) || 0;
 
+  // Preview always shows price in the CURRENT seller region (what the editor sees)
   const formatPreviewPrice = useCallback(
     (n: number) => {
       try {
-        return formatProduct(n, region as any);
+        return formatProduct(n, sellerRegion as any);
       } catch {
-        return String(n);
+        return formatMoney(n, sellerRegion);
       }
     },
-    [formatProduct, region]
+    [formatProduct, sellerRegion]
   );
 
   const deliveryFeeLabel =
@@ -834,15 +862,23 @@ export default function EditProductPage() {
       const token = await getToken();
       if (!token) throw new Error("Not signed in");
 
+      // Convert display price back to the ORIGINAL product region currency
+      const sameRegion = productRegion === sellerRegion;
+      const priceToStore = sameRegion
+        ? priceN
+        : convertPrice(priceN, sellerRegion, productRegion, ratesToNgn);
+
       const fd = new FormData();
       fd.append("name", name.trim());
       fd.append("brand", brand.trim());
-      fd.append("price", String(priceN));
+      fd.append("price", String(priceToStore));
       fd.append("stock", String(stockN));
       fd.append("description", description.trim());
       fd.append("category", category);
       fd.append("subCategory", subCategory);
-      fd.append("region", region || "NG");
+      // Keep the ORIGINAL product region — never overwrite it
+      fd.append("region", productRegion);
+      fd.append("currency", getRegion(productRegion).currency.code);
       fd.append("specifications", JSON.stringify(specs));
       fd.append(
         "shipping",
@@ -871,7 +907,7 @@ export default function EditProductPage() {
         )
       );
 
-            // Flat fields so backend never misses shipping / fulfillment
+      // Flat fields so backend never misses shipping / fulfillment
       if (shippingMethod) {
         fd.append("shippingMethod", shippingMethod);
         fd.append("courierCompany", courierCompany.trim());
@@ -894,8 +930,6 @@ export default function EditProductPage() {
 
       /**
        * Preserve visual order. Index 0 = cover.
-       * existingImages = remote URLs still kept (same order as on screen among remotes).
-       * imageOrder = full sequence so backend can interleave new uploads correctly.
        */
       const keepUrls: string[] = [];
       const newFiles: File[] = [];
@@ -1004,6 +1038,9 @@ export default function EditProductPage() {
     );
   }
 
+  const sameRegion = productRegion === sellerRegion;
+  const productRegionConfig = getRegion(productRegion);
+
   return (
     <div className="min-h-screen bg-bg text-text">
       <TopOverlay state={overlay} onDismiss={() => setOverlay(null)} />
@@ -1018,7 +1055,7 @@ export default function EditProductPage() {
           </Link>
           <div>
             <p className="text-[11px] font-bold uppercase tracking-[2px] text-[#737A86]">
-              Seller Lounge
+              Seller Lounge · {sellerRegionConfig.flag} {sellerRegionConfig.name}
             </p>
             <h1 className="text-2xl font-extrabold tracking-tight md:text-[26px]">
               Edit product
@@ -1032,6 +1069,7 @@ export default function EditProductPage() {
               <BuyerLivePreview {...previewProps} />
             </div>
 
+            {/* 01 Images */}
             <Section
               step="01"
               title="Images"
@@ -1097,6 +1135,7 @@ export default function EditProductPage() {
               </p>
             </Section>
 
+            {/* 02 Basics */}
             <Section step="02" title="Basics">
               <Label>Product name *</Label>
               <input
@@ -1112,7 +1151,10 @@ export default function EditProductPage() {
               />
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <Label>Price *</Label>
+                  <Label>
+                    Price * ({sellerRegionConfig.currency.symbol}{" "}
+                    {sellerRegionConfig.currency.code})
+                  </Label>
                   <input
                     className={inputCls}
                     value={price}
@@ -1121,6 +1163,18 @@ export default function EditProductPage() {
                     }
                     inputMode="decimal"
                   />
+                  {!sameRegion && (
+                    <p className="mb-3 -mt-2 text-[11px] text-amber-400/90">
+                      Converted from original {productRegionConfig.currency.code}{" "}
+                      listing. On save it will be stored back in{" "}
+                      {productRegionConfig.currency.code}.
+                    </p>
+                  )}
+                  {sameRegion && (
+                    <p className="mb-3 -mt-2 text-[11px] text-[#737A86]">
+                      Same marketplace region — original numbers shown
+                    </p>
+                  )}
                 </div>
                 <div>
                   <Label>Stock *</Label>
@@ -1143,6 +1197,7 @@ export default function EditProductPage() {
               />
             </Section>
 
+            {/* 03 Category */}
             <Section step="03" title="Category & specs">
               <Label>Category *</Label>
               <div className="mb-3 flex flex-wrap">
@@ -1200,6 +1255,7 @@ export default function EditProductPage() {
                 ))}
             </Section>
 
+            {/* Docs */}
             {needsDocs && (
               <Section
                 step="04"
@@ -1291,6 +1347,7 @@ export default function EditProductPage() {
               </Section>
             )}
 
+            {/* Fulfillment */}
             <Section
               step={needsDocs ? "05" : "04"}
               title="Fulfillment location"
@@ -1353,6 +1410,7 @@ export default function EditProductPage() {
                 )}
             </Section>
 
+            {/* Shipping */}
             <Section step={needsDocs ? "06" : "05"} title="Shipping method">
               <div className="mb-3.5 grid grid-cols-2 gap-2.5">
                 {(["self", "courier"] as const).map((m) => {
@@ -1415,6 +1473,7 @@ export default function EditProductPage() {
               )}
             </Section>
 
+            {/* Save */}
             <Section step={needsDocs ? "07" : "06"} title="Save changes">
               <div className="mb-1.5 flex justify-between text-[13px]">
                 <span className="text-[#737A86]">Plan</span>
@@ -1429,7 +1488,8 @@ export default function EditProductPage() {
                 </span>
               </div>
               <p className="text-[11px] text-[#737A86]">
-                Fee applies only to product price — never delivery.
+                Fee applies only to product price — never delivery. Original
+                region stays {productRegionConfig.flag} {productRegionConfig.name}.
               </p>
             </Section>
 

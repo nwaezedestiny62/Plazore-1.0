@@ -5,12 +5,13 @@ import {
   CheckCircle2,
   ChevronLeft,
   FileUp,
-  Footprints,   // ← not Walk
+  Footprints,
   ImagePlus,
   Rocket,
   Store,
   Trash2,
   Truck,
+  GripVertical,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -33,13 +34,13 @@ import {
   getDocTypes,
   getSpecFields,
 } from "@/lib/productSpecs";
+import { formatMoney, getRegion } from "@/lib/regions";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000/api";
 const CURRENT_PLAN = "free" as keyof typeof PLAN_IMAGE_LIMITS;
 
 type OverlayTone = "info" | "success" | "danger";
 type Overlay = { title: string; message?: string; tone?: OverlayTone } | null;
-
 type LocalDoc = { file: File; name: string; type: string };
 
 function TopOverlay({ state, onDismiss }: { state: Overlay; onDismiss: () => void }) {
@@ -124,6 +125,7 @@ export default function AddProductPage() {
 
   const maxImages = PLAN_IMAGE_LIMITS[CURRENT_PLAN] ?? 6;
   const feePct = PLAN_FEES[CURRENT_PLAN] ?? 8;
+  const regionConfig = getRegion(region);
 
   const [overlay, setOverlay] = useState<Overlay>(null);
   const [loading, setLoading] = useState(false);
@@ -204,12 +206,13 @@ export default function AddProductPage() {
   const stockN = Math.max(0, parseInt(stock || "0", 10) || 0);
   const feeN = Number(deliveryFee) || 0;
 
+  // Price is always entered & stored in the seller's CURRENT region currency
   const formatPreviewPrice = useCallback(
     (n: number) => {
       try {
         return formatProduct(n, region as any);
       } catch {
-        return String(n);
+        return formatMoney(n, region);
       }
     },
     [formatProduct, region]
@@ -237,6 +240,23 @@ export default function AddProductPage() {
     });
   };
 
+  // Move image to front = make it cover
+  const makeCover = (i: number) => {
+    if (i === 0) return;
+    setImageFiles((prev) => {
+      const copy = [...prev];
+      const [item] = copy.splice(i, 1);
+      copy.unshift(item);
+      return copy;
+    });
+    setImageUrls((prev) => {
+      const copy = [...prev];
+      const [item] = copy.splice(i, 1);
+      copy.unshift(item);
+      return copy;
+    });
+  };
+
   const onDocs = (files: FileList | null) => {
     if (!files?.length) return;
     setDocuments((prev) => {
@@ -254,7 +274,7 @@ export default function AddProductPage() {
   };
 
   const validate = () => {
-    if (!imageFiles.length) return "Add at least one product image";
+    if (!imageFiles.length) return "Add at least one product image (first one becomes the cover)";
     if (!name.trim()) return "Product name is required";
     if (!priceN || priceN <= 0) return "Enter a valid price";
     if (!category) return "Select a category";
@@ -285,7 +305,9 @@ export default function AddProductPage() {
       fd.append("description", description.trim());
       fd.append("category", category);
       fd.append("subCategory", subCategory);
+      // CRITICAL: lock the product to the seller's current region at creation time
       fd.append("region", region || "NG");
+      fd.append("currency", regionConfig.currency.code);
       fd.append("specifications", JSON.stringify(specs));
       fd.append(
         "shipping",
@@ -310,7 +332,12 @@ export default function AddProductPage() {
         )
       );
 
-      imageFiles.forEach((f) => fd.append("images", f));
+      // First image is always the cover – order matters
+      imageFiles.forEach((f, idx) => {
+        fd.append("images", f);
+        if (idx === 0) fd.append("coverIndex", "0");
+      });
+
       documents.forEach((d, i) => {
         fd.append("documents", d.file);
         fd.append(`documentTypes[${i}]`, d.type);
@@ -403,7 +430,7 @@ export default function AddProductPage() {
           </Link>
           <div>
             <p className="text-[11px] font-bold uppercase tracking-[2px] text-[#737A86]">
-              Seller Lounge
+              Seller Lounge · {regionConfig.flag} {regionConfig.name} ({regionConfig.currency.code})
             </p>
             <h1 className="text-2xl font-extrabold tracking-tight md:text-[26px]">Add product</h1>
           </div>
@@ -411,13 +438,22 @@ export default function AddProductPage() {
 
         <div className="grid gap-8 lg:grid-cols-[1fr_320px] lg:items-start">
           <div>
-            {/* 01 Images */}
-            <Section step="01" title="Images" subtitle={`Up to ${maxImages} photos`}>
+            {/* 01 Images – first is cover */}
+            <Section
+              step="01"
+              title="Images"
+              subtitle={`Up to ${maxImages} photos · First photo = Cover (used everywhere)`}
+            >
               <div className="flex flex-wrap gap-2">
                 {imageUrls.map((url, i) => (
                   <div key={url} className="relative h-[104px] w-[104px] overflow-hidden rounded-[14px]">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={url} alt="" className="h-full w-full object-cover" />
+                    {i === 0 && (
+                      <div className="absolute left-1 top-1 rounded bg-green px-1.5 py-0.5 text-[9px] font-bold text-[#041412]">
+                        COVER
+                      </div>
+                    )}
                     <button
                       type="button"
                       onClick={() => removeImage(i)}
@@ -425,6 +461,15 @@ export default function AddProductPage() {
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
+                    {i > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => makeCover(i)}
+                        className="absolute bottom-1 left-1 rounded bg-black/70 px-1.5 py-0.5 text-[9px] font-bold text-white"
+                      >
+                        Make cover
+                      </button>
+                    )}
                   </div>
                 ))}
                 {imageFiles.length < maxImages && (
@@ -438,6 +483,9 @@ export default function AddProductPage() {
                   </button>
                 )}
               </div>
+              <p className="mt-2 text-[11px] text-[#737A86]">
+                The first image is the cover photo shown in showroom, search, and product page.
+              </p>
               <input
                 ref={imageInputRef}
                 type="file"
@@ -451,12 +499,24 @@ export default function AddProductPage() {
             {/* 02 Basics */}
             <Section step="02" title="Basics">
               <Label>Product name *</Label>
-              <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} placeholder="What are you selling?" />
+              <input
+                className={inputCls}
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="What are you selling?"
+              />
               <Label>Brand</Label>
-              <input className={inputCls} value={brand} onChange={(e) => setBrand(e.target.value)} placeholder="Optional brand" />
+              <input
+                className={inputCls}
+                value={brand}
+                onChange={(e) => setBrand(e.target.value)}
+                placeholder="Optional brand"
+              />
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <Label>Price *</Label>
+                  <Label>
+                    Price * ({regionConfig.currency.symbol} {regionConfig.currency.code})
+                  </Label>
                   <input
                     className={inputCls}
                     value={price}
@@ -464,6 +524,9 @@ export default function AddProductPage() {
                     placeholder="0.00"
                     inputMode="decimal"
                   />
+                  <p className="mb-3 -mt-2 text-[11px] text-[#737A86]">
+                    Locked to your current marketplace region
+                  </p>
                 </div>
                 <div>
                   <Label>Stock *</Label>
@@ -546,7 +609,10 @@ export default function AddProductPage() {
             {needsDocs && (
               <Section step="04" title="Documents" subtitle="Required for this category">
                 {documents.map((doc, index) => (
-                  <div key={`${doc.name}-${index}`} className="mb-2.5 rounded-[14px] border border-line bg-[#0A121C] p-3">
+                  <div
+                    key={`${doc.name}-${index}`}
+                    className="mb-2.5 rounded-[14px] border border-line bg-[#0A121C] p-3"
+                  >
                     <div className="mb-2 flex items-center gap-2">
                       <p className="min-w-0 flex-1 truncate text-[13px] text-text">{doc.name}</p>
                       <button
@@ -668,16 +734,14 @@ export default function AddProductPage() {
                       type="button"
                       onClick={() => setShippingMethod(m)}
                       className={`flex flex-col items-center rounded-[14px] border py-4 ${
-                        active
-                          ? "border-green/40 bg-green/8"
-                          : "border-line bg-[#0A121C]"
+                        active ? "border-green/40 bg-green/8" : "border-line bg-[#0A121C]"
                       }`}
                     >
                       {m === "self" ? (
-  <Footprints className={`h-5 w-5 ${active ? "text-green" : "text-[#737A86]"}`} />
-) : (
-  <Truck className={`h-5 w-5 ${active ? "text-green" : "text-[#737A86]"}`} />
-)}
+                        <Footprints className={`h-5 w-5 ${active ? "text-green" : "text-[#737A86]"}`} />
+                      ) : (
+                        <Truck className={`h-5 w-5 ${active ? "text-green" : "text-[#737A86]"}`} />
+                      )}
                       <span
                         className={`mt-2 text-[13px] font-semibold ${
                           active ? "text-text" : "text-[#737A86]"
@@ -725,7 +789,7 @@ export default function AddProductPage() {
                 <span className="font-semibold text-text">{feePct}% of product price</span>
               </div>
               <p className="text-[11px] text-[#737A86]">
-                Fee applies only to product price — never delivery.
+                Fee applies only to product price — never delivery. Region locked to {regionConfig.name}.
               </p>
             </Section>
 
@@ -746,20 +810,20 @@ export default function AddProductPage() {
             </button>
           </div>
 
-          {/* Sticky live preview */}
+          {/* Sticky live preview – matches showroom + product page */}
           <div className="hidden lg:sticky lg:top-6 lg:block">
             <p className="mb-1 text-[11px] font-bold uppercase tracking-[2px] text-[#737A86]">
               Live preview
             </p>
             <p className="mb-3 text-lg font-extrabold text-text">What buyers will see</p>
 
-            {/* Card */}
+            {/* Showroom card – exact style */}
             <div className="mb-4 border border-line bg-[#0A121C] p-3.5">
               <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.8px] text-[#737A86]">
-                Showroom card
+                Showroom card · cover = first photo
               </p>
               <div className="w-[150px]">
-                <div className="relative aspect-[1/1.35] bg-[#F1F1F1]">
+                <div className="relative aspect-[1/1.35] overflow-hidden bg-[#F1F1F1]">
                   {imageUrls[0] ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={imageUrls[0]} alt="" className="h-full w-full object-cover" />
@@ -779,16 +843,18 @@ export default function AddProductPage() {
                   {(brand || storeName || "plazore").toLowerCase()} |{" "}
                   <span className="font-medium text-white">{formatPreviewPrice(priceN)}</span>
                 </p>
-                {shipsFrom && (
+                {shipsFrom ? (
                   <p className="mt-1 truncate text-[11px] text-white/42">{shipsFrom}</p>
+                ) : (
+                  <p className="mt-1 text-[11px] text-white/30">Ships from…</p>
                 )}
               </div>
             </div>
 
-            {/* Mini product page */}
+            {/* Mobile product page simulator */}
             <div className="overflow-hidden rounded-[28px] border-[3px] border-[#2C313A] bg-[#12141A] p-2 shadow-2xl">
               <div className="mx-auto mb-1 h-3.5 w-[78px] rounded-lg bg-black" />
-              <div className="max-h-[420px] overflow-y-auto rounded-[22px] bg-bg">
+              <div className="max-h-[420px] overflow-y-auto rounded-[22px] bg-bg [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                 <div className="aspect-[1/1.05] bg-[#07080C]">
                   {imageUrls[0] ? (
                     // eslint-disable-next-line @next/next/no-img-element

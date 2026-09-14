@@ -150,12 +150,6 @@ export default function ProductAIPage() {
                   {ai.summary}
                 </p>
               ) : null}
-              <Link
-                href={`/product/${id}`}
-                className="mt-7 hidden h-11 w-fit items-center rounded-full border border-white/12 bg-white/[0.04] px-5 text-sm font-semibold lg:inline-flex"
-              >
-                Back to product
-              </Link>
             </div>
           </div>
 
