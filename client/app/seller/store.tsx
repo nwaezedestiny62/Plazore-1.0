@@ -787,7 +787,7 @@ function LiveStorefrontPreview({
               }}
             />
             <Text style={{ color: MUTED, fontSize: 9, letterSpacing: 1 }}>
-              Plazore · Digital Mall
+              Plazore · Discovery-Led Commerce
             </Text>
           </View>
         </ScrollView>

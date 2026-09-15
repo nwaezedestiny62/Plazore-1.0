@@ -10,12 +10,13 @@ import {
   Info,
   MapPin,
   MessageCircle,
-  Music,
   Package,
+  Shield,
   User,
 } from "lucide-react";
 import { useMarketplace } from "@/context/MarketplaceContext";
 import { getRegion } from "@/lib/regions";
+import { openPrivacyPreferences } from "@/components/privacy/PrivacyConsent";
 
 const ACCOUNT_LINKS = [
   {
@@ -47,15 +48,6 @@ const ACCOUNT_LINKS = [
     title: "Orders",
     subtitle: "Purchases & delivery",
     icon: Package,
-  },
-] as const;
-
-const PREFERENCE_LINKS = [
-  {
-    href: "/settings/music",
-    title: "Ambient soundtrack",
-    subtitle: "Immerse yourself in the Plazore atmosphere",
-    icon: Music,
   },
 ] as const;
 
@@ -140,7 +132,6 @@ export default function SettingsPage() {
       </header>
 
       <main className="mx-auto w-full max-w-lg px-4 py-6 sm:px-6">
-        {/* Active marketplace card */}
         <Link
           href="/settings/region"
           className="mb-6 flex items-center gap-3 border border-white/[0.08] bg-[#11141A] p-4 transition hover:border-white/[0.12]"
@@ -160,20 +151,44 @@ export default function SettingsPage() {
           <ChevronRight className="h-4 w-4 shrink-0 text-[#737A86]" />
         </Link>
 
-        {/* Account */}
         <p className="mb-3 text-[11px] font-extrabold tracking-[0.14em] text-[#6B7280]">
           ACCOUNT
         </p>
         <LinkList items={ACCOUNT_LINKS} />
 
-        {/* Plazore */}
+        <p className="mb-3 mt-8 text-[11px] font-extrabold tracking-[0.14em] text-[#6B7280]">
+          PRIVACY
+        </p>
+        <ul className="overflow-hidden border border-white/[0.08] bg-[#11141A]">
+          <li>
+            <button
+              type="button"
+              onClick={() => openPrivacyPreferences()}
+              className="flex w-full items-center gap-3 px-4 py-3.5 text-left transition hover:bg-white/[0.02]"
+            >
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center border border-white/[0.08] bg-[#171B22]">
+                <Shield className="h-4 w-4 text-[#A7ADB8]" />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-semibold">
+                  Privacy preferences
+                </span>
+                <span className="mt-0.5 block text-[12px] text-[#737A86]">
+                  Essential technologies & optional choices
+                </span>
+              </span>
+              <ChevronRight className="h-4 w-4 shrink-0 text-[#737A86]" />
+            </button>
+          </li>
+        </ul>
+
         <p className="mb-3 mt-8 text-[11px] font-extrabold tracking-[0.14em] text-[#6B7280]">
           PLAZORE
         </p>
         <LinkList items={PLAZORE_LINKS} />
 
         <p className="mt-10 text-center text-[11px] tracking-[0.06em] text-[#6B7280]">
-          Plazore · Premium Digital Mall
+          Plazore · Discovery-Led Commerce
         </p>
       </main>
     </div>

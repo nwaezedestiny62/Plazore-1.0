@@ -8,6 +8,7 @@ import {
 } from '@/context/SoundtrackContext'
 import { ThemeProvider } from '@/context/ThemeContext'
 import { WishlistProvider } from '@/context/WishlistContext'
+import { NetworkStatusBanner } from '@/components/NetworkStatusBanner'
 import { tokenCache } from '@clerk/clerk-expo/token-cache'
 import { ClerkProvider } from '@clerk/clerk-expo'
 import {
@@ -66,6 +67,7 @@ function AppShell() {
     holdIntroGate()
   }, [holdIntroGate])
 
+  // Fullscreen opener: hide system bars so image is edge-to-edge
   useEffect(() => {
     StatusBar.setHidden(true, 'fade')
     if (Platform.OS === 'android') {
@@ -98,9 +100,15 @@ function AppShell() {
 
   return (
     <>
-      <ExpoStatusBar style="light" backgroundColor={BG} translucent={false} />
+      {/* During opener: fully hidden. After: normal light content bar */}
+      <ExpoStatusBar
+        style="light"
+        hidden={showOpener}
+        backgroundColor={showOpener ? 'transparent' : BG}
+        translucent={showOpener}
+      />
 
-      {Platform.OS === 'android' ? (
+      {Platform.OS === 'android' && !showOpener ? (
         <StatusBar
           barStyle="light-content"
           backgroundColor={BG}
@@ -118,6 +126,9 @@ function AppShell() {
           statusBarTranslucent: false,
         }}
       />
+
+      {/* Network banner only after opener — never covers the splash */}
+      {!showOpener ? <NetworkStatusBanner /> : null}
 
       {showOpener ? (
         <Animated.View
@@ -196,6 +207,12 @@ const styles = StyleSheet.create({
     backgroundColor: '#000',
   },
   openerImage: {
+    // Absolute fill — under status bar / notch when bar is hidden
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
     width: SCREEN_W,
     height: SCREEN_H,
   },

@@ -1103,7 +1103,7 @@ export default function PublicStorefront() {
 
         <View style={styles.footer}>
           <View style={styles.footerLine} />
-          <Text style={styles.footerText}>Plazore · Digital Mall</Text>
+          <Text style={styles.footerText}>Plazore · Discovery-Led Commerce</Text>
         </View>
       </ScrollView>
 

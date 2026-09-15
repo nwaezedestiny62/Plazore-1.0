@@ -183,7 +183,7 @@ export default function SettingsScreen() {
           />
         </SettingsSection>
 
-        <Text style={styles.footer}>Plazore · Premium Digital Mall</Text>
+        <Text style={styles.footer}>Plazore · Premium Discovery-Led Commerce</Text>
       </ScrollView>
     </SafeAreaView>
   )

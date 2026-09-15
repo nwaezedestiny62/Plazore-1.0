@@ -1154,7 +1154,7 @@ function MallInner({
       </section>
 
       <p className="pb-10 pt-6 text-center text-[11px] tracking-wide text-muted">
-        Plazore · Digital Mall
+        Plazore · Discovery-Led Commerce
       </p>
     </div>
   );

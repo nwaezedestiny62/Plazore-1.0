@@ -3,6 +3,8 @@ import { Manrope, Space_Grotesk } from "next/font/google";
 import "./globals.css";
 import { ClerkProvider } from "@clerk/nextjs";
 import { MarketplaceProvider } from "@/context/MarketplaceContext";
+import { PrivacyConsent } from "@/components/privacy/PrivacyConsent";
+import { NetworkStatusBanner } from "@/components/network/NetworkStatusBanner";
 
 const manrope = Manrope({
   subsets: ["latin"],
@@ -30,7 +32,11 @@ export default function RootLayout({
     <html lang="en" className={`${manrope.variable} ${spaceGrotesk.variable}`}>
       <body className="bg-bg text-text antialiased">
         <ClerkProvider>
-          <MarketplaceProvider>{children}</MarketplaceProvider>
+          <MarketplaceProvider>
+            <NetworkStatusBanner />
+            {children}
+            <PrivacyConsent />
+          </MarketplaceProvider>
         </ClerkProvider>
       </body>
     </html>
