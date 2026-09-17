@@ -5,7 +5,9 @@ import Product from "../models/Products.js";
 import Order from "../models/Order.js";
 import ContactMessage from "../models/ContactMessage.js";
 import ProductPerformance from "../models/ProductPerformance.js";
+import Wishlist from "../models/Wishlist.js";
 import Report from "../models/Report.js";
+import Cart from "../models/Cart.js";
 import Notification from "../models/Notification.js";
 
 const COUNTRY_ALIASES: Record<string, string[]> = {
@@ -203,6 +205,10 @@ export const getDashboardStats = async (req: Request, res: Response) => {
 // USERS
 // ─────────────────────────────────────────────────────────────
 
+// ─────────────────────────────────────────────────────────────
+// USERS — activity from real actions (orders / cart / listings)
+// ─────────────────────────────────────────────────────────────
+
 export const getAdminUsers = async (req: Request, res: Response) => {
   try {
     const page = Math.max(1, parseInt(String(req.query.page || "1"), 10));
@@ -216,6 +222,8 @@ export const getAdminUsers = async (req: Request, res: Response) => {
     const country = String(req.query.country || "").trim();
     const state = String(req.query.state || "").trim();
     const city = String(req.query.city || "").trim();
+    const zip = String(req.query.zip || "").trim();
+    const street = String(req.query.street || "").trim();
     const sort = String(req.query.sort || "newest").trim();
     const spot = String(req.query.spot || "").trim();
 
@@ -278,6 +286,24 @@ export const getAdminUsers = async (req: Request, res: Response) => {
       });
     }
 
+    if (zip) {
+      and.push({
+        "shippingDefaults.address.zipCode": {
+          $regex: escapeRegex(zip),
+          $options: "i",
+        },
+      });
+    }
+
+    if (street) {
+      and.push({
+        "shippingDefaults.address.street": {
+          $regex: escapeRegex(street),
+          $options: "i",
+        },
+      });
+    }
+
     if (q) {
       const or: any[] = [
         { name: { $regex: q, $options: "i" } },
@@ -290,6 +316,21 @@ export const getAdminUsers = async (req: Request, res: Response) => {
             $regex: `^${escapeRegex(q)}$`,
             $options: "i",
           },
+        },
+        {
+          "shippingDefaults.address.city": { $regex: q, $options: "i" },
+        },
+        {
+          "shippingDefaults.address.state": { $regex: q, $options: "i" },
+        },
+        {
+          "shippingDefaults.address.zipCode": { $regex: q, $options: "i" },
+        },
+        {
+          "shippingDefaults.address.street": { $regex: q, $options: "i" },
+        },
+        {
+          "shippingDefaults.address.country": { $regex: q, $options: "i" },
         },
       ];
       if (/^[a-f\d]{24}$/i.test(q)) or.push({ _id: q });
@@ -306,40 +347,6 @@ export const getAdminUsers = async (req: Request, res: Response) => {
       and.push({ isSellerSuspended: true });
     } else if (spot === "new") {
       and.push({ createdAt: { $gte: d7 } });
-    } else if (spot === "active") {
-      and.push({
-        $or: [
-          { lastSeenAt: { $gte: d1 } },
-          {
-            $and: [
-              {
-                $or: [
-                  { lastSeenAt: null },
-                  { lastSeenAt: { $exists: false } },
-                ],
-              },
-              { updatedAt: { $gte: d1 } },
-            ],
-          },
-        ],
-      });
-    } else if (spot === "dormant") {
-      and.push({
-        $or: [
-          { lastSeenAt: { $lte: d30 } },
-          {
-            $and: [
-              {
-                $or: [
-                  { lastSeenAt: null },
-                  { lastSeenAt: { $exists: false } },
-                ],
-              },
-              { updatedAt: { $lte: d30 } },
-            ],
-          },
-        ],
-      });
     } else if (spot === "no-region") {
       and.push({
         $or: [
@@ -349,17 +356,17 @@ export const getAdminUsers = async (req: Request, res: Response) => {
         ],
       });
     }
+    // active / quiet / idle / dormant applied after real activity map
 
     const filter = and.length ? { $and: and } : {};
 
     const sortMap: Record<string, any> = {
       newest: { createdAt: -1 },
       oldest: { createdAt: 1 },
-      lastSeen: { lastSeenAt: -1, updatedAt: -1 },
       name: { name: 1 },
     };
 
-    const [items, total, roleCounts, allForHealth] = await Promise.all([
+    const [items, total, roleCounts] = await Promise.all([
       User.find(filter)
         .sort(sortMap[sort] || sortMap.newest)
         .skip((page - 1) * limit)
@@ -370,7 +377,6 @@ export const getAdminUsers = async (req: Request, res: Response) => {
         .lean(),
       User.countDocuments(filter),
       User.aggregate([{ $group: { _id: "$role", n: { $sum: 1 } } }]),
-      User.find({}).select("lastSeenAt updatedAt").lean(),
     ]);
 
     const counts = { all: 0, buyer: 0, seller: 0, admin: 0 };
@@ -380,19 +386,84 @@ export const getAdminUsers = async (req: Request, res: Response) => {
       counts.all += r.n;
     }
 
+    // ── Real activity signals (not lastSeenAt) ──
+    const pageIds = items.map((u: any) => u._id);
+
+    const [buyerLast, sellerLast, cartLast, listingLast] = await Promise.all([
+      pageIds.length
+        ? Order.aggregate([
+            { $match: { buyer: { $in: pageIds } } },
+            { $group: { _id: "$buyer", at: { $max: "$createdAt" } } },
+          ])
+        : Promise.resolve([]),
+      pageIds.length
+        ? Order.aggregate([
+            { $match: { seller: { $in: pageIds } } },
+            { $group: { _id: "$seller", at: { $max: "$createdAt" } } },
+          ])
+        : Promise.resolve([]),
+      pageIds.length
+        ? Cart.aggregate([
+            { $match: { user: { $in: pageIds } } },
+            { $group: { _id: "$user", at: { $max: "$updatedAt" } } },
+          ]).catch(() => [])
+        : Promise.resolve([]),
+      pageIds.length
+        ? Product.aggregate([
+            { $match: { seller: { $in: pageIds } } },
+            { $group: { _id: "$seller", at: { $max: "$updatedAt" } } },
+          ])
+        : Promise.resolve([]),
+    ]);
+
+    const activityMap: Record<string, { at: Date; kind: string }> = {};
+    const bump = (id: any, at: any, kind: string) => {
+      if (!id || !at) return;
+      const k = String(id);
+      const t = new Date(at);
+      if (Number.isNaN(t.getTime())) return;
+      const prev = activityMap[k];
+      if (!prev || t > prev.at) activityMap[k] = { at: t, kind };
+    };
+    for (const r of buyerLast as any[]) bump(r._id, r.at, "order_buyer");
+    for (const r of sellerLast as any[]) bump(r._id, r.at, "order_seller");
+    for (const r of cartLast as any[]) bump(r._id, r.at, "cart");
+    for (const r of listingLast as any[]) bump(r._id, r.at, "listing");
+
+    // Platform-wide activity health from orders (buyers + sellers)
+    const [allBuyerAct, allSellerAct] = await Promise.all([
+      Order.aggregate([
+        { $group: { _id: "$buyer", at: { $max: "$createdAt" } } },
+      ]),
+      Order.aggregate([
+        { $group: { _id: "$seller", at: { $max: "$createdAt" } } },
+      ]),
+    ]);
+
+    const healthMap: Record<string, Date> = {};
+    for (const r of allBuyerAct as any[]) {
+      if (!r._id || !r.at) continue;
+      const t = new Date(r.at);
+      const k = String(r._id);
+      if (!healthMap[k] || t > healthMap[k]) healthMap[k] = t;
+    }
+    for (const r of allSellerAct as any[]) {
+      if (!r._id || !r.at) continue;
+      const t = new Date(r.at);
+      const k = String(r._id);
+      if (!healthMap[k] || t > healthMap[k]) healthMap[k] = t;
+    }
+
     let active24h = 0;
     let quiet7d = 0;
     let idle30d = 0;
     let dormant = 0;
-    let unknown = 0;
+    let unknown = counts.all;
 
-    for (const u of allForHealth as any[]) {
-      const seen = u.lastSeenAt || u.updatedAt;
-      if (!seen) {
-        unknown += 1;
-        continue;
-      }
-      const hrs = (now - new Date(seen).getTime()) / 3600000;
+    const healthIds = Object.keys(healthMap);
+    unknown = Math.max(0, counts.all - healthIds.length);
+    for (const id of healthIds) {
+      const hrs = (now - healthMap[id].getTime()) / 3600000;
       if (Number.isNaN(hrs)) unknown += 1;
       else if (hrs < 24) active24h += 1;
       else if (hrs < 24 * 7) quiet7d += 1;
@@ -403,25 +474,23 @@ export const getAdminUsers = async (req: Request, res: Response) => {
     const known = active24h + quiet7d + idle30d + dormant;
     const activeShare = known > 0 ? active24h / known : 0;
     const dormantShare = known > 0 ? dormant / known : 0;
-
     let healthScore = Math.round(
       Math.max(5, Math.min(98, 40 + activeShare * 55 - dormantShare * 35))
     );
     let healthLabel = "Steady";
     let healthTone: "green" | "warn" | "error" = "green";
-
     if (known === 0) {
       healthScore = 50;
-      healthLabel = "Insufficient presence data";
+      healthLabel = "No commerce activity yet";
       healthTone = "warn";
     } else if (healthScore >= 72) {
-      healthLabel = "Healthy activity";
+      healthLabel = "Healthy commerce activity";
       healthTone = "green";
     } else if (healthScore >= 48) {
-      healthLabel = "Mixed activity";
+      healthLabel = "Mixed commerce activity";
       healthTone = "warn";
     } else {
-      healthLabel = "Low activity";
+      healthLabel = "Low commerce activity";
       healthTone = "error";
     }
 
@@ -446,13 +515,45 @@ export const getAdminUsers = async (req: Request, res: Response) => {
       }
     }
 
+    let data = items.map((u: any) => {
+      const act = activityMap[String(u._id)];
+      return {
+        ...u,
+        lastSeenAt: u.lastSeenAt || null,
+        lastActivityAt: act?.at || null,
+        lastActivityKind: act?.kind || null,
+        productStats: statsMap[String(u._id)] || { total: 0, active: 0 },
+      };
+    });
+
+    // Spot filter on real activity (current page; full accuracy needs precomputed field)
+    if (spot === "active") {
+      data = data.filter((u: any) => {
+        if (!u.lastActivityAt) return false;
+        return now - new Date(u.lastActivityAt).getTime() < 24 * 3600 * 1000;
+      });
+    } else if (spot === "quiet") {
+      data = data.filter((u: any) => {
+        if (!u.lastActivityAt) return false;
+        const hrs = (now - new Date(u.lastActivityAt).getTime()) / 3600000;
+        return hrs >= 24 && hrs < 24 * 7;
+      });
+    } else if (spot === "idle") {
+      data = data.filter((u: any) => {
+        if (!u.lastActivityAt) return false;
+        const hrs = (now - new Date(u.lastActivityAt).getTime()) / 3600000;
+        return hrs >= 24 * 7 && hrs < 24 * 30;
+      });
+    } else if (spot === "dormant") {
+      data = data.filter((u: any) => {
+        if (!u.lastActivityAt) return true;
+        return now - new Date(u.lastActivityAt).getTime() >= 30 * 86400 * 1000;
+      });
+    }
+
     res.json({
       success: true,
-      data: items.map((u: any) => ({
-        ...u,
-        lastSeenAt: u.lastSeenAt || u.updatedAt || u.createdAt,
-        productStats: statsMap[String(u._id)] || { total: 0, active: 0 },
-      })),
+      data,
       counts,
       activityHealth: {
         score: healthScore,
@@ -464,6 +565,7 @@ export const getAdminUsers = async (req: Request, res: Response) => {
         dormant,
         unknown,
         total: counts.all,
+        basis: "orders_and_cart",
       },
       pagination: {
         page,
@@ -481,9 +583,7 @@ export const getAdminUserDetail = async (req: Request, res: Response) => {
   try {
     const user: any = await User.findById(req.params.id).lean();
     if (!user) {
-      return res
-        .status(404)
-        .json({ success: false, message: "User not found" });
+      return res.status(404).json({ success: false, message: "User not found" });
     }
 
     const [
@@ -495,13 +595,14 @@ export const getAdminUserDetail = async (req: Request, res: Response) => {
       recentOrdersAsBuyer,
       recentOrdersAsSeller,
       gmvAsSeller,
+      wishlistDoc,
     ] = await Promise.all([
       user.role === "seller"
         ? Product.find({ seller: user._id })
             .sort({ createdAt: -1 })
             .limit(50)
             .select(
-              "name price images category subCategory brand stock isActive region fulfillmentLocation createdAt updatedAt"
+              "name title price images category subCategory brand stock isActive region currency createdAt"
             )
             .lean()
         : Promise.resolve([]),
@@ -515,15 +616,19 @@ export const getAdminUserDetail = async (req: Request, res: Response) => {
       Order.countDocuments({ seller: user._id }),
       Order.find({ buyer: user._id })
         .sort({ createdAt: -1 })
-        .limit(10)
+        .limit(25)
         .populate("seller", "name storeName")
-        .select("orderNumber orderStatus paymentStatus totalAmount createdAt")
+        .select(
+          "orderNumber orderStatus paymentStatus totalAmount subtotal shippingCost createdAt items"
+        )
         .lean(),
       Order.find({ seller: user._id })
         .sort({ createdAt: -1 })
-        .limit(10)
+        .limit(25)
         .populate("buyer", "name email")
-        .select("orderNumber orderStatus paymentStatus totalAmount createdAt")
+        .select(
+          "orderNumber orderStatus paymentStatus totalAmount subtotal shippingCost createdAt items"
+        )
         .lean(),
       user.role === "seller"
         ? Order.aggregate([
@@ -537,15 +642,30 @@ export const getAdminUserDetail = async (req: Request, res: Response) => {
             { $group: { _id: null, total: { $sum: "$totalAmount" } } },
           ])
         : Promise.resolve([]),
+      Wishlist.findOne({ user: user._id })
+        .populate({
+          path: "products",
+          select: "name title price images isActive",
+        })
+        .lean(),
     ]);
 
-    res.json({
+    const wishlistProducts = ((wishlistDoc as any)?.products || []).map(
+      (p: any) => ({
+        _id: p?._id,
+        productId: p?._id,
+        title: p?.name || p?.title || "Item",
+        name: p?.name || p?.title,
+        price: p?.price,
+        image: Array.isArray(p?.images) ? p.images[0] : p?.images,
+        isActive: p?.isActive,
+      })
+    );
+
+    return res.json({
       success: true,
       data: {
-        user: {
-          ...user,
-          lastSeenAt: user.lastSeenAt || user.updatedAt || user.createdAt,
-        },
+        user,
         products,
         stats: {
           productCount,
@@ -553,14 +673,19 @@ export const getAdminUserDetail = async (req: Request, res: Response) => {
           orderCountAsBuyer,
           orderCountAsSeller,
           orderCount: orderCountAsBuyer + orderCountAsSeller,
+          wishlistCount: wishlistProducts.length,
           gmv: Math.round((gmvAsSeller as any)?.[0]?.total || 0),
         },
         recentOrdersAsBuyer,
         recentOrdersAsSeller,
+        ordersAsBuyer: recentOrdersAsBuyer,
+        ordersAsSeller: recentOrdersAsSeller,
+        wishlist: wishlistProducts,
+        wishlists: wishlistProducts,
       },
     });
   } catch (error: any) {
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 

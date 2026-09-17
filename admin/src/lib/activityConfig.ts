@@ -1,97 +1,70 @@
 /**
- * User activity classification (based on lastSeenAt).
- * Thresholds are in hours from "now".
- *
- * Active  → seen within ACTIVE_HOURS
- * Quiet   → after active, within QUIET_HOURS
- * Idle    → after quiet, within IDLE_HOURS
- * Dormant → older than IDLE_HOURS
- * Unknown → no lastSeenAt (and no usable fallback)
+ * Activity from real platform actions — not browser presence.
+ * Prefer lastActivityAt from API (orders, cart, listings, showroom events).
  */
 export const ACTIVITY_CONFIG = {
-  /** Seen within this many hours → Active */
   ACTIVE_HOURS: 24,
-
-  /** After active, up to this many hours → Quiet */
-  QUIET_HOURS: 24 * 7, // 7 days
-
-  /** After quiet, up to this many hours → Idle */
-  IDLE_HOURS: 24 * 30, // 30 days
-
-  /**
-   * If lastSeenAt is missing, optionally use updatedAt as weak signal.
-   * Set false to only trust lastSeenAt.
-   */
-  FALLBACK_TO_UPDATED_AT: true,
-
+  QUIET_HOURS: 24 * 7,
+  IDLE_HOURS: 24 * 30,
+  /** Never treat lastSeenAt as commerce activity */
+  USE_PRESENCE_FALLBACK: false,
   labels: {
     active: "Active",
     quiet: "Quiet",
     idle: "Idle",
     dormant: "Dormant",
-    unknown: "Unknown",
+    unknown: "No activity",
   } as const,
 } as const;
 
 export type ActivityKey = "active" | "quiet" | "idle" | "dormant" | "unknown";
-
 export type ActivityTone = "green" | "warn" | "neutral" | "error";
 
 export type ActivityState = {
   key: ActivityKey;
   label: string;
   tone: ActivityTone;
-  /** Hours since last activity; null if unknown */
   hoursAgo: number | null;
-  /** Human relative string e.g. "2h ago", "3d ago" */
   relative: string;
-  /** Source field used */
-  source: "lastSeenAt" | "updatedAt" | "none";
+  source: "lastActivityAt" | "none";
+  kind?: string | null;
 };
 
-function hoursBetween(from: Date, to: Date): number {
+export const ACTIVITY_SPOT_OPTIONS = [
+  { value: "", label: "All activity" },
+  { value: "active", label: "Active (24h)" },
+  { value: "quiet", label: "Quiet (7d)" },
+  { value: "idle", label: "Idle (30d)" },
+  { value: "dormant", label: "Dormant (30d+)" },
+  { value: "new", label: "Joined 7d" },
+  { value: "unverified", label: "Sellers unverified" },
+  { value: "suspended", label: "Suspended sellers" },
+  { value: "no-region", label: "No marketplace region" },
+] as const;
+
+function hoursBetween(from: Date, to: Date) {
   return (to.getTime() - from.getTime()) / 3_600_000;
 }
 
 function formatRelative(hours: number): string {
   if (hours < 0) return "just now";
-  if (hours < 1) {
-    const mins = Math.max(1, Math.round(hours * 60));
-    return `${mins}m ago`;
-  }
-  if (hours < 24) {
-    const h = Math.round(hours);
-    return `${h}h ago`;
-  }
+  if (hours < 1) return `${Math.max(1, Math.round(hours * 60))}m ago`;
+  if (hours < 24) return `${Math.round(hours)}h ago`;
   const days = Math.floor(hours / 24);
   if (days < 30) return `${days}d ago`;
   const months = Math.floor(days / 30);
   if (months < 12) return `${months}mo ago`;
-  const years = Math.floor(months / 12);
-  return `${years}y ago`;
+  return `${Math.floor(months / 12)}y ago`;
 }
 
-/**
- * Classify a user from last activity timestamp.
- * Prefer lastSeenAt; optionally fall back to updatedAt.
- */
 export function getActivityState(opts: {
-  lastSeenAt?: string | Date | null;
-  updatedAt?: string | Date | null;
+  lastActivityAt?: string | Date | null;
+  lastActivityKind?: string | null;
   now?: Date;
 }): ActivityState {
   const now = opts.now ?? new Date();
   const cfg = ACTIVITY_CONFIG;
-
-  let source: ActivityState["source"] = "none";
-  let raw: string | Date | null | undefined = opts.lastSeenAt;
-
-  if (raw) {
-    source = "lastSeenAt";
-  } else if (cfg.FALLBACK_TO_UPDATED_AT && opts.updatedAt) {
-    raw = opts.updatedAt;
-    source = "updatedAt";
-  }
+  const raw = opts.lastActivityAt;
 
   if (!raw) {
     return {
@@ -99,75 +72,47 @@ export function getActivityState(opts: {
       label: cfg.labels.unknown,
       tone: "neutral",
       hoursAgo: null,
-      relative: "Never seen",
+      relative: "—",
       source: "none",
+      kind: null,
     };
   }
 
-  const seen = raw instanceof Date ? raw : new Date(raw);
-  if (Number.isNaN(seen.getTime())) {
+  const t = new Date(raw);
+  if (Number.isNaN(t.getTime())) {
     return {
       key: "unknown",
       label: cfg.labels.unknown,
       tone: "neutral",
       hoursAgo: null,
-      relative: "Invalid date",
-      source,
+      relative: "—",
+      source: "none",
+      kind: null,
     };
   }
 
-  const hours = hoursBetween(seen, now);
-  const relative = formatRelative(hours);
+  const hours = hoursBetween(t, now);
+  let key: ActivityKey = "dormant";
+  if (hours < cfg.ACTIVE_HOURS) key = "active";
+  else if (hours < cfg.QUIET_HOURS) key = "quiet";
+  else if (hours < cfg.IDLE_HOURS) key = "idle";
 
-  if (hours < cfg.ACTIVE_HOURS) {
-    return {
-      key: "active",
-      label: cfg.labels.active,
-      tone: "green",
-      hoursAgo: hours,
-      relative,
-      source,
-    };
-  }
-  if (hours < cfg.QUIET_HOURS) {
-    return {
-      key: "quiet",
-      label: cfg.labels.quiet,
-      tone: "warn",
-      hoursAgo: hours,
-      relative,
-      source,
-    };
-  }
-  if (hours < cfg.IDLE_HOURS) {
-    return {
-      key: "idle",
-      label: cfg.labels.idle,
-      tone: "neutral",
-      hoursAgo: hours,
-      relative,
-      source,
-    };
-  }
+  const tone: ActivityTone =
+    key === "active"
+      ? "green"
+      : key === "quiet"
+        ? "warn"
+        : key === "idle"
+          ? "neutral"
+          : "error";
+
   return {
-    key: "dormant",
-    label: cfg.labels.dormant,
-    tone: "error",
+    key,
+    label: cfg.labels[key],
+    tone,
     hoursAgo: hours,
-    relative,
-    source,
+    relative: formatRelative(hours),
+    source: "lastActivityAt",
+    kind: opts.lastActivityKind || null,
   };
 }
-
-/** Filter option values that match spot query on the API */
-export const ACTIVITY_SPOT_OPTIONS = [
-  { value: "", label: "All accounts" },
-  { value: "active", label: `Active (${ACTIVITY_CONFIG.ACTIVE_HOURS}h)` },
-  { value: "quiet", label: "Quiet (to 7d)" },
-  { value: "idle", label: "Idle (to 30d)" },
-  { value: "dormant", label: "Dormant (30d+)" },
-  { value: "unverified", label: "Unverified sellers" },
-  { value: "suspended", label: "Suspended sellers" },
-  { value: "new", label: "Joined last 7 days" },
-  { value: "no-region", label: "Missing region" },
-] as const;

@@ -2,16 +2,33 @@
 
 import Link from "next/link";
 import { useAuth } from "@clerk/nextjs";
-import { Poppins } from "next/font/google";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import { createPortal } from "react-dom";
 import {
   LayoutGrid,
   List,
   MessageSquare,
   RefreshCw,
+  Search,
   WifiOff,
   X,
+  MapPin,
+  Lock,
+  Database,
+  Activity,
+  Store,
+  User as UserIcon,
+  Heart,
+  Package,
+  ShoppingBag,
 } from "lucide-react";
 import { adminFetch } from "@/lib/api";
 import { OrbLoader } from "@/components/OrbLoader";
@@ -22,22 +39,25 @@ import {
   ErrorBlock,
   Input,
   Panel,
-  Select,
   cn,
 } from "@/components/ui";
 import { REGION_LIST } from "@/lib/region";
 import { FULFILLMENT_COUNTRIES, getStatesForCountry } from "@/lib/location";
 import {
-  ACTIVITY_CONFIG,
   ACTIVITY_SPOT_OPTIONS,
   getActivityState,
 } from "@/lib/activityConfig";
 
-const poppins = Poppins({
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
-  display: "swap",
-});
+const GATE_KEY = "plazore.admin.usersGate.v1";
+const EXPECTED_PASSWORD =
+  process.env.NEXT_PUBLIC_ADMIN_USERS_PASSWORD || "";
+const PAGE_SIZE = 25;
+
+/** Stacking: page content < floats < profile modal */
+const Z_FLOAT = 90;
+const Z_MODAL = 9999;
+
+type EnvKind = "development" | "production" | "unknown";
 
 type UserRow = {
   _id: string;
@@ -51,14 +71,10 @@ type UserRow = {
   storeName?: string;
   storeDescription?: string;
   businessGoal?: string;
-  storeLogo?: string;
-  storeBanner?: string;
   isSellerVerified?: boolean;
   isSellerSuspended?: boolean;
-  sellerAppliedAt?: string;
-  lastSeenAt?: string;
-  lastSeenPlatform?: "web" | "app" | "admin";
-  payout?: { bankName?: string; accountName?: string; accountNumber?: string };
+  lastActivityAt?: string | null;
+  lastActivityKind?: string | null;
   shippingDefaults?: {
     address?: {
       street?: string;
@@ -67,35 +83,63 @@ type UserRow = {
       zipCode?: string;
       country?: string;
     };
-    deliveryMethod?: string;
-    courierCompany?: string;
   };
   createdAt?: string;
-  updatedAt?: string;
   productStats?: { total: number; active: number };
+};
+
+type OrderLite = {
+  _id?: string;
+  orderNumber?: string;
+  orderStatus?: string;
+  paymentStatus?: string;
+  totalAmount?: number;
+  total?: number;
+  currency?: string;
+  createdAt?: string;
+  items?: { title?: string; name?: string; quantity?: number; image?: string }[];
+  seller?: { name?: string; storeName?: string };
+  buyer?: { name?: string; email?: string };
+};
+
+type WishlistLite = {
+  _id?: string;
+  productId?: string;
+  title?: string;
+  name?: string;
+  price?: number;
+  image?: string;
+  addedAt?: string;
+  createdAt?: string;
+};
+
+type ProductLite = {
+  _id?: string;
+  title?: string;
+  name?: string;
+  status?: string;
+  price?: number;
+  currency?: string;
+  createdAt?: string;
 };
 
 type UserDetail = {
   user: UserRow;
-  products: Array<{
-    _id: string;
-    name: string;
-    price: number;
-    isActive?: boolean;
-    region?: string;
-    stock?: number;
-    category?: string;
-  }>;
+  products?: ProductLite[];
   stats: {
     productCount: number;
     activeProductCount: number;
     orderCountAsBuyer: number;
     orderCountAsSeller: number;
     orderCount: number;
-    gmv: number;
+    wishlistCount?: number;
   };
-  recentOrdersAsBuyer?: any[];
-  recentOrdersAsSeller?: any[];
+  recentOrdersAsBuyer?: OrderLite[];
+  recentOrdersAsSeller?: OrderLite[];
+  ordersAsBuyer?: OrderLite[];
+  ordersAsSeller?: OrderLite[];
+  wishlist?: WishlistLite[];
+  wishlists?: WishlistLite[];
 };
 
 type Counts = { all: number; buyer: number; seller: number; admin: number };
@@ -110,41 +154,85 @@ type ActivityHealth = {
   dormant: number;
   unknown: number;
   total: number;
+  basis?: string;
 };
 
-function fmtDate(d?: string) {
+function detectEnvFromApi(): EnvKind {
+  const base =
+    process.env.NEXT_PUBLIC_API_URL ||
+    process.env.NEXT_PUBLIC_ADMIN_API_URL ||
+    "";
+  const lower = base.toLowerCase();
+  if (
+    lower.includes("localhost") ||
+    lower.includes("127.0.0.1") ||
+    lower.includes(":3000")
+  )
+    return "development";
+  if (lower.includes("plazore") || lower.startsWith("https://"))
+    return "production";
+  if (process.env.NODE_ENV === "development") return "development";
+  if (process.env.NODE_ENV === "production") return "production";
+  return "unknown";
+}
+
+function kindLabel(kind?: string | null) {
+  if (kind === "order_buyer") return "Placed an order";
+  if (kind === "order_seller") return "Received an order";
+  if (kind === "cart") return "Updated cart";
+  if (kind === "listing") return "Updated listing";
+  if (kind === "showroom") return "Showroom action";
+  return kind || "No commerce action yet";
+}
+
+function money(n?: number, currency?: string) {
+  if (n == null || Number.isNaN(n)) return "—";
+  try {
+    return new Intl.NumberFormat(undefined, {
+      style: currency ? "currency" : "decimal",
+      currency: currency || undefined,
+      maximumFractionDigits: 2,
+    }).format(n);
+  } catch {
+    return String(n);
+  }
+}
+
+function shortDate(d?: string) {
   if (!d) return "—";
   try {
-    return new Date(d).toLocaleString();
+    return new Date(d).toLocaleDateString();
   } catch {
     return "—";
   }
 }
 
-function Field({
-  label,
+function DarkSelect({
+  value,
+  onChange,
   children,
+  disabled,
+  className,
 }: {
-  label: string;
-  children: React.ReactNode;
+  value: string;
+  onChange: (v: string) => void;
+  children: ReactNode;
+  disabled?: boolean;
+  className?: string;
 }) {
   return (
-    <div>
-      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#737A86]">
-        {label}
-      </p>
-      <div className="mt-1 break-words text-sm text-[#F5F7FA]">
-        {children ?? "—"}
-      </div>
-    </div>
-  );
-}
-
-function SectionLabel({ children }: { children: React.ReactNode }) {
-  return (
-    <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#737A86]">
+    <select
+      value={value}
+      disabled={disabled}
+      onChange={(e) => onChange(e.target.value)}
+      style={{ colorScheme: "dark" }}
+      className={cn(
+        "h-10 w-full rounded-xl border border-white/12 bg-[#14181F] px-3 text-[13px] text-[#F5F7FA] outline-none focus:border-[#00E575]/40 disabled:opacity-40",
+        className,
+      )}
+    >
       {children}
-    </p>
+    </select>
   );
 }
 
@@ -155,14 +243,16 @@ function Avatar({
 }: {
   name?: string;
   image?: string;
-  size?: "sm" | "md" | "lg";
+  size?: "sm" | "md" | "lg" | "xl";
 }) {
   const dim =
-    size === "lg"
-      ? "h-14 w-14 text-lg"
-      : size === "sm"
-        ? "h-8 w-8 text-[11px]"
-        : "h-10 w-10 text-sm";
+    size === "xl"
+      ? "h-16 w-16 text-xl"
+      : size === "lg"
+        ? "h-14 w-14 text-lg"
+        : size === "sm"
+          ? "h-8 w-8 text-[11px]"
+          : "h-10 w-10 text-sm";
   if (image) {
     return (
       // eslint-disable-next-line @next/next/no-img-element
@@ -171,7 +261,7 @@ function Avatar({
         alt=""
         className={cn(
           dim,
-          "shrink-0 rounded-full border border-[#252A33] object-cover"
+          "shrink-0 rounded-full object-cover ring-1 ring-white/10",
         )}
       />
     );
@@ -180,7 +270,7 @@ function Avatar({
     <div
       className={cn(
         dim,
-        "flex shrink-0 items-center justify-center rounded-full border border-[#252A33] bg-[#171B22] font-semibold text-[#00E575]"
+        "flex shrink-0 items-center justify-center rounded-full bg-white/[0.06] font-semibold text-[#00E575] ring-1 ring-white/10",
       )}
     >
       {(name || "?").slice(0, 1).toUpperCase()}
@@ -188,7 +278,718 @@ function Avatar({
   );
 }
 
-export default function UsersPage() {
+/**
+ * Portaled to body → always sticks to viewport bottom-left.
+ * Never scrolls with the page. Below modal, above page chrome.
+ * Clear of PerformanceFloat (bottom-right).
+ */
+function ActivityFloat({
+  health,
+  hidden,
+}: {
+  health: ActivityHealth;
+  hidden?: boolean;
+}) {
+  const [mounted, setMounted] = useState(false);
+  const [open, setOpen] = useState(false);
+  const pct = Math.max(0, Math.min(100, health.score));
+  const accent =
+    health.tone === "green"
+      ? "#00E575"
+      : health.tone === "warn"
+        ? "#FBBF24"
+        : "#F87171";
+
+  useEffect(() => setMounted(true), []);
+
+  if (!mounted || hidden) return null;
+
+  return createPortal(
+    <div
+      className="pointer-events-none"
+      style={{
+        position: "fixed",
+        left: 16,
+        bottom: 20,
+        zIndex: Z_FLOAT,
+      }}
+    >
+      <div className="pointer-events-auto flex flex-col items-start gap-2 sm:ml-[72px]">
+        {open && (
+          <div
+            className="w-[min(calc(100vw-5rem),280px)] overflow-hidden rounded-2xl border border-white/12 bg-[#0A0D12]/96 shadow-[0_16px_48px_rgba(0,0,0,0.55)] backdrop-blur-xl"
+            style={{ boxShadow: `0 0 0 1px ${accent}22, 0 16px 48px rgba(0,0,0,0.55)` }}
+          >
+            <div
+              className="h-[2px] w-full"
+              style={{
+                background: `linear-gradient(90deg, ${accent}, #14B8A6, #3B82F6)`,
+              }}
+            />
+            <div className="p-3.5">
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-white/40">
+                    Commerce activity
+                  </p>
+                  <p className="mt-0.5 text-[14px] font-semibold text-[#F5F7FA]">
+                    {health.label}
+                  </p>
+                </div>
+                <span
+                  className="text-[18px] font-bold tabular-nums"
+                  style={{ color: accent }}
+                >
+                  {pct}
+                </span>
+              </div>
+              <div className="mt-2.5 h-1 overflow-hidden rounded-full bg-white/[0.06]">
+                <div
+                  className="h-full rounded-full transition-all duration-700"
+                  style={{
+                    width: `${pct}%`,
+                    background: `linear-gradient(90deg, ${accent}, #3B82F6)`,
+                  }}
+                />
+              </div>
+              <p className="mt-2.5 text-[10px] leading-snug text-white/35">
+                {health.active24h} active · {health.quiet7d} quiet ·{" "}
+                {health.dormant} dormant · {health.total} total
+              </p>
+              <p className="mt-1 text-[9px] text-white/25">
+                Orders / cart / listings — not last seen
+              </p>
+            </div>
+          </div>
+        )}
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          aria-label="Platform activity"
+          className="relative flex h-12 w-12 items-center justify-center rounded-full border border-white/14 bg-[#0A0D12]/96 backdrop-blur-md transition hover:border-white/25"
+          style={{ boxShadow: `0 0 24px ${accent}40` }}
+        >
+          <Activity className="h-5 w-5" style={{ color: accent }} />
+          <span
+            className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[10px] font-bold text-[#041412]"
+            style={{ background: accent }}
+          >
+            {pct}
+          </span>
+        </button>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+function UsersGate({ children }: { children: ReactNode }) {
+  const [unlocked, setUnlocked] = useState(false);
+  const [ready, setReady] = useState(false);
+  const [password, setPassword] = useState("");
+  const [err, setErr] = useState("");
+
+  useEffect(() => {
+    try {
+      if (sessionStorage.getItem(GATE_KEY) === "1") setUnlocked(true);
+    } catch {
+      /* ignore */
+    }
+    setReady(true);
+  }, []);
+
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!EXPECTED_PASSWORD) {
+      setErr("Set NEXT_PUBLIC_ADMIN_USERS_PASSWORD");
+      return;
+    }
+    if (password === EXPECTED_PASSWORD) {
+      try {
+        sessionStorage.setItem(GATE_KEY, "1");
+      } catch {
+        /* ignore */
+      }
+      setUnlocked(true);
+      setErr("");
+      return;
+    }
+    setErr("Incorrect password.");
+  };
+
+  if (!ready)
+    return (
+      <div className="flex min-h-[50vh] items-center justify-center text-white/35">
+        …
+      </div>
+    );
+
+  if (!unlocked) {
+    return (
+      <div className="mx-auto flex min-h-[70vh] max-w-md flex-col justify-center px-4 text-[#F5F7FA]">
+        <div className="rounded-2xl border border-white/10 bg-[#0E1116]/95 p-6 sm:p-8">
+          <div className="h-px bg-gradient-to-r from-[#00E575] via-[#14B8A6] to-[#3B82F6]" />
+          <Lock className="mt-5 h-5 w-5 text-[#00E575]" />
+          <h1 className="mt-3 text-2xl font-semibold">Users directory</h1>
+          <form onSubmit={submit} className="mt-6 space-y-3">
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Access password"
+              className="h-12 w-full rounded-xl border border-white/12 bg-[#14181F] px-4 text-sm outline-none focus:border-[#00E575]/45"
+            />
+            {err && <p className="text-xs text-red-400">{err}</p>}
+            <button
+              type="submit"
+              className="flex h-12 w-full items-center justify-center rounded-xl bg-gradient-to-r from-[#00E575] via-[#14B8A6] to-[#3B82F6] text-sm font-extrabold text-[#041412]"
+            >
+              Unlock
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+  return <>{children}</>;
+}
+
+function DossierBlock({
+  icon: Icon,
+  title,
+  children,
+  count,
+}: {
+  icon: typeof UserIcon;
+  title: string;
+  children: ReactNode;
+  count?: number;
+}) {
+  return (
+    <section className="rounded-2xl border border-white/[0.07] bg-white/[0.025] p-4">
+      <div className="mb-3 flex items-center gap-2">
+        <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-white/[0.05] text-[#00E575]">
+          <Icon className="h-3.5 w-3.5" />
+        </span>
+        <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/45">
+          {title}
+        </p>
+        {typeof count === "number" && (
+          <span className="ml-auto text-[11px] tabular-nums text-white/35">
+            {count}
+          </span>
+        )}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function Row({
+  label,
+  value,
+  mono,
+}: {
+  label: string;
+  value: ReactNode;
+  mono?: boolean;
+}) {
+  return (
+    <div className="border-b border-white/[0.04] py-2 last:border-0">
+      <span className="text-[10px] uppercase tracking-wide text-white/35">
+        {label}
+      </span>
+      <p
+        className={cn(
+          "mt-0.5 text-[13px] text-[#F5F7FA]",
+          mono && "break-all font-mono text-[11px] text-white/55",
+        )}
+      >
+        {value ?? "—"}
+      </p>
+    </div>
+  );
+}
+
+function OrderLine({ o, hrefBase = "/orders" }: { o: OrderLite; hrefBase?: string }) {
+  const plzId = o.orderNumber || o._id || "—";
+  const status = o.orderStatus || "—";
+  const pay = o.paymentStatus || "";
+  const amount = o.totalAmount ?? o.total;
+  const itemLabel =
+    o.items?.[0]?.name ||
+    o.items?.[0]?.title ||
+    (o.items?.length ? `${o.items.length} items` : null);
+  const party = o.seller?.storeName || o.seller?.name || o.buyer?.name;
+
+  return (
+    <Link
+      href={o._id ? `${hrefBase}?q=${encodeURIComponent(String(plzId))}` : hrefBase}
+      className="block border-b border-white/[0.04] py-2.5 last:border-0 transition hover:bg-white/[0.03]"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="font-mono text-[12px] font-semibold tracking-wide text-[#00E575]">
+            {plzId}
+          </p>
+          <p className="mt-0.5 truncate text-[12px] text-white/55">
+            {shortDate(o.createdAt)}
+            {" · "}
+            <span className="text-white/70">{status}</span>
+            {pay ? ` · ${pay}` : ""}
+            {party ? ` · ${party}` : ""}
+          </p>
+          {itemLabel ? (
+            <p className="mt-0.5 truncate text-[11px] text-white/35">{itemLabel}</p>
+          ) : null}
+        </div>
+        <p className="shrink-0 text-[13px] font-semibold tabular-nums text-[#F5F7FA]">
+          {money(amount, o.currency)}
+        </p>
+      </div>
+    </Link>
+  );
+}
+
+function WishlistLine({ w }: { w: WishlistLite }) {
+  return (
+    <div className="flex items-center gap-3 border-b border-white/[0.04] py-2 last:border-0">
+      {w.image ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={w.image}
+          alt=""
+          className="h-9 w-9 rounded-lg object-cover"
+        />
+      ) : (
+        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/[0.05]">
+          <Heart className="h-3.5 w-3.5 text-white/30" />
+        </div>
+      )}
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-[13px]">{w.title || w.name || "Item"}</p>
+        <p className="text-[11px] text-white/40">
+          {shortDate(w.addedAt || w.createdAt)}
+        </p>
+      </div>
+      {w.price != null && (
+        <span className="text-[12px] tabular-nums text-white/55">
+          {money(w.price)}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function ProductLine({ p }: { p: ProductLite }) {
+  return (
+    <div className="flex items-start justify-between gap-3 border-b border-white/[0.04] py-2 last:border-0">
+      <div className="min-w-0">
+        <p className="truncate text-[13px] font-medium">
+          {p.title || p.name || "Listing"}
+        </p>
+        <p className="mt-0.5 text-[11px] text-white/40">
+          {shortDate(p.createdAt)}
+          {p.status ? ` · ${p.status}` : ""}
+        </p>
+      </div>
+      <p className="shrink-0 text-[12px] tabular-nums text-white/60">
+        {money(p.price, p.currency)}
+      </p>
+    </div>
+  );
+}
+
+function UserProfileModal({
+  open,
+  onClose,
+  detail,
+  loading,
+  contactOpen,
+  setContactOpen,
+  contactSubject,
+  setContactSubject,
+  contactMessage,
+  setContactMessage,
+  contactAllowsReply,
+  setContactAllowsReply,
+  contactBusy,
+  contactError,
+  contactSuccess,
+  onSend,
+}: {
+  open: boolean;
+  onClose: () => void;
+  detail: UserDetail | null;
+  loading: boolean;
+  contactOpen: boolean;
+  setContactOpen: (v: boolean) => void;
+  contactSubject: string;
+  setContactSubject: (v: string) => void;
+  contactMessage: string;
+  setContactMessage: (v: string) => void;
+  contactAllowsReply: boolean;
+  setContactAllowsReply: (v: boolean) => void;
+  contactBusy: boolean;
+  contactError: string;
+  contactSuccess: boolean;
+  onSend: () => void;
+}) {
+  const [mounted, setMounted] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const u = detail?.user;
+  const act = u
+    ? getActivityState({
+        lastActivityAt: u.lastActivityAt,
+        lastActivityKind: u.lastActivityKind,
+      })
+    : null;
+
+  const buyerOrders =
+    detail?.ordersAsBuyer || detail?.recentOrdersAsBuyer || [];
+  const sellerOrders =
+    detail?.ordersAsSeller || detail?.recentOrdersAsSeller || [];
+  const wishlist = detail?.wishlist || detail?.wishlists || [];
+  const products = detail?.products || [];
+
+  useEffect(() => setMounted(true), []);
+
+  useEffect(() => {
+    if (!open) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    requestAnimationFrame(() => {
+      scrollRef.current?.scrollTo({ top: 0 });
+    });
+  }, [open, detail?.user?._id]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
+
+  if (!mounted) return null;
+
+  return createPortal(
+    <div
+      className={cn(
+        "flex items-end justify-center sm:items-center sm:p-6",
+        open ? "pointer-events-auto" : "pointer-events-none",
+      )}
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: Z_MODAL,
+      }}
+      aria-hidden={!open}
+    >
+      <button
+        type="button"
+        aria-label="Close"
+        onClick={onClose}
+        className={cn(
+          "absolute inset-0 bg-black/70 transition-opacity duration-300",
+          open ? "opacity-100" : "opacity-0",
+        )}
+      />
+
+      <div
+        role="dialog"
+        aria-modal="true"
+        className={cn(
+          "relative z-10 flex w-full max-w-lg flex-col max-h-[min(92dvh,900px)]",
+          "rounded-t-3xl border border-white/10 bg-[#0A0D12] shadow-[0_40px_100px_rgba(0,0,0,0.7)] sm:rounded-3xl",
+          "transition-all duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]",
+          open
+            ? "translate-y-0 scale-100 opacity-100"
+            : "translate-y-10 scale-[0.97] opacity-0",
+        )}
+      >
+        <div className="h-[2px] shrink-0 bg-gradient-to-r from-[#00E575] via-[#14B8A6] to-[#3B82F6]" />
+
+        <div className="flex h-12 shrink-0 items-center justify-between px-4 sm:px-5">
+          <p className="text-[10px] font-semibold tracking-[0.2em] text-[#00E575]">
+            PROFILE
+          </p>
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex h-8 w-8 items-center justify-center rounded-full bg-white/5 text-white/50 hover:text-white"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div
+          ref={scrollRef}
+          className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-8 sm:px-5"
+        >
+          {loading && !detail && <OrbLoader label="Loading profile…" />}
+
+          {detail && u && act && (
+            <div className="space-y-4">
+              <div className="flex items-start gap-3.5 pt-1">
+                <Avatar name={u.name} image={u.image} size="xl" />
+                <div className="min-w-0 flex-1">
+                  <h2 className="truncate text-[18px] font-semibold sm:text-[20px]">
+                    {u.name || "—"}
+                  </h2>
+                  <p className="truncate text-[13px] text-white/45">{u.email}</p>
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    <Badge
+                      tone={
+                        u.role === "seller"
+                          ? "green"
+                          : u.role === "admin"
+                            ? "blue"
+                            : "neutral"
+                      }
+                    >
+                      {u.role}
+                    </Badge>
+                    <Badge tone="neutral">
+                      {u.marketplaceRegion || "No region"}
+                    </Badge>
+                    <Badge tone={act.tone}>{act.label}</Badge>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                {(
+                  [
+                    {
+                      label: "Last action",
+                      value: act.relative,
+                      sub: kindLabel(act.kind),
+                    },
+                    {
+                      label: "Joined",
+                      value: shortDate(u.createdAt),
+                      sub: "",
+                    },
+                    {
+                      label: "Bought",
+                      value: String(detail.stats.orderCountAsBuyer ?? 0),
+                      sub: "orders",
+                    },
+                    {
+                      label: "Sold",
+                      value: String(detail.stats.orderCountAsSeller ?? 0),
+                      sub: "orders",
+                    },
+                  ] as const
+                ).map((m) => (
+                  <div
+                    key={m.label}
+                    className="rounded-xl border border-white/[0.07] bg-white/[0.03] px-2.5 py-2.5"
+                  >
+                    <p className="text-[9px] font-semibold uppercase text-white/35">
+                      {m.label}
+                    </p>
+                    <p className="mt-1 truncate text-[13px] font-semibold tabular-nums">
+                      {m.value}
+                    </p>
+                    {m.sub ? (
+                      <p className="mt-0.5 truncate text-[10px] text-white/30">
+                        {m.sub}
+                      </p>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+
+              <DossierBlock icon={UserIcon} title="Identity">
+                <Row label="Phone" value={u.phone || "—"} />
+                <Row label="User ID" value={u._id} mono />
+                <Row label="Clerk" value={u.clerkId || "—"} mono />
+              </DossierBlock>
+
+              <DossierBlock icon={MapPin} title="Address">
+                <p className="text-[13px] leading-relaxed text-white/75">
+                  {[
+                    u.shippingDefaults?.address?.street,
+                    u.shippingDefaults?.address?.city,
+                    u.shippingDefaults?.address?.state,
+                    u.shippingDefaults?.address?.zipCode,
+                    u.shippingDefaults?.address?.country,
+                  ]
+                    .filter(Boolean)
+                    .join(", ") || "—"}
+                </p>
+              </DossierBlock>
+
+              {(u.role === "seller" || u.storeName) && (
+                <DossierBlock icon={Store} title="Storefront">
+                  <Row label="Store" value={u.storeName || "—"} />
+                  <Row label="Description" value={u.storeDescription || "—"} />
+                </DossierBlock>
+              )}
+
+              <DossierBlock
+                icon={ShoppingBag}
+                title="Orders as buyer"
+                count={buyerOrders.length}
+              >
+                {buyerOrders.length === 0 ? (
+                  <p className="text-[12px] text-white/40">No purchases yet.</p>
+                ) : (
+                  buyerOrders.map((o, i) => (
+                    <OrderLine key={o._id || `b-${i}`} o={o} />
+                  ))
+                )}
+              </DossierBlock>
+
+              <DossierBlock
+                icon={Package}
+                title="Orders as seller"
+                count={sellerOrders.length}
+              >
+                {sellerOrders.length === 0 ? (
+                  <p className="text-[12px] text-white/40">No sales yet.</p>
+                ) : (
+                  sellerOrders.map((o, i) => (
+                    <OrderLine key={o._id || `s-${i}`} o={o} />
+                  ))
+                )}
+              </DossierBlock>
+
+              <DossierBlock
+                icon={Heart}
+                title="Wishlist"
+                count={wishlist.length}
+              >
+                {wishlist.length === 0 ? (
+                  <p className="text-[12px] text-white/40">Empty wishlist.</p>
+                ) : (
+                  wishlist.map((w, i) => (
+                    <WishlistLine key={w._id || w.productId || `w-${i}`} w={w} />
+                  ))
+                )}
+              </DossierBlock>
+
+              {(u.role === "seller" || products.length > 0) && (
+                <DossierBlock
+                  icon={Store}
+                  title="Listings"
+                  count={products.length}
+                >
+                  {products.length === 0 ? (
+                    <p className="text-[12px] text-white/40">No listings.</p>
+                  ) : (
+                    products.map((p, i) => (
+                      <ProductLine key={p._id || `p-${i}`} p={p} />
+                    ))
+                  )}
+                </DossierBlock>
+              )}
+
+              <DossierBlock icon={Activity} title="Commerce signal">
+                <Row label="State" value={act.label} />
+                <Row label="When" value={act.relative} />
+                <Row label="Kind" value={kindLabel(act.kind)} />
+              </DossierBlock>
+
+              <DossierBlock icon={MessageSquare} title="Reach out">
+                {contactSuccess ? (
+                  <p className="text-sm text-[#00E575]">Sent via Plazore.</p>
+                ) : !contactOpen ? (
+                  <Button
+                    className="w-full gap-2 rounded-xl"
+                    onClick={() => {
+                      setContactOpen(true);
+                      setContactSubject(
+                        `Message from Plazore · ${u.storeName || u.name || "Account"}`,
+                      );
+                    }}
+                  >
+                    <MessageSquare className="h-4 w-4" />
+                    Contact user
+                  </Button>
+                ) : (
+                  <div className="space-y-2">
+                    <Input
+                      className="rounded-xl border-white/12 bg-[#14181F]"
+                      value={contactSubject}
+                      onChange={(e) => setContactSubject(e.target.value)}
+                      placeholder="Subject"
+                    />
+                    <textarea
+                      value={contactMessage}
+                      onChange={(e) => setContactMessage(e.target.value)}
+                      rows={3}
+                      className="w-full rounded-xl border border-white/12 bg-[#14181F] px-3 py-2 text-sm outline-none focus:border-[#00E575]/40"
+                      placeholder="Message…"
+                    />
+                    <label className="flex items-center gap-2 text-xs text-white/50">
+                      <input
+                        type="checkbox"
+                        checked={contactAllowsReply}
+                        onChange={(e) =>
+                          setContactAllowsReply(e.target.checked)
+                        }
+                      />
+                      Allow reply
+                    </label>
+                    {contactError && (
+                      <p className="text-xs text-red-400">{contactError}</p>
+                    )}
+                    <div className="flex gap-2">
+                      <Button
+                        className="flex-1 rounded-xl"
+                        disabled={contactBusy}
+                        onClick={onSend}
+                      >
+                        {contactBusy ? "…" : "Send"}
+                      </Button>
+                      <Button
+                        tone="ghost"
+                        className="rounded-xl"
+                        onClick={() => setContactOpen(false)}
+                      >
+                        Cancel
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </DossierBlock>
+
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <Link
+                  href={`/moderation?userId=${u._id}`}
+                  className="inline-flex h-11 flex-1 items-center justify-center rounded-xl bg-[#00E575] text-sm font-semibold text-[#041412]"
+                >
+                  Moderation
+                </Link>
+                <Link
+                  href={`/contact?userId=${u._id}`}
+                  className="inline-flex h-11 flex-1 items-center justify-center rounded-xl border border-white/12 text-sm text-white/55"
+                >
+                  Contact threads
+                </Link>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+function UsersDirectory() {
   const { getToken } = useAuth();
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -197,6 +998,10 @@ export default function UsersPage() {
   const deepUserId = (searchParams.get("userId") || "").trim();
   const deepRole = (searchParams.get("role") || "").trim();
   const deepOpenedRef = useRef<string | null>(null);
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  const loadingMoreRef = useRef(false);
+
+  const clientEnv = useMemo(() => detectEnvFromApi(), []);
 
   const [mounted, setMounted] = useState(false);
   const [offline, setOffline] = useState(false);
@@ -204,11 +1009,14 @@ export default function UsersPage() {
   const [role, setRole] = useState(
     deepRole === "buyer" || deepRole === "seller" || deepRole === "admin"
       ? deepRole
-      : ""
+      : "",
   );
   const [region, setRegion] = useState("");
   const [country, setCountry] = useState("");
   const [state, setState] = useState("");
+  const [city, setCity] = useState("");
+  const [zip, setZip] = useState("");
+  const [street, setStreet] = useState("");
   const [sort, setSort] = useState("newest");
   const [spot, setSpot] = useState("");
   const [view, setView] = useState<"list" | "grid">("list");
@@ -226,13 +1034,14 @@ export default function UsersPage() {
   const [pages, setPages] = useState(1);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState("");
-  const [stale, setStale] = useState(false);
+  const [apiEnv, setApiEnv] = useState<EnvKind | null>(null);
 
   const [openId, setOpenId] = useState<string | null>(null);
   const [detail, setDetail] = useState<UserDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
-  const [paneOpen, setPaneOpen] = useState(false);
+  const [modalOpen, setModalOpen] = useState(false);
 
   const [contactOpen, setContactOpen] = useState(false);
   const [contactSubject, setContactSubject] = useState("");
@@ -242,17 +1051,19 @@ export default function UsersPage() {
   const [contactError, setContactError] = useState("");
   const [contactSuccess, setContactSuccess] = useState(false);
 
-  const cacheRef = useRef<{
-    items: UserRow[];
-    counts: Counts;
-    health: ActivityHealth | null;
-    total: number;
-    pages: number;
-    page: number;
-  } | null>(null);
-
-  const showOffline = mounted && offline;
   const states = useMemo(() => getStatesForCountry(country), [country]);
+  const showOffline = mounted && offline;
+  const env: EnvKind = apiEnv || clientEnv;
+  const envTone =
+    env === "production" ? "error" : env === "development" ? "warn" : "neutral";
+  const envLabel =
+    env === "production"
+      ? "Production data"
+      : env === "development"
+        ? "Development data"
+        : "Environment unknown";
+
+  const hasMore = page < pages;
 
   useEffect(() => {
     setMounted(true);
@@ -267,222 +1078,189 @@ export default function UsersPage() {
     };
   }, []);
 
-  useEffect(() => {
-    if (
-      deepRole === "buyer" ||
-      deepRole === "seller" ||
-      deepRole === "admin"
-    ) {
-      setRole(deepRole);
-    }
-  }, [deepRole]);
+  const buildParams = useCallback(
+    (p: number) => {
+      const params = new URLSearchParams({
+        page: String(p),
+        limit: String(PAGE_SIZE),
+        sort,
+      });
+      if (role) params.set("role", role);
+      if (region) params.set("region", region);
+      if (country) params.set("country", country);
+      if (state) params.set("state", state);
+      if (city.trim()) params.set("city", city.trim());
+      if (zip.trim()) params.set("zip", zip.trim());
+      if (street.trim()) params.set("street", street.trim());
+      if (spot) params.set("spot", spot);
+      if (q.trim()) params.set("q", q.trim());
+      return params;
+    },
+    [role, region, country, state, city, zip, street, sort, spot, q],
+  );
 
   const load = useCallback(
     async (p = 1) => {
-      if (typeof navigator !== "undefined" && !navigator.onLine) {
-        setOffline(true);
-        if (cacheRef.current) {
-          setItems(cacheRef.current.items);
-          setCounts(cacheRef.current.counts);
-          setHealth(cacheRef.current.health);
-          setTotal(cacheRef.current.total);
-          setPages(cacheRef.current.pages);
-          setPage(cacheRef.current.page);
-          setStale(true);
-          setError(
-            "You’re offline. Showing the last loaded list — reconnect to refresh."
-          );
-          setLoading(false);
-          return;
-        }
-        setError("You’re offline. Connect to load accounts.");
-        setLoading(false);
-        return;
-      }
-
       try {
         setLoading(true);
         setError("");
-        setStale(false);
         const token = await getToken();
         if (!token) {
-          setError("Session expired. Sign in again.");
+          setError("Session expired.");
           setLoading(false);
           return;
         }
-
-        const params = new URLSearchParams({
-          page: String(p),
-          limit: "20",
-          sort,
-        });
-        if (role) params.set("role", role);
-        if (region) params.set("region", region);
-        if (country) params.set("country", country);
-        if (state) params.set("state", state);
-        if (spot) params.set("spot", spot);
-        if (q.trim()) params.set("q", q.trim());
-
-        const json = await adminFetch<any>(`/admin/users?${params}`, token);
-        const nextItems = json.data || [];
-        const nextCounts = json.counts || {
-          all: 0,
-          buyer: 0,
-          seller: 0,
-          admin: 0,
-        };
-        const nextHealth = json.activityHealth || null;
-        const nextTotal = json.pagination?.total || 0;
-        const nextPages = json.pagination?.pages || 1;
-        const nextPage = json.pagination?.page || p;
-
-        setItems(nextItems);
-        setCounts(nextCounts);
-        setHealth(nextHealth);
-        setTotal(nextTotal);
-        setPages(nextPages);
-        setPage(nextPage);
-
-        cacheRef.current = {
-          items: nextItems,
-          counts: nextCounts,
-          health: nextHealth,
-          total: nextTotal,
-          pages: nextPages,
-          page: nextPage,
-        };
-      } catch (e: any) {
-        if (cacheRef.current) {
-          setItems(cacheRef.current.items);
-          setCounts(cacheRef.current.counts);
-          setHealth(cacheRef.current.health);
-          setTotal(cacheRef.current.total);
-          setPages(cacheRef.current.pages);
-          setPage(cacheRef.current.page);
-          setStale(true);
-          setError(
-            e?.message
-              ? `${e.message} — showing last successful load.`
-              : "Request failed — showing last successful load."
-          );
-        } else {
-          setError(e?.message || "Failed to load users");
+        const json = await adminFetch<any>(
+          `/admin/users?${buildParams(p)}`,
+          token,
+        );
+        setItems(json.data || []);
+        setCounts(json.counts || { all: 0, buyer: 0, seller: 0, admin: 0 });
+        setHealth(json.activityHealth || null);
+        setTotal(json.pagination?.total || 0);
+        setPages(json.pagination?.pages || 1);
+        setPage(json.pagination?.page || p);
+        if (json.environment || json.meta?.environment) {
+          setApiEnv((json.environment || json.meta.environment) as EnvKind);
         }
+      } catch (e: any) {
+        setError(e?.message || "Failed to load users");
       } finally {
         setLoading(false);
       }
     },
-    [getToken, role, region, country, state, sort, spot, q]
+    [getToken, buildParams],
   );
+
+  const loadMore = useCallback(async () => {
+    if (loadingMoreRef.current || !hasMore || offline) return;
+    loadingMoreRef.current = true;
+    setLoadingMore(true);
+    try {
+      const next = page + 1;
+      const token = await getToken();
+      if (!token) return;
+      const json = await adminFetch<any>(
+        `/admin/users?${buildParams(next)}`,
+        token,
+      );
+      const batch: UserRow[] = json.data || [];
+      setItems((prev) => {
+        const seen = new Set(prev.map((u) => u._id));
+        return [...prev, ...batch.filter((u) => !seen.has(u._id))];
+      });
+      setPages(json.pagination?.pages || pages);
+      setPage(json.pagination?.page || next);
+      setTotal(json.pagination?.total || total);
+    } catch {
+      /* keep */
+    } finally {
+      setLoadingMore(false);
+      loadingMoreRef.current = false;
+    }
+  }, [getToken, buildParams, hasMore, offline, page, pages, total]);
 
   const loadDetail = useCallback(
     async (id: string) => {
-      if (typeof navigator !== "undefined" && !navigator.onLine) {
-        setError("You’re offline. Account detail needs a connection.");
-        setDetailLoading(false);
-        return;
-      }
       try {
         setDetailLoading(true);
         const token = await getToken();
-        if (!token) {
-          setError("Session expired. Sign in again.");
-          return;
-        }
+        if (!token) return;
         const json = await adminFetch<{ data: UserDetail }>(
           `/admin/users/${id}`,
-          token
+          token,
         );
         setDetail(json.data);
       } catch (e: any) {
-        setError(e?.message || "Could not load account detail");
+        setError(e?.message || "Could not load account");
       } finally {
         setDetailLoading(false);
       }
     },
-    [getToken]
+    [getToken],
   );
 
-  const openPane = useCallback(
+  const openProfile = useCallback(
     async (id: string) => {
       setOpenId(id);
       setDetail(null);
-      setPaneOpen(true);
+      setModalOpen(true);
       setContactOpen(false);
-      setContactSubject("");
-      setContactMessage("");
-      setContactAllowsReply(true);
-      setContactError("");
       setContactSuccess(false);
+      setContactError("");
+      const params = new URLSearchParams(searchParams.toString());
+      params.set("userId", id);
+      router.replace(`${pathname}?${params.toString()}`, { scroll: false });
       await loadDetail(id);
     },
-    [loadDetail]
+    [loadDetail, pathname, router, searchParams],
   );
 
-  const closePane = useCallback(() => {
-    setPaneOpen(false);
-    setContactOpen(false);
+  const closeProfile = useCallback(() => {
+    setModalOpen(false);
     deepOpenedRef.current = null;
-    if (deepUserId) {
-      router.replace(pathname);
-    }
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("userId");
+    const qs = params.toString();
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
     window.setTimeout(() => {
       setOpenId(null);
       setDetail(null);
     }, 280);
-  }, [deepUserId, pathname, router]);
+  }, [pathname, router, searchParams]);
 
   useEffect(() => {
     if (!mounted || !deepUserId) return;
     if (deepOpenedRef.current === deepUserId) return;
     deepOpenedRef.current = deepUserId;
-    void openPane(deepUserId);
-  }, [mounted, deepUserId, openPane]);
+    void openProfile(deepUserId);
+  }, [mounted, deepUserId, openProfile]);
 
   useEffect(() => {
     if (!mounted) return;
     load(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mounted, role, region, country, state, sort, spot]);
+  }, [mounted, role, region, country, state, city, zip, street, sort, spot]);
+
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) void loadMore();
+      },
+      { rootMargin: "240px" },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [loadMore, items.length]);
 
   const clearFilters = () => {
     setRole("");
     setRegion("");
     setCountry("");
     setState("");
+    setCity("");
+    setZip("");
+    setStreet("");
     setSort("newest");
     setSpot("");
     setQ("");
   };
 
   const startContactThroughPlazore = async () => {
-    if (!detail?.user || contactBusy || showOffline) return;
-
+    if (!detail?.user || contactBusy) return;
     const user = detail.user;
     const msg = contactMessage.trim();
     if (!msg) {
       setContactError("Write a short message.");
       return;
     }
-    const wordCount = msg.split(/\s+/).filter(Boolean).length;
-    if (wordCount > 300) {
-      setContactError(
-        `Message must be 300 words or fewer (you wrote ${wordCount}).`
-      );
-      return;
-    }
-
     try {
       setContactBusy(true);
       setContactError("");
-      setContactSuccess(false);
-
       const token = await getToken();
-      if (!token) {
-        setContactError("Session expired. Sign in again.");
-        return;
-      }
-
+      if (!token) return;
       await adminFetch(`/admin/contacts/reach-out`, token, {
         method: "POST",
         body: JSON.stringify({
@@ -498,7 +1276,6 @@ export default function UsersPage() {
           allowsReply: contactAllowsReply,
         }),
       });
-
       setContactSuccess(true);
       setContactMessage("");
     } catch (e: any) {
@@ -508,109 +1285,51 @@ export default function UsersPage() {
     }
   };
 
-  const u = detail?.user;
-  const detailActivity = u
-    ? getActivityState({
-        lastSeenAt: u.lastSeenAt,
-        updatedAt: u.updatedAt,
-      })
-    : null;
-
-  const filtersActive = !!(
-    role ||
-    region ||
-    country ||
-    state ||
-    spot ||
-    q.trim()
-  );
-
   return (
-    <div
-      className={cn(
-        poppins.className,
-        "relative min-h-[70vh] pb-28 text-[#F5F7FA]"
-      )}
-    >
+    <div className="relative mx-auto max-w-6xl pb-28 text-[#F5F7FA]">
       {showOffline && (
-        <div className="mb-4 flex items-start gap-3 border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+        <div className="mb-4 flex gap-3 rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
           <WifiOff className="mt-0.5 h-4 w-4 shrink-0" />
-          <div>
-            <p className="font-semibold">You’re offline</p>
-            <p className="mt-0.5 text-xs text-amber-100/80">
-              Search and detail require a connection.
-              {stale
-                ? " Showing the last list we loaded."
-                : " Reconnect to load accounts."}
-            </p>
-          </div>
+          Offline — reconnect to load more.
         </div>
       )}
 
-      <header className="mb-6 border-b border-[#252A33] pb-5">
-        <div className="flex flex-wrap items-center gap-2">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-[#00E575]">
-            Directory
-          </p>
-          <span
-            className={cn(
-              "inline-flex items-center gap-1.5 border px-2 py-0.5 text-[10px] font-medium",
-              showOffline
-                ? "border-amber-500/30 bg-amber-500/10 text-amber-200"
-                : "border-[#00E575]/25 bg-[#00E575]/10 text-[#00E575]"
-            )}
-          >
-            <span
-              className={cn(
-                "h-1.5 w-1.5 rounded-full",
-                showOffline ? "bg-amber-400" : "bg-[#00E575]"
-              )}
-            />
-            {showOffline ? "Offline" : "Live"}
-          </span>
-        </div>
+      <header className="mb-6">
+        <p className="text-[11px] font-semibold tracking-[0.2em] text-[#00E575]">
+          DIRECTORY
+        </p>
         <div className="mt-2 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <h1 className="text-[26px] font-semibold leading-none tracking-tight sm:text-[28px]">
+            <h1 className="text-[28px] font-semibold tracking-tight sm:text-[32px]">
               Users & sellers
             </h1>
-            <p className="mt-2 max-w-xl text-sm leading-relaxed text-[#A7ADB8]">
-              Search, filter, and inspect accounts. Activity is computed from{" "}
-              <span className="text-[#F5F7FA]">lastSeenAt</span>
-              {ACTIVITY_CONFIG.FALLBACK_TO_UPDATED_AT
-                ? " (falls back to updatedAt if missing)"
-                : ""}
-              . Thresholds: active {ACTIVITY_CONFIG.ACTIVE_HOURS}h · quiet{" "}
-              {ACTIVITY_CONFIG.QUIET_HOURS / 24}d · idle{" "}
-              {ACTIVITY_CONFIG.IDLE_HOURS / 24}d+.
+            <p className="mt-2 max-w-xl text-[13.5px] text-white/50">
+              Scroll loads more. Profile is a viewport popup. Activity float
+              stays pinned bottom-left.
             </p>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <p className="text-xs tabular-nums text-[#737A86]">
-              <span className="text-[#F5F7FA]">{total.toLocaleString()}</span> in
-              view ·{" "}
-              <span className="text-[#F5F7FA]">
-                {counts.all.toLocaleString()}
-              </span>{" "}
-              total
-              {stale ? " · cached" : ""}
-            </p>
-            <Button
-              tone="ghost"
-              className="h-9 gap-1.5 text-xs"
-              disabled={loading || showOffline}
-              onClick={() => load(page)}
-            >
-              <RefreshCw
-                className={cn("h-3.5 w-3.5", loading && "animate-spin")}
-              />
-              Refresh
-            </Button>
-          </div>
+          <Button
+            tone="ghost"
+            className="h-10 gap-1.5 rounded-full border border-white/12 bg-[#14181F] text-xs"
+            disabled={loading || showOffline}
+            onClick={() => load(1)}
+          >
+            <RefreshCw className={cn("h-3.5 w-3.5", loading && "animate-spin")} />
+            Refresh · {total.toLocaleString()}
+          </Button>
+        </div>
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          <Badge tone={envTone as any}>
+            <Database className="mr-1 inline h-3 w-3" />
+            {envLabel}
+          </Badge>
+          <Badge tone="blue">
+            Loaded {items.length.toLocaleString()} / {total.toLocaleString()}
+          </Badge>
         </div>
       </header>
 
-      <div className="mb-4 grid grid-cols-2 gap-px overflow-hidden border border-[#252A33] bg-[#252A33] sm:grid-cols-4">
+      <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
         {(
           [
             ["All", "", counts.all],
@@ -622,103 +1341,98 @@ export default function UsersPage() {
           <button
             key={label}
             type="button"
-            disabled={showOffline && !cacheRef.current}
             onClick={() => setRole(value)}
             className={cn(
-              "bg-[#11141A] px-3 py-3.5 text-left transition sm:px-4",
-              role === value &&
-                "bg-[#041412] ring-1 ring-inset ring-[#00E575]/30"
+              "rounded-2xl border px-3 py-3.5 text-left transition",
+              role === value
+                ? "border-[#00E575]/35 bg-[#00E575]/10"
+                : "border-white/[0.08] bg-white/[0.03] hover:border-white/15",
             )}
           >
-            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#737A86]">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/40">
               {label}
             </p>
-            <p className="mt-1.5 text-[22px] font-semibold tabular-nums leading-none">
+            <p className="mt-1.5 text-[22px] font-semibold tabular-nums">
               {Number(n).toLocaleString()}
             </p>
           </button>
         ))}
       </div>
 
-      <Panel className="mb-4 overflow-hidden">
-        <div className="flex flex-col gap-3 border-b border-[#252A33] px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#737A86]">
-            Filters
+      <Panel className="mb-4 overflow-hidden rounded-2xl border-white/[0.08] bg-white/[0.03]">
+        <div className="flex items-center justify-between border-b border-white/[0.06] px-4 py-3">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/40">
+            Search & location
           </p>
-          {filtersActive && (
-            <button
-              type="button"
-              onClick={clearFilters}
-              className="text-xs font-medium text-[#A7ADB8] hover:text-[#00E575]"
-            >
-              Clear all
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={clearFilters}
+            className="text-xs text-white/45 hover:text-[#00E575]"
+          >
+            Clear all
+          </button>
         </div>
-        <div className="flex flex-col gap-3 p-4">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
-            <Input
-              placeholder="Name, email, store, phone, region, or user ID…"
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && !showOffline && load(1)}
-              className="lg:max-w-md"
-              disabled={showOffline && !cacheRef.current}
-            />
-            <Button onClick={() => load(1)} disabled={loading || showOffline}>
-              {loading ? "Searching…" : "Search"}
+        <div className="space-y-3 p-4">
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <div className="relative min-w-0 flex-1">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/30" />
+              <Input
+                className="rounded-xl border-white/12 bg-[#14181F] pl-10"
+                placeholder="Name, email, store, phone, city, zip, street, ID…"
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && !showOffline && load(1)}
+              />
+            </div>
+            <Button
+              className="h-10 rounded-xl"
+              onClick={() => load(1)}
+              disabled={loading || showOffline}
+            >
+              Search
             </Button>
-            <div className="flex gap-1 border border-[#252A33] lg:ml-auto">
+            <div className="flex overflow-hidden rounded-xl border border-white/12">
               <button
                 type="button"
-                aria-label="List view"
                 onClick={() => setView("list")}
                 className={cn(
-                  "flex h-10 w-10 items-center justify-center transition",
+                  "flex h-10 w-10 items-center justify-center",
                   view === "list"
                     ? "bg-[#00E575] text-[#041412]"
-                    : "text-[#A7ADB8] hover:text-[#F5F7FA]"
+                    : "text-white/50",
                 )}
               >
                 <List className="h-4 w-4" />
               </button>
               <button
                 type="button"
-                aria-label="Grid view"
                 onClick={() => setView("grid")}
                 className={cn(
-                  "flex h-10 w-10 items-center justify-center transition",
+                  "flex h-10 w-10 items-center justify-center",
                   view === "grid"
                     ? "bg-[#00E575] text-[#041412]"
-                    : "text-[#A7ADB8] hover:text-[#F5F7FA]"
+                    : "text-white/50",
                 )}
               >
                 <LayoutGrid className="h-4 w-4" />
               </button>
             </div>
           </div>
-
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-5">
-            <Select
-              value={region}
-              onChange={(e) => setRegion(e.target.value)}
-              disabled={showOffline && !cacheRef.current}
-            >
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
+            <DarkSelect value={region} onChange={setRegion}>
               <option value="">All regions</option>
               {REGION_LIST.map((r: any) => (
                 <option key={r.code} value={r.code}>
-                  {r.name} ({r.code})
+                  {r.name}
                 </option>
               ))}
-            </Select>
-
-            <Select
+            </DarkSelect>
+            <DarkSelect
               value={country}
-              onChange={(e) => {
-                setCountry(e.target.value);
+              onChange={(v) => {
+                setCountry(v);
                 setState("");
               }}
-              disabled={showOffline && !cacheRef.current}
             >
               <option value="">All countries</option>
               {FULFILLMENT_COUNTRIES.map((c) => (
@@ -726,45 +1440,49 @@ export default function UsersPage() {
                   {c.name}
                 </option>
               ))}
-            </Select>
-
-            <Select
-              value={state}
-              onChange={(e) => setState(e.target.value)}
-              disabled={!country || (showOffline && !cacheRef.current)}
-            >
+            </DarkSelect>
+            <DarkSelect value={state} onChange={setState} disabled={!country}>
               <option value="">
-                {country ? "All states" : "Pick a country first"}
+                {country ? "All states" : "Country first"}
               </option>
               {states.map((s) => (
                 <option key={s.code} value={s.name}>
                   {s.name}
                 </option>
               ))}
-            </Select>
-
-            <Select
-              value={sort}
-              onChange={(e) => setSort(e.target.value)}
-              disabled={showOffline && !cacheRef.current}
-            >
-              <option value="newest">Newest first</option>
-              <option value="oldest">Oldest first</option>
-              <option value="lastSeen">Last seen</option>
-              <option value="name">Name A–Z</option>
-            </Select>
-
-            <Select
-              value={spot}
-              onChange={(e) => setSpot(e.target.value)}
-              disabled={showOffline && !cacheRef.current}
-            >
+            </DarkSelect>
+            <DarkSelect value={spot} onChange={setSpot}>
               {ACTIVITY_SPOT_OPTIONS.map((o) => (
                 <option key={o.value || "all"} value={o.value}>
                   {o.label}
                 </option>
               ))}
-            </Select>
+            </DarkSelect>
+          </div>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
+            <Input
+              className="rounded-xl border-white/12 bg-[#14181F]"
+              placeholder="City"
+              value={city}
+              onChange={(e) => setCity(e.target.value)}
+            />
+            <Input
+              className="rounded-xl border-white/12 bg-[#14181F]"
+              placeholder="Zip"
+              value={zip}
+              onChange={(e) => setZip(e.target.value)}
+            />
+            <Input
+              className="rounded-xl border-white/12 bg-[#14181F]"
+              placeholder="Street"
+              value={street}
+              onChange={(e) => setStreet(e.target.value)}
+            />
+            <DarkSelect value={sort} onChange={setSort}>
+              <option value="newest">Newest</option>
+              <option value="oldest">Oldest</option>
+              <option value="name">Name A–Z</option>
+            </DarkSelect>
           </div>
         </div>
       </Panel>
@@ -776,44 +1494,31 @@ export default function UsersPage() {
       )}
 
       {loading && items.length === 0 ? (
-        <div className="border border-[#252A33] bg-[#11141A]">
-          <OrbLoader label="Loading accounts" />
-        </div>
-      ) : items.length === 0 && !deepUserId ? (
-        <EmptyState
-          title="No users found"
-          body={
-            showOffline
-              ? "Connect to the internet to load accounts."
-              : "Try another search, region, or clear filters."
-          }
-        />
+        <OrbLoader label="Loading…" />
+      ) : items.length === 0 ? (
+        <EmptyState title="No users found" body="Clear filters or search again." />
       ) : view === "grid" ? (
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {items.map((row) => {
-            const act = getActivityState({
-              lastSeenAt: row.lastSeenAt,
-              updatedAt: row.updatedAt,
+            const a = getActivityState({
+              lastActivityAt: row.lastActivityAt,
+              lastActivityKind: row.lastActivityKind,
             });
             return (
               <button
                 key={row._id}
                 type="button"
-                onClick={() => openPane(row._id)}
+                onClick={() => openProfile(row._id)}
                 className={cn(
-                  "border border-[#252A33] bg-[#11141A] p-4 text-left transition hover:border-[#00E575]/35",
-                  openId === row._id &&
-                    paneOpen &&
-                    "border-[#00E575]/45 bg-[#00E575]/5"
+                  "rounded-2xl border border-white/[0.08] bg-white/[0.03] p-4 text-left transition hover:border-white/20",
+                  openId === row._id && modalOpen && "border-[#00E575]/40",
                 )}
               >
                 <div className="flex items-center gap-3">
                   <Avatar name={row.name} image={row.image} />
                   <div className="min-w-0">
                     <p className="truncate font-medium">{row.name || "—"}</p>
-                    <p className="truncate text-xs text-[#737A86]">
-                      {row.email}
-                    </p>
+                    <p className="truncate text-xs text-white/40">{row.email}</p>
                   </div>
                 </div>
                 <div className="mt-3 flex flex-wrap gap-1.5">
@@ -828,44 +1533,33 @@ export default function UsersPage() {
                   >
                     {row.role}
                   </Badge>
-                  <Badge tone="neutral">
-                    {row.marketplaceRegion || "No region"}
-                  </Badge>
-                  <Badge tone={act.tone}>{act.label}</Badge>
-                  {row.isSellerSuspended && (
-                    <Badge tone="error">Suspended</Badge>
-                  )}
+                  <Badge tone={a.tone}>{a.label}</Badge>
                 </div>
-                <p className="mt-3 text-[11px] text-[#737A86]">
-                  {act.relative}
-                  {row.lastSeenPlatform ? ` · ${row.lastSeenPlatform}` : ""}
-                  {act.source === "updatedAt" ? " · via updatedAt" : ""}
-                </p>
               </button>
             );
           })}
         </div>
-      ) : items.length > 0 ? (
-        <Panel className="overflow-x-auto">
-          <table className="w-full min-w-[920px] text-left text-sm">
-            <thead className="border-b border-[#252A33] text-[11px] uppercase tracking-[0.12em] text-[#737A86]">
+      ) : (
+        <Panel className="overflow-x-auto rounded-2xl border-white/[0.08] bg-white/[0.03]">
+          <table className="w-full min-w-[860px] text-left text-sm">
+            <thead className="border-b border-white/[0.06] text-[11px] uppercase tracking-[0.12em] text-white/40">
               <tr>
-                <th className="px-4 py-3 font-semibold">User</th>
-                <th className="px-4 py-3 font-semibold">Role</th>
-                <th className="px-4 py-3 font-semibold">Region</th>
-                <th className="px-4 py-3 font-semibold">Location</th>
-                <th className="px-4 py-3 font-semibold">Activity</th>
-                <th className="px-4 py-3 font-semibold">Last seen</th>
-                <th className="px-4 py-3 font-semibold">Joined</th>
+                <th className="px-4 py-3">User</th>
+                <th className="px-4 py-3">Role</th>
+                <th className="px-4 py-3">Region</th>
+                <th className="px-4 py-3">Location</th>
+                <th className="px-4 py-3">Activity</th>
+                <th className="px-4 py-3">Joined</th>
               </tr>
             </thead>
             <tbody>
               {items.map((row) => {
-                const act = getActivityState({
-                  lastSeenAt: row.lastSeenAt,
-                  updatedAt: row.updatedAt,
+                const a = getActivityState({
+                  lastActivityAt: row.lastActivityAt,
+                  lastActivityKind: row.lastActivityKind,
                 });
                 const loc = [
+                  row.shippingDefaults?.address?.city,
                   row.shippingDefaults?.address?.state,
                   row.shippingDefaults?.address?.country,
                 ]
@@ -874,12 +1568,12 @@ export default function UsersPage() {
                 return (
                   <tr
                     key={row._id}
-                    onClick={() => openPane(row._id)}
+                    onClick={() => openProfile(row._id)}
                     className={cn(
-                      "cursor-pointer border-b border-[#252A33]/70 transition-colors hover:bg-[#171B22]/80",
+                      "cursor-pointer border-b border-white/[0.05] hover:bg-white/[0.04]",
                       openId === row._id &&
-                        paneOpen &&
-                        "bg-[#00E575]/[0.06]"
+                        modalOpen &&
+                        "bg-[#00E575]/[0.06]",
                     )}
                   >
                     <td className="px-4 py-3">
@@ -889,7 +1583,7 @@ export default function UsersPage() {
                           <p className="truncate font-medium">
                             {row.name || "—"}
                           </p>
-                          <p className="truncate text-xs text-[#737A86]">
+                          <p className="truncate text-xs text-white/40">
                             {row.email}
                           </p>
                         </div>
@@ -908,33 +1602,15 @@ export default function UsersPage() {
                         {row.role}
                       </Badge>
                     </td>
-                    <td className="px-4 py-3 text-[#A7ADB8]">
+                    <td className="px-4 py-3 text-white/55">
                       {row.marketplaceRegion || "—"}
                     </td>
-                    <td className="px-4 py-3 text-[#A7ADB8]">{loc || "—"}</td>
+                    <td className="px-4 py-3 text-white/55">{loc || "—"}</td>
                     <td className="px-4 py-3">
-                      <div className="flex flex-col gap-0.5">
-                        <Badge tone={act.tone}>{act.label}</Badge>
-                        <span className="text-[10px] text-[#737A86]">
-                          {act.relative}
-                        </span>
-                      </div>
+                      <Badge tone={a.tone}>{a.label}</Badge>
                     </td>
-                    <td className="px-4 py-3 text-xs text-[#A7ADB8]">
-                      {row.lastSeenAt ? fmtDate(row.lastSeenAt) : "—"}
-                      {row.lastSeenPlatform
-                        ? ` · ${row.lastSeenPlatform}`
-                        : ""}
-                      {!row.lastSeenAt && act.source === "updatedAt" ? (
-                        <span className="block text-[10px] text-[#737A86]">
-                          fallback updatedAt
-                        </span>
-                      ) : null}
-                    </td>
-                    <td className="px-4 py-3 text-[#A7ADB8]">
-                      {row.createdAt
-                        ? new Date(row.createdAt).toLocaleDateString()
-                        : "—"}
+                    <td className="px-4 py-3 text-white/50">
+                      {shortDate(row.createdAt)}
                     </td>
                   </tr>
                 );
@@ -942,369 +1618,46 @@ export default function UsersPage() {
             </tbody>
           </table>
         </Panel>
-      ) : null}
-
-      {pages > 1 && (
-        <div className="mt-4 flex flex-wrap items-center gap-2">
-          <Button
-            tone="ghost"
-            disabled={page <= 1 || loading || showOffline}
-            onClick={() => load(page - 1)}
-          >
-            Previous
-          </Button>
-          <span className="text-xs text-[#737A86]">
-            Page {page} of {pages}
-          </span>
-          <Button
-            tone="ghost"
-            disabled={page >= pages || loading || showOffline}
-            onClick={() => load(page + 1)}
-          >
-            Next
-          </Button>
-        </div>
       )}
 
-      {health && (
-        <div
-          className={cn(
-            "fixed bottom-4 left-4 z-30 max-w-[min(100vw-2rem,280px)] border px-3 py-2.5 shadow-2xl backdrop-blur-md",
-            "max-sm:bottom-16",
-            health.tone === "green" &&
-              "border-[#00E575]/30 bg-[#041412]/95 text-[#00E575]",
-            health.tone === "warn" &&
-              "border-amber-500/30 bg-[#1a1408]/95 text-amber-200",
-            health.tone === "error" &&
-              "border-red-500/30 bg-[#1a0c0c]/95 text-red-200"
-          )}
-        >
-          <p className="text-[10px] font-semibold uppercase tracking-[0.16em] opacity-80">
-            Platform activity
-          </p>
-          <p className="mt-0.5 text-sm font-semibold">
-            {health.label} · {health.score}
-          </p>
-          <p className="mt-1 text-[10px] leading-relaxed opacity-80">
-            {health.active24h} active · {health.quiet7d} quiet ·{" "}
-            {health.idle30d} idle · {health.dormant} dormant · {health.total}{" "}
-            accounts
-          </p>
-        </div>
+      <div ref={sentinelRef} className="h-8 w-full" />
+      {loadingMore && (
+        <p className="py-3 text-center text-xs text-white/40">Loading more…</p>
+      )}
+      {!hasMore && items.length > 0 && (
+        <p className="py-3 text-center text-[11px] text-white/30">
+          End · {items.length.toLocaleString()} shown
+        </p>
       )}
 
-      <div
-        className={cn(
-          "fixed inset-0 z-40 bg-black/50 transition-opacity duration-300",
-          paneOpen
-            ? "pointer-events-auto opacity-100"
-            : "pointer-events-none opacity-0"
-        )}
-        onClick={closePane}
-        aria-hidden
+      {health ? <ActivityFloat health={health} hidden={modalOpen} /> : null}
+
+      <UserProfileModal
+        open={modalOpen}
+        onClose={closeProfile}
+        detail={detail}
+        loading={detailLoading}
+        contactOpen={contactOpen}
+        setContactOpen={setContactOpen}
+        contactSubject={contactSubject}
+        setContactSubject={setContactSubject}
+        contactMessage={contactMessage}
+        setContactMessage={setContactMessage}
+        contactAllowsReply={contactAllowsReply}
+        setContactAllowsReply={setContactAllowsReply}
+        contactBusy={contactBusy}
+        contactError={contactError}
+        contactSuccess={contactSuccess}
+        onSend={startContactThroughPlazore}
       />
-
-      <aside
-        className={cn(
-          poppins.className,
-          "fixed top-0 right-0 z-50 flex h-full w-full max-w-[440px] flex-col border-l border-[#252A33] bg-[#0C0F14] shadow-2xl transition-transform duration-300 ease-out",
-          paneOpen ? "translate-x-0" : "translate-x-full"
-        )}
-      >
-        <div className="flex h-14 shrink-0 items-center justify-between border-b border-[#252A33] px-4">
-          <div>
-            <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#00E575]">
-              Account
-            </p>
-            <p className="text-sm font-medium">Profile detail</p>
-          </div>
-          <button
-            type="button"
-            onClick={closePane}
-            className="flex h-9 w-9 items-center justify-center border border-[#252A33] bg-[#171B22] text-[#A7ADB8] transition hover:text-white"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-
-        <div className="flex-1 overflow-y-auto px-4 py-5">
-          {detailLoading && !detail && <OrbLoader label="Loading profile" />}
-          {detail && u && detailActivity && (
-            <div className="space-y-6">
-              <div className="flex gap-3">
-                <Avatar name={u.name} image={u.image} size="lg" />
-                <div className="min-w-0">
-                  <h2 className="truncate text-lg font-semibold">
-                    {u.name || "—"}
-                  </h2>
-                  <p className="truncate text-sm text-[#A7ADB8]">{u.email}</p>
-                  <div className="mt-2 flex flex-wrap gap-1.5">
-                    <Badge
-                      tone={
-                        u.role === "seller"
-                          ? "green"
-                          : u.role === "admin"
-                            ? "blue"
-                            : "neutral"
-                      }
-                    >
-                      {u.role}
-                    </Badge>
-                    <Badge tone="neutral">
-                      {u.marketplaceRegion || "No region"}
-                    </Badge>
-                    <Badge tone={detailActivity.tone}>
-                      {detailActivity.label}
-                    </Badge>
-                  </div>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div className="border border-[#252A33] bg-[#11141A] p-3">
-                  <p className="text-[10px] uppercase tracking-[0.14em] text-[#737A86]">
-                    Last seen
-                  </p>
-                  <p className="mt-1 text-sm">
-                    {u.lastSeenAt ? fmtDate(u.lastSeenAt) : "—"}
-                  </p>
-                  <p className="mt-1 text-[11px] text-[#737A86]">
-                    {detailActivity.relative}
-                    {u.lastSeenPlatform === "app"
-                      ? " · Mobile app"
-                      : u.lastSeenPlatform === "web"
-                        ? " · Web"
-                        : u.lastSeenPlatform === "admin"
-                          ? " · Admin"
-                          : ""}
-                    {detailActivity.source === "updatedAt"
-                      ? " · from updatedAt"
-                      : ""}
-                  </p>
-                </div>
-                <div className="border border-[#252A33] bg-[#11141A] p-3">
-                  <p className="text-[10px] uppercase tracking-[0.14em] text-[#737A86]">
-                    Joined
-                  </p>
-                  <p className="mt-1 text-sm">{fmtDate(u.createdAt)}</p>
-                </div>
-                <div className="border border-[#252A33] bg-[#11141A] p-3">
-                  <p className="text-[10px] uppercase tracking-[0.14em] text-[#737A86]">
-                    Buyer orders
-                  </p>
-                  <p className="mt-1 text-lg font-semibold tabular-nums">
-                    {detail.stats.orderCountAsBuyer}
-                  </p>
-                </div>
-                <div className="border border-[#252A33] bg-[#11141A] p-3">
-                  <p className="text-[10px] uppercase tracking-[0.14em] text-[#737A86]">
-                    Seller orders
-                  </p>
-                  <p className="mt-1 text-lg font-semibold tabular-nums">
-                    {detail.stats.orderCountAsSeller}
-                  </p>
-                </div>
-              </div>
-
-              <div className="space-y-3 border-t border-[#252A33] pt-4">
-                <SectionLabel>Identity</SectionLabel>
-                <Field label="Phone">{u.phone || "—"}</Field>
-                <Field label="User ID">
-                  <span className="font-mono text-[11px] text-[#A7ADB8]">
-                    {u._id}
-                  </span>
-                </Field>
-                <Field label="Clerk ID">
-                  <span className="font-mono text-[11px] text-[#A7ADB8]">
-                    {u.clerkId || "—"}
-                  </span>
-                </Field>
-                <Field label="Updated">{fmtDate(u.updatedAt)}</Field>
-              </div>
-
-              <div className="space-y-3 border-t border-[#252A33] pt-4">
-                <SectionLabel>Address</SectionLabel>
-                <Field label="Country">
-                  {u.shippingDefaults?.address?.country || "—"}
-                </Field>
-                <Field label="State">
-                  {u.shippingDefaults?.address?.state || "—"}
-                </Field>
-                <Field label="City">
-                  {u.shippingDefaults?.address?.city || "—"}
-                </Field>
-                <Field label="Street">
-                  {u.shippingDefaults?.address?.street || "—"}
-                </Field>
-              </div>
-
-              {u.role === "seller" && (
-                <div className="space-y-3 border-t border-[#252A33] pt-4">
-                  <SectionLabel>Storefront</SectionLabel>
-                  <Field label="Store">{u.storeName || "—"}</Field>
-                  <Field label="Goal">{u.businessGoal || "—"}</Field>
-                  <Field label="Description">
-                    {u.storeDescription || "—"}
-                  </Field>
-                  <Field label="Bank">{u.payout?.bankName || "—"}</Field>
-                  <Field label="Account name">
-                    {u.payout?.accountName || "—"}
-                  </Field>
-                </div>
-              )}
-
-              {(detail.recentOrdersAsBuyer?.length || 0) > 0 && (
-                <div className="space-y-2 border-t border-[#252A33] pt-4">
-                  <SectionLabel>Recent buyer orders</SectionLabel>
-                  {detail.recentOrdersAsBuyer!.slice(0, 6).map((o: any) => (
-                    <p
-                      key={o._id}
-                      className="border border-[#252A33] bg-[#11141A] px-3 py-2 text-xs"
-                    >
-                      {o.orderNumber} · {o.orderStatus} ·{" "}
-                      {Number(o.totalAmount || 0).toLocaleString()}
-                    </p>
-                  ))}
-                </div>
-              )}
-
-              {(detail.recentOrdersAsSeller?.length || 0) > 0 && (
-                <div className="space-y-2 border-t border-[#252A33] pt-4">
-                  <SectionLabel>Recent seller orders</SectionLabel>
-                  {detail.recentOrdersAsSeller!.slice(0, 6).map((o: any) => (
-                    <p
-                      key={o._id}
-                      className="border border-[#252A33] bg-[#11141A] px-3 py-2 text-xs"
-                    >
-                      {o.orderNumber} · {o.orderStatus} ·{" "}
-                      {Number(o.totalAmount || 0).toLocaleString()}
-                    </p>
-                  ))}
-                </div>
-              )}
-
-              <div className="space-y-3 border-t border-[#252A33] pt-4">
-                <SectionLabel>Contact through Plazore</SectionLabel>
-                <p className="text-xs leading-relaxed text-[#A7ADB8]">
-                  Mediated by Plazore. No direct buyer–seller chat. Uncheck
-                  “Allow text back” for a one-way notice.
-                </p>
-
-                {contactSuccess ? (
-                  <div className="border border-[#00E575]/30 bg-[#00E575]/5 px-3 py-3">
-                    <p className="text-sm font-medium text-[#00E575]">
-                      Message sent via Plazore
-                    </p>
-                    <p className="mt-1 text-xs text-[#A7ADB8]">
-                      {contactAllowsReply
-                        ? "The user can reply in their Contact inbox."
-                        : "One-way notice — the user cannot text back."}
-                    </p>
-                    <Button
-                      tone="ghost"
-                      className="mt-3 h-8 text-xs"
-                      onClick={() => {
-                        setContactSuccess(false);
-                        setContactOpen(false);
-                      }}
-                    >
-                      Close
-                    </Button>
-                  </div>
-                ) : !contactOpen ? (
-                  <Button
-                    className="w-full gap-2"
-                    onClick={() => {
-                      setContactOpen(true);
-                      setContactSubject(
-                        `Message from Plazore · ${u.storeName || u.name || "Account"}`
-                      );
-                      setContactAllowsReply(true);
-                      setContactError("");
-                    }}
-                    disabled={showOffline}
-                  >
-                    <MessageSquare className="h-4 w-4" />
-                    Contact user through Plazore
-                  </Button>
-                ) : (
-                  <div className="space-y-3 border border-[#252A33] bg-[#11141A] p-3">
-                    <Input
-                      placeholder="Subject"
-                      value={contactSubject}
-                      onChange={(e) => setContactSubject(e.target.value)}
-                      disabled={contactBusy}
-                    />
-                    <textarea
-                      value={contactMessage}
-                      onChange={(e) => setContactMessage(e.target.value)}
-                      rows={4}
-                      placeholder="Write the message the user will receive…"
-                      className="w-full border border-[#252A33] bg-[#0C0F14] px-3 py-2 text-sm text-[#F5F7FA] outline-none focus:border-[#00E575]/40"
-                      disabled={contactBusy}
-                    />
-                    <label className="flex items-start gap-2 text-xs text-[#A7ADB8]">
-                      <input
-                        type="checkbox"
-                        className="mt-0.5"
-                        checked={contactAllowsReply}
-                        onChange={(e) =>
-                          setContactAllowsReply(e.target.checked)
-                        }
-                        disabled={contactBusy}
-                      />
-                      <span>
-                        <span className="font-medium text-[#F5F7FA]">
-                          Allow user to text back
-                        </span>
-                        <br />
-                        Off = one-way notice only. They see it but cannot reply.
-                      </span>
-                    </label>
-                    {contactError && (
-                      <p className="text-xs text-red-400">{contactError}</p>
-                    )}
-                    <div className="flex gap-2">
-                      <Button
-                        className="flex-1"
-                        disabled={contactBusy || showOffline}
-                        onClick={startContactThroughPlazore}
-                      >
-                        {contactBusy ? "Sending…" : "Send via Plazore"}
-                      </Button>
-                      <Button
-                        tone="ghost"
-                        disabled={contactBusy}
-                        onClick={() => {
-                          setContactOpen(false);
-                          setContactError("");
-                        }}
-                      >
-                        Cancel
-                      </Button>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              <div className="flex flex-col gap-2 border-t border-[#252A33] pt-4">
-                <Link
-                  href={`/moderation?userId=${u._id}`}
-                  className="inline-flex h-10 items-center justify-center bg-[#00E575] px-4 text-sm font-semibold text-[#041412] transition hover:brightness-105"
-                >
-                  Open in Moderation
-                </Link>
-                <Link
-                  href={`/contact?userId=${u._id}`}
-                  className="inline-flex h-10 items-center justify-center border border-[#252A33] px-4 text-sm font-medium text-[#A7ADB8] transition hover:border-[#00E575]/40 hover:text-[#F5F7FA]"
-                >
-                  View their Contact threads
-                </Link>
-              </div>
-            </div>
-          )}
-        </div>
-      </aside>
     </div>
+  );
+}
+
+export default function UsersPage() {
+  return (
+    <UsersGate>
+      <UsersDirectory />
+    </UsersGate>
   );
 }

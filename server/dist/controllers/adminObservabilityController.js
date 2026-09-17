@@ -553,7 +553,8 @@ function fillDays(keys, byDay, extra) {
 }
 export const getAdminAnalytics = async (req, res) => {
     try {
-        const days = Math.min(90, Math.max(7, Number(req.query.days || 30)));
+        // in getAdminAnalytics
+const days = Math.min(3650, Math.max(1, Number(req.query.days || 30)));
         const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
         const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
         const keys = [];

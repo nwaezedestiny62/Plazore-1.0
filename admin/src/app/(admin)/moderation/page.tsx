@@ -1,9 +1,27 @@
 "use client";
 
+import Link from "next/link";
 import { useAuth } from "@clerk/nextjs";
-import { Poppins } from "next/font/google";
-import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import { createPortal } from "react-dom";
+import {
+  Activity,
+  Database,
+  Lock,
+  RefreshCw,
+  Search,
+  Shield,
+  WifiOff,
+  X,
+} from "lucide-react";
 import { adminFetch } from "@/lib/api";
 import { OrbLoader } from "@/components/OrbLoader";
 import {
@@ -13,16 +31,15 @@ import {
   ErrorBlock,
   Input,
   Panel,
-  Select,
   cn,
 } from "@/components/ui";
 
-const poppins = Poppins({
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
-  display: "swap",
-});
+const GATE_KEY = "plazore.admin.moderationGate.v1";
+const EXPECTED_PASSWORD =
+  process.env.NEXT_PUBLIC_ADMIN_MODERATION_PASSWORD || "";
+const Z_MODAL = 9999;
 
+type EnvKind = "development" | "production" | "unknown";
 type Context = "buyer" | "seller";
 type ModStatus = string;
 type ActionKind = "check" | "pardon" | "suspend" | "block" | "lift";
@@ -98,9 +115,30 @@ const HOUR_PRESETS = [
   { value: "custom", label: "Custom hours…" },
 ];
 
+function detectEnvFromApi(): EnvKind {
+  const base =
+    process.env.NEXT_PUBLIC_API_URL ||
+    process.env.NEXT_PUBLIC_ADMIN_API_URL ||
+    "";
+  const lower = base.toLowerCase();
+  if (
+    lower.includes("localhost") ||
+    lower.includes("127.0.0.1") ||
+    lower.includes(":3000")
+  )
+    return "development";
+  if (lower.includes("plazore") || lower.startsWith("https://"))
+    return "production";
+  if (process.env.NODE_ENV === "development") return "development";
+  if (process.env.NODE_ENV === "production") return "production";
+  return "unknown";
+}
+
 function toneForStatus(status: string) {
-  if (["NORMAL", "PARDONED", "RESTORED"].includes(status)) return "green" as const;
-  if (["UNDER_REVIEW", "ACTIVITY_CHECK"].includes(status)) return "warn" as const;
+  if (["NORMAL", "PARDONED", "RESTORED"].includes(status))
+    return "green" as const;
+  if (["UNDER_REVIEW", "ACTIVITY_CHECK"].includes(status))
+    return "warn" as const;
   if (["SUSPENDED", "BLOCKED"].includes(status)) return "error" as const;
   return "neutral" as const;
 }
@@ -124,6 +162,17 @@ function remaining(endsAt?: string | null) {
   return `${h}h ${m}m left`;
 }
 
+function money(n?: number) {
+  if (n == null || Number.isNaN(n)) return "—";
+  try {
+    return new Intl.NumberFormat(undefined, {
+      maximumFractionDigits: 2,
+    }).format(n);
+  } catch {
+    return String(n);
+  }
+}
+
 function computeHealth(profile: Profile) {
   let score = 74;
   const signals: string[] = [];
@@ -131,10 +180,14 @@ function computeHealth(profile: Profile) {
   const buyerOrders = profile.activity.orderAsBuyer || 0;
   const sellerOrders = profile.activity.orderAsSeller || 0;
   const products = profile.activity.productCount || 0;
-  const addresses = profile.addresses?.length || profile.activity.addressCount || 0;
-  const payments = profile.paymentMethods?.length || profile.activity.paymentMethodCount || 0;
-  const wishlist = profile.wishlist?.length || profile.activity.wishlistCount || 0;
-  const saved = profile.savedStores?.length || profile.activity.savedStoreCount || 0;
+  const addresses =
+    profile.addresses?.length || profile.activity.addressCount || 0;
+  const payments =
+    profile.paymentMethods?.length || profile.activity.paymentMethodCount || 0;
+  const wishlist =
+    profile.wishlist?.length || profile.activity.wishlistCount || 0;
+  const saved =
+    profile.savedStores?.length || profile.activity.savedStoreCount || 0;
   const ageMs = profile.user.createdAt
     ? Date.now() - new Date(profile.user.createdAt).getTime()
     : 0;
@@ -167,12 +220,10 @@ function computeHealth(profile: Profile) {
     score -= 4;
     signals.push("High volume of saved stores");
   }
-
   if (ageDays < 14 && products >= 12 && sellerOrders < 2) {
     score -= 14;
     signals.push("New account with a large catalog and little order history");
   }
-
   if (buyerOrders + sellerOrders === 0 && products === 0 && wishlist === 0) {
     score -= 6;
     signals.push("Very little marketplace activity yet");
@@ -182,7 +233,7 @@ function computeHealth(profile: Profile) {
   }
 
   const recentBad = (profile.events || []).filter((e: any) =>
-    ["SUSPENDED", "BLOCKED", "ACTIVITY_CHECK_REQUESTED"].includes(e.action)
+    ["SUSPENDED", "BLOCKED", "ACTIVITY_CHECK_REQUESTED"].includes(e.action),
   ).length;
   if (recentBad >= 2) {
     score -= 12;
@@ -253,33 +304,437 @@ const ACTION_META: Record<
   },
 };
 
-function Kpi({ label, value, hint }: { label: string; value: string | number; hint?: string }) {
+function DarkSelect({
+  value,
+  onChange,
+  children,
+  className,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  children: ReactNode;
+  className?: string;
+}) {
   return (
-    <div className="min-w-0 border border-[#252A33] bg-[#11141A] px-4 py-3">
-      <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#737A86]">{label}</p>
-      <p className="mt-1.5 text-[22px] font-semibold tabular-nums leading-none text-[#F5F7FA]">{value}</p>
-      {hint ? <p className="mt-1.5 text-[11px] text-[#737A86]">{hint}</p> : null}
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      style={{ colorScheme: "dark" }}
+      className={cn(
+        "h-10 w-full rounded-xl border border-white/12 bg-[#14181F] px-3 text-[13px] text-[#F5F7FA] outline-none focus:border-[#00E575]/40",
+        className,
+      )}
+    >
+      {children}
+    </select>
+  );
+}
+
+function Kpi({
+  label,
+  value,
+  hint,
+}: {
+  label: string;
+  value: string | number;
+  hint?: string;
+}) {
+  return (
+    <div className="min-w-0 rounded-2xl border border-white/[0.08] bg-white/[0.03] px-3.5 py-3.5">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/40">
+        {label}
+      </p>
+      <p className="mt-1.5 text-[22px] font-semibold tabular-nums leading-none text-[#F5F7FA]">
+        {value}
+      </p>
+      {hint ? (
+        <p className="mt-1.5 text-[11px] text-white/35">{hint}</p>
+      ) : null}
     </div>
   );
 }
 
-function SectionLabel({ children }: { children: React.ReactNode }) {
+function SectionLabel({ children }: { children: ReactNode }) {
   return (
-    <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#737A86]">{children}</p>
+    <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/40">
+      {children}
+    </p>
   );
 }
 
-export default function ModerationPage() {
+function OrderChip({ o }: { o: any }) {
+  const id = o.orderNumber || o._id || "—";
+  return (
+    <div className="rounded-xl border border-white/[0.07] bg-white/[0.03] px-3 py-2">
+      <p className="font-mono text-[12px] font-semibold text-[#00E575]">{id}</p>
+      <p className="mt-0.5 text-[11px] text-white/45">
+        {fmt(o.createdAt)} · {o.orderStatus || o.status || "—"} ·{" "}
+        {money(o.totalAmount ?? o.total)}
+      </p>
+    </div>
+  );
+}
+
+function ModerationGate({ children }: { children: ReactNode }) {
+  const [unlocked, setUnlocked] = useState(false);
+  const [ready, setReady] = useState(false);
+  const [password, setPassword] = useState("");
+  const [err, setErr] = useState("");
+  const [shake, setShake] = useState(false);
+
+  useEffect(() => {
+    try {
+      if (sessionStorage.getItem(GATE_KEY) === "1") setUnlocked(true);
+    } catch {
+      /* ignore */
+    }
+    setReady(true);
+  }, []);
+
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!EXPECTED_PASSWORD) {
+      setErr("Set NEXT_PUBLIC_ADMIN_MODERATION_PASSWORD in .env");
+      return;
+    }
+    if (password === EXPECTED_PASSWORD) {
+      try {
+        sessionStorage.setItem(GATE_KEY, "1");
+      } catch {
+        /* ignore */
+      }
+      setUnlocked(true);
+      setErr("");
+      return;
+    }
+    setErr("Incorrect password.");
+    setShake(true);
+    window.setTimeout(() => setShake(false), 420);
+  };
+
+  if (!ready) {
+    return (
+      <div className="flex min-h-[50vh] items-center justify-center text-white/35">
+        …
+      </div>
+    );
+  }
+
+  if (!unlocked) {
+    return (
+      <div className="mx-auto flex min-h-[70vh] max-w-md flex-col justify-center px-4 text-[#F5F7FA]">
+        <div
+          className={cn(
+            "rounded-2xl border border-white/10 bg-[#0E1116]/95 p-6 sm:p-8",
+            shake && "animate-[plazore-shake_0.4s_ease-in-out]",
+          )}
+        >
+          <div className="h-px bg-gradient-to-r from-[#00E575] via-[#14B8A6] to-[#3B82F6]" />
+          <div className="mt-5 flex h-11 w-11 items-center justify-center rounded-full bg-white/[0.06]">
+            <Lock className="h-4 w-4 text-[#00E575]" />
+          </div>
+          <p className="mt-4 text-[11px] font-semibold tracking-[0.2em] text-[#00E575]">
+            RESTRICTED
+          </p>
+          <h1 className="mt-2 text-2xl font-semibold">Moderation</h1>
+          <p className="mt-2 text-[13px] text-white/45">
+            Enter access password to continue.
+          </p>
+          <form onSubmit={submit} className="mt-6 space-y-3">
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Access password"
+              className="h-12 w-full rounded-xl border border-white/12 bg-[#14181F] px-4 text-sm text-[#F5F7FA] outline-none focus:border-[#00E575]/45"
+            />
+            {err && <p className="text-xs text-red-400">{err}</p>}
+            <button
+              type="submit"
+              className="flex h-12 w-full items-center justify-center rounded-xl bg-gradient-to-r from-[#00E575] via-[#14B8A6] to-[#3B82F6] text-sm font-extrabold text-[#041412]"
+            >
+              Unlock
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
+  return <>{children}</>;
+}
+
+/** Portaled activity dossier — viewport fixed, same pattern as Users */
+function ActivityModal({
+  open,
+  onClose,
+  profile,
+}: {
+  open: boolean;
+  onClose: () => void;
+  profile: Profile | null;
+}) {
+  const [mounted, setMounted] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const health = profile ? computeHealth(profile) : null;
+
+  useEffect(() => setMounted(true), []);
+
+  useEffect(() => {
+    if (!open) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (open) {
+      requestAnimationFrame(() => scrollRef.current?.scrollTo({ top: 0 }));
+    }
+  }, [open, profile?.user?._id]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
+
+  if (!mounted || !profile) return null;
+
+  const buyerOrders = profile.activity.recentOrdersBuyer || [];
+  const sellerOrders = profile.activity.recentOrdersSeller || [];
+
+  return createPortal(
+    <div
+      className={cn(
+        "flex items-end justify-center sm:items-center sm:p-6",
+        open ? "pointer-events-auto" : "pointer-events-none",
+      )}
+      style={{ position: "fixed", inset: 0, zIndex: Z_MODAL }}
+      aria-hidden={!open}
+    >
+      <button
+        type="button"
+        aria-label="Close"
+        onClick={onClose}
+        className={cn(
+          "absolute inset-0 bg-black/70 transition-opacity duration-300",
+          open ? "opacity-100" : "opacity-0",
+        )}
+      />
+      <div
+        role="dialog"
+        aria-modal="true"
+        className={cn(
+          "relative z-10 flex w-full max-w-lg flex-col max-h-[min(92dvh,900px)]",
+          "rounded-t-3xl border border-white/10 bg-[#0A0D12] shadow-[0_40px_100px_rgba(0,0,0,0.7)] sm:rounded-3xl",
+          "transition-all duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]",
+          open
+            ? "translate-y-0 scale-100 opacity-100"
+            : "translate-y-10 scale-[0.97] opacity-0",
+        )}
+      >
+        <div className="h-[2px] shrink-0 bg-gradient-to-r from-[#00E575] via-[#14B8A6] to-[#3B82F6]" />
+        <div className="flex h-12 shrink-0 items-center justify-between px-4 sm:px-5">
+          <p className="text-[10px] font-semibold tracking-[0.2em] text-[#00E575]">
+            ACTIVITY DOSSIER
+          </p>
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex h-8 w-8 items-center justify-center rounded-full bg-white/5 text-white/50 hover:text-white"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div
+          ref={scrollRef}
+          className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-8 sm:px-5"
+        >
+          <p className="text-sm font-medium text-[#F5F7FA]">
+            {profile.user.name}
+          </p>
+          <p className="text-xs text-white/40">{profile.user.email}</p>
+
+          {health && (
+            <div className="mt-4 rounded-2xl border border-white/[0.07] bg-white/[0.03] p-4">
+              <SectionLabel>Activity health</SectionLabel>
+              <div className="mt-3 flex items-end gap-3">
+                <span className="text-4xl font-semibold tabular-nums">
+                  {health.score}
+                </span>
+                <Badge tone={health.tone}>{health.conclusion}</Badge>
+              </div>
+              <ul className="mt-3 space-y-1.5">
+                {health.signals.map((s, i) => (
+                  <li key={i} className="text-xs text-white/50">
+                    · {s}
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-3 text-[10px] text-white/30">
+                Rule-based review aid — not a verdict.
+              </p>
+            </div>
+          )}
+
+          <div className="mt-4 space-y-4">
+            <section>
+              <SectionLabel>
+                Orders as buyer ({buyerOrders.length})
+              </SectionLabel>
+              <div className="mt-2 space-y-1.5">
+                {buyerOrders.length === 0 ? (
+                  <p className="text-xs text-white/35">None</p>
+                ) : (
+                  buyerOrders.map((o: any, i: number) => (
+                    <OrderChip key={o._id || i} o={o} />
+                  ))
+                )}
+              </div>
+            </section>
+
+            <section>
+              <SectionLabel>
+                Orders as seller ({sellerOrders.length})
+              </SectionLabel>
+              <div className="mt-2 space-y-1.5">
+                {sellerOrders.length === 0 ? (
+                  <p className="text-xs text-white/35">None</p>
+                ) : (
+                  sellerOrders.map((o: any, i: number) => (
+                    <OrderChip key={o._id || i} o={o} />
+                  ))
+                )}
+              </div>
+            </section>
+
+            <section>
+              <SectionLabel>
+                Wishlist ({profile.wishlist?.length || 0})
+              </SectionLabel>
+              {profile.wishlist?.length ? (
+                <div className="mt-2 space-y-1.5">
+                  {profile.wishlist.slice(0, 20).map((p: any) => (
+                    <p
+                      key={p._id}
+                      className="rounded-xl border border-white/[0.07] bg-white/[0.03] px-3 py-2 text-xs"
+                    >
+                      {p.name || p.title || "Item"}
+                    </p>
+                  ))}
+                </div>
+              ) : (
+                <p className="mt-2 text-xs text-white/35">Empty</p>
+              )}
+            </section>
+
+            <section>
+              <SectionLabel>
+                Saved stores ({profile.savedStores?.length || 0})
+              </SectionLabel>
+              {profile.savedStores?.length ? (
+                <div className="mt-2 space-y-1.5">
+                  {profile.savedStores.slice(0, 12).map((s: any) => (
+                    <p
+                      key={s._id}
+                      className="rounded-xl border border-white/[0.07] bg-white/[0.03] px-3 py-2 text-xs"
+                    >
+                      {s.name || s.storeName || "Store"}
+                    </p>
+                  ))}
+                </div>
+              ) : (
+                <p className="mt-2 text-xs text-white/35">None</p>
+              )}
+            </section>
+
+            <section>
+              <SectionLabel>
+                Payment methods ({profile.paymentMethods?.length || 0})
+              </SectionLabel>
+              {profile.paymentMethods?.length ? (
+                <div className="mt-2 space-y-1.5">
+                  {profile.paymentMethods.map((p: any) => (
+                    <p
+                      key={p._id}
+                      className="rounded-xl border border-white/[0.07] bg-white/[0.03] px-3 py-2 text-xs"
+                    >
+                      {p.brand} ···· {p.last4}
+                      {p.isDefault ? " · default" : ""}
+                    </p>
+                  ))}
+                </div>
+              ) : (
+                <p className="mt-2 text-xs text-white/35">None</p>
+              )}
+            </section>
+
+            <section>
+              <SectionLabel>
+                Addresses ({profile.addresses?.length || 0})
+              </SectionLabel>
+              {profile.addresses?.length ? (
+                <div className="mt-2 space-y-1.5">
+                  {profile.addresses.map((a: any) => (
+                    <p
+                      key={a._id}
+                      className="rounded-xl border border-white/[0.07] bg-white/[0.03] px-3 py-2 text-xs"
+                    >
+                      {a.type} · {a.city}, {a.state}
+                      {a.isDefault ? " · default" : ""}
+                    </p>
+                  ))}
+                </div>
+              ) : (
+                <p className="mt-2 text-xs text-white/35">None</p>
+              )}
+            </section>
+
+            <Link
+              href={`/users?userId=${profile.user._id}`}
+              className="inline-flex h-11 w-full items-center justify-center rounded-xl border border-white/12 text-sm text-white/60"
+            >
+              Open full user dossier
+            </Link>
+          </div>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+function ModerationDirectory() {
   const { getToken } = useAuth();
   const searchParams = useSearchParams();
   const preselect = searchParams.get("userId") || "";
+
+  const clientEnv = useMemo(() => detectEnvFromApi(), []);
+  const [apiEnv, setApiEnv] = useState<EnvKind | null>(null);
+  const env: EnvKind = apiEnv || clientEnv;
+  const envTone =
+    env === "production" ? "error" : env === "development" ? "warn" : "neutral";
+  const envLabel =
+    env === "production"
+      ? "Production data"
+      : env === "development"
+        ? "Development data"
+        : "Environment unknown";
 
   const [stats, setStats] = useState<Stats | null>(null);
   const [statsLoading, setStatsLoading] = useState(true);
   const [q, setQ] = useState("");
   const [searchResults, setSearchResults] = useState<SearchUser[]>([]);
   const [searching, setSearching] = useState(false);
-  const [selectedId, setSelectedId] = useState<string | null>(preselect || null);
+  const [selectedId, setSelectedId] = useState<string | null>(
+    preselect || null,
+  );
   const [profile, setProfile] = useState<Profile | null>(null);
   const [profileLoading, setProfileLoading] = useState(false);
   const [error, setError] = useState("");
@@ -311,14 +766,21 @@ export default function ModerationPage() {
     };
   }, []);
 
-  const durationHours = hourPreset === "custom" ? Number(customHours) || 0 : Number(hourPreset) || 0;
+  const durationHours =
+    hourPreset === "custom" ? Number(customHours) || 0 : Number(hourPreset) || 0;
 
   const loadStats = useCallback(async () => {
     try {
       setStatsLoading(true);
       const token = await getToken();
-      const json = await adminFetch<{ data: Stats }>("/moderation/stats", token);
+      const json = await adminFetch<{ data: Stats; environment?: string }>(
+        "/moderation/stats",
+        token,
+      );
       setStats(json.data);
+      if ((json as any).environment) {
+        setApiEnv((json as any).environment as EnvKind);
+      }
     } catch (e: any) {
       setError(e.message || "Failed to load stats");
     } finally {
@@ -347,7 +809,10 @@ export default function ModerationPage() {
         setActiveAction(null);
         setReason("");
         const token = await getToken();
-        const json = await adminFetch<{ data: Profile }>(`/moderation/users/${id}`, token);
+        const json = await adminFetch<{ data: Profile }>(
+          `/moderation/users/${id}`,
+          token,
+        );
         setProfile(json.data);
         setSelectedId(id);
         setContext(json.data.user.role === "seller" ? "seller" : "buyer");
@@ -358,7 +823,7 @@ export default function ModerationPage() {
         setProfileLoading(false);
       }
     },
-    [getToken]
+    [getToken],
   );
 
   useEffect(() => {
@@ -382,7 +847,7 @@ export default function ModerationPage() {
       const token = await getToken();
       const json = await adminFetch<{ data: SearchUser[] }>(
         `/moderation/search?q=${encodeURIComponent(q.trim())}`,
-        token
+        token,
       );
       setSearchResults(json.data || []);
     } catch (e: any) {
@@ -399,7 +864,10 @@ export default function ModerationPage() {
 
   const executeAction = async () => {
     if (!selectedId || !activeAction) return;
-    if (["pardon", "suspend", "block", "lift"].includes(activeAction) && !reason.trim()) {
+    if (
+      ["pardon", "suspend", "block", "lift"].includes(activeAction) &&
+      !reason.trim()
+    ) {
       setError("A reason is required for this action.");
       return;
     }
@@ -473,109 +941,154 @@ export default function ModerationPage() {
     return context === "seller" ? profile.seller : profile.buyer;
   }, [profile, context]);
 
-  const health = useMemo(() => (profile ? computeHealth(profile) : null), [profile]);
   const visibleActions = side ? allowedActions(side.status) : [];
   const showOffline = mounted && offline;
   const underReview =
     side?.status === "UNDER_REVIEW" || side?.status === "ACTIVITY_CHECK";
 
   return (
-    <div className={cn(poppins.className, "relative pb-20 text-[#F5F7FA]")}>
+    <div className="relative mx-auto max-w-6xl pb-24 text-[#F5F7FA]">
       {showOffline && (
-        <div className="mb-4 border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
-          You are offline. Search and enforcement are paused until you reconnect.
+        <div className="mb-4 flex gap-3 rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+          <WifiOff className="mt-0.5 h-4 w-4 shrink-0" />
+          Offline — search and enforcement paused.
         </div>
       )}
 
-      <header className="mb-7 flex flex-col gap-4 border-b border-[#252A33] pb-6 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center gap-4">
-          <div className="flex h-14 w-14 shrink-0 items-center justify-center border border-[#00E575]/25 bg-[#041412]">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src="/moderation-logo.png"
-              alt="Moderation"
-              className="h-9 w-9 object-contain"
-              onError={(e) => {
-                (e.target as HTMLImageElement).src = "/plazore-logo.png";
-              }}
-            />
+      <header className="mb-6">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="flex items-center gap-4">
+            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border border-[#00E575]/25 bg-[#041412]">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/moderation-logo.png"
+                alt="Moderation"
+                className="h-9 w-9 object-contain"
+                onError={(e) => {
+                  (e.target as HTMLImageElement).src = "/plazore-logo.png";
+                }}
+              />
+            </div>
+            <div>
+              <p className="text-[11px] font-semibold tracking-[0.2em] text-[#00E575]">
+                TRUST & SAFETY
+              </p>
+              <h1 className="mt-0.5 text-[28px] font-semibold tracking-tight sm:text-[32px]">
+                Moderation
+              </h1>
+              <p className="mt-2 max-w-xl text-[13.5px] text-white/50">
+                Internal durations never appear to buyers or sellers.
+              </p>
+            </div>
           </div>
-          <div>
-            <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-[#00E575]">
-              Trust & Safety
-            </p>
-            <h1 className="mt-0.5 text-[28px] font-semibold leading-none tracking-tight">
-              Moderation
-            </h1>
-            <p className="mt-2 max-w-xl text-sm leading-relaxed text-[#A7ADB8]">
-              Internal durations never appear to buyers or sellers.
-            </p>
-          </div>
+          <Button
+            tone="ghost"
+            className="h-10 gap-1.5 rounded-full border border-white/12 bg-[#14181F] text-xs"
+            onClick={refreshAll}
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+            Refresh
+          </Button>
+        </div>
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          <Badge tone={envTone as any}>
+            <Database className="mr-1 inline h-3 w-3" />
+            {envLabel}
+          </Badge>
+          <Badge tone="blue">
+            <Shield className="mr-1 inline h-3 w-3" />
+            Enforcement
+          </Badge>
         </div>
       </header>
 
       {error && (
-        <div className="mb-5">
+        <div className="mb-4">
           <ErrorBlock message={error} />
         </div>
       )}
 
       {statsLoading && !stats ? (
-        <div className="mb-6 border border-[#252A33] bg-[#11141A]">
+        <div className="mb-6 overflow-hidden rounded-2xl border border-white/[0.08]">
           <OrbLoader label="Loading overview" />
         </div>
       ) : stats ? (
-        <section className="mb-6 grid grid-cols-2 gap-px overflow-hidden border border-[#252A33] bg-[#252A33] lg:grid-cols-3 xl:grid-cols-6">
+        <section className="mb-6 grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6">
           <Kpi label="Pending" value={stats.pendingChecks} hint="Active checks" />
           <Kpi label="Under review" value={stats.underReview} />
-          <Kpi label="Seller" value={`${stats.sellerSuspensions} / ${stats.sellerBlocks}`} hint="Suspended / blocked" />
-          <Kpi label="Buyer" value={`${stats.buyerSuspensions} / ${stats.buyerBlocks}`} hint="Suspended / blocked" />
+          <Kpi
+            label="Seller"
+            value={`${stats.sellerSuspensions} / ${stats.sellerBlocks}`}
+            hint="Suspended / blocked"
+          />
+          <Kpi
+            label="Buyer"
+            value={`${stats.buyerSuspensions} / ${stats.buyerBlocks}`}
+            hint="Suspended / blocked"
+          />
           <Kpi label="Pardoned" value={stats.recentlyPardoned} hint="Last 7 days" />
           <Kpi label="Restored" value={stats.recentlyRestored} hint="Last 7 days" />
         </section>
       ) : null}
 
-      <Panel className="mb-5 overflow-hidden">
-        <div className="border-b border-[#252A33] px-5 py-4">
+      <Panel className="mb-5 overflow-hidden rounded-2xl border-white/[0.08] bg-white/[0.03]">
+        <div className="border-b border-white/[0.06] px-4 py-3 sm:px-5">
           <SectionLabel>Find account</SectionLabel>
         </div>
-        <div className="px-5 py-4">
-          <div className="flex flex-col gap-3 sm:flex-row">
-            <Input
-              placeholder="Name, email, store, phone, or user ID…"
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && runSearch()}
-              className="sm:max-w-lg"
-            />
-            <Button onClick={runSearch} disabled={searching || showOffline}>
+        <div className="space-y-3 p-4 sm:p-5">
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <div className="relative min-w-0 flex-1">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/30" />
+              <Input
+                className="rounded-xl border-white/12 bg-[#14181F] pl-10"
+                placeholder="Name, email, store, phone, or user ID…"
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && runSearch()}
+              />
+            </div>
+            <Button
+              className="h-10 rounded-xl"
+              onClick={runSearch}
+              disabled={searching || showOffline}
+            >
               {searching ? "Searching…" : "Search"}
             </Button>
           </div>
           {searchResults.length > 0 && (
-            <div className="mt-4 divide-y divide-[#252A33] border border-[#252A33]">
+            <div className="divide-y divide-white/[0.05] overflow-hidden rounded-2xl border border-white/[0.08]">
               {searchResults.map((u) => (
                 <button
                   key={u._id}
                   type="button"
                   onClick={() => loadProfile(u._id)}
                   className={cn(
-                    "flex w-full items-center justify-between gap-3 px-4 py-3 text-left text-sm",
-                    selectedId === u._id ? "bg-[#00E575]/10" : "bg-[#171B22] hover:bg-[#1C2129]"
+                    "flex w-full flex-col gap-2 px-4 py-3 text-left transition sm:flex-row sm:items-center sm:justify-between",
+                    selectedId === u._id
+                      ? "bg-[#00E575]/10"
+                      : "bg-white/[0.02] hover:bg-white/[0.04]",
                   )}
                 >
                   <div className="min-w-0">
                     <p className="truncate font-medium">{u.name || "—"}</p>
-                    <p className="truncate text-xs text-[#737A86]">
+                    <p className="truncate text-xs text-white/40">
                       {u.email} · {u.role}
                       {u.storeName ? ` · ${u.storeName}` : ""}
                     </p>
                   </div>
-                  <div className="flex shrink-0 gap-1.5">
-                    <Badge tone={toneForStatus(u.moderation?.buyer?.status || "NORMAL")}>
+                  <div className="flex flex-wrap gap-1.5">
+                    <Badge
+                      tone={toneForStatus(
+                        u.moderation?.buyer?.status || "NORMAL",
+                      )}
+                    >
                       Buyer · {u.moderation?.buyer?.status || "NORMAL"}
                     </Badge>
-                    <Badge tone={toneForStatus(u.moderation?.seller?.status || "NORMAL")}>
+                    <Badge
+                      tone={toneForStatus(
+                        u.moderation?.seller?.status || "NORMAL",
+                      )}
+                    >
                       Seller · {u.moderation?.seller?.status || "NORMAL"}
                     </Badge>
                   </div>
@@ -587,31 +1100,49 @@ export default function ModerationPage() {
       </Panel>
 
       {profileLoading && (
-        <div className="mb-5 border border-[#252A33] bg-[#11141A]">
+        <div className="mb-5 overflow-hidden rounded-2xl border border-white/[0.08]">
           <OrbLoader label="Loading account" />
         </div>
       )}
 
       {!profileLoading && profile && (
-        <div className="mb-6 grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
-          <Panel className="overflow-hidden">
-            <div className="flex flex-wrap items-start justify-between gap-4 border-b border-[#252A33] px-5 py-5">
+        <div className="mb-6 grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(280px,340px)]">
+          <Panel className="overflow-hidden rounded-2xl border-white/[0.08] bg-white/[0.03]">
+            <div className="flex flex-wrap items-start justify-between gap-3 border-b border-white/[0.06] px-4 py-4 sm:px-5">
               <div className="min-w-0">
                 <SectionLabel>Account</SectionLabel>
-                <h2 className="mt-1 truncate text-xl font-semibold">{profile.user.name || "—"}</h2>
-                <p className="truncate text-sm text-[#A7ADB8]">{profile.user.email}</p>
+                <h2 className="mt-1 truncate text-xl font-semibold">
+                  {profile.user.name || "—"}
+                </h2>
+                <p className="truncate text-sm text-white/45">
+                  {profile.user.email}
+                </p>
+                {profile.user.marketplaceRegion && (
+                  <p className="mt-1 text-xs text-white/35">
+                    Region · {profile.user.marketplaceRegion}
+                  </p>
+                )}
               </div>
-              <div className="flex gap-2">
-                <Button tone="ghost" className="h-9 text-xs" onClick={() => setActivityOpen(true)}>
-                  See user activity
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  tone="ghost"
+                  className="h-9 gap-1.5 rounded-xl text-xs"
+                  onClick={() => setActivityOpen(true)}
+                >
+                  <Activity className="h-3.5 w-3.5" />
+                  Activity
                 </Button>
-                <Button tone="ghost" className="h-9 text-xs" onClick={refreshAll}>
+                <Button
+                  tone="ghost"
+                  className="h-9 rounded-xl text-xs"
+                  onClick={refreshAll}
+                >
                   Refresh
                 </Button>
               </div>
             </div>
 
-            <div className="grid gap-px bg-[#252A33] sm:grid-cols-2">
+            <div className="grid gap-2 p-4 sm:grid-cols-2 sm:p-5">
               {(["buyer", "seller"] as const).map((sideKey) => {
                 const s = sideKey === "buyer" ? profile.buyer : profile.seller;
                 return (
@@ -623,14 +1154,21 @@ export default function ModerationPage() {
                       setActiveAction(null);
                       setReason("");
                     }}
-                    className={cn("bg-[#11141A] p-5 text-left", context === sideKey && "bg-[#041412]")}
+                    className={cn(
+                      "rounded-2xl border p-4 text-left transition",
+                      context === sideKey
+                        ? "border-[#00E575]/35 bg-[#00E575]/10"
+                        : "border-white/[0.08] bg-white/[0.02] hover:border-white/15",
+                    )}
                   >
-                    <SectionLabel>{sideKey === "buyer" ? "Buyer / General" : "Seller World"}</SectionLabel>
+                    <SectionLabel>
+                      {sideKey === "buyer" ? "Buyer / General" : "Seller World"}
+                    </SectionLabel>
                     <div className="mt-3">
                       <Badge tone={toneForStatus(s.status)}>{s.status}</Badge>
                     </div>
                     {s.endsAt && s.status === "SUSPENDED" && (
-                      <p className="mt-2 text-xs text-[#A7ADB8]">
+                      <p className="mt-2 text-xs text-white/45">
                         Internal · {fmt(s.endsAt)} · {remaining(s.endsAt)}
                       </p>
                     )}
@@ -640,16 +1178,16 @@ export default function ModerationPage() {
             </div>
           </Panel>
 
-          <aside className="xl:sticky xl:top-6">
-            <Panel className="overflow-hidden">
-              <div className="border-b border-[#252A33] px-5 py-4">
+          <aside className="lg:sticky lg:top-6">
+            <Panel className="overflow-hidden rounded-2xl border-white/[0.08] bg-white/[0.03]">
+              <div className="border-b border-white/[0.06] px-4 py-4">
                 <SectionLabel>Enforcement</SectionLabel>
-                <p className="mt-1.5 text-sm text-[#A7ADB8]">
-                  Buttons follow the current status. Clock times stay internal.
+                <p className="mt-1.5 text-[13px] text-white/45">
+                  Actions follow status. Clock times stay internal.
                 </p>
               </div>
-              <div className="space-y-4 px-5 py-4">
-                <div className="grid grid-cols-2 gap-px border border-[#252A33] bg-[#252A33]">
+              <div className="space-y-4 p-4">
+                <div className="grid grid-cols-2 gap-1 rounded-xl border border-white/10 p-1">
                   {(["buyer", "seller"] as const).map((c) => (
                     <button
                       key={c}
@@ -660,8 +1198,10 @@ export default function ModerationPage() {
                         setReason("");
                       }}
                       className={cn(
-                        "h-10 text-xs font-semibold",
-                        context === c ? "bg-[#00E575] text-[#041412]" : "bg-[#171B22] text-[#A7ADB8]"
+                        "h-9 rounded-lg text-xs font-semibold transition",
+                        context === c
+                          ? "bg-[#00E575] text-[#041412]"
+                          : "text-white/50 hover:text-white",
                       )}
                     >
                       {c === "buyer" ? "Buyer" : "Seller"}
@@ -670,19 +1210,28 @@ export default function ModerationPage() {
                 </div>
 
                 {side && (
-                  <div className="border border-[#252A33] bg-[#171B22] p-3">
-                    <Badge tone={toneForStatus(side.status)}>{side.status}</Badge>
+                  <div className="rounded-xl border border-white/[0.07] bg-white/[0.03] p-3">
+                    <Badge tone={toneForStatus(side.status)}>
+                      {side.status}
+                    </Badge>
                     {side.status === "SUSPENDED" && side.endsAt && (
-                      <p className="mt-2 text-xs text-[#A7ADB8]">Internal end · {remaining(side.endsAt)}</p>
+                      <p className="mt-2 text-xs text-white/45">
+                        Internal end · {remaining(side.endsAt)}
+                      </p>
                     )}
                     {side.status === "BLOCKED" && (
-                      <p className="mt-2 text-xs text-[#A7ADB8]">Until blockage is lifted</p>
+                      <p className="mt-2 text-xs text-white/45">
+                        Until blockage is lifted
+                      </p>
                     )}
                   </div>
                 )}
 
                 {underReview && (
-                  <Button className="w-full" onClick={() => setActivityOpen(true)}>
+                  <Button
+                    className="w-full rounded-xl"
+                    onClick={() => setActivityOpen(true)}
+                  >
                     See user activity
                   </Button>
                 )}
@@ -701,14 +1250,14 @@ export default function ModerationPage() {
                           setError("");
                         }}
                         className={cn(
-                          "h-11 border px-3 text-left text-sm font-semibold disabled:opacity-50",
+                          "h-11 rounded-xl border px-3 text-left text-sm font-semibold disabled:opacity-50",
                           isActive
                             ? "border-[#00E575]/40 bg-[#00E575]/10 text-[#00E575]"
                             : meta.tone === "danger"
                               ? "border-red-500/30 bg-red-500/5 text-red-300"
                               : meta.tone === "primary"
                                 ? "border-[#00E575]/30 bg-[#00E575]/5 text-[#00E575]"
-                                : "border-[#252A33] bg-[#171B22] text-[#A7ADB8]"
+                                : "border-white/10 bg-white/[0.03] text-white/55",
                         )}
                       >
                         {meta.label}
@@ -718,23 +1267,31 @@ export default function ModerationPage() {
                 </div>
 
                 {activeAction && (
-                  <div className="space-y-3 border border-amber-500/25 bg-amber-500/5 p-3">
-                    <p className="text-sm font-semibold text-amber-100">{ACTION_META[activeAction].label}</p>
-                    <p className="text-xs text-[#A7ADB8]">{ACTION_META[activeAction].hint}</p>
+                  <div className="space-y-3 rounded-2xl border border-amber-500/25 bg-amber-500/5 p-3">
+                    <p className="text-sm font-semibold text-amber-100">
+                      {ACTION_META[activeAction].label}
+                    </p>
+                    <p className="text-xs text-white/50">
+                      {ACTION_META[activeAction].hint}
+                    </p>
                     <Input
+                      className="rounded-xl border-white/12 bg-[#14181F]"
                       value={reason}
                       onChange={(e) => setReason(e.target.value)}
                       placeholder="Internal reason…"
                     />
                     {activeAction === "suspend" && (
                       <div className="space-y-2">
-                        <Select value={hourPreset} onChange={(e) => setHourPreset(e.target.value)} className="w-full">
+                        <DarkSelect
+                          value={hourPreset}
+                          onChange={setHourPreset}
+                        >
                           {HOUR_PRESETS.map((p) => (
                             <option key={p.value} value={p.value}>
                               {p.label}
                             </option>
                           ))}
-                        </Select>
+                        </DarkSelect>
                         {hourPreset === "custom" && (
                           <Input
                             type="number"
@@ -742,16 +1299,27 @@ export default function ModerationPage() {
                             value={customHours}
                             onChange={(e) => setCustomHours(e.target.value)}
                             placeholder="Hours"
+                            className="rounded-xl border-white/12 bg-[#14181F]"
                           />
                         )}
-                        <p className="text-[10px] text-[#737A86]">Users never see this duration.</p>
+                        <p className="text-[10px] text-white/30">
+                          Users never see this duration.
+                        </p>
                       </div>
                     )}
                     <div className="flex gap-2">
-                      <Button disabled={busy || showOffline} onClick={executeAction}>
+                      <Button
+                        className="rounded-xl"
+                        disabled={busy || showOffline}
+                        onClick={executeAction}
+                      >
                         {busy ? "Working…" : "Confirm"}
                       </Button>
-                      <Button tone="ghost" onClick={() => setActiveAction(null)}>
+                      <Button
+                        tone="ghost"
+                        className="rounded-xl"
+                        onClick={() => setActiveAction(null)}
+                      >
                         Cancel
                       </Button>
                     </div>
@@ -763,43 +1331,54 @@ export default function ModerationPage() {
         </div>
       )}
 
-      <Panel className="mb-5 overflow-hidden">
-        <div className="flex flex-col gap-3 border-b border-[#252A33] px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+      <Panel className="mb-5 overflow-hidden rounded-2xl border-white/[0.08] bg-white/[0.03]">
+        <div className="flex flex-col gap-3 border-b border-white/[0.06] px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
           <SectionLabel>Active cases</SectionLabel>
           <div className="flex flex-wrap gap-2">
-            <Select
+            <DarkSelect
               value={caseFilter.context}
-              onChange={(e) => setCaseFilter((f) => ({ ...f, context: e.target.value }))}
+              onChange={(v) =>
+                setCaseFilter((f) => ({ ...f, context: v }))
+              }
               className="w-36"
             >
               <option value="">All contexts</option>
               <option value="buyer">Buyer</option>
               <option value="seller">Seller</option>
-            </Select>
-            <Select
+            </DarkSelect>
+            <DarkSelect
               value={caseFilter.status}
-              onChange={(e) => setCaseFilter((f) => ({ ...f, status: e.target.value }))}
+              onChange={(v) =>
+                setCaseFilter((f) => ({ ...f, status: v }))
+              }
               className="w-40"
             >
               <option value="">All statuses</option>
               <option value="UNDER_REVIEW">Under review</option>
               <option value="SUSPENDED">Suspended</option>
               <option value="BLOCKED">Blocked</option>
-            </Select>
-            <Button tone="ghost" className="h-10" onClick={loadCases}>
+            </DarkSelect>
+            <Button
+              tone="ghost"
+              className="h-10 rounded-xl"
+              onClick={loadCases}
+            >
               Apply
             </Button>
           </div>
         </div>
-        <div className="p-5">
+        <div className="p-4 sm:p-5">
           {cases.length === 0 ? (
-            <EmptyState title="No active cases" body="Activity checks and suspensions appear here." />
+            <EmptyState
+              title="No active cases"
+              body="Activity checks and suspensions appear here."
+            />
           ) : (
             <div className="space-y-2">
               {cases.map((c) => (
                 <div
                   key={c._id}
-                  className="flex flex-col gap-3 border border-[#252A33] bg-[#171B22] px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+                  className="flex flex-col gap-3 rounded-2xl border border-white/[0.07] bg-white/[0.02] px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
                 >
                   <div className="min-w-0">
                     <p className="truncate text-sm font-medium">
@@ -811,7 +1390,11 @@ export default function ModerationPage() {
                     </div>
                   </div>
                   {c.user?._id && (
-                    <Button tone="ghost" className="h-8 text-xs" onClick={() => loadProfile(c.user._id)}>
+                    <Button
+                      tone="ghost"
+                      className="h-8 rounded-xl text-xs"
+                      onClick={() => loadProfile(c.user._id)}
+                    >
                       Open
                     </Button>
                   )}
@@ -820,11 +1403,22 @@ export default function ModerationPage() {
             </div>
           )}
           {activeCaseId && (
-            <div className="mt-4 border border-[#252A33] p-4">
-              <Input value={noteBody} onChange={(e) => setNoteBody(e.target.value)} placeholder="Internal note…" />
+            <div className="mt-4 rounded-2xl border border-white/[0.08] p-4">
+              <Input
+                className="rounded-xl border-white/12 bg-[#14181F]"
+                value={noteBody}
+                onChange={(e) => setNoteBody(e.target.value)}
+                placeholder="Internal note…"
+              />
               <div className="mt-2 flex gap-2">
-                <Button onClick={addNote}>Save note</Button>
-                <Button tone="ghost" onClick={() => setActiveCaseId("")}>
+                <Button className="rounded-xl" onClick={addNote}>
+                  Save note
+                </Button>
+                <Button
+                  tone="ghost"
+                  className="rounded-xl"
+                  onClick={() => setActiveCaseId("")}
+                >
                   Cancel
                 </Button>
               </div>
@@ -833,116 +1427,19 @@ export default function ModerationPage() {
         </div>
       </Panel>
 
-      {activityOpen && profile && (
-        <>
-          <button
-            type="button"
-            className="fixed inset-0 z-40 bg-black/60"
-            onClick={() => setActivityOpen(false)}
-          />
-          <aside
-            className={cn(
-              poppins.className,
-              "fixed inset-y-0 right-0 z-50 flex w-full max-w-md flex-col border-l border-[#252A33] bg-[#0D1015]"
-            )}
-          >
-            <div className="flex items-center justify-between border-b border-[#252A33] px-5 py-4">
-              <div>
-                <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#00E575]">
-                  User activity
-                </p>
-                <p className="mt-0.5 text-sm font-medium">{profile.user.name}</p>
-              </div>
-              <Button tone="ghost" className="h-9 w-9 p-0" onClick={() => setActivityOpen(false)}>
-                ✕
-              </Button>
-            </div>
-            <div className="flex-1 overflow-y-auto px-5 py-5">
-              {health && (
-                <div className="mb-6 border border-[#252A33] bg-[#11141A] p-4">
-                  <SectionLabel>Activity health</SectionLabel>
-                  <div className="mt-3 flex items-end gap-3">
-                    <span className="text-4xl font-semibold tabular-nums">{health.score}</span>
-                    <Badge tone={health.tone}>{health.conclusion}</Badge>
-                  </div>
-                  <ul className="mt-3 space-y-1.5">
-                    {health.signals.map((s, i) => (
-                      <li key={i} className="text-xs text-[#A7ADB8]">
-                        · {s}
-                      </li>
-                    ))}
-                  </ul>
-                  <p className="mt-3 text-[10px] text-[#737A86]">
-                    Rule-based review aid. Treat as a prompt to look closer, not a verdict.
-                  </p>
-                </div>
-              )}
-
-              <section className="mb-6">
-                <SectionLabel>Wishlist ({profile.wishlist?.length || 0})</SectionLabel>
-                {profile.wishlist?.length ? (
-                  <div className="mt-3 space-y-1.5">
-                    {profile.wishlist.slice(0, 12).map((p: any) => (
-                      <p key={p._id} className="border border-[#252A33] bg-[#171B22] px-3 py-2 text-xs">
-                        {p.name || "Item"}
-                      </p>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="mt-3 text-xs text-[#737A86]">No wishlist items.</p>
-                )}
-              </section>
-
-              <section className="mb-6">
-                <SectionLabel>Saved stores ({profile.savedStores?.length || 0})</SectionLabel>
-                {profile.savedStores?.length ? (
-                  <div className="mt-3 space-y-1.5">
-                    {profile.savedStores.slice(0, 12).map((s: any) => (
-                      <p key={s._id} className="border border-[#252A33] bg-[#171B22] px-3 py-2 text-xs">
-                        {s.name || "Store"}
-                      </p>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="mt-3 text-xs text-[#737A86]">No saved stores.</p>
-                )}
-              </section>
-
-              <section className="mb-6">
-                <SectionLabel>Payment methods ({profile.paymentMethods?.length || 0})</SectionLabel>
-                {profile.paymentMethods?.length ? (
-                  <div className="mt-3 space-y-1.5">
-                    {profile.paymentMethods.map((p: any) => (
-                      <p key={p._id} className="border border-[#252A33] bg-[#171B22] px-3 py-2 text-xs">
-                        {p.brand} ···· {p.last4}
-                        {p.isDefault ? " · default" : ""}
-                      </p>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="mt-3 text-xs text-[#737A86]">No payment methods on file.</p>
-                )}
-              </section>
-
-              <section className="mb-6">
-                <SectionLabel>Addresses ({profile.addresses?.length || 0})</SectionLabel>
-                {profile.addresses?.length ? (
-                  <div className="mt-3 space-y-1.5">
-                    {profile.addresses.map((a: any) => (
-                      <p key={a._id} className="border border-[#252A33] bg-[#171B22] px-3 py-2 text-xs">
-                        {a.type} · {a.city}, {a.state}
-                        {a.isDefault ? " · default" : ""}
-                      </p>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="mt-3 text-xs text-[#737A86]">No addresses on file.</p>
-                )}
-              </section>
-            </div>
-          </aside>
-        </>
-      )}
+      <ActivityModal
+        open={activityOpen}
+        onClose={() => setActivityOpen(false)}
+        profile={profile}
+      />
     </div>
+  );
+}
+
+export default function ModerationPage() {
+  return (
+    <ModerationGate>
+      <ModerationDirectory />
+    </ModerationGate>
   );
 }

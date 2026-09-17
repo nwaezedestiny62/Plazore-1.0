@@ -2,10 +2,26 @@
 
 import Link from "next/link";
 import { useAuth } from "@clerk/nextjs";
-import { Poppins } from "next/font/google";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { LayoutGrid, List, RefreshCw, WifiOff, X } from "lucide-react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import { createPortal } from "react-dom";
+import {
+  Database,
+  LayoutGrid,
+  List,
+  Lock,
+  Package,
+  RefreshCw,
+  WifiOff,
+  X,
+} from "lucide-react";
 import { adminFetch } from "@/lib/api";
 import { OrbLoader } from "@/components/OrbLoader";
 import {
@@ -15,17 +31,17 @@ import {
   ErrorBlock,
   Input,
   Panel,
-  Select,
   cn,
 } from "@/components/ui";
 import { REGION_LIST } from "@/lib/region";
 import { FULFILLMENT_COUNTRIES, getStatesForCountry } from "@/lib/location";
 
-const poppins = Poppins({
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
-  display: "swap",
-});
+const GATE_KEY = "plazore.admin.productsGate.v1";
+const EXPECTED_PASSWORD =
+  process.env.NEXT_PUBLIC_ADMIN_PRODUCTS_PASSWORD || "";
+const Z_MODAL = 9999;
+
+type EnvKind = "development" | "production" | "unknown";
 
 type ProductRow = {
   _id: string;
@@ -70,6 +86,25 @@ type ProductRow = {
 
 type Counts = { all: number; active: number; inactive: number };
 
+function detectEnvFromApi(): EnvKind {
+  const base =
+    process.env.NEXT_PUBLIC_API_URL ||
+    process.env.NEXT_PUBLIC_ADMIN_API_URL ||
+    "";
+  const lower = base.toLowerCase();
+  if (
+    lower.includes("localhost") ||
+    lower.includes("127.0.0.1") ||
+    lower.includes(":3000")
+  )
+    return "development";
+  if (lower.includes("plazore") || lower.startsWith("https://"))
+    return "production";
+  if (process.env.NODE_ENV === "development") return "development";
+  if (process.env.NODE_ENV === "production") return "production";
+  return "unknown";
+}
+
 function locLabel(p: ProductRow) {
   return (
     p.fulfillmentLocation?.displayLabel ||
@@ -90,16 +125,39 @@ function fmtDate(d?: string) {
   }
 }
 
-function Field({
-  label,
+function DarkSelect({
+  value,
+  onChange,
   children,
+  className,
+  disabled,
 }: {
-  label: string;
-  children: React.ReactNode;
+  value: string;
+  onChange: (v: string) => void;
+  children: ReactNode;
+  className?: string;
+  disabled?: boolean;
 }) {
   return (
+    <select
+      value={value}
+      disabled={disabled}
+      onChange={(e) => onChange(e.target.value)}
+      style={{ colorScheme: "dark" }}
+      className={cn(
+        "h-10 w-full rounded-xl border border-white/12 bg-[#14181F] px-3 text-[13px] text-[#F5F7FA] outline-none focus:border-[#00E575]/40 disabled:opacity-50",
+        className,
+      )}
+    >
+      {children}
+    </select>
+  );
+}
+
+function Field({ label, children }: { label: string; children: ReactNode }) {
+  return (
     <div>
-      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#737A86]">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-white/35">
         {label}
       </p>
       <div className="mt-1 break-words text-sm text-[#F5F7FA]">
@@ -109,9 +167,9 @@ function Field({
   );
 }
 
-function SectionLabel({ children }: { children: React.ReactNode }) {
+function SectionLabel({ children }: { children: ReactNode }) {
   return (
-    <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#737A86]">
+    <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/40">
       {children}
     </p>
   );
@@ -133,7 +191,7 @@ function ProductImageGallery({
 
   if (!list.length) {
     return (
-      <div className="flex aspect-[4/3] w-full items-center justify-center border border-[#252A33] bg-[#171B22] text-xs text-[#737A86]">
+      <div className="flex aspect-[4/3] w-full items-center justify-center rounded-2xl border border-white/[0.08] bg-white/[0.03] text-xs text-white/35">
         No images
       </div>
     );
@@ -143,7 +201,7 @@ function ProductImageGallery({
 
   return (
     <div className="space-y-2">
-      <div className="relative aspect-[4/3] w-full overflow-hidden border border-[#252A33] bg-[#171B22]">
+      <div className="relative aspect-[4/3] w-full overflow-hidden rounded-2xl border border-white/[0.08] bg-white/[0.03]">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={hero}
@@ -151,7 +209,7 @@ function ProductImageGallery({
           className="h-full w-full object-cover"
         />
         {list.length > 1 && (
-          <span className="absolute bottom-2 right-2 border border-[#252A33]/80 bg-[#0C0F14]/85 px-2 py-0.5 text-[10px] tabular-nums text-[#A7ADB8]">
+          <span className="absolute bottom-2 right-2 rounded-md border border-white/10 bg-[#0C0F14]/85 px-2 py-0.5 text-[10px] tabular-nums text-white/55">
             {active + 1} / {list.length}
           </span>
         )}
@@ -164,10 +222,10 @@ function ProductImageGallery({
               type="button"
               onClick={() => setActive(i)}
               className={cn(
-                "aspect-square overflow-hidden border bg-[#171B22] transition",
+                "aspect-square overflow-hidden rounded-lg border bg-white/[0.03] transition",
                 i === active
                   ? "border-[#00E575] ring-1 ring-[#00E575]/40"
-                  : "border-[#252A33] hover:border-[#00E575]/35",
+                  : "border-white/10 hover:border-[#00E575]/35",
               )}
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -180,11 +238,385 @@ function ProductImageGallery({
   );
 }
 
-export default function ProductsPage() {
+function ProductsGate({ children }: { children: ReactNode }) {
+  const [unlocked, setUnlocked] = useState(false);
+  const [ready, setReady] = useState(false);
+  const [password, setPassword] = useState("");
+  const [err, setErr] = useState("");
+  const [shake, setShake] = useState(false);
+
+  useEffect(() => {
+    try {
+      if (sessionStorage.getItem(GATE_KEY) === "1") setUnlocked(true);
+    } catch {
+      /* ignore */
+    }
+    setReady(true);
+  }, []);
+
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!EXPECTED_PASSWORD) {
+      setErr("Set NEXT_PUBLIC_ADMIN_PRODUCTS_PASSWORD in .env");
+      return;
+    }
+    if (password === EXPECTED_PASSWORD) {
+      try {
+        sessionStorage.setItem(GATE_KEY, "1");
+      } catch {
+        /* ignore */
+      }
+      setUnlocked(true);
+      setErr("");
+      return;
+    }
+    setErr("Incorrect password.");
+    setShake(true);
+    window.setTimeout(() => setShake(false), 420);
+  };
+
+  if (!ready) {
+    return (
+      <div className="flex min-h-[50vh] items-center justify-center text-white/35">
+        …
+      </div>
+    );
+  }
+
+  if (!unlocked) {
+    return (
+      <div className="mx-auto flex min-h-[70vh] max-w-md flex-col justify-center px-4 text-[#F5F7FA]">
+        <div
+          className={cn(
+            "rounded-2xl border border-white/10 bg-[#0E1116]/95 p-6 sm:p-8",
+            shake && "animate-[plazore-shake_0.4s_ease-in-out]",
+          )}
+        >
+          <div className="h-px bg-gradient-to-r from-[#00E575] via-[#14B8A6] to-[#3B82F6]" />
+          <div className="mt-5 flex h-11 w-11 items-center justify-center rounded-full bg-white/[0.06]">
+            <Lock className="h-4 w-4 text-[#00E575]" />
+          </div>
+          <p className="mt-4 text-[11px] font-semibold tracking-[0.2em] text-[#00E575]">
+            RESTRICTED
+          </p>
+          <h1 className="mt-2 text-2xl font-semibold">Products</h1>
+          <p className="mt-2 text-[13px] text-white/45">
+            Enter access password to continue.
+          </p>
+          <form onSubmit={submit} className="mt-6 space-y-3">
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Access password"
+              autoComplete="current-password"
+              className="h-12 w-full rounded-xl border border-white/12 bg-[#14181F] px-4 text-sm text-[#F5F7FA] outline-none focus:border-[#00E575]/45"
+            />
+            {err && <p className="text-xs text-red-400">{err}</p>}
+            <button
+              type="submit"
+              className="flex h-12 w-full items-center justify-center rounded-xl bg-gradient-to-r from-[#00E575] via-[#14B8A6] to-[#3B82F6] text-sm font-extrabold text-[#041412]"
+            >
+              Unlock
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
+  return <>{children}</>;
+}
+
+function ProductModal({
+  open,
+  onClose,
+  selected,
+  detailLoading,
+  openId,
+  busyId,
+  showOffline,
+  onToggleActive,
+}: {
+  open: boolean;
+  onClose: () => void;
+  selected: ProductRow | null;
+  detailLoading: boolean;
+  openId: string | null;
+  busyId: string;
+  showOffline: boolean;
+  onToggleActive: (p: ProductRow) => void;
+}) {
+  const [mounted, setMounted] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => setMounted(true), []);
+
+  useEffect(() => {
+    if (!open) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (open) {
+      requestAnimationFrame(() => scrollRef.current?.scrollTo({ top: 0 }));
+    }
+  }, [open, selected?._id]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
+
+  if (!mounted) return null;
+
+  const metric = (p: ProductRow) => ({
+    views: p.views ?? p.metrics?.views ?? 0,
+    cart: p.cartAdds ?? p.metrics?.cartAdds ?? 0,
+    checkout: p.checkouts ?? p.metrics?.purchases ?? 0,
+  });
+
+  return createPortal(
+    <div
+      className={cn(
+        "flex items-end justify-center sm:items-center sm:p-6",
+        open ? "pointer-events-auto" : "pointer-events-none",
+      )}
+      style={{ position: "fixed", inset: 0, zIndex: Z_MODAL }}
+      aria-hidden={!open}
+    >
+      <button
+        type="button"
+        aria-label="Close"
+        onClick={onClose}
+        className={cn(
+          "absolute inset-0 bg-black/70 transition-opacity duration-300",
+          open ? "opacity-100" : "opacity-0",
+        )}
+      />
+      <div
+        role="dialog"
+        aria-modal="true"
+        className={cn(
+          "relative z-10 flex w-full max-w-lg flex-col max-h-[min(92dvh,900px)]",
+          "rounded-t-3xl border border-white/10 bg-[#0A0D12] shadow-[0_40px_100px_rgba(0,0,0,0.7)] sm:rounded-3xl",
+          "transition-all duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]",
+          open
+            ? "translate-y-0 scale-100 opacity-100"
+            : "translate-y-10 scale-[0.97] opacity-0",
+        )}
+      >
+        <div className="h-[2px] shrink-0 bg-gradient-to-r from-[#00E575] via-[#14B8A6] to-[#3B82F6]" />
+        <div className="flex h-12 shrink-0 items-center justify-between px-4 sm:px-5">
+          <div>
+            <p className="text-[10px] font-semibold tracking-[0.2em] text-[#00E575]">
+              LISTING
+            </p>
+            <p className="text-sm font-medium text-white/80">Product detail</p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex h-8 w-8 items-center justify-center rounded-full bg-white/5 text-white/50 hover:text-white"
+            aria-label="Close"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div
+          ref={scrollRef}
+          className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-8 sm:px-5"
+        >
+          {detailLoading && !selected ? (
+            <OrbLoader label="Loading product" />
+          ) : selected ? (
+            <div className="space-y-6">
+              <div>
+                <h2 className="text-lg font-semibold leading-snug">
+                  {selected.name}
+                </h2>
+                <p className="mt-1 text-sm text-white/50">
+                  {selected.category}
+                  {selected.subCategory ? ` · ${selected.subCategory}` : ""}
+                  {selected.brand ? ` · ${selected.brand}` : ""}
+                </p>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  <Badge tone={selected.isActive ? "green" : "error"}>
+                    {selected.isActive ? "Active" : "Inactive"}
+                  </Badge>
+                  <Badge tone="neutral">
+                    {selected.region || "No region"}
+                  </Badge>
+                  <Badge tone={(selected.stock ?? 0) > 0 ? "green" : "warn"}>
+                    Stock {selected.stock ?? 0}
+                  </Badge>
+                </div>
+              </div>
+
+              <div>
+                <SectionLabel>
+                  Images
+                  {(selected.images?.length || 0) > 0
+                    ? ` · ${selected.images!.length}`
+                    : ""}
+                </SectionLabel>
+                <div className="mt-2">
+                  <ProductImageGallery
+                    images={selected.images}
+                    name={selected.name}
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-2">
+                {(() => {
+                  const m = metric(selected);
+                  return (
+                    <>
+                      <div className="rounded-xl border border-white/[0.07] bg-white/[0.03] p-3">
+                        <p className="text-[10px] uppercase tracking-[0.14em] text-white/40">
+                          Views
+                        </p>
+                        <p className="mt-1 text-lg font-semibold tabular-nums">
+                          {m.views.toLocaleString()}
+                        </p>
+                      </div>
+                      <div className="rounded-xl border border-white/[0.07] bg-white/[0.03] p-3">
+                        <p className="text-[10px] uppercase tracking-[0.14em] text-white/40">
+                          Cart adds
+                        </p>
+                        <p className="mt-1 text-lg font-semibold tabular-nums">
+                          {m.cart.toLocaleString()}
+                        </p>
+                      </div>
+                      <div className="rounded-xl border border-white/[0.07] bg-white/[0.03] p-3">
+                        <p className="text-[10px] uppercase tracking-[0.14em] text-white/40">
+                          Checkouts
+                        </p>
+                        <p className="mt-1 text-lg font-semibold tabular-nums">
+                          {m.checkout.toLocaleString()}
+                        </p>
+                      </div>
+                    </>
+                  );
+                })()}
+              </div>
+
+              <div className="rounded-xl border border-white/[0.07] bg-white/[0.03] p-3">
+                <p className="text-[10px] uppercase tracking-[0.14em] text-white/40">
+                  Price
+                </p>
+                <p className="mt-1 text-2xl font-semibold tabular-nums">
+                  {Number(selected.price || 0).toLocaleString()}
+                </p>
+              </div>
+
+              <div className="space-y-3 border-t border-white/[0.06] pt-4">
+                <SectionLabel>Seller</SectionLabel>
+                <Field label="Store">
+                  {selected.seller?.storeName || selected.seller?.name || "—"}
+                </Field>
+                <Field label="Email">{selected.seller?.email || "—"}</Field>
+                {selected.seller?.isSellerSuspended && (
+                  <Badge tone="error">Seller suspended</Badge>
+                )}
+              </div>
+
+              <div className="space-y-3 border-t border-white/[0.06] pt-4">
+                <SectionLabel>Fulfillment</SectionLabel>
+                <Field label="Location">{locLabel(selected)}</Field>
+                <Field label="City">
+                  {selected.fulfillmentLocation?.city || "—"}
+                </Field>
+                <Field label="State">
+                  {selected.fulfillmentLocation?.state || "—"}
+                </Field>
+                <Field label="Country">
+                  {selected.fulfillmentLocation?.country || "—"}
+                </Field>
+              </div>
+
+              {selected.description && (
+                <div className="space-y-2 border-t border-white/[0.06] pt-4">
+                  <SectionLabel>Description</SectionLabel>
+                  <p className="text-sm leading-relaxed text-white/55">
+                    {selected.description}
+                  </p>
+                </div>
+              )}
+
+              <div className="space-y-2 border-t border-white/[0.06] pt-4 text-xs text-white/35">
+                <p className="font-mono">ID {selected._id}</p>
+                <p>Listed {fmtDate(selected.createdAt)}</p>
+                <p>Updated {fmtDate(selected.updatedAt)}</p>
+                {(selected.wishlistCount ?? 0) > 0 && (
+                  <p>Wishlist saves: {selected.wishlistCount}</p>
+                )}
+              </div>
+
+              <div className="flex flex-col gap-2 border-t border-white/[0.06] pt-4">
+                {selected.seller?._id && (
+                  <Link
+                    href={`/users?userId=${encodeURIComponent(selected.seller._id)}&role=seller`}
+                    className="inline-flex h-11 items-center justify-center rounded-xl border border-white/12 bg-white/[0.03] px-4 text-sm text-white/55 transition hover:text-[#00E575]"
+                  >
+                    Open seller on Users
+                  </Link>
+                )}
+                <Button
+                  className="rounded-xl"
+                  tone={selected.isActive ? "danger" : "primary"}
+                  disabled={busyId === selected._id || showOffline}
+                  onClick={() => onToggleActive(selected)}
+                >
+                  {selected.isActive
+                    ? "Deactivate product"
+                    : "Activate product"}
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="py-16 text-center">
+              <p className="text-sm text-white/50">
+                Product not found in catalog.
+              </p>
+              <p className="mt-1 font-mono text-[11px] text-white/30">
+                {openId}
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+function ProductsDirectory() {
   const { getToken } = useAuth();
   const searchParams = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
+
+  const clientEnv = useMemo(() => detectEnvFromApi(), []);
+  const env: EnvKind = clientEnv;
+  const envTone =
+    env === "production" ? "error" : env === "development" ? "warn" : "neutral";
+  const envLabel =
+    env === "production"
+      ? "Production data"
+      : env === "development"
+        ? "Development data"
+        : "Environment unknown";
 
   const deepProductId = (searchParams.get("productId") || "").trim();
   const deepOpenedRef = useRef<string | null>(null);
@@ -215,7 +647,7 @@ export default function ProductsPage() {
   const [busyId, setBusyId] = useState("");
 
   const [openId, setOpenId] = useState<string | null>(null);
-  const [paneOpen, setPaneOpen] = useState(false);
+  const [modalOpen, setModalOpen] = useState(false);
   const [detailOverride, setDetailOverride] = useState<ProductRow | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
 
@@ -355,7 +787,6 @@ export default function ProductsPage() {
         const token = await getToken();
         if (!token) return null;
 
-        // Prefer dedicated detail if available
         try {
           const one = await adminFetch<{ data?: ProductRow }>(
             `/admin/products/${id}`,
@@ -366,7 +797,6 @@ export default function ProductsPage() {
           /* fall through */
         }
 
-        // Fallback: search list endpoints may still return the row
         const params = new URLSearchParams({
           page: "1",
           limit: "5",
@@ -387,10 +817,10 @@ export default function ProductsPage() {
     [getToken],
   );
 
-  const openPane = useCallback(
+  const openModal = useCallback(
     async (id: string) => {
       setOpenId(id);
-      setPaneOpen(true);
+      setModalOpen(true);
 
       const inList =
         items.find((p) => p._id === id) ||
@@ -408,8 +838,8 @@ export default function ProductsPage() {
     [items, fetchProductById],
   );
 
-  const closePane = useCallback(() => {
-    setPaneOpen(false);
+  const closeModal = useCallback(() => {
+    setModalOpen(false);
     deepOpenedRef.current = null;
     if (deepProductId) {
       router.replace(pathname);
@@ -420,20 +850,19 @@ export default function ProductsPage() {
     }, 280);
   }, [deepProductId, pathname, router]);
 
-  // Auto-open from Reports (or any deep link): /products?productId=xxx
+  // Auto-open from Reports / other pages: /products?productId=xxx
   useEffect(() => {
     if (!mounted || !deepProductId) return;
     if (deepOpenedRef.current === deepProductId) return;
     deepOpenedRef.current = deepProductId;
-    void openPane(deepProductId);
-  }, [mounted, deepProductId, openPane]);
+    void openModal(deepProductId);
+  }, [mounted, deepProductId, openModal]);
 
-  // When list finishes loading, prefer list row over override
   useEffect(() => {
-    if (!openId || !paneOpen) return;
+    if (!openId || !modalOpen) return;
     const inList = items.find((p) => p._id === openId);
     if (inList) setDetailOverride(null);
-  }, [items, openId, paneOpen]);
+  }, [items, openId, modalOpen]);
 
   const selected =
     items.find((p) => p._id === openId) || detailOverride || null;
@@ -489,14 +918,9 @@ export default function ProductsPage() {
   });
 
   return (
-    <div
-      className={cn(
-        poppins.className,
-        "relative min-h-[70vh] pb-28 text-[#F5F7FA]",
-      )}
-    >
+    <div className="relative mx-auto max-w-6xl pb-24 text-[#F5F7FA]">
       {showOffline && (
-        <div className="mb-4 flex items-start gap-3 border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+        <div className="mb-4 flex items-start gap-3 rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
           <WifiOff className="mt-0.5 h-4 w-4 shrink-0" />
           <div>
             <p className="font-semibold">You’re offline</p>
@@ -510,14 +934,55 @@ export default function ProductsPage() {
         </div>
       )}
 
-      <header className="mb-6 border-b border-[#252A33] pb-5">
-        <div className="flex flex-wrap items-center gap-2">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-[#00E575]">
+      <header className="mb-6">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <p className="text-[11px] font-semibold tracking-[0.2em] text-[#00E575]">
+              CATALOG
+            </p>
+            <h1 className="mt-1 text-[28px] font-semibold tracking-tight sm:text-[32px]">
+              Products
+            </h1>
+            <p className="mt-2 max-w-xl text-[13.5px] text-white/50">
+              Search, filter, and inspect listings. Deep links from Reports open
+              the product modal automatically.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-xs tabular-nums text-white/40">
+              <span className="text-[#F5F7FA]">{total.toLocaleString()}</span>{" "}
+              in view ·{" "}
+              <span className="text-[#F5F7FA]">
+                {counts.all.toLocaleString()}
+              </span>{" "}
+              total
+              {stale ? " · cached" : ""}
+            </p>
+            <Button
+              tone="ghost"
+              className="h-10 gap-1.5 rounded-full border border-white/12 bg-[#14181F] text-xs"
+              disabled={loading || showOffline}
+              onClick={() => load(page)}
+            >
+              <RefreshCw
+                className={cn("h-3.5 w-3.5", loading && "animate-spin")}
+              />
+              Refresh
+            </Button>
+          </div>
+        </div>
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          <Badge tone={envTone as any}>
+            <Database className="mr-1 inline h-3 w-3" />
+            {envLabel}
+          </Badge>
+          <Badge tone="blue">
+            <Package className="mr-1 inline h-3 w-3" />
             Catalog
-          </p>
+          </Badge>
           <span
             className={cn(
-              "inline-flex items-center gap-1.5 border px-2 py-0.5 text-[10px] font-medium",
+              "inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] font-medium",
               showOffline
                 ? "border-amber-500/30 bg-amber-500/10 text-amber-200"
                 : "border-[#00E575]/25 bg-[#00E575]/10 text-[#00E575]",
@@ -532,42 +997,9 @@ export default function ProductsPage() {
             {showOffline ? "Offline" : "Live"}
           </span>
         </div>
-        <div className="mt-2 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <h1 className="text-[26px] font-semibold leading-none tracking-tight sm:text-[28px]">
-              Products
-            </h1>
-            <p className="mt-2 max-w-xl text-sm leading-relaxed text-[#A7ADB8]">
-              Search, filter, and inspect listings. Deep links from Reports open
-              the product pane automatically.
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <p className="text-xs tabular-nums text-[#737A86]">
-              <span className="text-[#F5F7FA]">{total.toLocaleString()}</span> in
-              view ·{" "}
-              <span className="text-[#F5F7FA]">
-                {counts.all.toLocaleString()}
-              </span>{" "}
-              total
-              {stale ? " · cached" : ""}
-            </p>
-            <Button
-              tone="ghost"
-              className="h-9 gap-1.5 text-xs"
-              disabled={loading || showOffline}
-              onClick={() => load(page)}
-            >
-              <RefreshCw
-                className={cn("h-3.5 w-3.5", loading && "animate-spin")}
-              />
-              Refresh
-            </Button>
-          </div>
-        </div>
       </header>
 
-      <div className="mb-4 grid grid-cols-3 gap-px overflow-hidden border border-[#252A33] bg-[#252A33]">
+      <div className="mb-4 grid grid-cols-3 gap-2">
         {(
           [
             ["All", "", counts.all],
@@ -580,12 +1012,13 @@ export default function ProductsPage() {
             type="button"
             onClick={() => setActive(value)}
             className={cn(
-              "bg-[#11141A] px-3 py-3.5 text-left transition sm:px-4",
-              active === value &&
-                "bg-[#041412] ring-1 ring-inset ring-[#00E575]/30",
+              "rounded-2xl border px-3 py-3.5 text-left transition sm:px-4",
+              active === value
+                ? "border-[#00E575]/35 bg-[#00E575]/10"
+                : "border-white/[0.08] bg-white/[0.03] hover:border-white/15",
             )}
           >
-            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#737A86]">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/40">
               {label}
             </p>
             <p className="mt-1.5 text-[22px] font-semibold tabular-nums leading-none">
@@ -595,16 +1028,16 @@ export default function ProductsPage() {
         ))}
       </div>
 
-      <Panel className="mb-4 overflow-hidden">
-        <div className="flex flex-col gap-3 border-b border-[#252A33] px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#737A86]">
+      <Panel className="mb-4 overflow-hidden rounded-2xl border-white/[0.08] bg-white/[0.03]">
+        <div className="flex flex-col gap-3 border-b border-white/[0.06] px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/40">
             Filters
           </p>
           {filtersActive && (
             <button
               type="button"
               onClick={clearFilters}
-              className="text-xs font-medium text-[#A7ADB8] hover:text-[#00E575]"
+              className="text-xs font-medium text-white/50 hover:text-[#00E575]"
             >
               Clear all
             </button>
@@ -617,22 +1050,26 @@ export default function ProductsPage() {
               value={q}
               onChange={(e) => setQ(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && !showOffline && load(1)}
-              className="lg:max-w-md"
+              className="rounded-xl border-white/12 bg-[#14181F] lg:max-w-md"
               disabled={showOffline && !cacheRef.current}
             />
-            <Button onClick={() => load(1)} disabled={loading || showOffline}>
+            <Button
+              className="rounded-xl"
+              onClick={() => load(1)}
+              disabled={loading || showOffline}
+            >
               {loading ? "Searching…" : "Search"}
             </Button>
-            <div className="flex gap-1 border border-[#252A33] lg:ml-auto">
+            <div className="flex gap-1 rounded-xl border border-white/10 lg:ml-auto">
               <button
                 type="button"
                 aria-label="List view"
                 onClick={() => setView("list")}
                 className={cn(
-                  "flex h-10 w-10 items-center justify-center transition",
+                  "flex h-10 w-10 items-center justify-center rounded-l-xl transition",
                   view === "list"
                     ? "bg-[#00E575] text-[#041412]"
-                    : "text-[#A7ADB8] hover:text-[#F5F7FA]",
+                    : "text-white/50 hover:text-[#F5F7FA]",
                 )}
               >
                 <List className="h-4 w-4" />
@@ -642,10 +1079,10 @@ export default function ProductsPage() {
                 aria-label="Grid view"
                 onClick={() => setView("grid")}
                 className={cn(
-                  "flex h-10 w-10 items-center justify-center transition",
+                  "flex h-10 w-10 items-center justify-center rounded-r-xl transition",
                   view === "grid"
                     ? "bg-[#00E575] text-[#041412]"
-                    : "text-[#A7ADB8] hover:text-[#F5F7FA]",
+                    : "text-white/50 hover:text-[#F5F7FA]",
                 )}
               >
                 <LayoutGrid className="h-4 w-4" />
@@ -654,9 +1091,9 @@ export default function ProductsPage() {
           </div>
 
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-5">
-            <Select
+            <DarkSelect
               value={region}
-              onChange={(e) => setRegion(e.target.value)}
+              onChange={setRegion}
               disabled={showOffline && !cacheRef.current}
             >
               <option value="">All regions</option>
@@ -665,12 +1102,12 @@ export default function ProductsPage() {
                   {r.name} ({r.code})
                 </option>
               ))}
-            </Select>
+            </DarkSelect>
 
-            <Select
+            <DarkSelect
               value={country}
-              onChange={(e) => {
-                setCountry(e.target.value);
+              onChange={(v) => {
+                setCountry(v);
                 setCity("");
               }}
               disabled={showOffline && !cacheRef.current}
@@ -681,11 +1118,11 @@ export default function ProductsPage() {
                   {c.name}
                 </option>
               ))}
-            </Select>
+            </DarkSelect>
 
-            <Select
+            <DarkSelect
               value={city}
-              onChange={(e) => setCity(e.target.value)}
+              onChange={setCity}
               disabled={showOffline && !cacheRef.current}
             >
               <option value="">All cities</option>
@@ -694,11 +1131,11 @@ export default function ProductsPage() {
                   {c}
                 </option>
               ))}
-            </Select>
+            </DarkSelect>
 
-            <Select
+            <DarkSelect
               value={sort}
-              onChange={(e) => setSort(e.target.value)}
+              onChange={setSort}
               disabled={showOffline && !cacheRef.current}
             >
               <option value="newest">Newest first</option>
@@ -714,17 +1151,17 @@ export default function ProductsPage() {
               <option value="cartLow">Cart adds low → high</option>
               <option value="checkoutHigh">Checkouts high → low</option>
               <option value="checkoutLow">Checkouts low → high</option>
-            </Select>
+            </DarkSelect>
 
-            <Select
+            <DarkSelect
               value={active}
-              onChange={(e) => setActive(e.target.value)}
+              onChange={setActive}
               disabled={showOffline && !cacheRef.current}
             >
               <option value="">All status</option>
               <option value="true">Active only</option>
               <option value="false">Inactive only</option>
-            </Select>
+            </DarkSelect>
           </div>
         </div>
       </Panel>
@@ -736,7 +1173,7 @@ export default function ProductsPage() {
       )}
 
       {loading && items.length === 0 ? (
-        <div className="border border-[#252A33] bg-[#11141A]">
+        <div className="overflow-hidden rounded-2xl border border-white/[0.08]">
           <OrbLoader label="Loading catalog" />
         </div>
       ) : items.length === 0 && !deepProductId ? (
@@ -756,16 +1193,16 @@ export default function ProductsPage() {
               <button
                 key={p._id}
                 type="button"
-                onClick={() => void openPane(p._id)}
+                onClick={() => void openModal(p._id)}
                 className={cn(
-                  "border border-[#252A33] bg-[#11141A] p-4 text-left transition hover:border-[#00E575]/35",
+                  "rounded-2xl border border-white/[0.08] bg-white/[0.03] p-4 text-left transition hover:border-[#00E575]/35",
                   openId === p._id &&
-                    paneOpen &&
-                    "border-[#00E575]/45 bg-[#00E575]/5",
+                    modalOpen &&
+                    "border-[#00E575]/45 bg-[#00E575]/[0.06]",
                 )}
               >
                 <div className="flex gap-3">
-                  <div className="h-16 w-16 shrink-0 overflow-hidden border border-[#252A33] bg-[#171B22]">
+                  <div className="h-16 w-16 shrink-0 overflow-hidden rounded-xl border border-white/10 bg-white/[0.04]">
                     {p.images?.[0] ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img
@@ -777,7 +1214,7 @@ export default function ProductsPage() {
                   </div>
                   <div className="min-w-0 flex-1">
                     <p className="truncate font-medium">{p.name}</p>
-                    <p className="truncate text-xs text-[#737A86]">
+                    <p className="truncate text-xs text-white/40">
                       {p.seller?.storeName || p.seller?.name || "—"}
                     </p>
                     <p className="mt-1 text-sm font-semibold tabular-nums">
@@ -794,7 +1231,7 @@ export default function ProductsPage() {
                     Stock {p.stock ?? 0}
                   </Badge>
                 </div>
-                <p className="mt-3 text-[11px] tabular-nums text-[#737A86]">
+                <p className="mt-3 text-[11px] tabular-nums text-white/35">
                   {m.views} views · {m.cart} carts · {m.checkout} checkouts
                   {(p.images?.length || 0) > 1
                     ? ` · ${p.images!.length} photos`
@@ -805,9 +1242,9 @@ export default function ProductsPage() {
           })}
         </div>
       ) : items.length > 0 ? (
-        <Panel className="overflow-x-auto">
+        <Panel className="overflow-x-auto rounded-2xl border-white/[0.08] bg-white/[0.03]">
           <table className="w-full min-w-[1080px] text-left text-sm">
-            <thead className="border-b border-[#252A33] text-[11px] uppercase tracking-[0.12em] text-[#737A86]">
+            <thead className="border-b border-white/[0.06] text-[11px] uppercase tracking-[0.12em] text-white/40">
               <tr>
                 <th className="px-4 py-3 font-semibold">Product</th>
                 <th className="px-4 py-3 font-semibold">Seller</th>
@@ -826,15 +1263,17 @@ export default function ProductsPage() {
                 return (
                   <tr
                     key={p._id}
-                    onClick={() => void openPane(p._id)}
+                    onClick={() => void openModal(p._id)}
                     className={cn(
-                      "cursor-pointer border-b border-[#252A33]/70 transition-colors hover:bg-[#171B22]/80",
-                      openId === p._id && paneOpen && "bg-[#00E575]/[0.06]",
+                      "cursor-pointer border-b border-white/[0.05] transition-colors hover:bg-white/[0.03]",
+                      openId === p._id &&
+                        modalOpen &&
+                        "bg-[#00E575]/[0.06]",
                     )}
                   >
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-3">
-                        <div className="h-11 w-11 shrink-0 overflow-hidden border border-[#252A33] bg-[#171B22]">
+                        <div className="h-11 w-11 shrink-0 overflow-hidden rounded-lg border border-white/10 bg-white/[0.04]">
                           {p.images?.[0] ? (
                             // eslint-disable-next-line @next/next/no-img-element
                             <img
@@ -846,7 +1285,7 @@ export default function ProductsPage() {
                         </div>
                         <div className="min-w-0">
                           <p className="truncate font-medium">{p.name}</p>
-                          <p className="truncate text-xs text-[#737A86]">
+                          <p className="truncate text-xs text-white/40">
                             {p.category}
                             {p.brand ? ` · ${p.brand}` : ""}
                             {(p.images?.length || 0) > 1
@@ -860,13 +1299,13 @@ export default function ProductsPage() {
                       <p className="truncate">
                         {p.seller?.storeName || p.seller?.name || "—"}
                       </p>
-                      <p className="truncate text-xs text-[#737A86]">
+                      <p className="truncate text-xs text-white/40">
                         {p.seller?.email}
                       </p>
                     </td>
-                    <td className="px-4 py-3 text-[#A7ADB8]">
+                    <td className="px-4 py-3 text-white/55">
                       <p className="truncate">{locLabel(p)}</p>
-                      <p className="text-[11px] text-[#737A86]">
+                      <p className="text-[11px] text-white/35">
                         {p.region || "—"}
                       </p>
                     </td>
@@ -880,13 +1319,13 @@ export default function ProductsPage() {
                         {p.stock ?? 0}
                       </Badge>
                     </td>
-                    <td className="px-4 py-3 tabular-nums text-[#A7ADB8]">
+                    <td className="px-4 py-3 tabular-nums text-white/50">
                       {m.views.toLocaleString()}
                     </td>
-                    <td className="px-4 py-3 tabular-nums text-[#A7ADB8]">
+                    <td className="px-4 py-3 tabular-nums text-white/50">
                       {m.cart.toLocaleString()}
                     </td>
-                    <td className="px-4 py-3 tabular-nums text-[#A7ADB8]">
+                    <td className="px-4 py-3 tabular-nums text-white/50">
                       {m.checkout.toLocaleString()}
                     </td>
                     <td className="px-4 py-3 font-semibold tabular-nums">
@@ -904,16 +1343,18 @@ export default function ProductsPage() {
         <div className="mt-4 flex flex-wrap items-center gap-2">
           <Button
             tone="ghost"
+            className="rounded-xl"
             disabled={page <= 1 || loading || showOffline}
             onClick={() => load(page - 1)}
           >
             Previous
           </Button>
-          <span className="text-xs text-[#737A86]">
+          <span className="text-xs text-white/40">
             Page {page} of {pages}
           </span>
           <Button
             tone="ghost"
+            className="rounded-xl"
             disabled={page >= pages || loading || showOffline}
             onClick={() => load(page + 1)}
           >
@@ -922,201 +1363,24 @@ export default function ProductsPage() {
         </div>
       )}
 
-      <div
-        className={cn(
-          "fixed inset-0 z-40 bg-black/50 transition-opacity duration-300",
-          paneOpen
-            ? "pointer-events-auto opacity-100"
-            : "pointer-events-none opacity-0",
-        )}
-        onClick={closePane}
-        aria-hidden
+      <ProductModal
+        open={modalOpen}
+        onClose={closeModal}
+        selected={selected}
+        detailLoading={detailLoading}
+        openId={openId}
+        busyId={busyId}
+        showOffline={showOffline}
+        onToggleActive={toggleActive}
       />
-
-      <aside
-        className={cn(
-          poppins.className,
-          "fixed top-0 right-0 z-50 flex h-full w-full max-w-[440px] flex-col border-l border-[#252A33] bg-[#0C0F14] shadow-2xl transition-transform duration-300 ease-out",
-          paneOpen ? "translate-x-0" : "translate-x-full",
-        )}
-      >
-        <div className="flex h-14 shrink-0 items-center justify-between border-b border-[#252A33] px-4">
-          <div>
-            <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#00E575]">
-              Listing
-            </p>
-            <p className="text-sm font-medium">Product detail</p>
-          </div>
-          <button
-            type="button"
-            onClick={closePane}
-            className="flex h-9 w-9 items-center justify-center border border-[#252A33] bg-[#171B22] text-[#A7ADB8] transition hover:text-white"
-            aria-label="Close"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-
-        <div className="flex-1 overflow-y-auto px-4 py-5">
-          {detailLoading && !selected ? (
-            <OrbLoader label="Loading product" />
-          ) : selected ? (
-            <div className="space-y-6">
-              <div>
-                <h2 className="text-lg font-semibold leading-snug">
-                  {selected.name}
-                </h2>
-                <p className="mt-1 text-sm text-[#A7ADB8]">
-                  {selected.category}
-                  {selected.subCategory ? ` · ${selected.subCategory}` : ""}
-                  {selected.brand ? ` · ${selected.brand}` : ""}
-                </p>
-                <div className="mt-2 flex flex-wrap gap-1.5">
-                  <Badge tone={selected.isActive ? "green" : "error"}>
-                    {selected.isActive ? "Active" : "Inactive"}
-                  </Badge>
-                  <Badge tone="neutral">
-                    {selected.region || "No region"}
-                  </Badge>
-                  <Badge tone={(selected.stock ?? 0) > 0 ? "green" : "warn"}>
-                    Stock {selected.stock ?? 0}
-                  </Badge>
-                </div>
-              </div>
-
-              <div>
-                <SectionLabel>
-                  Images
-                  {(selected.images?.length || 0) > 0
-                    ? ` · ${selected.images!.length}`
-                    : ""}
-                </SectionLabel>
-                <div className="mt-2">
-                  <ProductImageGallery
-                    images={selected.images}
-                    name={selected.name}
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-3 gap-2">
-                {(() => {
-                  const m = metric(selected);
-                  return (
-                    <>
-                      <div className="border border-[#252A33] bg-[#11141A] p-3">
-                        <p className="text-[10px] uppercase tracking-[0.14em] text-[#737A86]">
-                          Views
-                        </p>
-                        <p className="mt-1 text-lg font-semibold tabular-nums">
-                          {m.views.toLocaleString()}
-                        </p>
-                      </div>
-                      <div className="border border-[#252A33] bg-[#11141A] p-3">
-                        <p className="text-[10px] uppercase tracking-[0.14em] text-[#737A86]">
-                          Cart adds
-                        </p>
-                        <p className="mt-1 text-lg font-semibold tabular-nums">
-                          {m.cart.toLocaleString()}
-                        </p>
-                      </div>
-                      <div className="border border-[#252A33] bg-[#11141A] p-3">
-                        <p className="text-[10px] uppercase tracking-[0.14em] text-[#737A86]">
-                          Checkouts
-                        </p>
-                        <p className="mt-1 text-lg font-semibold tabular-nums">
-                          {m.checkout.toLocaleString()}
-                        </p>
-                      </div>
-                    </>
-                  );
-                })()}
-              </div>
-
-              <div className="border border-[#252A33] bg-[#11141A] p-3">
-                <p className="text-[10px] uppercase tracking-[0.14em] text-[#737A86]">
-                  Price
-                </p>
-                <p className="mt-1 text-2xl font-semibold tabular-nums">
-                  {Number(selected.price || 0).toLocaleString()}
-                </p>
-              </div>
-
-              <div className="space-y-3 border-t border-[#252A33] pt-4">
-                <SectionLabel>Seller</SectionLabel>
-                <Field label="Store">
-                  {selected.seller?.storeName || selected.seller?.name || "—"}
-                </Field>
-                <Field label="Email">{selected.seller?.email || "—"}</Field>
-                {selected.seller?.isSellerSuspended && (
-                  <Badge tone="error">Seller suspended</Badge>
-                )}
-              </div>
-
-              <div className="space-y-3 border-t border-[#252A33] pt-4">
-                <SectionLabel>Fulfillment</SectionLabel>
-                <Field label="Location">{locLabel(selected)}</Field>
-                <Field label="City">
-                  {selected.fulfillmentLocation?.city || "—"}
-                </Field>
-                <Field label="State">
-                  {selected.fulfillmentLocation?.state || "—"}
-                </Field>
-                <Field label="Country">
-                  {selected.fulfillmentLocation?.country || "—"}
-                </Field>
-              </div>
-
-              {selected.description && (
-                <div className="space-y-2 border-t border-[#252A33] pt-4">
-                  <SectionLabel>Description</SectionLabel>
-                  <p className="text-sm leading-relaxed text-[#A7ADB8]">
-                    {selected.description}
-                  </p>
-                </div>
-              )}
-
-              <div className="space-y-2 border-t border-[#252A33] pt-4 text-xs text-[#737A86]">
-                <p className="font-mono">ID {selected._id}</p>
-                <p>Listed {fmtDate(selected.createdAt)}</p>
-                <p>Updated {fmtDate(selected.updatedAt)}</p>
-                {(selected.wishlistCount ?? 0) > 0 && (
-                  <p>Wishlist saves: {selected.wishlistCount}</p>
-                )}
-              </div>
-
-              <div className="flex flex-col gap-2 border-t border-[#252A33] pt-4">
-                {selected.seller?._id && (
-                  <Link
-                    href={`/users?userId=${encodeURIComponent(selected.seller._id)}&role=seller`}
-                    className="inline-flex h-10 items-center justify-center border border-[#252A33] bg-[#171B22] px-4 text-sm text-[#A7ADB8] transition hover:text-[#00E575]"
-                  >
-                    Open seller on Users
-                  </Link>
-                )}
-                <Button
-                  tone={selected.isActive ? "danger" : "primary"}
-                  disabled={busyId === selected._id || showOffline}
-                  onClick={() => toggleActive(selected)}
-                >
-                  {selected.isActive
-                    ? "Deactivate product"
-                    : "Activate product"}
-                </Button>
-              </div>
-            </div>
-          ) : (
-            <div className="py-16 text-center">
-              <p className="text-sm text-[#A7ADB8]">
-                Product not found in catalog.
-              </p>
-              <p className="mt-1 font-mono text-[11px] text-[#737A86]">
-                {openId}
-              </p>
-            </div>
-          )}
-        </div>
-      </aside>
     </div>
+  );
+}
+
+export default function ProductsPage() {
+  return (
+    <ProductsGate>
+      <ProductsDirectory />
+    </ProductsGate>
   );
 }
