@@ -573,7 +573,7 @@ export function Storefront({
         <footer className="mb-2 mt-10 flex flex-col items-center">
           <span className="mb-3.5 h-[3px] w-9 rounded-sm bg-[#252A33]" />
           <p className="text-[11px] tracking-widest text-[#737A86]">
-            Plazore · Discovery-Led Commerce
+            Plazore · Digital Mall
           </p>
         </footer>
       </div>

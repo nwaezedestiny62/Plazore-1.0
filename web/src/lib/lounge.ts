@@ -69,7 +69,7 @@ export const LOUNGE_SECTIONS: LoungeSection[] = [
   items: [
     { id: "help", label: "Help", subtitle: "Guides & FAQs", href: "/help" },
     { id: "contact", label: "Contact", subtitle: "Reach Plazore", href: "/contact" },
-    { id: "about", label: "About", subtitle: "The Discovery-Led Commerce", href: "/about" },
+    { id: "about", label: "About", subtitle: "The Digital Mall", href: "/about" },
   ],
 },
 ];

@@ -11,6 +11,7 @@ import {
   LayoutGrid,
   PanelLeftClose,
   PanelLeftOpen,
+  Users,
 } from "lucide-react";
 import { PerformanceFloat } from "@/components/PerformanceFloat";
 import { TV_ROOM_BG, countKeyForPath } from "@/lib/tvCatalog";
@@ -21,6 +22,7 @@ const RAIL_KEY = "plazore.admin.railOpen";
 const RAIL = [
   { href: "/overview", label: "Home", icon: Home },
   { href: "/analytics", label: "Analytics", icon: LayoutGrid },
+  { href: "/team", label: "Team", icon: Users }, // add
 ];
 
 export function AdminShell({ children }: { children: React.ReactNode }) {

@@ -1203,7 +1203,7 @@ export default function CheckoutPage() {
       </div>
 
       <p className="pb-8 text-center text-[11px] font-semibold tracking-wide text-white/38 md:pb-6">
-        Plazore · Discovery-Led Commerce
+        Plazore · Digital Mall
       </p>
     </div>
   );

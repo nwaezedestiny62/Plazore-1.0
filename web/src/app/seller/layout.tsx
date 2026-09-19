@@ -5,21 +5,24 @@ import { usePathname, useRouter } from "next/navigation";
 import { useAuth, useUser } from "@clerk/nextjs";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  ChevronRight,
   Diamond,
   Grid2x2,
   LogOut,
   MessageCircle,
   Package,
+  PanelLeftClose,
+  PanelLeftOpen,
   Receipt,
 } from "lucide-react";
 import {
   fetchMyModeration,
   isContextBlocked,
-  resolveScreenKind,
 } from "@/lib/moderation";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000/api";
 const PENDING_STATUSES = new Set(["Preparing"]);
+const RAIL_KEY = "plazore.seller.railOpen";
 
 const NAV = [
   {
@@ -54,13 +57,37 @@ const NAV = [
   },
 ] as const;
 
-function Badge({ count }: { count: number }) {
+function NavBadge({ count }: { count: number }) {
   if (count <= 0) return null;
   const label = count > 99 ? "99+" : String(count);
   return (
-    <span className="absolute -right-1.5 -top-1.5 min-w-[15px] rounded-full border border-[#11141A] bg-[#00E575] px-1 text-center text-[9px] font-extrabold leading-[15px] text-[#041412]">
+    <span className="absolute -right-1.5 -top-1.5 min-w-[15px] rounded-full border border-[#0C0E12] bg-[#00E575] px-1 text-center text-[9px] font-bold leading-[15px] text-[#041412]">
       {label}
     </span>
+  );
+}
+
+function ExitToMall({
+  compact,
+  className = "",
+}: {
+  compact?: boolean;
+  className?: string;
+}) {
+  return (
+    <Link
+      href="/"
+      title="Exit to Mall"
+      className={
+        className ||
+        (compact
+          ? "inline-flex h-9 items-center gap-1.5 rounded-full border border-white/[0.1] bg-white/[0.04] px-3 text-[11px] font-semibold text-[#8BA3C7] transition hover:border-white/20 hover:bg-white/[0.07] hover:text-[#F5F7FA]"
+          : "inline-flex items-center gap-2 rounded-full border border-white/[0.1] bg-white/[0.03] px-3.5 py-2 text-[12px] font-semibold text-[#8BA3C7] transition hover:border-white/18 hover:bg-white/[0.06] hover:text-[#F5F7FA]")
+      }
+    >
+      <LogOut className={compact ? "h-3.5 w-3.5" : "h-3.5 w-3.5"} strokeWidth={2} />
+      <span>Exit to Mall</span>
+    </Link>
   );
 }
 
@@ -79,6 +106,32 @@ export default function SellerLayout({
   const [modChecking, setModChecking] = useState(true);
   const [sellerLocked, setSellerLocked] = useState(false);
   const redirected = useRef(false);
+
+  const [railOpen, setRailOpen] = useState(true);
+  const [railReady, setRailReady] = useState(false);
+
+  useEffect(() => {
+    try {
+      const v = localStorage.getItem(RAIL_KEY);
+      if (v === "0") setRailOpen(false);
+      else setRailOpen(true);
+    } catch {
+      setRailOpen(true);
+    }
+    setRailReady(true);
+  }, []);
+
+  const toggleRail = () => {
+    setRailOpen((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem(RAIL_KEY, next ? "1" : "0");
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  };
 
   const checkModeration = useCallback(async () => {
     try {
@@ -218,68 +271,224 @@ export default function SellerLayout({
     return 0;
   };
 
+  const storeLabel =
+    (user?.publicMetadata?.storeName as string | undefined) ||
+    user?.fullName ||
+    "Seller";
+
   return (
-    <div className="min-h-screen bg-[#090B0F] text-[#F5F7FA] lg:flex">
-      <aside className="hidden w-[240px] shrink-0 flex-col border-r border-white/[0.07] bg-[#0C0E12] lg:flex">
-        <div className="border-b border-white/[0.07] px-5 py-5">
-          <p className="text-[10px] font-extrabold tracking-[0.18em] text-[#737A86]">
-            SELLER LOUNGE
-          </p>
-          <p className="mt-1 text-sm font-bold">Plazore Commerce</p>
+    <div className="min-h-dvh bg-[#090B0F] text-[#F5F7FA] lg:flex">
+      {/* ── Desktop sidebar ── */}
+      <aside
+        className={`
+          fixed left-0 top-0 z-30 hidden h-dvh flex-col
+          border-r border-white/[0.06] bg-[#0A0C10]
+          transition-[width] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]
+          lg:flex
+          ${
+            railReady && railOpen
+              ? "w-[240px]"
+              : railReady
+                ? "w-[68px]"
+                : "w-[240px]"
+          }
+        `}
+      >
+        <div
+          className={`flex shrink-0 items-center border-b border-white/[0.06] ${
+            railOpen ? "justify-between gap-2 px-4 py-4" : "flex-col gap-3 px-2 py-4"
+          }`}
+        >
+          {railOpen ? (
+            <div className="min-w-0">
+              <p className="text-[10px] font-semibold tracking-[0.18em] text-[#5C6570]">
+                SELLER LOUNGE
+              </p>
+              <p className="mt-0.5 truncate text-[13px] font-semibold text-[#E8EAED]">
+                Plazore Commerce
+              </p>
+            </div>
+          ) : (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src="/logo.png"
+              alt="Plazore"
+              className="h-7 w-7 object-contain opacity-90"
+            />
+          )}
+          <button
+            type="button"
+            onClick={toggleRail}
+            aria-label={railOpen ? "Collapse sidebar" : "Expand sidebar"}
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-[#5C6570] transition hover:bg-white/[0.05] hover:text-[#E8EAED]"
+          >
+            {railOpen ? (
+              <PanelLeftClose className="h-4 w-4" />
+            ) : (
+              <PanelLeftOpen className="h-4 w-4" />
+            )}
+          </button>
         </div>
-        <nav className="flex flex-1 flex-col gap-1 p-3">
+
+        <nav
+          className={`flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto ${
+            railOpen ? "p-2.5" : "items-center px-2 py-3"
+          }`}
+        >
           {NAV.map((item) => {
             const active = item.match(pathname);
             const count = badgeFor(item.href);
+            const Icon = item.icon;
             return (
               <Link
                 key={item.href}
                 href={item.href}
-                className={`relative flex items-center gap-3 px-3 py-2.5 text-sm font-semibold transition ${
-                  active
-                    ? "bg-white/[0.06] text-[#B8F0D0]"
-                    : "text-[#5A6F88] hover:bg-white/[0.04] hover:text-[#F5F7FA]"
-                }`}
+                title={item.label}
+                className={`
+                  relative flex items-center transition-colors duration-150
+                  ${
+                    railOpen
+                      ? "gap-3 rounded-md px-3 py-2.5 text-[13px] font-medium"
+                      : "h-10 w-10 justify-center rounded-md"
+                  }
+                  ${
+                    active
+                      ? railOpen
+                        ? "bg-white/[0.06] text-[#F5F7FA]"
+                        : "bg-white/[0.1] text-[#F5F7FA]"
+                      : railOpen
+                        ? "text-[#7A8494] hover:bg-white/[0.03] hover:text-[#C5CAD3]"
+                        : "text-[#5C6570] hover:bg-white/[0.05] hover:text-[#C5CAD3]"
+                  }
+                `}
               >
-                <span className="relative">
-                  <item.icon className="h-[18px] w-[18px]" />
-                  <Badge count={count} />
+                {railOpen && active ? (
+                  <span className="absolute left-0 top-1/2 h-4 w-[2px] -translate-y-1/2 rounded-full bg-[#00E575]" />
+                ) : null}
+                <span className="relative shrink-0">
+                  <Icon className="h-[17px] w-[17px]" strokeWidth={1.75} />
+                  <NavBadge count={count} />
                 </span>
-                {item.label}
+                {railOpen ? <span className="truncate">{item.label}</span> : null}
               </Link>
             );
           })}
         </nav>
-        <div className="border-t border-white/[0.07] p-3">
+
+        <div
+          className={`shrink-0 border-t border-white/[0.06] ${
+            railOpen ? "space-y-2 p-3" : "flex flex-col items-center gap-2 p-2"
+          }`}
+        >
+          {railOpen ? (
+            <p className="truncate px-2 text-[11px] text-[#5C6570]">{storeLabel}</p>
+          ) : null}
           <Link
             href="/"
-            className="flex items-center gap-2 px-3 py-2.5 text-sm font-semibold text-[#3B82F6] hover:bg-white/[0.04]"
+            title="Exit to Mall"
+            className={`
+              flex items-center font-medium transition
+              ${
+                railOpen
+                  ? "gap-2.5 rounded-md px-3 py-2.5 text-[13px] text-[#8BA3C7] hover:bg-white/[0.04] hover:text-[#F5F7FA]"
+                  : "h-10 w-10 justify-center rounded-md text-[#8BA3C7] hover:bg-white/[0.06]"
+              }
+            `}
           >
-            <LogOut className="h-4 w-4" />
-            Exit to Mall
+            <LogOut className="h-4 w-4 shrink-0" strokeWidth={1.75} />
+            {railOpen ? <span>Exit to Mall</span> : null}
           </Link>
         </div>
       </aside>
 
-      <div className="flex min-h-screen min-w-0 flex-1 flex-col pb-[72px] lg:pb-0">
-        {children}
+      {railReady && !railOpen ? (
+        <button
+          type="button"
+          aria-label="Show sidebar"
+          onClick={toggleRail}
+          className="fixed left-2.5 top-1/2 z-40 hidden h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full border border-white/10 bg-[#0E1116]/95 text-[#A7ADB8] shadow-lg backdrop-blur-md transition hover:border-white/20 hover:text-white lg:flex"
+        >
+          <ChevronRight className="h-4 w-4" />
+        </button>
+      ) : null}
+
+      {/* Main */}
+      <div
+        className={`
+          flex min-h-dvh min-w-0 flex-1 flex-col
+          pb-[72px] lg:pb-0
+          transition-[padding] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]
+          ${
+            railReady && railOpen
+              ? "lg:pl-[240px]"
+              : railReady
+                ? "lg:pl-[68px]"
+                : "lg:pl-[240px]"
+          }
+        `}
+      >
+        {/* Mobile top bar — Exit always visible on responsive */}
+        <header className="sticky top-0 z-30 flex items-center justify-between gap-3 border-b border-white/[0.06] bg-[#090B0F]/92 px-3 py-2.5 backdrop-blur-md sm:px-4 lg:hidden">
+          <div className="flex min-w-0 items-center gap-2.5">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/logo.png"
+              alt=""
+              className="h-7 w-7 shrink-0 object-contain"
+            />
+            <div className="min-w-0">
+              <p className="text-[9px] font-semibold tracking-[0.16em] text-[#5C6570]">
+                SELLER
+              </p>
+              <p className="truncate text-[12px] font-semibold text-[#E8EAED]">
+                {storeLabel}
+              </p>
+            </div>
+          </div>
+          <ExitToMall compact />
+        </header>
+
+        {/* Desktop top strip */}
+        <header className="sticky top-0 z-20 hidden items-center justify-between border-b border-white/[0.06] bg-[#090B0F]/90 px-5 py-2.5 backdrop-blur-md lg:flex lg:px-6">
+          <button
+            type="button"
+            onClick={toggleRail}
+            className="flex h-8 items-center gap-2 rounded-md px-2 text-[12px] font-medium text-[#5C6570] transition hover:bg-white/[0.04] hover:text-[#C5CAD3]"
+            aria-label={railOpen ? "Hide sidebar" : "Show sidebar"}
+          >
+            {railOpen ? (
+              <PanelLeftClose className="h-4 w-4" />
+            ) : (
+              <PanelLeftOpen className="h-4 w-4" />
+            )}
+            <span>{railOpen ? "Hide menu" : "Show menu"}</span>
+          </button>
+          <ExitToMall />
+        </header>
+
+        <main className="min-w-0 flex-1">{children}</main>
       </div>
 
-      <nav className="fixed inset-x-0 bottom-0 z-40 flex border-t border-white/[0.08] bg-[#11141A] pb-[max(8px,env(safe-area-inset-bottom))] pt-2 lg:hidden">
+      {/* Mobile bottom nav */}
+      <nav className="fixed inset-x-0 bottom-0 z-40 flex border-t border-white/[0.07] bg-[#0C0E12]/98 pb-[max(6px,env(safe-area-inset-bottom))] pt-1.5 backdrop-blur-md lg:hidden">
         {NAV.map((item) => {
           const active = item.match(pathname);
           const count = badgeFor(item.href);
+          const Icon = item.icon;
           return (
             <Link
               key={item.href}
               href={item.href}
-              className={`relative flex flex-1 flex-col items-center gap-1 py-1 text-[10px] font-semibold ${
-                active ? "text-[#B8F0D0]" : "text-[#5A6F88]"
+              className={`relative flex flex-1 flex-col items-center gap-0.5 py-1.5 text-[9px] font-medium tracking-wide ${
+                active ? "text-[#E8EAED]" : "text-[#5C6570]"
               }`}
             >
+              {active ? (
+                <span className="absolute top-0 h-[2px] w-6 rounded-full bg-[#00E575]" />
+              ) : null}
               <span className="relative">
-                <item.icon className="h-[20px] w-[20px]" />
-                <Badge count={count} />
+                <Icon className="h-[19px] w-[19px]" strokeWidth={1.75} />
+                <NavBadge count={count} />
               </span>
               {item.label}
             </Link>

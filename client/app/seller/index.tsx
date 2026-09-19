@@ -3,6 +3,7 @@ import {
   Animated,
   Easing,
   Image,
+  ImageBackground,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -31,11 +32,36 @@ const GREEN = '#00E575'
 const BLUE = '#3B82F6'
 
 const SELLER_TIPS = [
-  'Products with high-quality images usually attract more buyers.',
-  'Keep your shipping information updated so buyers know what to expect.',
-  'Complete your storefront to improve buyer trust.',
-  'Update your inventory regularly to avoid cancelled orders.',
-  'Clear product titles help shoppers find you faster in the mall.',
+  {
+    title: 'Sharp product photos',
+    body: 'High-quality images usually attract more buyers in the mall.',
+    image:
+      'https://images.unsplash.com/photo-1441986300917-64674bd600d8?auto=format&fit=crop&w=1200&q=80',
+  },
+  {
+    title: 'Clear shipping',
+    body: 'Keep shipping details updated so buyers know what to expect.',
+    image:
+      'https://images.unsplash.com/photo-1566576912321-d58ddd7a6088?auto=format&fit=crop&w=1200&q=80',
+  },
+  {
+    title: 'Complete your storefront',
+    body: 'A finished store profile builds trust before the first order.',
+    image:
+      'https://images.unsplash.com/photo-1441984904996-e0b6ba687e04?auto=format&fit=crop&w=1200&q=80',
+  },
+  {
+    title: 'Stay in stock',
+    body: 'Update inventory regularly to avoid cancelled orders.',
+    image:
+      'https://images.unsplash.com/photo-1556742049-0cfed4f6a45d?auto=format&fit=crop&w=1200&q=80',
+  },
+  {
+    title: 'Titles that find buyers',
+    body: 'Clear product titles help shoppers discover you faster.',
+    image:
+      'https://images.unsplash.com/photo-1472851294608-062f824d29cc?auto=format&fit=crop&w=1200&q=80',
+  },
 ]
 
 type Overview = {
@@ -75,7 +101,7 @@ function PlazoreOrb({ size = 110 }: { size?: number }) {
     )
     loop.start()
     return () => loop.stop()
-  }, [])
+  }, [rotation])
   const rotate = rotation.interpolate({
     inputRange: [0, 1],
     outputRange: ['0deg', '360deg'],
@@ -122,6 +148,63 @@ function PlazoreOrb({ size = 110 }: { size?: number }) {
           resizeMode="contain"
         />
       </View>
+    </View>
+  )
+}
+
+function SellerTipsBanner({
+  tipIndex,
+  onSelect,
+  opacity,
+}: {
+  tipIndex: number
+  onSelect: (i: number) => void
+  opacity: Animated.Value
+}) {
+  const tip = SELLER_TIPS[tipIndex] || SELLER_TIPS[0]
+  return (
+    <View style={styles.tipBanner}>
+      <ImageBackground
+        source={{ uri: tip.image }}
+        style={styles.tipBannerBg}
+        imageStyle={styles.tipBannerImg}
+      >
+        <LinearGradient
+          colors={[
+            'rgba(9,11,15,0.94)',
+            'rgba(9,11,15,0.78)',
+            'rgba(9,11,15,0.35)',
+          ]}
+          start={{ x: 0, y: 0.5 }}
+          end={{ x: 1, y: 0.5 }}
+          style={styles.tipBannerGrad}
+        >
+          <View style={styles.tipBannerInner}>
+            <View style={styles.tipBannerIcon}>
+              <Ionicons name="bulb-outline" size={16} color={GREEN} />
+            </View>
+            <Animated.View style={[styles.tipBannerCopy, { opacity }]}>
+              <Text style={styles.tipBannerKicker}>Seller tip</Text>
+              <Text style={styles.tipBannerTitle} numberOfLines={1}>
+                {tip.title}
+              </Text>
+              <Text style={styles.tipBannerBody} numberOfLines={2}>
+                {tip.body}
+              </Text>
+            </Animated.View>
+          </View>
+          <View style={styles.tipBannerDots}>
+            {SELLER_TIPS.map((_, i) => (
+              <Pressable
+                key={i}
+                onPress={() => onSelect(i)}
+                hitSlop={8}
+                style={[styles.tipDot, i === tipIndex && styles.tipDotOn]}
+              />
+            ))}
+          </View>
+        </LinearGradient>
+      </ImageBackground>
     </View>
   )
 }
@@ -203,8 +286,16 @@ export default function SellerDashboard() {
 
   const feePct =
     (PLAN_FEES && typeof PLAN_FEES === 'object'
-      ? PLAN_FEES[overview.plan] ?? PLAN_FEES.free
+      ? (PLAN_FEES[overview.plan] ?? PLAN_FEES.free)
       : null) ?? 8
+
+  const exitToMall = useCallback(() => {
+    if (router.canGoBack()) {
+      router.back()
+    } else {
+      router.replace('/(tabs)' as any)
+    }
+  }, [router])
 
   const loadDashboard = useCallback(async () => {
     try {
@@ -289,7 +380,6 @@ export default function SellerDashboard() {
         setLoading(false)
         return
       }
-      // Full-screen orb only on first open — pull-to-refresh stays inline
       if (!hasLoadedOnce.current) {
         setLoading(true)
       }
@@ -314,7 +404,7 @@ export default function SellerDashboard() {
       })
     }, 8000)
     return () => clearInterval(t)
-  }, [loading])
+  }, [loading, tipOpacity])
 
   const safeActivity = Array.isArray(activity) ? activity : []
   const safeTopProducts = Array.isArray(analytics?.topProducts)
@@ -327,7 +417,6 @@ export default function SellerDashboard() {
       ? `$${Number(overview.revenue).toLocaleString()}`
       : '—'
 
-  // ── ONLY orb — nothing else on screen ──
   if (loading && !refreshing) {
     return (
       <View style={styles.loaderRoot}>
@@ -338,7 +427,7 @@ export default function SellerDashboard() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
-            <View style={styles.header}>
+      <View style={styles.header}>
         <View style={styles.headerLeft}>
           <Text style={styles.headerEyebrow}>Seller Lounge</Text>
           <Text style={styles.headerTitle} numberOfLines={1}>
@@ -368,22 +457,20 @@ export default function SellerDashboard() {
           >
             <Ionicons name="settings-outline" size={20} color={TEXT} />
           </TouchableOpacity>
-          <TouchableOpacity
-            onPress={() => {
-              if (router.canGoBack()) {
-                router.back()
-              } else {
-                router.replace('/(tabs)' as any)
-              }
-            }}
-            activeOpacity={0.85}
-            style={styles.exitBtn}
-            accessibilityLabel="Exit seller lounge"
-          >
-            <Ionicons name="exit-outline" size={16} color={BLUE} />
-            <Text style={styles.exitText}>Exit</Text>
-          </TouchableOpacity>
         </View>
+      </View>
+
+      {/* Exit — full-width strip, always readable */}
+      <View style={styles.exitBar}>
+        <TouchableOpacity
+          onPress={exitToMall}
+          activeOpacity={0.88}
+          style={styles.exitBtn}
+          accessibilityLabel="Exit to Mall"
+        >
+          <Ionicons name="exit-outline" size={16} color="#8BA3C7" />
+          <Text style={styles.exitText}>Exit to Mall</Text>
+        </TouchableOpacity>
       </View>
 
       <ScrollView
@@ -406,6 +493,12 @@ export default function SellerDashboard() {
         </Text>
         <Text style={styles.greetingSub}>Your store at a glance.</Text>
 
+        <SellerTipsBanner
+          tipIndex={tipIndex}
+          onSelect={setTipIndex}
+          opacity={tipOpacity}
+        />
+
         <LinearGradient
           colors={['rgba(0,229,117,0.14)', 'rgba(59,130,246,0.10)']}
           start={{ x: 0, y: 0 }}
@@ -425,7 +518,7 @@ export default function SellerDashboard() {
           </Text>
           <Text style={styles.revenueHint}>
             {overview.revenue && overview.revenue > 0
-              ? 'Lifetime from completed orders on Plazore.'
+              ? 'Revenue from completed orders on Plazore.'
               : 'Payouts and live totals appear here when payments are enabled.'}
           </Text>
           <View style={styles.revenueMeta}>
@@ -480,8 +573,8 @@ export default function SellerDashboard() {
           </View>
 
           <View style={{ marginTop: 12 }}>
-  <DashboardPerformanceBars data={safeSeries /* or analytics?.series || [] */} />
-</View>
+            <DashboardPerformanceBars data={safeSeries} />
+          </View>
 
           <Text style={[styles.cardTitle, { marginTop: 18, marginBottom: 8 }]}>
             Top products
@@ -589,24 +682,6 @@ export default function SellerDashboard() {
           ))
         )}
 
-        <Text style={[styles.sectionLabel, { marginTop: 28 }]}>Tip</Text>
-        <View style={styles.tipCard}>
-          <View style={styles.tipIcon}>
-            <Ionicons name="bulb-outline" size={18} color={GREEN} />
-          </View>
-          <Animated.Text style={[styles.tipText, { opacity: tipOpacity }]}>
-            {SELLER_TIPS[tipIndex]}
-          </Animated.Text>
-          <View style={styles.tipDots}>
-            {SELLER_TIPS.map((_, i) => (
-              <View
-                key={i}
-                style={[styles.tipDot, i === tipIndex && styles.tipDotOn]}
-              />
-            ))}
-          </View>
-        </View>
-
         <View style={styles.planCard}>
           <View style={{ flex: 1 }}>
             <Text style={styles.planEyebrow}>Subscription</Text>
@@ -641,7 +716,11 @@ export default function SellerDashboard() {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: BG },
   loaderRoot: {
-    ...{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 },
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
     backgroundColor: BG,
     alignItems: 'center',
     justifyContent: 'center',
@@ -654,9 +733,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingTop: 6,
-    paddingBottom: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: LINE,
+    paddingBottom: 10,
     backgroundColor: BG,
   },
   headerLeft: { flex: 1, minWidth: 0, marginRight: 12 },
@@ -697,6 +774,29 @@ const styles = StyleSheet.create({
     color: '#F0C070',
   },
 
+  exitBar: {
+    paddingHorizontal: 16,
+    paddingBottom: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: LINE,
+  },
+  exitBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  exitText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#8BA3C7',
+  },
+
   scroll: { flex: 1 },
   scrollContent: { padding: 16, paddingBottom: 48 },
 
@@ -708,9 +808,77 @@ const styles = StyleSheet.create({
   },
   greetingSub: {
     marginTop: 4,
-    marginBottom: 18,
+    marginBottom: 14,
     fontSize: 14,
     color: SECONDARY,
+  },
+
+  tipBanner: {
+    marginBottom: 16,
+    borderRadius: 12,
+    overflow: 'hidden',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: LINE,
+  },
+  tipBannerBg: { minHeight: 88 },
+  tipBannerImg: { borderRadius: 12 },
+  tipBannerGrad: {
+    paddingHorizontal: 14,
+    paddingTop: 12,
+    paddingBottom: 10,
+    minHeight: 88,
+    justifyContent: 'space-between',
+  },
+  tipBannerInner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+  },
+  tipBannerIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(0,229,117,0.15)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(0,229,117,0.28)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  tipBannerCopy: { flex: 1, minWidth: 0 },
+  tipBannerKicker: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1.2,
+    color: GREEN,
+    textTransform: 'uppercase',
+  },
+  tipBannerTitle: {
+    marginTop: 2,
+    fontSize: 14,
+    fontWeight: '700',
+    color: TEXT,
+  },
+  tipBannerBody: {
+    marginTop: 2,
+    fontSize: 12,
+    lineHeight: 17,
+    color: SECONDARY,
+  },
+  tipBannerDots: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 5,
+    marginTop: 8,
+  },
+  tipDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
+    backgroundColor: 'rgba(255,255,255,0.22)',
+  },
+  tipDotOn: {
+    width: 14,
+    backgroundColor: GREEN,
   },
 
   revenueCard: {
@@ -932,43 +1100,6 @@ const styles = StyleSheet.create({
   activityTitle: { fontSize: 14, fontWeight: '600', color: TEXT },
   activitySub: { fontSize: 12, color: MUTED, marginTop: 2 },
 
-  tipCard: {
-    backgroundColor: SURFACE,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: LINE,
-    padding: 16,
-    marginBottom: 18,
-  },
-  tipIcon: {
-    width: 32,
-    height: 32,
-    backgroundColor: 'rgba(0,229,117,0.1)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 10,
-  },
-  tipText: {
-    fontSize: 14,
-    color: SECONDARY,
-    lineHeight: 21,
-    minHeight: 42,
-  },
-  tipDots: {
-    flexDirection: 'row',
-    gap: 5,
-    marginTop: 14,
-  },
-  tipDot: {
-    width: 5,
-    height: 5,
-    borderRadius: 2.5,
-    backgroundColor: LINE,
-  },
-  tipDotOn: {
-    width: 14,
-    backgroundColor: GREEN,
-  },
-
   planCard: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -976,6 +1107,7 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: LINE,
     padding: 16,
+    marginTop: 16,
     marginBottom: 20,
   },
   planEyebrow: {
@@ -1004,20 +1136,5 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: MUTED,
     letterSpacing: 0.6,
-  },
-    exitBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    paddingHorizontal: 10,
-    height: 40,
-    backgroundColor: SURFACE,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: LINE,
-  },
-  exitText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: BLUE,
   },
 })

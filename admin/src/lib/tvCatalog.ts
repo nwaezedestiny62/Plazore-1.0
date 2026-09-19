@@ -156,6 +156,14 @@ export const TV_ROWS: TvRow[] = [
           "https://images.unsplash.com/photo-1596526131083-e8c633c948d2?auto=format&fit=crop&w=900&q=80",
         countKey: "contactsNew",
       },
+      {
+  href: "/team",
+  label: "Team",
+  kicker: "Administrators",
+  kind: "image",
+  image:
+    "https://images.unsplash.com/photo-1522071820081-009f0129c71c?auto=format&fit=crop&w=900&q=80",
+},
     ],
   },
   {
@@ -240,6 +248,7 @@ export const TV_ROWS: TvRow[] = [
       },
     ],
   },
+  
 ];
 
 export type ActivityCounts = {

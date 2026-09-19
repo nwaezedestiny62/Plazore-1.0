@@ -241,7 +241,7 @@ const SECTIONS: NavSection[] = [
       {
         id: 'about',
         label: 'About',
-        subtitle: 'The Discovery-Led Commerce',
+        subtitle: 'The Digital Mall',
         icon: 'information-circle',
         href: '/settings/about',
       },
@@ -1286,7 +1286,7 @@ export default function PlazoreNavigationHub({
                         <View style={{ flex: 1 }}>
                           <Text style={styles.sellerTitle}>Open a store</Text>
                           <Text style={styles.sellerSub}>
-                            Sell on Plazore’s Discovery-Led Commerce
+                            Sell on Plazore’s Digital Mall
                           </Text>
                         </View>
                         <Ionicons

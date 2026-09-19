@@ -29,12 +29,38 @@ const PLAN_FEES: Record<string, number> = {
   pro: 3,
 };
 
+/** Rotating tips + external images for the banner */
 const SELLER_TIPS = [
-  "Products with high-quality images usually attract more buyers.",
-  "Keep your shipping information updated so buyers know what to expect.",
-  "Complete your storefront to improve buyer trust.",
-  "Update your inventory regularly to avoid cancelled orders.",
-  "Clear product titles help shoppers find you faster in the mall.",
+  {
+    title: "Sharp product photos",
+    body: "High-quality images usually attract more buyers in the mall.",
+    image:
+      "https://images.unsplash.com/photo-1441986300917-64674bd600d8?auto=format&fit=crop&w=1200&q=80",
+  },
+  {
+    title: "Clear shipping",
+    body: "Keep shipping details updated so buyers know what to expect.",
+    image:
+      "https://images.unsplash.com/photo-1566576912321-d58ddd7a6088?auto=format&fit=crop&w=1200&q=80",
+  },
+  {
+    title: "Complete your storefront",
+    body: "A finished store profile builds trust before the first order.",
+    image:
+      "https://images.unsplash.com/photo-1441984904996-e0b6ba687e04?auto=format&fit=crop&w=1200&q=80",
+  },
+  {
+    title: "Stay in stock",
+    body: "Update inventory regularly to avoid cancelled orders.",
+    image:
+      "https://images.unsplash.com/photo-1556742049-0cfed4f6a45d?auto=format&fit=crop&w=1200&q=80",
+  },
+  {
+    title: "Titles that find buyers",
+    body: "Clear product titles help shoppers discover you faster.",
+    image:
+      "https://images.unsplash.com/photo-1472851294608-062f824d29cc?auto=format&fit=crop&w=1200&q=80",
+  },
 ];
 
 type Overview = {
@@ -83,7 +109,6 @@ function normalizeDashboardSeries(raw: SeriesPoint[]) {
     }
     if (!label) label = `${i + 1}`;
 
-    // Prefer multi-metric if API sends it; else fall back to single `value` as engagement
     const views = Number(d.views) || 0;
     const cart = Number(d.cartAdds ?? d.cart) || 0;
     const purchases = Number(d.purchases ?? d.sales) || 0;
@@ -131,9 +156,7 @@ function PerformanceBars({ data }: { data: SeriesPoint[] }) {
 
   return (
     <div>
-      {/* Y scale + bars */}
       <div className="flex gap-2">
-        {/* Y labels */}
         <div className="flex w-7 flex-col justify-between pb-5 pt-1 text-right text-[9px] tabular-nums text-[#4A6078]">
           <span>{max}</span>
           <span>{Math.round(max / 2)}</span>
@@ -141,7 +164,6 @@ function PerformanceBars({ data }: { data: SeriesPoint[] }) {
         </div>
 
         <div className="relative min-w-0 flex-1">
-          {/* Grid lines */}
           <div className="pointer-events-none absolute inset-0 flex flex-col justify-between pb-5 pt-1">
             {[0, 1, 2].map((i) => (
               <div key={i} className="border-t border-white/[0.05]" />
@@ -172,7 +194,9 @@ function PerformanceBars({ data }: { data: SeriesPoint[] }) {
                       height: `${h}%`,
                       backgroundImage:
                         "linear-gradient(180deg, #00E575 0%, #14B8A6 45%, #3B82F6 100%)",
-                      boxShadow: isOn ? "0 0 12px rgba(0,229,117,0.25)" : undefined,
+                      boxShadow: isOn
+                        ? "0 0 12px rgba(0,229,117,0.25)"
+                        : undefined,
                     }}
                   />
                   {i % labelEvery === 0 && (
@@ -187,7 +211,6 @@ function PerformanceBars({ data }: { data: SeriesPoint[] }) {
         </div>
       </div>
 
-      {/* Tooltip / summary */}
       <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border border-white/[0.06] bg-[#0A121C] px-3 py-2 text-[12px]">
         {active ? (
           <>
@@ -225,6 +248,77 @@ function OrbLoader() {
   );
 }
 
+/** Compact on mobile (~72–88px), richer on lg */
+function SellerTipsBanner({
+  tipIndex,
+  onSelect,
+}: {
+  tipIndex: number;
+  onSelect: (i: number) => void;
+}) {
+  const tip = SELLER_TIPS[tipIndex] || SELLER_TIPS[0];
+
+  return (
+    <div className="relative overflow-hidden rounded-xl border border-white/[0.08]">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={tip.image}
+        alt=""
+        className="absolute inset-0 h-full w-full object-cover"
+      />
+      <div className="absolute inset-0 bg-gradient-to-r from-[#090B0F]/95 via-[#090B0F]/80 to-[#090B0F]/35" />
+      <div className="absolute inset-0 bg-gradient-to-t from-[#090B0F]/50 to-transparent" />
+
+      <div className="relative flex min-h-[72px] items-center gap-3 px-3.5 py-3 sm:min-h-[88px] sm:gap-4 sm:px-5 sm:py-4 lg:min-h-[100px]">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#00E575]/15 ring-1 ring-[#00E575]/25 sm:h-10 sm:w-10">
+          <Lightbulb className="h-4 w-4 text-[#00E575] sm:h-[18px] sm:w-[18px]" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#00E575]">
+            Seller tip
+          </p>
+          <p className="mt-0.5 truncate text-[13px] font-semibold text-[#F5F7FA] sm:text-sm">
+            {tip.title}
+          </p>
+          <p className="mt-0.5 line-clamp-1 text-[11px] leading-snug text-[#A7ADB8] sm:line-clamp-2 sm:text-[12.5px]">
+            {tip.body}
+          </p>
+        </div>
+        <div className="hidden shrink-0 flex-col items-end gap-2 sm:flex">
+          <div className="flex gap-1.5">
+            {SELLER_TIPS.map((_, i) => (
+              <button
+                key={i}
+                type="button"
+                aria-label={`Tip ${i + 1}`}
+                onClick={() => onSelect(i)}
+                className={`h-1.5 rounded-full transition ${
+                  i === tipIndex ? "w-3.5 bg-[#00E575]" : "w-1.5 bg-white/25"
+                }`}
+              />
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Mobile dots under content, no extra height waste */}
+      <div className="relative flex justify-center gap-1.5 pb-2.5 sm:hidden">
+        {SELLER_TIPS.map((_, i) => (
+          <button
+            key={i}
+            type="button"
+            aria-label={`Tip ${i + 1}`}
+            onClick={() => onSelect(i)}
+            className={`h-1 rounded-full transition ${
+              i === tipIndex ? "w-3 bg-[#00E575]" : "w-1 bg-white/25"
+            }`}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function SellerDashboardPage() {
   const { getToken, isSignedIn } = useAuth();
   const { user } = useUser();
@@ -257,7 +351,10 @@ export default function SellerDashboardPage() {
   const [tipIndex, setTipIndex] = useState(0);
 
   const firstName =
-    user?.firstName || user?.fullName?.split(" ")[0] || user?.username || "Seller";
+    user?.firstName ||
+    user?.fullName?.split(" ")[0] ||
+    user?.username ||
+    "Seller";
   const greeting = useMemo(() => getGreeting(new Date().getHours()), []);
 
   const feePct = PLAN_FEES[overview.plan] ?? PLAN_FEES.free ?? 8;
@@ -269,26 +366,42 @@ export default function SellerDashboardPage() {
       const headers = { Authorization: `Bearer ${token}` };
 
       const [dashRes, ordersRes, productsRes, analyticsRes] = await Promise.all([
-        fetch(`${API}/seller/dashboard`, { headers }).then((r) => r.json()).catch(() => null),
-        fetch(`${API}/orders/seller/my`, { headers }).then((r) => r.json()).catch(() => null),
-        fetch(`${API}/seller/products`, { headers }).then((r) => r.json()).catch(() => null),
-        fetch(`${API}/analytics/seller?range=30`, { headers }).then((r) => r.json()).catch(() => null),
+        fetch(`${API}/seller/dashboard`, { headers })
+          .then((r) => r.json())
+          .catch(() => null),
+        fetch(`${API}/orders/seller/my`, { headers })
+          .then((r) => r.json())
+          .catch(() => null),
+        fetch(`${API}/seller/products`, { headers })
+          .then((r) => r.json())
+          .catch(() => null),
+        fetch(`${API}/analytics/seller?range=30`, { headers })
+          .then((r) => r.json())
+          .catch(() => null),
       ]);
 
       const dash = dashRes?.success ? dashRes.data : null;
-      const orders: Record<string, unknown>[] = Array.isArray(ordersRes?.data) ? ordersRes.data : [];
-      const products: unknown[] = Array.isArray(productsRes?.data) ? productsRes.data : [];
-      const analyticsData = analyticsRes?.success && analyticsRes.data ? analyticsRes.data : null;
+      const orders: Record<string, unknown>[] = Array.isArray(ordersRes?.data)
+        ? ordersRes.data
+        : [];
+      const products: unknown[] = Array.isArray(productsRes?.data)
+        ? productsRes.data
+        : [];
+      const analyticsData =
+        analyticsRes?.success && analyticsRes.data ? analyticsRes.data : null;
       setAnalytics(analyticsData);
 
       const pending = orders.filter(
-        (o) => o?.orderStatus === "Preparing" || o?.orderStatus === "Shipped",
+        (o) =>
+          o?.orderStatus === "Preparing" || o?.orderStatus === "Shipped"
       ).length;
-      const completed = orders.filter((o) => o?.orderStatus === "Delivered").length;
+      const completed = orders.filter(
+        (o) => o?.orderStatus === "Delivered"
+      ).length;
 
       const revenue =
         Number(
-          dash?.revenue ?? dash?.totalRevenue ?? analyticsData?.totals?.revenue,
+          dash?.revenue ?? dash?.totalRevenue ?? analyticsData?.totals?.revenue
         ) || 0;
 
       setOverview({
@@ -318,7 +431,7 @@ export default function SellerDashboardPage() {
                 : "New order",
           subtitle: String(o?.orderNumber || "Order"),
           at: String(o?.createdAt || ""),
-        })),
+        }))
       );
     } catch (e) {
       console.error("Seller dashboard error:", e);
@@ -338,11 +451,16 @@ export default function SellerDashboardPage() {
 
   useEffect(() => {
     if (loading) return;
-    const t = setInterval(() => setTipIndex((i) => (i + 1) % SELLER_TIPS.length), 8000);
+    const t = setInterval(
+      () => setTipIndex((i) => (i + 1) % SELLER_TIPS.length),
+      8000
+    );
     return () => clearInterval(t);
   }, [loading]);
 
-  const safeTop = Array.isArray(analytics?.topProducts) ? analytics!.topProducts! : [];
+  const safeTop = Array.isArray(analytics?.topProducts)
+    ? analytics!.topProducts!
+    : [];
   const safeSeries = Array.isArray(analytics?.series) ? analytics!.series! : [];
 
   const revenueLabel =
@@ -352,7 +470,7 @@ export default function SellerDashboardPage() {
 
   return (
     <div className="min-h-screen">
-      {/* Header */}
+      {/* Header — no Exit (layout handles Exit to Mall) */}
       <header className="sticky top-0 z-20 flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.07] bg-[#090B0F]/95 px-4 py-3 backdrop-blur sm:px-6 lg:px-8">
         <div className="min-w-0">
           <p className="text-[10px] font-bold uppercase tracking-[1.6px] text-[#737A86]">
@@ -382,12 +500,6 @@ export default function SellerDashboardPage() {
           >
             <Settings className="h-5 w-5" />
           </Link>
-          <Link
-            href="/"
-            className="hidden h-10 items-center gap-1.5 border border-white/[0.07] bg-[#11141A] px-3 text-xs font-bold text-[#3B82F6] sm:inline-flex"
-          >
-            Exit
-          </Link>
         </div>
       </header>
 
@@ -412,9 +524,12 @@ export default function SellerDashboardPage() {
           </button>
         </div>
 
-        {/* Desktop: 2-col business layout */}
+        {/* Tips banner — visible mobile + desktop, height-disciplined on mobile */}
+        <div className="mb-5 sm:mb-6">
+          <SellerTipsBanner tipIndex={tipIndex} onSelect={setTipIndex} />
+        </div>
+
         <div className="grid gap-4 lg:grid-cols-12 lg:gap-6">
-          {/* Revenue + stats */}
           <section className="space-y-4 lg:col-span-8">
             <div className="border border-[#00E575]/22 bg-gradient-to-br from-[#00E575]/[0.14] to-[#3B82F6]/10 p-[18px]">
               <div className="flex items-center justify-between">
@@ -434,8 +549,13 @@ export default function SellerDashboardPage() {
                   : "Payouts and live totals appear here when payments are enabled."}
               </p>
               <div className="mt-3.5 flex items-center justify-between text-xs">
-                <span className="text-[#737A86]">Fee · {feePct}% of product price</span>
-                <Link href="/seller/subscription" className="font-bold text-[#00E575]">
+                <span className="text-[#737A86]">
+                  Fee · {feePct}% of product price
+                </span>
+                <Link
+                  href="/seller/subscription"
+                  className="font-bold text-[#00E575]"
+                >
                   Plan
                 </Link>
               </div>
@@ -443,9 +563,21 @@ export default function SellerDashboardPage() {
 
             <div className="grid grid-cols-3 gap-2 sm:gap-3">
               {[
-                { label: "Products", value: overview.totalProducts, icon: Package },
-                { label: "Pending", value: overview.pendingOrders, icon: Clock },
-                { label: "Completed", value: overview.completedOrders, icon: CheckCheck },
+                {
+                  label: "Products",
+                  value: overview.totalProducts,
+                  icon: Package,
+                },
+                {
+                  label: "Pending",
+                  value: overview.pendingOrders,
+                  icon: Clock,
+                },
+                {
+                  label: "Completed",
+                  value: overview.completedOrders,
+                  icon: CheckCheck,
+                },
               ].map((s) => (
                 <div
                   key={s.label}
@@ -484,12 +616,13 @@ export default function SellerDashboardPage() {
                   </span>
                 </div>
                 <div className="mt-3">
-  <PerformanceBars data={safeSeries} />
-</div>
+                  <PerformanceBars data={safeSeries} />
+                </div>
                 <p className="mb-2 mt-4 text-[15px] font-bold">Top products</p>
                 {safeTop.length === 0 ? (
                   <p className="text-[12.5px] text-[#737A86]">
-                    Rankings appear as buyers view, cart, and purchase your items.
+                    Rankings appear as buyers view, cart, and purchase your
+                    items.
                   </p>
                 ) : (
                   safeTop.slice(0, 5).map((p, i) => (
@@ -498,18 +631,24 @@ export default function SellerDashboardPage() {
                       type="button"
                       onClick={() => {
                         if (p?.productId)
-                          router.push(`/seller/products/performance/${p.productId}`);
+                          router.push(
+                            `/seller/products/performance/${p.productId}`
+                          );
                       }}
                       className="flex w-full items-center border-b border-white/[0.07] py-2.5 text-left last:border-0"
                     >
                       <span className="w-5 text-xs text-[#737A86]">{i + 1}</span>
-                      <span className="min-w-0 flex-1 truncate text-[13px]">{p?.name || "Product"}</span>
+                      <span className="min-w-0 flex-1 truncate text-[13px]">
+                        {p?.name || "Product"}
+                      </span>
                       {p?.milestone200 ? (
                         <span className="mr-2 bg-[#00E575]/12 px-1.5 py-0.5 text-[9px] font-extrabold text-[#00E575]">
                           200+
                         </span>
                       ) : null}
-                      <span className="text-[13px] font-bold text-[#00E575]">{p?.score ?? 0}</span>
+                      <span className="text-[13px] font-bold text-[#00E575]">
+                        {p?.score ?? 0}
+                      </span>
                     </button>
                   ))
                 )}
@@ -517,7 +656,6 @@ export default function SellerDashboardPage() {
             </div>
           </section>
 
-          {/* Right column — actions + activity */}
           <aside className="space-y-4 lg:col-span-4">
             <div>
               <p className="mb-2.5 text-[11px] font-bold uppercase tracking-[1.4px] text-[#737A86]">
@@ -525,7 +663,11 @@ export default function SellerDashboardPage() {
               </p>
               <div className="grid grid-cols-2 gap-2">
                 {[
-                  { href: "/seller/products/add", label: "Add product", icon: PlusCircle },
+                  {
+                    href: "/seller/products/add",
+                    label: "Add product",
+                    icon: PlusCircle,
+                  },
                   { href: "/seller/products", label: "Products", icon: Package },
                   { href: "/seller/orders", label: "Orders", icon: Receipt },
                   { href: "/seller/store", label: "Storefront", icon: Store },
@@ -538,7 +680,9 @@ export default function SellerDashboardPage() {
                     <span className="mb-2 flex h-10 w-10 items-center justify-center bg-[#171B22]">
                       <a.icon className="h-5 w-5" />
                     </span>
-                    <span className="text-center text-xs font-semibold text-[#A7ADB8]">{a.label}</span>
+                    <span className="text-center text-xs font-semibold text-[#A7ADB8]">
+                      {a.label}
+                    </span>
                   </Link>
                 ))}
               </div>
@@ -550,7 +694,10 @@ export default function SellerDashboardPage() {
                   Recent activity
                 </p>
                 {activity.length > 0 ? (
-                  <Link href="/seller/orders" className="text-[13px] font-semibold text-[#00E575]">
+                  <Link
+                    href="/seller/orders"
+                    className="text-[13px] font-semibold text-[#00E575]"
+                  >
                     View all
                   </Link>
                 ) : null}
@@ -580,10 +727,14 @@ export default function SellerDashboardPage() {
                         )}
                       </span>
                       <span className="min-w-0">
-                        <span className="block text-sm font-semibold">{item.title}</span>
+                        <span className="block text-sm font-semibold">
+                          {item.title}
+                        </span>
                         <span className="mt-0.5 block text-xs text-[#737A86]">
                           {item.subtitle}
-                          {item.at ? ` · ${new Date(item.at).toLocaleDateString()}` : ""}
+                          {item.at
+                            ? ` · ${new Date(item.at).toLocaleDateString()}`
+                            : ""}
                         </span>
                       </span>
                     </li>
@@ -592,37 +743,24 @@ export default function SellerDashboardPage() {
               )}
             </div>
 
-            <div className="border border-white/[0.07] bg-[#11141A] p-4">
-              <div className="mb-2.5 flex h-8 w-8 items-center justify-center bg-[#00E575]/10">
-                <Lightbulb className="h-[18px] w-[18px] text-[#00E575]" />
-              </div>
-              <p className="min-h-[42px] text-sm leading-[21px] text-[#A7ADB8]">
-                {SELLER_TIPS[tipIndex]}
-              </p>
-              <div className="mt-3.5 flex gap-1.5">
-                {SELLER_TIPS.map((_, i) => (
-                  <span
-                    key={i}
-                    className={`h-1.5 rounded-full ${
-                      i === tipIndex ? "w-3.5 bg-[#00E575]" : "w-1.5 bg-white/10"
-                    }`}
-                  />
-                ))}
-              </div>
-            </div>
-
             <div className="flex items-center border border-white/[0.07] bg-[#11141A] p-4">
               <div className="min-w-0 flex-1">
                 <p className="text-[10px] font-bold uppercase tracking-wide text-[#737A86]">
                   Subscription
                 </p>
-                <p className="mt-1 text-lg font-extrabold capitalize">{overview.plan || "free"}</p>
-                <p className="mt-0.5 text-xs text-[#A7ADB8]">{feePct}% product fee</p>
+                <p className="mt-1 text-lg font-extrabold capitalize">
+                  {overview.plan || "free"}
+                </p>
+                <p className="mt-0.5 text-xs text-[#A7ADB8]">
+                  {feePct}% product fee
+                </p>
               </div>
               <Link
                 href="/seller/subscription"
                 className="px-4 py-2.5 text-[13px] font-extrabold text-[#041412]"
-                style={{ backgroundImage: "linear-gradient(90deg,#00E575,#3B82F6)" }}
+                style={{
+                  backgroundImage: "linear-gradient(90deg,#00E575,#3B82F6)",
+                }}
               >
                 Manage
               </Link>

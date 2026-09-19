@@ -25,6 +25,36 @@ function storeName(product: Product) {
   return product.brand || "plazore";
 }
 
+/** Location line under brand — matches mobile showroom card. */
+function productLocation(product: Product): string {
+  const p = product as Product & {
+    shipsFrom?: string;
+    shipsFromLabel?: string;
+    fulfillmentLocation?: {
+      displayLabel?: string;
+      city?: string;
+      state?: string;
+      country?: string;
+    };
+    location?: string;
+  };
+
+  if (p.shipsFromLabel?.trim()) return p.shipsFromLabel.trim();
+  if (typeof p.shipsFrom === "string" && p.shipsFrom.trim()) {
+    return p.shipsFrom.trim();
+  }
+  const loc = p.fulfillmentLocation;
+  if (loc?.displayLabel?.trim()) return loc.displayLabel.trim();
+  if (loc) {
+    const parts = [loc.city, loc.state, loc.country].filter(Boolean);
+    if (parts.length) return parts.join(", ");
+  }
+  if (typeof p.location === "string" && p.location.trim()) {
+    return p.location.trim();
+  }
+  return "";
+}
+
 function stashReturn(productId: string) {
   try {
     sessionStorage.setItem(
@@ -33,11 +63,11 @@ function stashReturn(productId: string) {
         type: "add_to_cart",
         productId,
         at: Date.now(),
-      })
+      }),
     );
     sessionStorage.setItem(
       "plazore_return_to",
-      typeof window !== "undefined" ? window.location.pathname : "/"
+      typeof window !== "undefined" ? window.location.pathname : "/",
     );
   } catch {
     /* ignore */
@@ -74,6 +104,9 @@ export function ProductCard({
   const [imgIdx, setImgIdx] = useState(0);
   const images = product.images?.length ? product.images : [];
 
+  const brand = storeName(product);
+  const location = productLocation(product);
+
   useEffect(() => {
     setMounted(true);
   }, []);
@@ -90,6 +123,7 @@ export function ProductCard({
     });
   }, [product?._id, product?.region, room, position, displayRegion]);
 
+  // Lightweight slideshow — only tick when 2+ images; no transform on every frame
   useEffect(() => {
     if (images.length < 2) return;
     const id = window.setInterval(() => {
@@ -121,7 +155,7 @@ export function ProductCard({
       amount,
       productRegion,
       displayRegion,
-      marketplace?.ratesToNgn || undefined
+      marketplace?.ratesToNgn || undefined,
     );
   }, [mounted, product.price, product.region, displayRegion, marketplace]);
 
@@ -192,40 +226,66 @@ export function ProductCard({
           className="block"
           onClick={trackOpen}
         >
-          <div className="relative aspect-[3/4] overflow-hidden bg-surface-2">
+          {/* Slightly shorter than 3/4 to tighten card height */}
+          <div className="relative aspect-[3/3.55] overflow-hidden bg-surface-2 sm:aspect-[3/3.5]">
             {images.length > 0 ? (
-              images.map((src, i) => (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  key={`${product._id}-${i}`}
-                  src={src}
-                  alt={product.name}
-                  className="absolute inset-0 h-full w-full object-cover transition-opacity duration-[1600ms] ease-in-out"
-                  style={{
-                    opacity: i === imgIdx ? 1 : 0,
-                    transform: i === imgIdx ? "scale(1.03)" : "scale(1)",
-                    transition:
-                      i === imgIdx
-                        ? "opacity 1.6s ease-in-out, transform 4.2s linear"
-                        : "opacity 1.6s ease-in-out",
-                  }}
-                />
-              ))
+              images.map((src, i) => {
+                const active = i === imgIdx;
+                // Only active + neighbors stay in the opacity path (less GPU work)
+                if (!active && images.length > 3) {
+                  const prev = (imgIdx - 1 + images.length) % images.length;
+                  const next = (imgIdx + 1) % images.length;
+                  if (i !== prev && i !== next) return null;
+                }
+                return (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    key={`${product._id}-${i}`}
+                    src={src}
+                    alt={product.name}
+                    loading={i === 0 ? "eager" : "lazy"}
+                    decoding="async"
+                    className="absolute inset-0 h-full w-full object-cover"
+                    style={{
+                      opacity: active ? 1 : 0,
+                      transition: "opacity 1.1s ease-in-out",
+                    }}
+                  />
+                );
+              })
             ) : (
               <div className="h-full w-full bg-surface" />
             )}
           </div>
 
-          <p
-            className={`mt-2.5 text-[10px] font-semibold uppercase tracking-[0.16em] ${
-              light ? "text-chamber-ink/45" : "text-muted"
-            }`}
-          >
-            {storeName(product)}
-          </p>
-          <p className="mt-1 line-clamp-2 text-[13px] font-medium leading-snug sm:text-sm">
+          {/* Name */}
+          <p className="mt-2 line-clamp-2 text-[13px] font-medium leading-snug sm:text-sm">
             {product.name}
           </p>
+
+          {/* Brand | location — side by side like mobile showroom card */}
+          <p
+            className={`mt-1 flex items-center gap-1.5 text-[11px] leading-tight ${
+              light ? "text-chamber-ink/50" : "text-white/55"
+            }`}
+          >
+            <span className="truncate font-medium lowercase">
+              {brand.toLowerCase()}
+            </span>
+            {location ? (
+              <>
+                <span
+                  className={light ? "text-chamber-ink/30" : "text-white/30"}
+                  aria-hidden
+                >
+                  |
+                </span>
+                <span className="min-w-0 truncate opacity-80">{location}</span>
+              </>
+            ) : null}
+          </p>
+
+          {/* Price */}
           <p
             className={`mt-1 text-[13px] font-semibold ${
               light ? "text-chamber-ink" : "text-secondary"
@@ -241,7 +301,7 @@ export function ProductCard({
           type="button"
           onClick={onCart}
           aria-label="Add to bag"
-          className="absolute right-2.5 top-[calc(70%-2.75rem)] z-10 flex h-[34px] w-[34px] items-center justify-center bg-white text-[#111] shadow-[0_1px_6px_rgba(0,0,0,0.18)] transition hover:scale-105 active:scale-95"
+          className="absolute right-2.5 top-[calc(68%-2.5rem)] z-10 flex h-[34px] w-[34px] items-center justify-center bg-white text-[#111] shadow-[0_1px_6px_rgba(0,0,0,0.18)] transition hover:scale-105 active:scale-95"
         >
           <ShoppingCart className="h-4 w-4" strokeWidth={2} />
         </button>

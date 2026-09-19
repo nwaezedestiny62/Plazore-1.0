@@ -498,7 +498,7 @@ export default function DownloadPage() {
                 The new way to shop and earn.
               </h1>
               <p className="mt-4 max-w-[36ch] text-[15px] leading-[1.7] text-[#A7ADB8]">
-                Plazore is a Discovery-Led Commerce built to change how
+                Plazore is a Digital Mall built to change how
                 people discover, buy and sell goods.
               </p>
             </Reveal>
@@ -541,7 +541,7 @@ export default function DownloadPage() {
                     The new way to shop and earn.
                   </h1>
                   <p className="mt-5 max-w-[34ch] text-[15px] leading-[1.7] text-[#A7ADB8]">
-                    Plazore is a Discovery-Led Commerce built to change
+                    Plazore is a Digital Mall built to change
                     how people discover, buy and sell goods.
                   </p>
                 </Reveal>
@@ -822,7 +822,7 @@ export default function DownloadPage() {
 
       <footer className="border-t border-white/[0.05] py-8 text-center">
         <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/25">
-          Discovery-Led Commerce
+          Digital Mall
         </p>
       </footer>
     </div>

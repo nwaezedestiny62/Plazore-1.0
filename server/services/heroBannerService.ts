@@ -30,7 +30,7 @@ const STATIC_FALLBACKS: Record<
   1: {
     imageUrl: "/hero/welcome.jpg",
     headline: "Discover with intention",
-    subheadline: "A quieter Discovery-Led Commerce — curated pieces, trusted sellers.",
+    subheadline: "A quieter Digital Mall — curated pieces, trusted sellers.",
     ctaLabel: "Enter the mall",
     kicker: "PLAZORE",
   },
@@ -325,7 +325,7 @@ function pickWording(
       headline: position === 1 ? "Discover with intention" : "Just placed",
       subheadline:
         position === 1
-          ? "A quieter Discovery-Led Commerce — curated pieces, trusted sellers."
+          ? "A quieter Digital Mall — curated pieces, trusted sellers."
           : "New work on the floor. Same calm pace.",
       ctaLabel: position === 1 ? "Enter the mall" : "See what's new",
       kicker: position === 1 ? "PLAZORE" : "ARRIVALS",
@@ -342,7 +342,7 @@ function pickWording(
       usedName: false,
     },
     {
-      headline: position === 1 ? "The Discovery-Led Commerce" : "New this week",
+      headline: position === 1 ? "The Digital Mall" : "New this week",
       subheadline:
         position === 1
           ? "Global finds. Local trust. Plazore."

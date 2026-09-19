@@ -13,7 +13,7 @@ export const HERO_SLIDES: HeroSlide[] = [
     image: "/hero/welcome.jpg",
     kicker: "PLAZORE",
     headline: "Discover with intention",
-    subheadline: "A quieter Discovery-Led Commerce — curated pieces, trusted sellers, no noise.",
+    subheadline: "A quieter Digital Mall — curated pieces, trusted sellers, no noise.",
     ctaLabel: "Enter the mall",
   },
   {

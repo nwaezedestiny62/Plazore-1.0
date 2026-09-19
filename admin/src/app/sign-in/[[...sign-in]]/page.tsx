@@ -96,7 +96,7 @@ function SignInScreen() {
             </div>
 
             <p className="text-[10px] tracking-[0.18em] text-[#737A86]/70">
-              PLAZORE · DISCOVERY-LED COMMERCE
+              PLAZORE · Digital Mall
             </p>
           </div>
         </section>

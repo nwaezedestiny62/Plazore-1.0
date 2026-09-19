@@ -231,7 +231,7 @@ function TextBlock({
           ${mobile ? "text-white/45" : "text-white/20"}
         `}
       >
-        Discovery-Led Commerce
+        Digital Mall
       </p>
     </div>
   );

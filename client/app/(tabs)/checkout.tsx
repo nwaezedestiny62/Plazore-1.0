@@ -1389,7 +1389,7 @@ export default function Checkout() {
         </View>
 
         <Text style={styles.footerBrand}>
-          Plazore · Discovery-Led Commerce
+          Plazore · Digital Mall
         </Text>
       </ScrollView>
 

@@ -90,24 +90,15 @@ function normalizeImageUrl(raw: unknown): string {
         o.path ??
         o.src ??
         o.image ??
-        o.original
+        o.original,
     );
   }
   return "";
 }
 
-/** First URL in the returned list is always the cover. */
 function extractImageList(p: any): string[] {
   if (!p || typeof p !== "object") return [];
-
-  const candidates = [
-    p.images,
-    p.imageUrls,
-    p.photos,
-    p.gallery,
-    p.media,
-  ];
-
+  const candidates = [p.images, p.imageUrls, p.photos, p.gallery, p.media];
   let list: unknown[] = [];
   for (const c of candidates) {
     if (Array.isArray(c) && c.length) {
@@ -115,7 +106,6 @@ function extractImageList(p: any): string[] {
       break;
     }
   }
-
   const urls = list.map(normalizeImageUrl).filter(Boolean);
   const seen = new Set<string>();
   const out: string[] = [];
@@ -124,7 +114,6 @@ function extractImageList(p: any): string[] {
     seen.add(u);
     out.push(u);
   }
-
   if (out.length === 0) {
     const single = normalizeImageUrl(
       p.coverImage ||
@@ -132,11 +121,10 @@ function extractImageList(p: any): string[] {
         p.image ||
         p.thumbnail ||
         p.mainImage ||
-        p.primaryImage
+        p.primaryImage,
     );
     if (single) out.push(single);
   }
-
   return out;
 }
 
@@ -157,7 +145,7 @@ async function readJson(res: Response) {
   if (!ct.includes("application/json")) {
     const text = await res.text();
     throw new Error(
-      `Expected JSON, got ${res.status}. Body starts: ${text.slice(0, 80)}`
+      `Expected JSON, got ${res.status}. Body starts: ${text.slice(0, 80)}`,
     );
   }
   return res.json();
@@ -185,10 +173,10 @@ function TopOverlay({
         : "#3B82F6";
 
   return (
-    <div className="pointer-events-none fixed inset-x-0 top-0 z-[200] px-3.5 pt-3 md:px-6">
-      <div className="pointer-events-auto mx-auto flex max-w-lg overflow-hidden border border-white/10 bg-[#11141A]">
+    <div className="pointer-events-none fixed inset-x-0 top-0 z-[200] px-3 pt-3 sm:px-4 md:px-6">
+      <div className="pointer-events-auto mx-auto flex max-w-lg overflow-hidden rounded-xl border border-white/10 bg-[#11141A] shadow-lg">
         <div className="w-[3px] shrink-0" style={{ backgroundColor: accent }} />
-        <div className="flex flex-1 gap-2.5 p-3">
+        <div className="flex flex-1 gap-2.5 p-3 sm:p-3.5">
           <div className="min-w-0 flex-1">
             <p className="text-sm font-bold text-text">{state.title}</p>
             {state.message && (
@@ -197,7 +185,12 @@ function TopOverlay({
               </p>
             )}
           </div>
-          <button type="button" onClick={onDismiss} className="text-[#737A86]">
+          <button
+            type="button"
+            onClick={onDismiss}
+            className="shrink-0 text-[#737A86] hover:text-text"
+            aria-label="Dismiss"
+          >
             ×
           </button>
         </div>
@@ -218,17 +211,19 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <section className="mb-3.5 border border-line bg-surface p-4 md:p-5">
-      <div className="mb-3.5 flex items-center gap-3">
-        <div className="flex h-8 w-8 items-center justify-center bg-gradient-to-br from-green to-blue text-[12px] font-extrabold text-[#041412]">
+    <section className="mb-3 rounded-2xl border border-line bg-surface p-3.5 sm:mb-3.5 sm:p-4 md:p-5">
+      <div className="mb-3 flex items-center gap-2.5 sm:mb-3.5 sm:gap-3">
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-green to-blue text-[12px] font-extrabold text-[#041412]">
           {step}
         </div>
-        <div>
-          <p className="text-base font-bold text-text">{title}</p>
-          {subtitle && <p className="text-[11px] text-[#737A86]">{subtitle}</p>}
+        <div className="min-w-0">
+          <p className="text-[15px] font-bold text-text sm:text-base">{title}</p>
+          {subtitle && (
+            <p className="text-[11px] leading-snug text-[#737A86]">{subtitle}</p>
+          )}
         </div>
       </div>
-      <div className="mb-3.5 h-px bg-line" />
+      <div className="mb-3 h-px bg-line sm:mb-3.5" />
       {children}
     </section>
   );
@@ -246,7 +241,7 @@ const inputCls =
   "mb-3 w-full rounded-[14px] border border-line bg-[#0A121C] px-3.5 py-[13px] text-[15px] text-text outline-none placeholder:text-[#3D5268] focus:border-green/40";
 
 const pillCls = (on: boolean) =>
-  `mr-2 mb-2 inline-flex rounded-full border px-3 py-2 text-xs font-medium transition ${
+  `mr-2 mb-2 inline-flex min-h-[36px] items-center rounded-full border px-3 py-2 text-xs font-medium transition ${
     on
       ? "border-green/35 bg-green/12 font-bold text-green"
       : "border-line bg-[#0A121C] text-[#737A86]"
@@ -332,18 +327,20 @@ function BuyerLivePreview({
       <p className="mb-1 text-[11px] font-bold uppercase tracking-[2px] text-[#737A86]">
         Live preview
       </p>
-      <p className="mb-3 text-lg font-extrabold text-text">What buyers will see</p>
+      <p className="mb-3 text-base font-extrabold text-text sm:text-lg">
+        What buyers will see
+      </p>
 
-      {/* Showroom card – exact match */}
-      <div className="mb-4 border border-line bg-[#0A121C] p-3.5">
+      {/* Showroom card */}
+      <div className="mb-4 rounded-2xl border border-line bg-[#0A121C] p-3 sm:p-3.5">
         <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.8px] text-[#737A86]">
           Showroom card · cover = first photo
         </p>
-        <div className="w-[150px]">
-          <div className="relative aspect-[1/1.35] overflow-hidden bg-[#F1F1F1]">
+        <div className="w-[130px] sm:w-[150px]">
+          <div className="relative aspect-[1/1.35] overflow-hidden rounded-lg bg-[#F1F1F1]">
             <SafeImg src={cover} className="h-full w-full object-cover" />
-            <div className="absolute bottom-[11px] right-[11px] flex h-[34px] w-[34px] items-center justify-center bg-white shadow">
-              <span className="text-[10px] font-bold text-[#111]">Bag</span>
+            <div className="absolute bottom-[11px] right-[11px] flex h-[34px] w-[34px] items-center justify-center rounded-md bg-white shadow">
+              <span className="text-[10px] font-bold text-[#111]">Cart</span>
             </div>
           </div>
           <p className="mt-2.5 truncate text-[13.5px] font-medium text-white">
@@ -365,9 +362,9 @@ function BuyerLivePreview({
       <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.8px] text-[#737A86]">
         Mobile product screen
       </p>
-      <div className="overflow-hidden rounded-[28px] border-[3px] border-[#2C313A] bg-[#12141A] p-2 shadow-2xl">
+      <div className="mx-auto max-w-[320px] overflow-hidden rounded-[28px] border-[3px] border-[#2C313A] bg-[#12141A] p-2 shadow-2xl sm:max-w-none">
         <div className="mx-auto mb-1 h-3.5 w-[78px] rounded-lg bg-black" />
-        <div className="max-h-[520px] overflow-y-auto rounded-[22px] bg-bg [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <div className="max-h-[min(520px,70vh)] overflow-y-auto rounded-[22px] bg-bg [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           <div className="relative aspect-[1/1.05] overflow-hidden bg-[#07080C]">
             <SafeImg src={shown} className="h-full w-full object-cover" />
             {images.length > 1 && (
@@ -377,9 +374,10 @@ function BuyerLivePreview({
                     key={i}
                     type="button"
                     onClick={() => setIdx(i)}
-                    className={`h-[4px] rounded-full ${
+                    className={`h-[4px] rounded-full transition ${
                       i === idx ? "w-4 bg-white" : "w-1.5 bg-white/30"
                     }`}
+                    aria-label={`Image ${i + 1}`}
                   />
                 ))}
               </div>
@@ -395,7 +393,7 @@ function BuyerLivePreview({
             <p className="text-lg font-bold leading-6 text-text">
               {name || "Product name"}
             </p>
-            <div className="mt-2 flex items-center justify-between gap-2">
+            <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
               <p className="text-xl font-bold text-text">{priceLabel}</p>
               <span
                 className={`rounded-full border px-2 py-1 text-[11px] font-semibold ${
@@ -428,14 +426,14 @@ function BuyerLivePreview({
               Sold by
             </p>
             <div className="flex items-center gap-2.5 rounded-[14px] border border-line bg-surface p-3">
-              <div className="flex h-9 w-9 items-center justify-center rounded-[10px] bg-[#171B22]">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-[#171B22]">
                 <Store className="h-4 w-4 text-[#A7ADB8]" />
               </div>
-              <div>
+              <div className="min-w-0">
                 <p className="text-[10px] font-semibold uppercase tracking-wide text-[#737A86]">
                   Visit storefront
                 </p>
-                <p className="text-sm font-bold text-text">
+                <p className="truncate text-sm font-bold text-text">
                   {storeName || brand || "Your store"}
                 </p>
               </div>
@@ -445,11 +443,11 @@ function BuyerLivePreview({
               Delivery
             </p>
             <div className="rounded-[14px] border border-line bg-surface p-3">
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 {shippingMethod === "courier" ? (
-                  <Truck className="h-4 w-4 text-green" />
+                  <Truck className="h-4 w-4 shrink-0 text-green" />
                 ) : (
-                  <Footprints className="h-4 w-4 text-green" />
+                  <Footprints className="h-4 w-4 shrink-0 text-green" />
                 )}
                 <p className="text-[13px] font-semibold text-text">
                   {shippingMethod === "courier"
@@ -468,10 +466,10 @@ function BuyerLivePreview({
             </div>
 
             <div className="mt-3.5 grid grid-cols-2 gap-2">
-              <span className="flex h-11 items-center justify-center border border-line text-[11px] font-bold uppercase tracking-wide text-text">
+              <span className="flex h-11 items-center justify-center rounded-lg border border-line text-[11px] font-bold uppercase tracking-wide text-text">
                 Add to bag
               </span>
-              <span className="flex h-11 items-center justify-center bg-text text-[11px] font-extrabold uppercase tracking-wide text-bg">
+              <span className="flex h-11 items-center justify-center rounded-lg bg-text text-[11px] font-extrabold uppercase tracking-wide text-bg">
                 Buy now
               </span>
             </div>
@@ -500,14 +498,13 @@ export default function EditProductPage() {
   const [overlay, setOverlay] = useState<Overlay>(null);
   const [storeName, setStoreName] = useState("");
 
-  // Original product region + price (never changes unless seller intentionally changes it)
   const [productRegion, setProductRegion] = useState<string>("NG");
   const [originalPrice, setOriginalPrice] = useState<number>(0);
 
   const [images, setImages] = useState<ImageItem[]>([]);
   const [name, setName] = useState("");
   const [brand, setBrand] = useState("");
-  const [price, setPrice] = useState(""); // this is the DISPLAY value (converted if needed)
+  const [price, setPrice] = useState("");
   const [stock, setStock] = useState("1");
   const [description, setDescription] = useState("");
   const [category, setCategory] = useState("");
@@ -519,7 +516,9 @@ export default function EditProductPage() {
   const [fulfillCountryCode, setFulfillCountryCode] = useState("");
   const [fulfillStateCode, setFulfillStateCode] = useState("");
   const [fulfillCity, setFulfillCity] = useState("");
-  const [shippingMethod, setShippingMethod] = useState<"self" | "courier" | null>(null);
+  const [shippingMethod, setShippingMethod] = useState<
+    "self" | "courier" | null
+  >(null);
   const [courierCompany, setCourierCompany] = useState("");
   const [deliveryFee, setDeliveryFee] = useState("");
 
@@ -531,7 +530,7 @@ export default function EditProductPage() {
     (title: string, message?: string, tone: OverlayTone = "info") => {
       setOverlay({ title, message, tone });
     },
-    []
+    [],
   );
 
   const revokeBlobUri = useCallback((uri: string) => {
@@ -567,15 +566,14 @@ export default function EditProductPage() {
       setSubCategory(p.subCategory || "");
       setSpecs(normalizeSpecs(p.specifications));
 
-      // Keep original region forever
-      const origRegion = resolveRegionCode(p.region || p.marketplaceRegion || "NG");
+      const origRegion = resolveRegionCode(
+        p.region || p.marketplaceRegion || "NG",
+      );
       setProductRegion(origRegion);
 
       const origPrice = Number(p.price) || 0;
       setOriginalPrice(origPrice);
 
-      // Display price: same region → original numbers
-      // different region → converted to current seller region
       const sameRegion = origRegion === sellerRegion;
       const displayPrice = sameRegion
         ? origPrice
@@ -604,38 +602,38 @@ export default function EditProductPage() {
             documentName: d.documentName || d.name || "Document",
             documentType: d.documentType || d.type || "other",
             secureUrl: normalizeImageUrl(
-              d.secureUrl || d.url || d.secure_url || ""
+              d.secureUrl || d.url || d.secure_url || "",
             ),
           }))
-          .filter((d: ExistingDoc) => d.documentName)
+          .filter((d: ExistingDoc) => d.documentName),
       );
 
       const ship = p.shipping || {};
       const method = ship.method || ship.deliveryMethod || null;
       setShippingMethod(
-        method === "self" || method === "courier" ? method : null
+        method === "self" || method === "courier" ? method : null,
       );
       setCourierCompany(
-        String(ship.courier || ship.courierCompany || ship.courierName || "")
+        String(ship.courier || ship.courierCompany || ship.courierName || ""),
       );
       setDeliveryFee(
         ship.deliveryFee != null && ship.deliveryFee !== ""
           ? String(ship.deliveryFee)
-          : ""
+          : "",
       );
 
       const loc = p.fulfillmentLocation || p.shipsFromLocation || {};
       const countryCode =
         loc.countryCode ||
         FULFILLMENT_COUNTRIES.find(
-          (c) => c.name === loc.country || c.code === loc.country
+          (c) => c.name === loc.country || c.code === loc.country,
         )?.code ||
         "";
       setFulfillCountryCode(countryCode);
       setFulfillStateCode(loc.stateCode || "");
       setFulfillCity(loc.city || "");
     },
-    [revokeBlobUri, sellerRegion, ratesToNgn]
+    [revokeBlobUri, sellerRegion, ratesToNgn],
   );
 
   const fetchProduct = useCallback(
@@ -666,7 +664,7 @@ export default function EditProductPage() {
       }
       return product;
     },
-    [id]
+    [id],
   );
 
   const load = useCallback(async () => {
@@ -700,7 +698,7 @@ export default function EditProductPage() {
       toast(
         "Error",
         e?.message || "Could not load product. Check API URL.",
-        "danger"
+        "danger",
       );
     } finally {
       setPageLoading(false);
@@ -721,16 +719,16 @@ export default function EditProductPage() {
   const docTypes = useMemo(() => getDocTypes(category), [category]);
   const fulfillStates = useMemo(
     () => getStatesForCountry(fulfillCountryCode),
-    [fulfillCountryCode]
+    [fulfillCountryCode],
   );
   const fulfillCities = useMemo(
     () => getCitiesForState(fulfillCountryCode, fulfillStateCode),
-    [fulfillCountryCode, fulfillStateCode]
+    [fulfillCountryCode, fulfillStateCode],
   );
 
   const previewImages = useMemo(
     () => images.map((i) => i.uri).filter(Boolean),
-    [images]
+    [images],
   );
 
   const shipsFrom = useMemo(() => {
@@ -749,7 +747,6 @@ export default function EditProductPage() {
   const stockN = Math.max(0, parseInt(stock || "0", 10) || 0);
   const feeN = Number(deliveryFee) || 0;
 
-  // Preview always shows price in the CURRENT seller region (what the editor sees)
   const formatPreviewPrice = useCallback(
     (n: number) => {
       try {
@@ -758,7 +755,7 @@ export default function EditProductPage() {
         return formatMoney(n, sellerRegion);
       }
     },
-    [formatProduct, sellerRegion]
+    [formatProduct, sellerRegion],
   );
 
   const deliveryFeeLabel =
@@ -808,7 +805,6 @@ export default function EditProductPage() {
     });
   };
 
-  /** First slot is always cover — move any photo to front. */
   const setAsCover = (i: number) => {
     if (i <= 0) return;
     setImages((prev) => {
@@ -862,7 +858,6 @@ export default function EditProductPage() {
       const token = await getToken();
       if (!token) throw new Error("Not signed in");
 
-      // Convert display price back to the ORIGINAL product region currency
       const sameRegion = productRegion === sellerRegion;
       const priceToStore = sameRegion
         ? priceN
@@ -876,7 +871,6 @@ export default function EditProductPage() {
       fd.append("description", description.trim());
       fd.append("category", category);
       fd.append("subCategory", subCategory);
-      // Keep the ORIGINAL product region — never overwrite it
       fd.append("region", productRegion);
       fd.append("currency", getRegion(productRegion).currency.code);
       fd.append("specifications", JSON.stringify(specs));
@@ -887,11 +881,11 @@ export default function EditProductPage() {
           courier: courierCompany.trim(),
           courierCompany: courierCompany.trim(),
           deliveryFee: feeN,
-        })
+        }),
       );
 
       const country = FULFILLMENT_COUNTRIES.find(
-        (c) => c.code === fulfillCountryCode
+        (c) => c.code === fulfillCountryCode,
       );
       fd.append(
         "fulfillmentLocation",
@@ -901,13 +895,13 @@ export default function EditProductPage() {
             country: country?.name || "",
             stateCode: fulfillStateCode,
             state:
-              fulfillStates.find((s) => s.code === fulfillStateCode)?.name || "",
+              fulfillStates.find((s) => s.code === fulfillStateCode)?.name ||
+              "",
             city: fulfillCity,
-          })
-        )
+          }),
+        ),
       );
 
-      // Flat fields so backend never misses shipping / fulfillment
       if (shippingMethod) {
         fd.append("shippingMethod", shippingMethod);
         fd.append("courierCompany", courierCompany.trim());
@@ -918,19 +912,16 @@ export default function EditProductPage() {
       fd.append("fulfillmentCountryCode", fulfillCountryCode);
       fd.append(
         "fulfillmentCountry",
-        FULFILLMENT_COUNTRIES.find((c) => c.code === fulfillCountryCode)?.name ||
-          ""
+        FULFILLMENT_COUNTRIES.find((c) => c.code === fulfillCountryCode)
+          ?.name || "",
       );
       fd.append("fulfillmentStateCode", fulfillStateCode);
       fd.append(
         "fulfillmentState",
-        fulfillStates.find((s) => s.code === fulfillStateCode)?.name || ""
+        fulfillStates.find((s) => s.code === fulfillStateCode)?.name || "",
       );
       fd.append("fulfillmentCity", fulfillCity);
 
-      /**
-       * Preserve visual order. Index 0 = cover.
-       */
       const keepUrls: string[] = [];
       const newFiles: File[] = [];
       const imageOrder: Array<
@@ -986,12 +977,11 @@ export default function EditProductPage() {
         toast(
           "Error",
           json?.message || `Could not save product (${res.status})`,
-          "danger"
+          "danger",
         );
         return;
       }
 
-      // Always re-fetch so list/cover match what Mongo actually stored
       const fresh = await fetchProduct(token);
       if (fresh) {
         applyProduct(fresh, { allowEmptyImages: true });
@@ -1045,27 +1035,33 @@ export default function EditProductPage() {
     <div className="min-h-screen bg-bg text-text">
       <TopOverlay state={overlay} onDismiss={() => setOverlay(null)} />
 
-      <div className="mx-auto max-w-6xl px-4 py-6 md:px-6 md:py-8">
-        <div className="mb-6 flex items-center gap-3">
+      <div className="mx-auto max-w-6xl px-3 py-4 sm:px-4 sm:py-6 md:px-6 md:py-8">
+        {/* Header */}
+        <div className="mb-4 flex items-center gap-2.5 sm:mb-6 sm:gap-3">
           <Link
             href="/seller/products"
-            className="flex h-10 w-10 items-center justify-center border border-line bg-surface text-[#A7ADB8] hover:text-text"
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-line bg-surface text-[#A7ADB8] transition hover:text-text"
+            aria-label="Back to products"
           >
             <ChevronLeft className="h-5 w-5" />
           </Link>
-          <div>
-            <p className="text-[11px] font-bold uppercase tracking-[2px] text-[#737A86]">
-              Seller Lounge · {sellerRegionConfig.flag} {sellerRegionConfig.name}
+          <div className="min-w-0">
+            <p className="text-[10px] font-bold uppercase tracking-[2px] text-[#737A86] sm:text-[11px]">
+              Seller Lounge · {sellerRegionConfig.flag}{" "}
+              {sellerRegionConfig.name}
             </p>
-            <h1 className="text-2xl font-extrabold tracking-tight md:text-[26px]">
+            <h1 className="truncate text-xl font-extrabold tracking-tight sm:text-2xl md:text-[26px]">
               Edit product
             </h1>
           </div>
         </div>
 
-        <div className="grid gap-8 lg:grid-cols-[1fr_320px] lg:items-start">
-          <div>
-            <div className="mb-5 lg:hidden">
+        {/* Layout: form + sticky preview */}
+        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(280px,320px)] lg:items-start lg:gap-8">
+          {/* Form column */}
+          <div className="min-w-0">
+            {/* Mobile / tablet preview (above form) */}
+            <div className="mb-4 lg:hidden">
               <BuyerLivePreview {...previewProps} />
             </div>
 
@@ -1079,7 +1075,7 @@ export default function EditProductPage() {
                 {images.map((item, i) => (
                   <div
                     key={item.id}
-                    className={`relative h-[104px] w-[104px] overflow-hidden rounded-[14px] bg-[#0A121C] ${
+                    className={`relative h-[88px] w-[88px] overflow-hidden rounded-[14px] bg-[#0A121C] sm:h-[104px] sm:w-[104px] ${
                       i === 0 ? "ring-2 ring-[#00E575]" : ""
                     }`}
                   >
@@ -1114,9 +1110,9 @@ export default function EditProductPage() {
                   <button
                     type="button"
                     onClick={() => imageInputRef.current?.click()}
-                    className="flex h-[104px] w-[104px] flex-col items-center justify-center rounded-[14px] border border-dashed border-[#2A4560] bg-[#0A121C] text-[#737A86]"
+                    className="flex h-[88px] w-[88px] flex-col items-center justify-center rounded-[14px] border border-dashed border-[#2A4560] bg-[#0A121C] text-[#737A86] sm:h-[104px] sm:w-[104px]"
                   >
-                    <ImagePlus className="h-6 w-6" />
+                    <ImagePlus className="h-5 w-5 sm:h-6 sm:w-6" />
                     <span className="mt-1 text-[11px]">Add</span>
                   </button>
                 )}
@@ -1129,7 +1125,7 @@ export default function EditProductPage() {
                 className="hidden"
                 onChange={(e) => onImages(e.target.files)}
               />
-              <p className="mt-2 text-[12px] text-[#737A86]">
+              <p className="mt-2 text-[12px] leading-relaxed text-[#737A86]">
                 The first image is the cover on the product list and showroom.
                 Use “Make cover” to move another photo to the front.
               </p>
@@ -1149,7 +1145,7 @@ export default function EditProductPage() {
                 value={brand}
                 onChange={(e) => setBrand(e.target.value)}
               />
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 gap-0 sm:grid-cols-2 sm:gap-3">
                 <div>
                   <Label>
                     Price * ({sellerRegionConfig.currency.symbol}{" "}
@@ -1164,9 +1160,10 @@ export default function EditProductPage() {
                     inputMode="decimal"
                   />
                   {!sameRegion && (
-                    <p className="mb-3 -mt-2 text-[11px] text-amber-400/90">
-                      Converted from original {productRegionConfig.currency.code}{" "}
-                      listing. On save it will be stored back in{" "}
+                    <p className="mb-3 -mt-2 text-[11px] leading-snug text-amber-400/90">
+                      Converted from original{" "}
+                      {productRegionConfig.currency.code} listing. On save it
+                      will be stored back in{" "}
                       {productRegionConfig.currency.code}.
                     </p>
                   )}
@@ -1280,9 +1277,10 @@ export default function EditProductPage() {
                         type="button"
                         onClick={() =>
                           setExistingDocs((prev) =>
-                            prev.filter((_, i) => i !== index)
+                            prev.filter((_, i) => i !== index),
                           )
                         }
+                        aria-label="Remove document"
                       >
                         <Trash2 className="h-4 w-4 text-[#FF8A9A]" />
                       </button>
@@ -1301,8 +1299,11 @@ export default function EditProductPage() {
                       <button
                         type="button"
                         onClick={() =>
-                          setNewDocuments((p) => p.filter((_, i) => i !== index))
+                          setNewDocuments((p) =>
+                            p.filter((_, i) => i !== index),
+                          )
                         }
+                        aria-label="Remove new document"
                       >
                         <Trash2 className="h-4 w-4 text-[#FF8A9A]" />
                       </button>
@@ -1315,8 +1316,8 @@ export default function EditProductPage() {
                           onClick={() =>
                             setNewDocuments((prev) =>
                               prev.map((d, i) =>
-                                i === index ? { ...d, type: t.id } : d
-                              )
+                                i === index ? { ...d, type: t.id } : d,
+                              ),
                             )
                           }
                           className={pillCls(doc.type === t.id)}
@@ -1411,7 +1412,10 @@ export default function EditProductPage() {
             </Section>
 
             {/* Shipping */}
-            <Section step={needsDocs ? "06" : "05"} title="Shipping method">
+            <Section
+              step={needsDocs ? "06" : "05"}
+              title="Shipping method"
+            >
               <div className="mb-3.5 grid grid-cols-2 gap-2.5">
                 {(["self", "courier"] as const).map((m) => {
                   const active = shippingMethod === m;
@@ -1420,7 +1424,7 @@ export default function EditProductPage() {
                       key={m}
                       type="button"
                       onClick={() => setShippingMethod(m)}
-                      className={`flex flex-col items-center rounded-[14px] border py-4 ${
+                      className={`flex flex-col items-center rounded-[14px] border py-3.5 sm:py-4 ${
                         active
                           ? "border-green/40 bg-green/8"
                           : "border-line bg-[#0A121C]"
@@ -1436,7 +1440,7 @@ export default function EditProductPage() {
                         />
                       )}
                       <span
-                        className={`mt-2 text-[13px] font-semibold ${
+                        className={`mt-2 text-[12px] font-semibold sm:text-[13px] ${
                           active ? "text-text" : "text-[#737A86]"
                         }`}
                       >
@@ -1487,30 +1491,35 @@ export default function EditProductPage() {
                   {feePct}% of product price
                 </span>
               </div>
-              <p className="text-[11px] text-[#737A86]">
+              <p className="text-[11px] leading-relaxed text-[#737A86]">
                 Fee applies only to product price — never delivery. Original
-                region stays {productRegionConfig.flag} {productRegionConfig.name}.
+                region stays {productRegionConfig.flag}{" "}
+                {productRegionConfig.name}.
               </p>
             </Section>
 
-            <button
-              type="button"
-              onClick={handleSave}
-              disabled={saving}
-              className="mb-8 flex h-14 w-full items-center justify-center gap-2 bg-gradient-to-r from-green to-blue text-[15px] font-extrabold text-[#041412] disabled:opacity-60"
-            >
-              {saving ? (
-                <span className="h-5 w-5 animate-spin rounded-full border-2 border-[#041412]/30 border-t-[#041412]" />
-              ) : (
-                <>
-                  <CheckCircle2 className="h-[18px] w-[18px]" />
-                  Save product
-                </>
-              )}
-            </button>
+            {/* Sticky-ish save on mobile: full width, safe bottom space */}
+            <div className="pb-[max(1.5rem,env(safe-area-inset-bottom))]">
+              <button
+                type="button"
+                onClick={handleSave}
+                disabled={saving}
+                className="mb-4 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-green to-blue text-[15px] font-extrabold text-[#041412] disabled:opacity-60 sm:mb-8 sm:h-14"
+              >
+                {saving ? (
+                  <span className="h-5 w-5 animate-spin rounded-full border-2 border-[#041412]/30 border-t-[#041412]" />
+                ) : (
+                  <>
+                    <CheckCircle2 className="h-[18px] w-[18px]" />
+                    Save product
+                  </>
+                )}
+              </button>
+            </div>
           </div>
 
-          <div className="hidden lg:sticky lg:top-6 lg:block">
+          {/* Desktop sticky preview */}
+          <div className="hidden lg:sticky lg:top-6 lg:block lg:self-start">
             <BuyerLivePreview {...previewProps} />
           </div>
         </div>

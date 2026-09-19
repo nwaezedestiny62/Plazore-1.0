@@ -24,6 +24,12 @@ function isSignInPath(pathname: string | null) {
   return pathname === "/sign-in" || pathname.startsWith("/sign-in/");
 }
 
+/** Invite accept must work for invitees who are not admins yet */
+function isInvitePath(pathname: string | null) {
+  if (!pathname) return false;
+  return pathname === "/invite/accept" || pathname.startsWith("/invite/");
+}
+
 export function AdminSessionGate({ children }: { children: React.ReactNode }) {
   const { isLoaded, isSignedIn } = useAuth();
   const { signOut } = useClerk();
@@ -31,6 +37,7 @@ export function AdminSessionGate({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const [ready, setReady] = useState(false);
   const onSignIn = isSignInPath(pathname);
+  const onInvite = isInvitePath(pathname);
 
   useEffect(() => {
     if (!isLoaded) return;
@@ -38,11 +45,15 @@ export function AdminSessionGate({ children }: { children: React.ReactNode }) {
     let cancelled = false;
 
     const run = async () => {
+      // Invite accept: allow signed-in or signed-out without admin live session
+      if (onInvite) {
+        if (!cancelled) setReady(true);
+        return;
+      }
+
       const live = sessionStorage.getItem(LIVE_KEY) === "1";
       const pending = sessionStorage.getItem(PENDING_KEY) === "1";
 
-      // Just finished email OR Google OAuth (callback is /sign-in/sso-callback,
-      // then Clerk may send /overview while pending is still set)
       if (isSignedIn && (onSignIn || pending || live)) {
         markAdminSessionLive();
         if (onSignIn) router.replace("/overview");
@@ -50,7 +61,6 @@ export function AdminSessionGate({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      // Cookie from a previous visit, this tab is new → force sign-in
       if (isSignedIn && !live && !pending && !onSignIn) {
         await signOut({ redirectUrl: "/sign-in" });
         if (!cancelled) setReady(true);
@@ -72,7 +82,7 @@ export function AdminSessionGate({ children }: { children: React.ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [isLoaded, isSignedIn, onSignIn, router, signOut]);
+  }, [isLoaded, isSignedIn, onSignIn, onInvite, router, signOut]);
 
   if (!isLoaded || !ready) {
     return (

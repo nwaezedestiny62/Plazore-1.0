@@ -82,7 +82,7 @@ function heroSubSize(text: string): string {
 function takeUnique(
   list: Product[] | undefined,
   cap: number,
-  seen?: Set<string>
+  seen?: Set<string>,
 ): Product[] {
   const used = seen ?? new Set<string>();
   const out: Product[] = [];
@@ -98,13 +98,13 @@ function takeUnique(
 
 function buildRooms(
   products: Product[],
-  serverRooms?: ShowroomRooms | null
+  serverRooms?: ShowroomRooms | null,
 ): SplitRooms {
   const hasServerRooms =
     !!serverRooms &&
     ((serverRooms[1]?.length || 0) > 0 ||
       (serverRooms[2]?.length || 0) > 0 ||
-      (serverRooms[3]?.length || 0) > 0 ||
+      (serverRooms[3]?.length || 0) ||
       (serverRooms[4]?.length || 0) > 0);
 
   if (hasServerRooms && serverRooms) {
@@ -124,6 +124,19 @@ function buildRooms(
     four: takeUnique(products, ROOM_CAPACITY[4], seen),
     titles: ROOM_TITLES,
   };
+}
+
+function isBagVisible(el: HTMLElement | null): boolean {
+  if (!el) return false;
+  const r = el.getBoundingClientRect();
+  const style = window.getComputedStyle(el);
+  return (
+    style.display !== "none" &&
+    style.visibility !== "hidden" &&
+    style.opacity !== "0" &&
+    r.width > 0 &&
+    r.height > 0
+  );
 }
 
 function CustomBarIcon({ className = "" }: { className?: string }) {
@@ -163,14 +176,49 @@ function MallChrome({
     user?.primaryEmailAddress?.emailAddress ||
     "Account";
 
+  /** Always register the bag that is actually visible (mobile vs desktop). */
   useEffect(() => {
-    const el = bagRefDesktop.current || bagRefMobile.current;
-    if (el && fly) fly.registerBagTarget(el);
+    if (!fly) return;
+
+    const registerVisible = () => {
+      const desktop = bagRefDesktop.current;
+      const mobile = bagRefMobile.current;
+
+      // Mobile header is md:hidden — prefer it under 768 when visible
+      if (window.innerWidth < 768 && isBagVisible(mobile)) {
+        fly.registerBagTarget(mobile);
+        return;
+      }
+      if (isBagVisible(desktop)) {
+        fly.registerBagTarget(desktop);
+        return;
+      }
+      if (isBagVisible(mobile)) {
+        fly.registerBagTarget(mobile);
+      }
+    };
+
+    registerVisible();
+    window.addEventListener("resize", registerVisible);
+    window.addEventListener("orientationchange", registerVisible);
+    return () => {
+      window.removeEventListener("resize", registerVisible);
+      window.removeEventListener("orientationchange", registerVisible);
+    };
   }, [fly, bagN, progress]);
 
   useEffect(() => {
     if (!fly?.bagPulse) return;
-    const el = bagRefDesktop.current || bagRefMobile.current;
+    const desktop = bagRefDesktop.current;
+    const mobile = bagRefMobile.current;
+    const el =
+      (isBagVisible(mobile) && window.innerWidth < 768
+        ? mobile
+        : isBagVisible(desktop)
+          ? desktop
+          : isBagVisible(mobile)
+            ? mobile
+            : null) || null;
     if (!el) return;
     el.animate(
       [
@@ -178,12 +226,13 @@ function MallChrome({
         { transform: "scale(1.22)" },
         { transform: "scale(1)" },
       ],
-      { duration: 420, easing: "cubic-bezier(0.22, 1, 0.36, 1)" }
+      { duration: 420, easing: "cubic-bezier(0.22, 1, 0.36, 1)" },
     );
   }, [fly?.bagPulse]);
 
   return (
     <>
+      {/* Desktop header */}
       <header
         className={`fixed inset-x-0 top-0 z-50 hidden h-16 items-center justify-between px-6 transition-all duration-500 md:flex lg:px-10 ${
           solid ? "bg-[#090B0F]/80 backdrop-blur-xl" : "bg-transparent"
@@ -316,6 +365,7 @@ function MallChrome({
         </div>
       </header>
 
+      {/* Mobile header */}
       <header
         className={`fixed inset-x-0 top-0 z-50 flex h-14 items-center justify-between px-3.5 transition-all duration-400 md:hidden ${
           solid ? "bg-[#090B0F]/88 backdrop-blur-xl" : "bg-transparent"
@@ -361,6 +411,8 @@ function MallChrome({
               </span>
             ) : null}
           </Link>
+
+          {/* Futuristic mobile cart target */}
           <Link
             ref={bagRefMobile}
             href="/cart"
@@ -368,9 +420,16 @@ function MallChrome({
             aria-label="Cart"
             data-plazore-cart-icon
           >
-            <ShoppingCart className="h-[18px] w-[18px]" strokeWidth={1.75} />
+            <span
+              aria-hidden
+              className="pointer-events-none absolute inset-1 rounded-full bg-[#00E575]/12 blur-[5px]"
+            />
+            <ShoppingCart
+              className="relative h-[18px] w-[18px]"
+              strokeWidth={1.75}
+            />
             {bagN > 0 ? (
-              <span className="absolute right-1 top-1.5 min-w-[15px] rounded-full bg-[#00E575] px-0.5 text-center text-[8.5px] font-extrabold text-[#041412]">
+              <span className="absolute -right-0.5 -top-0.5 flex min-w-[16px] items-center justify-center rounded-full bg-gradient-to-r from-[#00E575] to-[#3B82F6] px-1 text-[8.5px] font-extrabold text-[#041412] shadow-[0_0_10px_rgba(0,229,117,0.45)]">
                 {bagN > 9 ? "9+" : bagN}
               </span>
             ) : null}
@@ -454,7 +513,7 @@ function RoomThreeStage({ products }: { products: Product[] }) {
         scheduleHold();
       }, 1800);
     },
-    [products.length, clearHold, scheduleHold]
+    [products.length, clearHold, scheduleHold],
   );
 
   useEffect(() => {
@@ -475,14 +534,14 @@ function RoomThreeStage({ products }: { products: Product[] }) {
             type: "add_to_cart",
             productId: product._id,
             at: Date.now(),
-          })
+          }),
         );
         sessionStorage.setItem("plazore_return_to", window.location.pathname);
       } catch {
         /* ignore */
       }
       router.push(
-        `/sign-in?redirect_url=${encodeURIComponent(window.location.pathname)}`
+        `/sign-in?redirect_url=${encodeURIComponent(window.location.pathname)}`,
       );
       return;
     }
@@ -559,7 +618,7 @@ function RoomThreeStage({ products }: { products: Product[] }) {
                 {formatProductPrice(
                   Number(active.price),
                   active.region,
-                  displayRegion
+                  displayRegion,
                 )}
               </span>
             </p>
@@ -601,7 +660,7 @@ function MallInner({
 
   const [products, setProducts] = useState<Product[]>(initialProducts || []);
   const [serverRooms, setServerRooms] = useState<ShowroomRooms | null>(
-    initialRooms || null
+    initialRooms || null,
   );
   const [loading, setLoading] = useState(initialLoading);
 
@@ -666,13 +725,13 @@ function MallInner({
 
   const rooms = useMemo(
     () => buildRooms(products, serverRooms),
-    [products, serverRooms]
+    [products, serverRooms],
   );
 
   const railA = useMemo(() => rooms.one.slice(0, RAIL_CAP), [rooms.one]);
   const railB = useMemo(
     () => rooms.one.slice(RAIL_CAP, ROOM_CAPACITY[1]),
-    [rooms.one]
+    [rooms.one],
   );
 
   const showroomHasItems =
@@ -718,7 +777,7 @@ function MallInner({
           json?.unreadCount ??
           json?.count ??
           json?.data?.totalUnread ??
-          NaN
+          NaN,
       );
       if (Number.isFinite(direct) && direct >= 0) return Math.floor(direct);
 
@@ -739,7 +798,7 @@ function MallInner({
           (n.read === false ||
             n.isRead === false ||
             n.unread === true ||
-            (!n.readAt && n.read !== true && n.isRead !== true))
+            (!n.readAt && n.read !== true && n.isRead !== true)),
       ).length;
     };
 
@@ -1154,7 +1213,7 @@ function MallInner({
       </section>
 
       <p className="pb-10 pt-6 text-center text-[11px] tracking-wide text-muted">
-        Plazore · Discovery-Led Commerce
+        Plazore · Digital Mall
       </p>
     </div>
   );

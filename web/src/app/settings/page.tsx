@@ -188,7 +188,7 @@ export default function SettingsPage() {
         <LinkList items={PLAZORE_LINKS} />
 
         <p className="mt-10 text-center text-[11px] tracking-[0.06em] text-[#6B7280]">
-          Plazore · Discovery-Led Commerce
+          Plazore · Digital Mall
         </p>
       </main>
     </div>
