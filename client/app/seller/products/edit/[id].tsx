@@ -17,7 +17,7 @@ import {
   getSpecFields,
 } from '@/constants/productSpecs'
 import {
-  convertWithNgnRates,
+  convertPrice,
   getRegion,
   regionCurrencyCode,
   resolveRegionCode,
@@ -97,9 +97,11 @@ type ProductPreviewData = {
   region: string
   storeName: string
   shipsFrom: string | null
+  feeMode: 'free' | 'fixed' | 'on_delivery' | null
   shippingMethod: 'self' | 'courier' | null
   courierCompany: string
   deliveryFee: number
+  deliveryNote: string
   specifications: Record<string, string>
 }
 
@@ -451,6 +453,23 @@ function ProductCardPreview({
             {data.shipsFrom}
           </Text>
         )}
+        {data.feeMode === 'free' ? (
+          <Text
+            style={{ color: GREEN, fontSize: 11, marginTop: 3, fontWeight: '600' }}
+          >
+            Free delivery
+          </Text>
+        ) : data.feeMode === 'on_delivery' ? (
+          <Text
+            style={{
+              color: 'rgba(255,255,255,0.5)',
+              fontSize: 11,
+              marginTop: 3,
+            }}
+          >
+            Pay on arrival
+          </Text>
+        ) : null}
       </View>
     </View>
   )
@@ -493,12 +512,23 @@ function ProductPagePreview({
   const inStock = stockN > 0
 
   const deliveryLabel =
-    data.shippingMethod === 'self'
-      ? 'Direct Merchant Delivery'
-      : data.courierCompany?.trim()
-        ? data.courierCompany.trim()
-        : data.shippingMethod === 'courier'
-          ? 'Courier Delivery'
+    data.feeMode === 'free'
+      ? 'Free delivery'
+      : data.shippingMethod === 'self'
+        ? 'Self delivery'
+        : data.courierCompany?.trim()
+          ? data.courierCompany.trim()
+          : data.shippingMethod === 'courier'
+            ? 'Courier'
+            : null
+
+  const feeDisplay =
+    data.feeMode === 'free'
+      ? 'Free'
+      : data.feeMode === 'on_delivery'
+        ? 'Pay on arrival'
+        : data.feeMode === 'fixed' && data.deliveryFee > 0
+          ? formatPrice(data.deliveryFee)
           : null
 
   const onScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -685,18 +715,30 @@ function ProductPagePreview({
                     <Text style={styles.shipMethod}>{data.shipsFrom}</Text>
                   </View>
                 )}
-                {!!data.shippingMethod && (
+                {!!feeDisplay && (
                   <View style={styles.shipFeeRow}>
                     <Text style={{ color: SECONDARY, fontSize: 13 }}>
-                      Delivery fee
+                      Delivery
                     </Text>
                     <Text
                       style={{ color: TEXT, fontWeight: '600', fontSize: 14 }}
                     >
-                      {formatPrice(data.deliveryFee)}
+                      {feeDisplay}
                     </Text>
                   </View>
                 )}
+                {data.feeMode === 'on_delivery' && !!data.deliveryNote?.trim() ? (
+                  <Text
+                    style={{
+                      color: SECONDARY,
+                      fontSize: 12,
+                      marginTop: 8,
+                      lineHeight: 17,
+                    }}
+                  >
+                    {data.deliveryNote}
+                  </Text>
+                ) : null}
               </View>
             </>
           )}
@@ -788,11 +830,15 @@ export default function EditProduct() {
   const [fulfillCountryCode, setFulfillCountryCode] = useState('')
   const [fulfillStateCode, setFulfillStateCode] = useState('')
   const [fulfillCity, setFulfillCity] = useState('')
+  const [feeMode, setFeeMode] = useState<
+    'free' | 'fixed' | 'on_delivery' | null
+  >(null)
   const [shippingMethod, setShippingMethod] = useState<
     'self' | 'courier' | null
   >(null)
   const [courierCompany, setCourierCompany] = useState('')
   const [deliveryFee, setDeliveryFee] = useState('')
+  const [deliveryNote, setDeliveryNote] = useState('')
 
   const nameRef = useRef<TextInput>(null)
   const brandRef = useRef<TextInput>(null)
@@ -823,16 +869,18 @@ export default function EditProduct() {
    */
   const toSellerCurrency = useCallback(
     (amount: number) => {
-      if (!regionMismatch) return amount
-      const converted = convertWithNgnRates(
-        amount,
-        productCurrency,
-        sellerCurrency,
-        ratesToNgn,
+      const n = Number(amount)
+      if (!Number.isFinite(n)) return 0
+      if (!regionMismatch) return n
+      const converted = convertPrice(
+        n,
+        productRegion,
+        sellerRegion,
+        (ratesToNgn ?? null) as any,
       )
-      return converted ?? amount
+      return Number.isFinite(converted) ? converted : n
     },
-    [regionMismatch, productCurrency, sellerCurrency, ratesToNgn],
+    [regionMismatch, productRegion, sellerRegion, ratesToNgn],
   )
 
   /**
@@ -840,16 +888,18 @@ export default function EditProduct() {
    */
   const toProductCurrency = useCallback(
     (amount: number) => {
-      if (!regionMismatch) return amount
-      const converted = convertWithNgnRates(
-        amount,
-        sellerCurrency,
-        productCurrency,
-        ratesToNgn,
+      const n = Number(amount)
+      if (!Number.isFinite(n)) return 0
+      if (!regionMismatch) return n
+      const converted = convertPrice(
+        n,
+        sellerRegion,
+        productRegion,
+        (ratesToNgn ?? null) as any,
       )
-      return converted ?? amount
+      return Number.isFinite(converted) ? converted : n
     },
-    [regionMismatch, sellerCurrency, productCurrency, ratesToNgn],
+    [regionMismatch, sellerRegion, productRegion, ratesToNgn],
   )
 
   /* ── Load product ── */
@@ -888,20 +938,20 @@ export default function EditProduct() {
         setProductRegion(locked)
 
         const storedPrice = Number(p.price) || 0
-        // Show converted price if seller is in a different marketplace
-        const displayPrice =
-          locked === resolveRegionCode(region)
-            ? storedPrice
-            : convertWithNgnRates(
-                storedPrice,
-                regionCurrencyCode(locked),
-                regionCurrencyCode(region),
-                ratesToNgn,
-              ) ?? storedPrice
+        const displayPrice = convertPrice(
+          storedPrice,
+          locked,
+          resolveRegionCode(region),
+          (ratesToNgn ?? null) as any,
+        )
+        const shown =
+          Number.isFinite(displayPrice) && displayPrice > 0
+            ? displayPrice
+            : storedPrice
 
         setName(String(p.name || ''))
         setBrand(String(p.brand || ''))
-        setPrice(storedPrice ? String(displayPrice) : '')
+        setPrice(storedPrice ? String(shown) : '')
         setStock(String(p.stock ?? 1))
         setDescription(String(p.description || ''))
         setCategory(String(p.category || ''))
@@ -941,18 +991,37 @@ export default function EditProduct() {
           setFulfillCity(String(fl.city || ''))
         }
 
-        const ship = p.shipping || {}
-        const method =
-          ship.method === 'self' || ship.method === 'courier'
-            ? ship.method
-            : null
-        setShippingMethod(method)
-        setCourierCompany(
-          String(ship.courierCompany || ship.courier || ''),
-        )
-        setDeliveryFee(
-          ship.deliveryFee != null ? String(ship.deliveryFee) : '',
-        )
+              const ship = p.shipping || {}
+      const feeRaw = Number(ship.deliveryFee) || 0
+      const mode =
+        ship.feeMode === 'free' ||
+        ship.feeMode === 'fixed' ||
+        ship.feeMode === 'on_delivery'
+          ? ship.feeMode
+          : feeRaw > 0
+            ? 'fixed'
+            : 'free'
+      setFeeMode(mode)
+
+      const method = ship.method || ship.deliveryMethod || null
+      setShippingMethod(
+        mode === 'free'
+          ? null
+          : method === 'self' || method === 'courier'
+            ? method
+            : null,
+      )
+      setCourierCompany(
+        String(ship.courier || ship.courierCompany || ship.courierName || ''),
+      )
+      setDeliveryFee(
+        mode === 'fixed' &&
+          ship.deliveryFee != null &&
+          ship.deliveryFee !== ''
+          ? String(ship.deliveryFee)
+          : '',
+      )
+      setDeliveryNote(String(ship.deliveryNote || ''))
       } catch (e: any) {
         console.error(e)
         toast(
@@ -1031,9 +1100,11 @@ export default function EditProduct() {
       region: productRegion,
       storeName,
       shipsFrom,
+      feeMode,
       shippingMethod,
       courierCompany,
-      deliveryFee: feeN,
+      deliveryFee: feeMode === 'fixed' ? feeN : 0,
+      deliveryNote,
       specifications: specs,
     }),
     [
@@ -1048,9 +1119,11 @@ export default function EditProduct() {
       productRegion,
       storeName,
       shipsFrom,
+      feeMode,
       shippingMethod,
       courierCompany,
       feeN,
+      deliveryNote,
       specs,
     ],
   )
@@ -1123,10 +1196,18 @@ export default function EditProduct() {
     if (!priceN || priceN <= 0) return 'Enter a valid price'
     if (!category) return 'Select a category'
     if (!fulfillCountryCode || !fulfillCity) return 'Set fulfillment location'
-    if (!shippingMethod) return 'Choose a shipping method'
-    if (shippingMethod === 'courier' && !courierCompany.trim())
-      return 'Courier company is required'
-    if (deliveryFee === '' || feeN < 0) return 'Enter delivery fee (0 allowed)'
+    if (!feeMode) return 'Choose a delivery charge option'
+    if (feeMode !== 'free') {
+      if (!shippingMethod) return 'Choose self delivery or courier'
+      if (shippingMethod === 'courier' && !courierCompany.trim()) {
+        return 'Courier company is required'
+      }
+      if (feeMode === 'fixed') {
+        if (deliveryFee === '' || !(feeN > 0)) {
+          return 'Enter a delivery fee greater than 0'
+        }
+      }
+    }
     return null
   }
 
@@ -1156,10 +1237,12 @@ export default function EditProduct() {
       fd.append(
         'shipping',
         JSON.stringify({
-          method: shippingMethod,
-          courier: courierCompany.trim(),
-          courierCompany: courierCompany.trim(),
-          deliveryFee: feeN,
+          feeMode,
+          method: feeMode === "free" ? undefined : shippingMethod,
+          courier: feeMode === "free" ? "" : courierCompany.trim(),
+          courierCompany: feeMode === "free" ? "" : courierCompany.trim(),
+          deliveryFee: feeMode === "fixed" ? feeN : 0,
+          deliveryNote: feeMode === "on_delivery" ? deliveryNote.trim() : "",
         }),
       )
       const country = FULFILLMENT_COUNTRIES.find(
@@ -1185,6 +1268,7 @@ export default function EditProduct() {
         .filter((i) => i.type === 'remote')
         .map((i) => i.uri)
       fd.append('existingImages', JSON.stringify(existingUrls))
+      fd.append('coverIndex', '0')
 
       // New local images (appended in order)
       images
@@ -1743,71 +1827,152 @@ export default function EditProduct() {
             )}
         </Section>
 
-        {/* Shipping */}
-        <Section step={needsDocs ? '06' : '05'} title="Shipping method">
-          <View style={{ flexDirection: 'row', gap: 10, marginBottom: 14 }}>
-            {(['self', 'courier'] as const).map((m) => {
-              const active = shippingMethod === m
+        {/* Delivery */}
+        <Section
+          step={needsDocs ? '06' : '05'}
+          title="Delivery"
+          subtitle="How buyers are charged for delivery"
+        >
+          <Label>Delivery charge *</Label>
+          <View style={{ gap: 8, marginBottom: 14 }}>
+            {(
+              [
+                { id: 'free' as const, label: 'Free delivery' },
+                { id: 'fixed' as const, label: 'Fixed fee' },
+                { id: 'on_delivery' as const, label: 'Pay on delivery' },
+              ] as const
+            ).map((opt) => {
+              const active = feeMode === opt.id
               return (
                 <TouchableOpacity
-                  key={m}
-                  onPress={() => setShippingMethod(m)}
-                  style={[styles.shipChoice, active && styles.shipChoiceOn]}
+                  key={opt.id}
+                  onPress={() => {
+                    setFeeMode(opt.id)
+                    if (opt.id === 'free') {
+                      setShippingMethod(null)
+                      setCourierCompany('')
+                      setDeliveryFee('')
+                      setDeliveryNote('')
+                    } else {
+                      setDeliveryFee('')
+                      if (opt.id !== 'on_delivery') setDeliveryNote('')
+                    }
+                  }}
+                  style={[
+                    styles.shipChoice,
+                    active && styles.shipChoiceOn,
+                    {
+                      flex: undefined,
+                      alignItems: 'flex-start',
+                      paddingHorizontal: 14,
+                    },
+                  ]}
                 >
-                  <Ionicons
-                    name={m === 'self' ? 'walk-outline' : 'car-outline'}
-                    size={20}
-                    color={active ? GREEN : MUTED}
-                  />
                   <Text
                     style={{
-                      marginTop: 8,
                       fontWeight: '600',
                       fontSize: 13,
                       color: active ? TEXT : MUTED,
                     }}
                   >
-                    {m === 'self' ? 'Self delivery' : 'Courier'}
+                    {opt.label}
                   </Text>
                 </TouchableOpacity>
               )
             })}
           </View>
 
-          {shippingMethod === 'courier' && (
+          {feeMode && feeMode !== 'free' ? (
             <>
-              <Label onPress={() => courierRef.current?.focus()}>
-                Courier company *
-              </Label>
-              <TextInput
-                ref={courierRef}
-                value={courierCompany}
-                onChangeText={setCourierCompany}
-                placeholder="e.g. DHL, GIG, FedEx"
-                placeholderTextColor="#3D5268"
-                style={styles.input}
-              />
-            </>
-          )}
+              <Label>Way of delivering *</Label>
+              <View style={{ flexDirection: 'row', gap: 10, marginBottom: 14 }}>
+                {(['self', 'courier'] as const).map((m) => {
+                  const active = shippingMethod === m
+                  return (
+                    <TouchableOpacity
+                      key={m}
+                      onPress={() => setShippingMethod(m)}
+                      style={[styles.shipChoice, active && styles.shipChoiceOn]}
+                    >
+                      <Ionicons
+                        name={m === 'self' ? 'walk-outline' : 'car-outline'}
+                        size={20}
+                        color={active ? GREEN : MUTED}
+                      />
+                      <Text
+                        style={{
+                          marginTop: 8,
+                          fontWeight: '600',
+                          fontSize: 13,
+                          color: active ? TEXT : MUTED,
+                        }}
+                      >
+                        {m === 'self' ? 'Self delivery' : 'Courier'}
+                      </Text>
+                    </TouchableOpacity>
+                  )
+                })}
+              </View>
 
-          {!!shippingMethod && (
-            <>
-              <Label onPress={() => feeRef.current?.focus()}>
-                Delivery fee *
-              </Label>
-              <TextInput
-                ref={feeRef}
-                value={deliveryFee}
-                onChangeText={(t) =>
-                  setDeliveryFee(t.replace(/[^0-9.]/g, ''))
-                }
-                placeholder="0.00"
-                keyboardType="decimal-pad"
-                placeholderTextColor="#3D5268"
-                style={styles.input}
-              />
+              {shippingMethod === 'courier' ? (
+                <>
+                  <Label onPress={() => courierRef.current?.focus()}>
+                    Courier company *
+                  </Label>
+                  <TextInput
+                    ref={courierRef}
+                    value={courierCompany}
+                    onChangeText={setCourierCompany}
+                    placeholder="e.g. DHL, GIG, FedEx"
+                    placeholderTextColor="#3D5268"
+                    style={styles.input}
+                  />
+                </>
+              ) : null}
+
+              {feeMode === 'fixed' ? (
+                <>
+                  <Label onPress={() => feeRef.current?.focus()}>
+                    Delivery fee *
+                  </Label>
+                  <TextInput
+                    ref={feeRef}
+                    value={deliveryFee}
+                    onChangeText={(t) =>
+                      setDeliveryFee(t.replace(/[^0-9.]/g, ''))
+                    }
+                    placeholder="0.00"
+                    keyboardType="decimal-pad"
+                    placeholderTextColor="#3D5268"
+                    style={styles.input}
+                  />
+                </>
+              ) : null}
+
+              {feeMode === 'on_delivery' ? (
+                <>
+                  <Label>Note (optional)</Label>
+                  <TextInput
+                    value={deliveryNote}
+                    onChangeText={setDeliveryNote}
+                    placeholder="e.g. Cash or POS on arrival"
+                    placeholderTextColor="#3D5268"
+                    style={styles.input}
+                  />
+                  <Text style={styles.hint}>
+                    Buyer pays delivery when the order arrives — not in
+                    checkout total.
+                  </Text>
+                </>
+              ) : null}
             </>
-          )}
+          ) : null}
+
+          {feeMode === 'free' ? (
+            <Text style={styles.hint}>
+              No delivery charge. Checkout will show Free delivery.
+            </Text>
+          ) : null}
         </Section>
 
         {/* Live preview */}

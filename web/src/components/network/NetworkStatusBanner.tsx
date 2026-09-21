@@ -1,18 +1,26 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Wifi, WifiOff } from "lucide-react";
+import { Wifi, WifiOff, X } from "lucide-react";
 import { getConnectionInfo, type NetworkKind } from "@/lib/networkStatus";
 
 const GRAD = "linear-gradient(90deg,#00E575,#14B8A6,#3B82F6)";
 
-const SLOW_VISIBLE_MS = 80_000; // 1m 20s on screen
-const SLOW_COOLDOWN_MS = 60_000; // wait 1m before showing slow again
-const ONLINE_TOAST_MS = 2400;
-const PROBE_MS = 12_000;
-const SLOW_RTT_MS = 4_000;
-const OFFLINE_GRACE_MS = 1_200; // ignore tiny blips
-const SLOW_STREAK_NEED = 2;
+/** How often we measure reachability */
+const PROBE_MS = 15_000;
+/** Abort + treat as slow only if this long */
+const PROBE_TIMEOUT_MS = 5_000;
+/** RTT above this counts as one slow sample */
+const SLOW_RTT_MS = 2_800;
+/** Need this many consecutive slow samples before showing */
+const SLOW_STREAK_NEED = 3;
+/** Slow banner auto-hides after this (must not feel permanent) */
+const SLOW_VISIBLE_MS = 10_000;
+/** After hide, ignore slow for this long */
+const SLOW_COOLDOWN_MS = 90_000;
+/** Offline must last at least this before showing */
+const OFFLINE_GRACE_MS = 1_500;
+const ONLINE_TOAST_MS = 2_200;
 
 type DisplayKind = NetworkKind | "restored";
 
@@ -22,11 +30,13 @@ export function NetworkStatusBanner() {
   const [reduceMotion, setReduceMotion] = useState(false);
 
   const slowStreak = useRef(0);
-  const slowHideAt = useRef(0);
   const slowCooldownUntil = useRef(0);
   const offlineSince = useRef<number | null>(null);
   const wasOffline = useRef(false);
+  const displayRef = useRef<DisplayKind>("online");
+  const openRef = useRef(false);
   const timers = useRef<number[]>([]);
+  const probing = useRef(false);
 
   const clearTimers = () => {
     timers.current.forEach((id) => window.clearTimeout(id));
@@ -40,14 +50,27 @@ export function NetworkStatusBanner() {
   };
 
   const show = useCallback((kind: DisplayKind, autoHideMs?: number) => {
+    displayRef.current = kind;
+    openRef.current = true;
     setDisplay(kind);
     setOpen(true);
+    clearTimers();
     if (autoHideMs && autoHideMs > 0) {
-      later(() => setOpen(false), autoHideMs);
+      later(() => {
+        openRef.current = false;
+        setOpen(false);
+        if (kind === "slow") {
+          slowCooldownUntil.current = Date.now() + SLOW_COOLDOWN_MS;
+        }
+      }, autoHideMs);
     }
   }, []);
 
-  const hide = useCallback(() => setOpen(false), []);
+  const hide = useCallback(() => {
+    openRef.current = false;
+    setOpen(false);
+    clearTimers();
+  }, []);
 
   const apply = useCallback(
     (kind: NetworkKind) => {
@@ -57,8 +80,8 @@ export function NetworkStatusBanner() {
         if (offlineSince.current == null) offlineSince.current = now;
         if (now - (offlineSince.current ?? now) < OFFLINE_GRACE_MS) return;
         wasOffline.current = true;
-        clearTimers();
-        show("offline"); // stays until recovered
+        slowStreak.current = 0;
+        show("offline"); // stays until recovery
         return;
       }
 
@@ -66,69 +89,81 @@ export function NetworkStatusBanner() {
 
       if (kind === "online") {
         slowStreak.current = 0;
+        // Always clear a lingering slow banner when probes are healthy
+        if (openRef.current && displayRef.current === "slow") {
+          hide();
+        }
         if (wasOffline.current) {
           wasOffline.current = false;
-          clearTimers();
           show("restored", ONLINE_TOAST_MS);
-        } else if (display === "offline") {
+        } else if (openRef.current && displayRef.current === "offline") {
           hide();
         }
         return;
       }
 
-      // slow
-      if (display === "offline") return;
+      // kind === "slow" — only from measured probe, never API hint alone
+      if (displayRef.current === "offline" && openRef.current) return;
+      if (now < slowCooldownUntil.current) return;
 
       slowStreak.current += 1;
       if (slowStreak.current < SLOW_STREAK_NEED) return;
-      if (now < slowCooldownUntil.current) return;
-      if (open && display === "slow") return;
+      if (openRef.current && displayRef.current === "slow") return;
 
-      clearTimers();
-      show("slow");
-      slowHideAt.current = now + SLOW_VISIBLE_MS;
-      later(() => {
-        hide();
-        slowCooldownUntil.current = Date.now() + SLOW_COOLDOWN_MS;
-      }, SLOW_VISIBLE_MS);
+      show("slow", SLOW_VISIBLE_MS);
     },
-    [display, hide, open, show],
+    [hide, show]
   );
 
   useEffect(() => {
     setReduceMotion(
-      window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches
     );
 
     const probe = async () => {
-      const { online, hintSlow } = getConnectionInfo();
-
-      if (!online) {
-        apply("offline");
-        return;
-      }
-
+      if (probing.current) return;
+      probing.current = true;
       try {
+        const { online } = getConnectionInfo();
+
+        if (!online) {
+          apply("offline");
+          return;
+        }
+
         const ctrl = new AbortController();
-        const t = window.setTimeout(() => ctrl.abort(), SLOW_RTT_MS + 500);
+        const t = window.setTimeout(() => ctrl.abort(), PROBE_TIMEOUT_MS);
         const start = performance.now();
-        await fetch(`/favicon.ico?n=${Date.now()}`, {
-          method: "GET",
-          cache: "no-store",
-          signal: ctrl.signal,
-        });
+        let ok = false;
+        try {
+          // GET + cache-bust — HEAD often fails on static hosts and must not mean "slow"
+          await fetch(`/favicon.ico?n=${Date.now()}`, {
+            method: "GET",
+            cache: "no-store",
+            signal: ctrl.signal,
+          });
+          ok = true;
+        } catch {
+          ok = false;
+        }
         window.clearTimeout(t);
         const rtt = performance.now() - start;
-        if (rtt >= SLOW_RTT_MS || hintSlow) apply("slow");
-        else {
-          slowStreak.current = 0;
-          apply("online");
+
+        if (!navigator.onLine) {
+          apply("offline");
+          return;
         }
-      } catch {
-        if (!navigator.onLine) apply("offline");
-        else if (hintSlow) apply("slow");
-        // fetch fail while still "online" is often a 404/HEAD issue — do not force slow
+
+        // Failed probe while still "online" → ignore (CDN/404/adblock), do not force slow
+        if (!ok) {
+          apply("online");
+          return;
+        }
+
+        if (rtt >= SLOW_RTT_MS) apply("slow");
         else apply("online");
+      } finally {
+        probing.current = false;
       }
     };
 
@@ -220,6 +255,20 @@ export function NetworkStatusBanner() {
               {copy.body}
             </p>
           </div>
+          {kind === "slow" ? (
+            <button
+              type="button"
+              aria-label="Dismiss"
+              onClick={() => {
+                hide();
+                slowCooldownUntil.current = Date.now() + SLOW_COOLDOWN_MS;
+                slowStreak.current = 0;
+              }}
+              className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-white/40 hover:bg-white/10 hover:text-white"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          ) : null}
         </div>
       </div>
       <style jsx global>{`

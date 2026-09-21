@@ -49,15 +49,22 @@ const productSchema = new Schema<IProduct>(
       index: true,
     },
 
-    shipping: {
+        shipping: {
+      feeMode: {
+        type: String,
+        enum: ["free", "fixed", "on_delivery"],
+        required: true,
+        default: "fixed",
+      },
       method: {
         type: String,
         enum: ["self", "courier"],
-        required: true,
+        required: false,
         default: "courier",
       },
       courierCompany: { type: String, default: "" },
       deliveryFee: { type: Number, default: 0, min: 0 },
+      deliveryNote: { type: String, default: "", trim: true },
     },
 
     fulfillmentLocation: {

@@ -32,7 +32,7 @@ function mapBanner(b: ApiHeroBanner, index: number): HeroSlide | null {
 
   return {
     id: `slot-${b.position || index + 1}`,
-    image: image || HERO_SLIDES[index % HERO_SLIDES.length]?.image || "/hero/welcome.jpg",
+    image: image || HERO_SLIDES[index % HERO_SLIDES.length]?.image || "/hero/welcome.png",
     kicker: String(b.kicker || "PLAZORE").toUpperCase(),
     headline: headline || HERO_SLIDES[index % HERO_SLIDES.length]?.headline || "Plazore",
     subheadline:

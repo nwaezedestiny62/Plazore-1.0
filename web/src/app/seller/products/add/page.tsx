@@ -147,9 +147,11 @@ export default function AddProductPage() {
   const [fulfillCountryCode, setFulfillCountryCode] = useState("");
   const [fulfillStateCode, setFulfillStateCode] = useState("");
   const [fulfillCity, setFulfillCity] = useState("");
+  const [feeMode, setFeeMode] = useState<"free" | "fixed" | "on_delivery" | null>(null);
   const [shippingMethod, setShippingMethod] = useState<"self" | "courier" | null>(null);
   const [courierCompany, setCourierCompany] = useState("");
   const [deliveryFee, setDeliveryFee] = useState("");
+  const [deliveryNote, setDeliveryNote] = useState("");
 
   const imageInputRef = useRef<HTMLInputElement>(null);
   const docInputRef = useRef<HTMLInputElement>(null);
@@ -206,7 +208,6 @@ export default function AddProductPage() {
   const stockN = Math.max(0, parseInt(stock || "0", 10) || 0);
   const feeN = Number(deliveryFee) || 0;
 
-  // Price is always entered & stored in the seller's CURRENT region currency
   const formatPreviewPrice = useCallback(
     (n: number) => {
       try {
@@ -217,6 +218,26 @@ export default function AddProductPage() {
     },
     [formatProduct, region]
   );
+
+  const deliveryLabel =
+    feeMode === "free"
+      ? "Free delivery"
+      : shippingMethod === "self"
+        ? "Self delivery"
+        : courierCompany.trim()
+          ? courierCompany.trim()
+          : shippingMethod === "courier"
+            ? "Courier"
+            : null;
+
+  const feeDisplay =
+    feeMode === "free"
+      ? "Free"
+      : feeMode === "on_delivery"
+        ? "Pay on arrival"
+        : feeMode === "fixed" && feeN > 0
+          ? formatPreviewPrice(feeN)
+          : null;
 
   const onImages = (files: FileList | null) => {
     if (!files?.length) return;
@@ -240,7 +261,6 @@ export default function AddProductPage() {
     });
   };
 
-  // Move image to front = make it cover
   const makeCover = (i: number) => {
     if (i === 0) return;
     setImageFiles((prev) => {
@@ -279,10 +299,14 @@ export default function AddProductPage() {
     if (!priceN || priceN <= 0) return "Enter a valid price";
     if (!category) return "Select a category";
     if (!fulfillCountryCode || !fulfillCity) return "Set fulfillment location";
-    if (!shippingMethod) return "Choose a shipping method";
-    if (shippingMethod === "courier" && !courierCompany.trim())
-      return "Courier company is required";
-    if (deliveryFee === "" || feeN < 0) return "Enter delivery fee (0 allowed)";
+    if (!feeMode) return "Choose a delivery charge option";
+    if (feeMode !== "free") {
+      if (!shippingMethod) return "Choose self delivery or courier";
+      if (shippingMethod === "courier" && !courierCompany.trim())
+        return "Courier company is required";
+      if (feeMode === "fixed" && (!(feeN > 0) || deliveryFee === ""))
+        return "Enter a delivery fee greater than 0";
+    }
     return null;
   };
 
@@ -305,17 +329,18 @@ export default function AddProductPage() {
       fd.append("description", description.trim());
       fd.append("category", category);
       fd.append("subCategory", subCategory);
-      // CRITICAL: lock the product to the seller's current region at creation time
       fd.append("region", region || "NG");
       fd.append("currency", regionConfig.currency.code);
       fd.append("specifications", JSON.stringify(specs));
       fd.append(
         "shipping",
         JSON.stringify({
-          method: shippingMethod,
-          courier: courierCompany.trim(),
-          courierCompany: courierCompany.trim(),
-          deliveryFee: feeN,
+          feeMode,
+          method: feeMode === "free" ? undefined : shippingMethod,
+          courier: feeMode === "free" ? "" : courierCompany.trim(),
+          courierCompany: feeMode === "free" ? "" : courierCompany.trim(),
+          deliveryFee: feeMode === "fixed" ? feeN : 0,
+          deliveryNote: feeMode === "on_delivery" ? deliveryNote.trim() : "",
         })
       );
       const country = FULFILLMENT_COUNTRIES.find((c) => c.code === fulfillCountryCode);
@@ -332,7 +357,6 @@ export default function AddProductPage() {
         )
       );
 
-      // First image is always the cover – order matters
       imageFiles.forEach((f, idx) => {
         fd.append("images", f);
         if (idx === 0) fd.append("coverIndex", "0");
@@ -438,7 +462,6 @@ export default function AddProductPage() {
 
         <div className="grid gap-8 lg:grid-cols-[1fr_320px] lg:items-start">
           <div>
-            {/* 01 Images – first is cover */}
             <Section
               step="01"
               title="Images"
@@ -496,7 +519,6 @@ export default function AddProductPage() {
               />
             </Section>
 
-            {/* 02 Basics */}
             <Section step="02" title="Basics">
               <Label>Product name *</Label>
               <input
@@ -549,7 +571,6 @@ export default function AddProductPage() {
               />
             </Section>
 
-            {/* 03 Category + specs */}
             <Section step="03" title="Category & specs">
               <Label>Category *</Label>
               <div className="mb-3 flex flex-wrap">
@@ -605,7 +626,6 @@ export default function AddProductPage() {
                 ))}
             </Section>
 
-            {/* Docs */}
             {needsDocs && (
               <Section step="04" title="Documents" subtitle="Required for this category">
                 {documents.map((doc, index) => (
@@ -660,7 +680,6 @@ export default function AddProductPage() {
               </Section>
             )}
 
-            {/* Fulfillment */}
             <Section
               step={needsDocs ? "05" : "04"}
               title="Fulfillment location"
@@ -723,62 +742,153 @@ export default function AddProductPage() {
                 )}
             </Section>
 
-            {/* Shipping */}
-            <Section step={needsDocs ? "06" : "05"} title="Shipping method">
-              <div className="mb-3.5 grid grid-cols-2 gap-2.5">
-                {(["self", "courier"] as const).map((m) => {
-                  const active = shippingMethod === m;
+            <Section
+              step={needsDocs ? "06" : "05"}
+              title="Delivery"
+              subtitle="How buyers are charged for delivery"
+            >
+              <Label>Delivery charge *</Label>
+              <div className="mb-3.5 grid grid-cols-1 gap-2 sm:grid-cols-3">
+                {(
+                  [
+                    { id: "free" as const, label: "Free delivery" },
+                    { id: "fixed" as const, label: "Fixed fee" },
+                    { id: "on_delivery" as const, label: "Pay on delivery" },
+                  ] as const
+                ).map((opt) => {
+                  const active = feeMode === opt.id;
                   return (
                     <button
-                      key={m}
+                      key={opt.id}
                       type="button"
-                      onClick={() => setShippingMethod(m)}
-                      className={`flex flex-col items-center rounded-[14px] border py-4 ${
-                        active ? "border-green/40 bg-green/8" : "border-line bg-[#0A121C]"
+                      onClick={() => {
+                        setFeeMode(opt.id);
+                        if (opt.id === "free") {
+                          setShippingMethod(null);
+                          setCourierCompany("");
+                          setDeliveryFee("");
+                          setDeliveryNote("");
+                        } else {
+                          setDeliveryFee("");
+                          if (opt.id !== "on_delivery") setDeliveryNote("");
+                        }
+                      }}
+                      className={`rounded-[14px] border px-3 py-3.5 text-left ${
+                        active
+                          ? "border-green/40 bg-green/8"
+                          : "border-line bg-[#0A121C]"
                       }`}
                     >
-                      {m === "self" ? (
-                        <Footprints className={`h-5 w-5 ${active ? "text-green" : "text-[#737A86]"}`} />
-                      ) : (
-                        <Truck className={`h-5 w-5 ${active ? "text-green" : "text-[#737A86]"}`} />
-                      )}
                       <span
-                        className={`mt-2 text-[13px] font-semibold ${
+                        className={`text-[13px] font-semibold ${
                           active ? "text-text" : "text-[#737A86]"
                         }`}
                       >
-                        {m === "self" ? "Self delivery" : "Courier"}
+                        {opt.label}
                       </span>
                     </button>
                   );
                 })}
               </div>
-              {shippingMethod === "courier" && (
+
+              {feeMode && feeMode !== "free" && (
                 <>
-                  <Label>Courier company *</Label>
-                  <input
-                    className={inputCls}
-                    value={courierCompany}
-                    onChange={(e) => setCourierCompany(e.target.value)}
-                    placeholder="e.g. DHL, GIG, FedEx"
-                  />
+                  <Label>Way of delivering *</Label>
+                  <div className="mb-3.5 grid grid-cols-2 gap-2.5">
+                    {(["self", "courier"] as const).map((m) => {
+                      const active = shippingMethod === m;
+                      return (
+                        <button
+                          key={m}
+                          type="button"
+                          onClick={() => setShippingMethod(m)}
+                          className={`flex flex-col items-center rounded-[14px] border py-4 ${
+                            active
+                              ? "border-green/40 bg-green/8"
+                              : "border-line bg-[#0A121C]"
+                          }`}
+                        >
+                          {m === "self" ? (
+                            <Footprints
+                              className={`h-5 w-5 ${
+                                active ? "text-green" : "text-[#737A86]"
+                              }`}
+                            />
+                          ) : (
+                            <Truck
+                              className={`h-5 w-5 ${
+                                active ? "text-green" : "text-[#737A86]"
+                              }`}
+                            />
+                          )}
+                          <span
+                            className={`mt-2 text-[13px] font-semibold ${
+                              active ? "text-text" : "text-[#737A86]"
+                            }`}
+                          >
+                            {m === "self" ? "Self delivery" : "Courier"}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {shippingMethod === "courier" && (
+                    <>
+                      <Label>Courier company *</Label>
+                      <input
+                        className={inputCls}
+                        value={courierCompany}
+                        onChange={(e) => setCourierCompany(e.target.value)}
+                        placeholder="e.g. DHL, GIG, FedEx"
+                      />
+                    </>
+                  )}
+
+                  {feeMode === "fixed" && (
+                    <>
+                      <Label>
+                        Delivery fee * ({regionConfig.currency.symbol})
+                      </Label>
+                      <input
+                        className={inputCls}
+                        value={deliveryFee}
+                        onChange={(e) =>
+                          setDeliveryFee(
+                            e.target.value.replace(/[^0-9.]/g, ""),
+                          )
+                        }
+                        placeholder="0.00"
+                        inputMode="decimal"
+                      />
+                    </>
+                  )}
+
+                  {feeMode === "on_delivery" && (
+                    <>
+                      <Label>Note (optional)</Label>
+                      <input
+                        className={inputCls}
+                        value={deliveryNote}
+                        onChange={(e) => setDeliveryNote(e.target.value)}
+                        placeholder="e.g. Cash or POS on arrival"
+                      />
+                      <p className="mb-3 -mt-2 text-[11px] text-[#737A86]">
+                        Buyer pays delivery when the order arrives — not in
+                        checkout total.
+                      </p>
+                    </>
+                  )}
                 </>
               )}
-              {!!shippingMethod && (
-                <>
-                  <Label>Delivery fee *</Label>
-                  <input
-                    className={inputCls}
-                    value={deliveryFee}
-                    onChange={(e) => setDeliveryFee(e.target.value.replace(/[^0-9.]/g, ""))}
-                    placeholder="0.00"
-                    inputMode="decimal"
-                  />
-                </>
+
+              {feeMode === "free" && (
+                <p className="text-[12px] text-[#737A86]">
+                  No delivery charge. Checkout will show Free delivery.
+                </p>
               )}
             </Section>
 
-            {/* Publish */}
             <Section step={needsDocs ? "07" : "06"} title="Publish">
               <div className="mb-1.5 flex justify-between text-[13px]">
                 <span className="text-[#737A86]">Plan</span>
@@ -810,14 +920,12 @@ export default function AddProductPage() {
             </button>
           </div>
 
-          {/* Sticky live preview – matches showroom + product page */}
           <div className="hidden lg:sticky lg:top-6 lg:block">
             <p className="mb-1 text-[11px] font-bold uppercase tracking-[2px] text-[#737A86]">
               Live preview
             </p>
             <p className="mb-3 text-lg font-extrabold text-text">What buyers will see</p>
 
-            {/* Showroom card – exact style */}
             <div className="mb-4 border border-line bg-[#0A121C] p-3.5">
               <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.8px] text-[#737A86]">
                 Showroom card · cover = first photo
@@ -848,10 +956,14 @@ export default function AddProductPage() {
                 ) : (
                   <p className="mt-1 text-[11px] text-white/30">Ships from…</p>
                 )}
+                {feeMode === "free" ? (
+                  <p className="mt-1 text-[11px] font-semibold text-[#00E575]">Free delivery</p>
+                ) : feeMode === "on_delivery" ? (
+                  <p className="mt-1 text-[11px] text-white/50">Pay on arrival</p>
+                ) : null}
               </div>
             </div>
 
-            {/* Mobile product page simulator */}
             <div className="overflow-hidden rounded-[28px] border-[3px] border-[#2C313A] bg-[#12141A] p-2 shadow-2xl">
               <div className="mx-auto mb-1 h-3.5 w-[78px] rounded-lg bg-black" />
               <div className="max-h-[420px] overflow-y-auto rounded-[22px] bg-bg [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
@@ -899,6 +1011,54 @@ export default function AddProductPage() {
                       </div>
                     </>
                   )}
+
+                  {(deliveryLabel || shipsFrom) && (
+                    <>
+                      <p className="mb-1.5 mt-3 text-xs font-semibold uppercase tracking-wide text-text">
+                        Delivery
+                      </p>
+                      <div className="rounded-[14px] border border-line bg-surface p-3">
+                        {!!deliveryLabel && (
+                          <div className={shipsFrom ? "mb-2.5" : ""}>
+                            <p className="text-[10px] font-semibold uppercase tracking-wide text-[#737A86]">
+                              Delivery
+                            </p>
+                            <p className="mt-0.5 text-[13px] font-semibold text-text">
+                              {deliveryLabel}
+                            </p>
+                          </div>
+                        )}
+                        {!!shipsFrom && (
+                          <div
+                            className={
+                              deliveryLabel
+                                ? "border-t border-line pt-2.5"
+                                : ""
+                            }
+                          >
+                            <p className="text-[10px] font-semibold uppercase tracking-wide text-[#737A86]">
+                              Ships from
+                            </p>
+                            <p className="mt-0.5 text-[13px] font-semibold text-text">
+                              {shipsFrom}
+                            </p>
+                          </div>
+                        )}
+                        {!!feeDisplay && (
+                          <div className="mt-2.5 flex items-center justify-between border-t border-line pt-2.5">
+                            <span className="text-[13px] text-[#A7ADB8]">Delivery</span>
+                            <span className="text-sm font-semibold text-text">{feeDisplay}</span>
+                          </div>
+                        )}
+                        {feeMode === "on_delivery" && !!deliveryNote.trim() ? (
+                          <p className="mt-2 text-[12px] leading-[17px] text-[#A7ADB8]">
+                            {deliveryNote}
+                          </p>
+                        ) : null}
+                      </div>
+                    </>
+                  )}
+
                   <p className="mb-1.5 mt-3 text-xs font-semibold uppercase tracking-wide text-text">
                     Sold by
                   </p>

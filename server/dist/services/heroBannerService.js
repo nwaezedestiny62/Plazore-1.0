@@ -15,12 +15,12 @@ export const BANNER_CYCLE_MS = 1000 * 60 * 30;
 const MIN_BEHAVIORAL_SCORE = 2.5;
 const STATIC_FALLBACKS = {
     1: {
-        imageUrl: "/hero/welcome.jpg",
-        headline: "Discover with intention",
-        subheadline: "A quieter Digital Mall — curated pieces, trusted sellers.",
-        ctaLabel: "Enter the mall",
-        kicker: "PLAZORE",
-    },
+  imageUrl: "/hero/welcome.png",
+  headline: "Let the shopping come to you.",
+  subheadline: "Explore the Plazore Showroom — products, sellers, and discoveries worth seeing.",
+  ctaLabel: "Explore the Showroom",
+  kicker: "PLAZORE"
+},
     4: {
         imageUrl: "/hero/new-arrivals.jpg",
         headline: "Just placed",
@@ -422,7 +422,7 @@ export async function ensureHeroSlots() {
             ? ADMIN_DEFAULTS[s.position]
             : STATIC_FALLBACKS[s.position];
         const creative = {
-            imageUrl: def?.imageUrl || "/hero/welcome.jpg",
+            imageUrl: def?.imageUrl || "/hero/welcome.png",
             headline: def?.headline || "Plazore",
             subheadline: def?.subheadline || "",
             ctaLabel: def?.ctaLabel || "Explore",

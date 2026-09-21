@@ -1,5 +1,9 @@
 export type NetworkKind = "online" | "offline" | "slow";
 
+/**
+ * Browser Network Information API is a coarse *hint* only.
+ * Never use it alone to pin a "slow" UI — values stick and mis-report often.
+ */
 export function getConnectionInfo(): {
   online: boolean;
   hintSlow: boolean;
@@ -25,14 +29,12 @@ export function getConnectionInfo(): {
   const downlink = conn?.downlink;
   const rtt = conn?.rtt;
 
-  // Hint only — never enough on its own to pin the banner forever.
-  // saveData is a user preference, NOT a slow network.
+  // Extremely conservative — UI must still confirm with a real probe.
   const hintSlow =
     online &&
     (effectiveType === "slow-2g" ||
-      effectiveType === "2g" ||
-      (typeof rtt === "number" && rtt >= 750) ||
-      (typeof downlink === "number" && downlink > 0 && downlink < 0.4));
+      (typeof rtt === "number" && rtt >= 2000) ||
+      (typeof downlink === "number" && downlink > 0 && downlink < 0.25));
 
   return { online, hintSlow, downlink, effectiveType };
 }

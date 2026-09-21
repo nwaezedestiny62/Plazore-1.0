@@ -90,12 +90,31 @@ function readShipping(product: Product) {
     [ship.courier, ship.courierName, ship.courierCompany, ship.company]
       .map((v) => (typeof v === "string" ? v.trim() : ""))
       .find(Boolean) || "";
+  const note =
+    typeof ship.deliveryNote === "string" ? ship.deliveryNote.trim() : "";
+
+  const feeModeRaw = ship.feeMode;
+  const feeMode: "free" | "fixed" | "on_delivery" =
+    feeModeRaw === "free" ||
+    feeModeRaw === "fixed" ||
+    feeModeRaw === "on_delivery"
+      ? feeModeRaw
+      : deliveryFee > 0
+        ? "fixed"
+        : "free";
+
+  const deliveryMethodLabel =
+    feeMode === "free"
+      ? "Free delivery"
+      : method === "self"
+        ? "Self delivery"
+        : courierName || "Courier";
+
   return {
+    feeMode,
     deliveryFee,
-    deliveryMethodLabel:
-      method === "self"
-        ? "Direct Merchant Delivery"
-        : courierName || "Courier Delivery",
+    deliveryNote: note,
+    deliveryMethodLabel,
   };
 }
 
@@ -513,7 +532,8 @@ export function ProductView({ product }: { product: Product }) {
     return false;
   }, [isSignedIn, userId, seller, product, user?.id]);
 
-  const { deliveryFee, deliveryMethodLabel } = readShipping(product);
+  const { feeMode, deliveryFee, deliveryNote, deliveryMethodLabel } =
+    readShipping(product);
   const categoryLabel =
     typeof product.category === "string"
       ? product.category
@@ -1104,11 +1124,23 @@ export function ProductView({ product }: { product: Product }) {
               </div>
             </div>
             <div className="flex justify-between border-t border-line pt-3 text-[14.5px]">
-              <span className="text-secondary">Delivery fee</span>
+              <span className="text-secondary">
+                {feeMode === "on_delivery" ? "Delivery charge" : "Delivery fee"}
+              </span>
               <span className="font-semibold" suppressHydrationWarning>
                 {feeLabel}
               </span>
             </div>
+            {feeMode === "on_delivery" && deliveryNote ? (
+              <p className="mt-2.5 text-[13px] leading-5 text-secondary">
+                {deliveryNote}
+              </p>
+            ) : null}
+            {feeMode === "on_delivery" ? (
+              <p className="mt-2 text-[12px] text-muted">
+                Paid when the order arrives — not added at checkout.
+              </p>
+            ) : null}
           </div>
 
           {shipsFrom && (

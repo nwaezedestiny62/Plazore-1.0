@@ -250,8 +250,15 @@ export default function CheckoutPage() {
       const unit = Number(item.price ?? product.price) || 0;
       const qty = Math.max(1, Number(item.quantity) || 1);
       const lineDisplay = convertPrice(unit * qty, region, displayRegion);
-      const feeRaw = Number(product.shipping?.deliveryFee) || 0;
-      const feeDisplay = convertPrice(feeRaw, region, displayRegion);
+            const feeRaw = Number(product.shipping?.deliveryFee) || 0;
+      const feeMode =
+        (product.shipping as { feeMode?: string } | undefined)?.feeMode ||
+        (feeRaw > 0 ? "fixed" : "free");
+      // Only fixed (or legacy fee > 0) is prepaid; free + COD = 0 on total
+      const feeDisplay =
+        feeMode === "fixed"
+          ? convertPrice(feeRaw, region, displayRegion)
+          : 0;
 
       const invalid: string[] = [];
       if (!product._id) invalid.push("Missing product id");

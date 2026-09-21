@@ -35,7 +35,6 @@ import {
 import {
   convertPrice,
   formatMoney,
-  formatProductPrice,
   getRegion,
   resolveRegionCode,
 } from "@/lib/regions";
@@ -46,6 +45,7 @@ const CURRENT_PLAN = "free" as keyof typeof PLAN_IMAGE_LIMITS;
 
 type OverlayTone = "info" | "success" | "danger";
 type Overlay = { title: string; message?: string; tone?: OverlayTone } | null;
+type FeeMode = "free" | "fixed" | "on_delivery";
 
 type ImageItem =
   | { id: string; type: "remote"; uri: string }
@@ -73,9 +73,8 @@ function normalizeImageUrl(raw: unknown): string {
       s.startsWith("https://") ||
       s.startsWith("blob:") ||
       s.startsWith("data:")
-    ) {
+    )
       return s;
-    }
     if (s.startsWith("//")) return `https:${s}`;
     if (s.startsWith("/")) return `${API_ORIGIN}${s}`;
     return s;
@@ -114,7 +113,7 @@ function extractImageList(p: any): string[] {
     seen.add(u);
     out.push(u);
   }
-  if (out.length === 0) {
+  if (!out.length) {
     const single = normalizeImageUrl(
       p.coverImage ||
         p.cover ||
@@ -293,9 +292,11 @@ type BuyerPreviewProps = {
   priceLabel: string;
   stockN: number;
   shipsFrom: string | null;
+  feeMode: FeeMode | null;
   shippingMethod: "self" | "courier" | null;
   courierCompany: string;
   deliveryFeeLabel: string;
+  deliveryNote: string;
 };
 
 function BuyerLivePreview({
@@ -309,9 +310,11 @@ function BuyerLivePreview({
   priceLabel,
   stockN,
   shipsFrom,
+  feeMode,
   shippingMethod,
   courierCompany,
   deliveryFeeLabel,
+  deliveryNote,
 }: BuyerPreviewProps) {
   const cover = images[0] || "";
   const [idx, setIdx] = useState(0);
@@ -322,6 +325,15 @@ function BuyerLivePreview({
     setIdx(0);
   }, [images.join("|")]);
 
+  const methodLabel =
+    feeMode === "free"
+      ? "Free delivery"
+      : shippingMethod === "courier"
+        ? courierCompany.trim() || "Courier"
+        : shippingMethod === "self"
+          ? "Self delivery"
+          : "Delivery";
+
   return (
     <div>
       <p className="mb-1 text-[11px] font-bold uppercase tracking-[2px] text-[#737A86]">
@@ -331,15 +343,15 @@ function BuyerLivePreview({
         What buyers will see
       </p>
 
-      {/* Showroom card */}
-      <div className="mb-4 rounded-2xl border border-line bg-[#0A121C] p-3 sm:p-3.5">
+      {/* Showroom card — no border (matches real card) */}
+      <div className="mb-4 bg-[#0A121C] p-3 sm:p-3.5">
         <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.8px] text-[#737A86]">
           Showroom card · cover = first photo
         </p>
         <div className="w-[130px] sm:w-[150px]">
-          <div className="relative aspect-[1/1.35] overflow-hidden rounded-lg bg-[#F1F1F1]">
+          <div className="relative aspect-[1/1.35] overflow-hidden bg-[#F1F1F1]">
             <SafeImg src={cover} className="h-full w-full object-cover" />
-            <div className="absolute bottom-[11px] right-[11px] flex h-[34px] w-[34px] items-center justify-center rounded-md bg-white shadow">
+            <div className="absolute bottom-[11px] right-[11px] flex h-[34px] w-[34px] items-center justify-center bg-white shadow">
               <span className="text-[10px] font-bold text-[#111]">Cart</span>
             </div>
           </div>
@@ -355,10 +367,17 @@ function BuyerLivePreview({
           ) : (
             <p className="mt-1 text-[11px] text-white/30">Ships from…</p>
           )}
+          {feeMode === "free" && (
+            <p className="mt-0.5 text-[11px] font-medium text-[#00E575]/90">
+              Free delivery
+            </p>
+          )}
+          {feeMode === "on_delivery" && (
+            <p className="mt-0.5 text-[11px] text-white/50">Pay on arrival</p>
+          )}
         </div>
       </div>
 
-      {/* Mobile product screen */}
       <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.8px] text-[#737A86]">
         Mobile product screen
       </p>
@@ -444,22 +463,21 @@ function BuyerLivePreview({
             </p>
             <div className="rounded-[14px] border border-line bg-surface p-3">
               <div className="flex flex-wrap items-center gap-2">
-                {shippingMethod === "courier" ? (
+                {feeMode !== "free" && shippingMethod === "courier" ? (
                   <Truck className="h-4 w-4 shrink-0 text-green" />
                 ) : (
                   <Footprints className="h-4 w-4 shrink-0 text-green" />
                 )}
                 <p className="text-[13px] font-semibold text-text">
-                  {shippingMethod === "courier"
-                    ? courierCompany || "Courier"
-                    : shippingMethod === "self"
-                      ? "Self delivery"
-                      : "Shipping"}
+                  {methodLabel}
                 </p>
                 <p className="ml-auto text-[13px] font-bold text-text">
                   {deliveryFeeLabel}
                 </p>
               </div>
+              {feeMode === "on_delivery" && !!deliveryNote.trim() && (
+                <p className="mt-1 text-[11px] text-[#A7ADB8]">{deliveryNote}</p>
+              )}
               <p className="mt-1.5 text-[11px] leading-[16px] text-[#737A86]">
                 {shipsFrom || "Set fulfillment location"}
               </p>
@@ -498,8 +516,8 @@ export default function EditProductPage() {
   const [overlay, setOverlay] = useState<Overlay>(null);
   const [storeName, setStoreName] = useState("");
 
-  const [productRegion, setProductRegion] = useState<string>("NG");
-  const [originalPrice, setOriginalPrice] = useState<number>(0);
+  const [productRegion, setProductRegion] = useState("NG");
+  const [originalPrice, setOriginalPrice] = useState(0);
 
   const [images, setImages] = useState<ImageItem[]>([]);
   const [name, setName] = useState("");
@@ -516,11 +534,13 @@ export default function EditProductPage() {
   const [fulfillCountryCode, setFulfillCountryCode] = useState("");
   const [fulfillStateCode, setFulfillStateCode] = useState("");
   const [fulfillCity, setFulfillCity] = useState("");
-  const [shippingMethod, setShippingMethod] = useState<
-    "self" | "courier" | null
-  >(null);
+  const [feeMode, setFeeMode] = useState<FeeMode | null>(null);
+  const [shippingMethod, setShippingMethod] = useState<"self" | "courier" | null>(
+    null,
+  );
   const [courierCompany, setCourierCompany] = useState("");
   const [deliveryFee, setDeliveryFee] = useState("");
+  const [deliveryNote, setDeliveryNote] = useState("");
 
   const imageInputRef = useRef<HTMLInputElement>(null);
   const docInputRef = useRef<HTMLInputElement>(null);
@@ -583,9 +603,7 @@ export default function EditProductPage() {
 
       const urls = extractImageList(p);
       setImages((prev) => {
-        if (!urls.length && prev.length && !opts?.allowEmptyImages) {
-          return prev;
-        }
+        if (!urls.length && prev.length && !opts?.allowEmptyImages) return prev;
         prev.forEach((item) => {
           if (item.type === "local") revokeBlobUri(item.uri);
         });
@@ -609,18 +627,38 @@ export default function EditProductPage() {
       );
 
       const ship = p.shipping || {};
+      const feeRaw = Number(ship.deliveryFee) || 0;
+      const mode: FeeMode =
+        ship.feeMode === "free" ||
+        ship.feeMode === "fixed" ||
+        ship.feeMode === "on_delivery"
+          ? ship.feeMode
+          : feeRaw > 0
+            ? "fixed"
+            : "free";
+      setFeeMode(mode);
+
       const method = ship.method || ship.deliveryMethod || null;
       setShippingMethod(
-        method === "self" || method === "courier" ? method : null,
+        mode === "free"
+          ? null
+          : method === "self" || method === "courier"
+            ? method
+            : null,
       );
       setCourierCompany(
         String(ship.courier || ship.courierCompany || ship.courierName || ""),
       );
       setDeliveryFee(
-        ship.deliveryFee != null && ship.deliveryFee !== ""
-          ? String(ship.deliveryFee)
+        mode === "fixed" && feeRaw > 0
+          ? String(
+              sameRegion
+                ? feeRaw
+                : convertPrice(feeRaw, origRegion, sellerRegion, ratesToNgn),
+            )
           : "",
       );
+      setDeliveryNote(String(ship.deliveryNote || ""));
 
       const loc = p.fulfillmentLocation || p.shipsFromLocation || {};
       const countryCode =
@@ -659,59 +697,44 @@ export default function EditProductPage() {
         const listRes = await readJson(listRaw);
         const list = Array.isArray(listRes?.data)
           ? listRes.data
-          : listRes?.data?.products || [];
-        product = list.find((x: any) => String(x._id || x.id) === String(id));
+          : Array.isArray(listRes)
+            ? listRes
+            : [];
+        product = list.find((x: any) => String(x._id) === id) || null;
       }
-      return product;
+
+      if (!product) throw new Error("Product not found");
+      applyProduct(product);
     },
-    [id],
+    [id, applyProduct],
   );
 
-  const load = useCallback(async () => {
-    if (!id) return;
-    try {
-      const token = await getToken();
-      if (!token) return;
-
-      try {
-        const storeRaw = await fetch(`${API}/seller/store`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (storeRaw.ok) {
-          const storeRes = await readJson(storeRaw);
-          if (storeRes?.success && storeRes.data?.storeName) {
-            setStoreName(storeRes.data.storeName);
-          }
-        }
-      } catch {
-        /* ignore */
-      }
-
-      const product = await fetchProduct(token);
-      if (!product) {
-        toast("Error", "Product not found", "danger");
-        return;
-      }
-      applyProduct(product, { allowEmptyImages: true });
-    } catch (e: any) {
-      console.error(e);
-      toast(
-        "Error",
-        e?.message || "Could not load product. Check API URL.",
-        "danger",
-      );
-    } finally {
-      setPageLoading(false);
-    }
-  }, [id, getToken, toast, applyProduct, fetchProduct]);
-
   useEffect(() => {
-    if (!isLoaded || !isSignedIn) {
-      if (isLoaded && !isSignedIn) setPageLoading(false);
-      return;
-    }
-    load();
-  }, [isLoaded, isSignedIn, load]);
+    if (!isLoaded || !isSignedIn || !id) return;
+    (async () => {
+      try {
+        setPageLoading(true);
+        const token = await getToken();
+        if (!token) return;
+        try {
+          const storeRes = await fetch(`${API}/seller/store`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          const storeJson = await storeRes.json();
+          if (storeJson?.success && storeJson.data?.storeName) {
+            setStoreName(storeJson.data.storeName);
+          }
+        } catch {
+          /* ignore */
+        }
+        await fetchProduct(token);
+      } catch (e: any) {
+        toast("Error", e?.message || "Could not load product", "danger");
+      } finally {
+        setPageLoading(false);
+      }
+    })();
+  }, [isLoaded, isSignedIn, id, getToken, fetchProduct, toast]);
 
   const subCats = category ? PRODUCT_CATEGORIES[category] || [] : [];
   const specFields = useMemo(() => getSpecFields(category), [category]);
@@ -724,11 +747,6 @@ export default function EditProductPage() {
   const fulfillCities = useMemo(
     () => getCitiesForState(fulfillCountryCode, fulfillStateCode),
     [fulfillCountryCode, fulfillStateCode],
-  );
-
-  const previewImages = useMemo(
-    () => images.map((i) => i.uri).filter(Boolean),
-    [images],
   );
 
   const shipsFrom = useMemo(() => {
@@ -758,28 +776,12 @@ export default function EditProductPage() {
     [formatProduct, sellerRegion],
   );
 
-  const deliveryFeeLabel =
-    deliveryFee === ""
-      ? "—"
-      : feeN === 0
-        ? "Free delivery"
-        : formatPreviewPrice(feeN);
-
-  const previewProps: BuyerPreviewProps = {
-    images: previewImages,
-    name,
-    brand,
-    storeName,
-    category,
-    subCategory,
-    description,
-    priceLabel: formatPreviewPrice(priceN),
-    stockN,
-    shipsFrom,
-    shippingMethod,
-    courierCompany,
-    deliveryFeeLabel,
-  };
+  const deliveryFeeLabel = useMemo(() => {
+    if (feeMode === "free") return "Free";
+    if (feeMode === "on_delivery") return "Pay on arrival";
+    if (feeMode === "fixed" && feeN > 0) return formatPreviewPrice(feeN);
+    return "—";
+  }, [feeMode, feeN, formatPreviewPrice]);
 
   const onImages = (files: FileList | null) => {
     if (!files?.length) return;
@@ -794,7 +796,6 @@ export default function EditProductPage() {
       }
       return next;
     });
-    if (imageInputRef.current) imageInputRef.current.value = "";
   };
 
   const removeImage = (i: number) => {
@@ -808,11 +809,10 @@ export default function EditProductPage() {
   const setAsCover = (i: number) => {
     if (i <= 0) return;
     setImages((prev) => {
-      if (i >= prev.length) return prev;
-      const next = [...prev];
-      const [item] = next.splice(i, 1);
-      next.unshift(item);
-      return next;
+      const copy = [...prev];
+      const [item] = copy.splice(i, 1);
+      copy.unshift(item);
+      return copy;
     });
   };
 
@@ -830,20 +830,22 @@ export default function EditProductPage() {
       }
       return next;
     });
-    if (docInputRef.current) docInputRef.current.value = "";
   };
 
   const validate = () => {
     if (!images.length) return "Add at least one product image";
-    if (!images[0]?.uri) return "Cover image is missing — add a photo";
     if (!name.trim()) return "Product name is required";
     if (!priceN || priceN <= 0) return "Enter a valid price";
     if (!category) return "Select a category";
     if (!fulfillCountryCode || !fulfillCity) return "Set fulfillment location";
-    if (!shippingMethod) return "Choose a shipping method";
-    if (shippingMethod === "courier" && !courierCompany.trim())
-      return "Courier company is required";
-    if (deliveryFee === "" || feeN < 0) return "Enter delivery fee (0 allowed)";
+    if (!feeMode) return "Choose a delivery charge option";
+    if (feeMode !== "free") {
+      if (!shippingMethod) return "Choose self delivery or courier";
+      if (shippingMethod === "courier" && !courierCompany.trim())
+        return "Courier company is required";
+      if (feeMode === "fixed" && (!(feeN > 0) || deliveryFee === ""))
+        return "Enter a delivery fee greater than 0";
+    }
     return null;
   };
 
@@ -862,6 +864,12 @@ export default function EditProductPage() {
       const priceToStore = sameRegion
         ? priceN
         : convertPrice(priceN, sellerRegion, productRegion, ratesToNgn);
+      const feeToStore =
+        feeMode !== "fixed"
+          ? 0
+          : sameRegion
+            ? feeN
+            : convertPrice(feeN, sellerRegion, productRegion, ratesToNgn);
 
       const fd = new FormData();
       fd.append("name", name.trim());
@@ -872,15 +880,16 @@ export default function EditProductPage() {
       fd.append("category", category);
       fd.append("subCategory", subCategory);
       fd.append("region", productRegion);
-      fd.append("currency", getRegion(productRegion).currency.code);
       fd.append("specifications", JSON.stringify(specs));
       fd.append(
         "shipping",
         JSON.stringify({
-          method: shippingMethod,
-          courier: courierCompany.trim(),
-          courierCompany: courierCompany.trim(),
-          deliveryFee: feeN,
+          feeMode,
+          method: feeMode === "free" ? undefined : shippingMethod,
+          courier: feeMode === "free" ? "" : courierCompany.trim(),
+          courierCompany: feeMode === "free" ? "" : courierCompany.trim(),
+          deliveryFee: feeMode === "fixed" ? feeToStore : 0,
+          deliveryNote: feeMode === "on_delivery" ? deliveryNote.trim() : "",
         }),
       );
 
@@ -902,65 +911,21 @@ export default function EditProductPage() {
         ),
       );
 
-      if (shippingMethod) {
-        fd.append("shippingMethod", shippingMethod);
-        fd.append("courierCompany", courierCompany.trim());
-        fd.append("courier", courierCompany.trim());
-        fd.append("deliveryFee", String(feeN));
-      }
-
-      fd.append("fulfillmentCountryCode", fulfillCountryCode);
-      fd.append(
-        "fulfillmentCountry",
-        FULFILLMENT_COUNTRIES.find((c) => c.code === fulfillCountryCode)
-          ?.name || "",
-      );
-      fd.append("fulfillmentStateCode", fulfillStateCode);
-      fd.append(
-        "fulfillmentState",
-        fulfillStates.find((s) => s.code === fulfillStateCode)?.name || "",
-      );
-      fd.append("fulfillmentCity", fulfillCity);
-
-      const keepUrls: string[] = [];
-      const newFiles: File[] = [];
-      const imageOrder: Array<
-        | { kind: "existing"; url: string }
-        | { kind: "new"; index: number }
-      > = [];
-
-      for (const item of images) {
-        if (item.type === "remote" && item.uri) {
-          keepUrls.push(item.uri);
-          imageOrder.push({ kind: "existing", url: item.uri });
-        } else if (item.type === "local" && item.file) {
-          const index = newFiles.length;
-          newFiles.push(item.file);
-          imageOrder.push({ kind: "new", index });
-        }
-      }
-
-      const cover =
-        images[0]?.type === "remote"
-          ? images[0].uri
-          : images[0]?.type === "local"
-            ? "__new_0__"
-            : "";
-
+      const keepUrls = images
+        .filter((x) => x.type === "remote")
+        .map((x) => x.uri);
       fd.append("existingImages", JSON.stringify(keepUrls));
-      fd.append("keepImages", JSON.stringify(keepUrls));
-      fd.append("imagesToKeep", JSON.stringify(keepUrls));
-      fd.append("imageOrder", JSON.stringify(imageOrder));
-      fd.append("coverImage", cover);
-      fd.append("coverIndex", "0");
 
-      newFiles.forEach((file, i) => {
-        fd.append("images", file, file.name || `image-${i}.jpg`);
+      images.forEach((item, idx) => {
+        if (item.type === "local") {
+          fd.append("images", item.file);
+        }
+        if (idx === 0) fd.append("coverIndex", "0");
       });
 
       fd.append("existingDocuments", JSON.stringify(existingDocs));
       newDocuments.forEach((d, i) => {
-        fd.append("documents", d.file, d.file.name);
+        fd.append("documents", d.file);
         fd.append(`documentTypes[${i}]`, d.type);
         fd.append(`documentNames[${i}]`, d.name);
       });
@@ -970,24 +935,14 @@ export default function EditProductPage() {
         headers: { Authorization: `Bearer ${token}` },
         body: fd,
       });
-
       const json = await readJson(res);
 
       if (!res.ok || json?.success === false) {
-        toast(
-          "Error",
-          json?.message || `Could not save product (${res.status})`,
-          "danger",
-        );
-        return;
+        throw new Error(json?.message || "Could not save product");
       }
 
-      const fresh = await fetchProduct(token);
-      if (fresh) {
-        applyProduct(fresh, { allowEmptyImages: true });
-        setNewDocuments([]);
-      } else if (json?.data || json?.product) {
-        applyProduct(json.data || json.product);
+      if (json?.data || json?.product) {
+        applyProduct(json.data || json.product, { allowEmptyImages: true });
         setNewDocuments([]);
       }
 
@@ -999,6 +954,24 @@ export default function EditProductPage() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const previewProps: BuyerPreviewProps = {
+    images: images.map((x) => x.uri),
+    name,
+    brand,
+    storeName,
+    category,
+    subCategory,
+    description,
+    priceLabel: formatPreviewPrice(priceN),
+    stockN,
+    shipsFrom,
+    feeMode,
+    shippingMethod,
+    courierCompany,
+    deliveryFeeLabel,
+    deliveryNote,
   };
 
   if (!isLoaded || pageLoading) {
@@ -1036,7 +1009,6 @@ export default function EditProductPage() {
       <TopOverlay state={overlay} onDismiss={() => setOverlay(null)} />
 
       <div className="mx-auto max-w-6xl px-3 py-4 sm:px-4 sm:py-6 md:px-6 md:py-8">
-        {/* Header */}
         <div className="mb-4 flex items-center gap-2.5 sm:mb-6 sm:gap-3">
           <Link
             href="/seller/products"
@@ -1047,8 +1019,7 @@ export default function EditProductPage() {
           </Link>
           <div className="min-w-0">
             <p className="text-[10px] font-bold uppercase tracking-[2px] text-[#737A86] sm:text-[11px]">
-              Seller Lounge · {sellerRegionConfig.flag}{" "}
-              {sellerRegionConfig.name}
+              Seller Lounge · {sellerRegionConfig.flag} {sellerRegionConfig.name}
             </p>
             <h1 className="truncate text-xl font-extrabold tracking-tight sm:text-2xl md:text-[26px]">
               Edit product
@@ -1056,16 +1027,8 @@ export default function EditProductPage() {
           </div>
         </div>
 
-        {/* Layout: form + sticky preview */}
         <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(280px,320px)] lg:items-start lg:gap-8">
-          {/* Form column */}
           <div className="min-w-0">
-            {/* Mobile / tablet preview (above form) */}
-            <div className="mb-4 lg:hidden">
-              <BuyerLivePreview {...previewProps} />
-            </div>
-
-            {/* 01 Images */}
             <Section
               step="01"
               title="Images"
@@ -1125,13 +1088,8 @@ export default function EditProductPage() {
                 className="hidden"
                 onChange={(e) => onImages(e.target.files)}
               />
-              <p className="mt-2 text-[12px] leading-relaxed text-[#737A86]">
-                The first image is the cover on the product list and showroom.
-                Use “Make cover” to move another photo to the front.
-              </p>
             </Section>
 
-            {/* 02 Basics */}
             <Section step="02" title="Basics">
               <Label>Product name *</Label>
               <input
@@ -1161,15 +1119,8 @@ export default function EditProductPage() {
                   />
                   {!sameRegion && (
                     <p className="mb-3 -mt-2 text-[11px] leading-snug text-amber-400/90">
-                      Converted from original{" "}
-                      {productRegionConfig.currency.code} listing. On save it
-                      will be stored back in{" "}
-                      {productRegionConfig.currency.code}.
-                    </p>
-                  )}
-                  {sameRegion && (
-                    <p className="mb-3 -mt-2 text-[11px] text-[#737A86]">
-                      Same marketplace region — original numbers shown
+                      Converted from original {productRegionConfig.currency.code}
+                      . On save stored in {productRegionConfig.currency.code}.
                     </p>
                   )}
                 </div>
@@ -1194,7 +1145,6 @@ export default function EditProductPage() {
               />
             </Section>
 
-            {/* 03 Category */}
             <Section step="03" title="Category & specs">
               <Label>Category *</Label>
               <div className="mb-3 flex flex-wrap">
@@ -1252,7 +1202,6 @@ export default function EditProductPage() {
                 ))}
             </Section>
 
-            {/* Docs */}
             {needsDocs && (
               <Section
                 step="04"
@@ -1280,7 +1229,6 @@ export default function EditProductPage() {
                             prev.filter((_, i) => i !== index),
                           )
                         }
-                        aria-label="Remove document"
                       >
                         <Trash2 className="h-4 w-4 text-[#FF8A9A]" />
                       </button>
@@ -1303,7 +1251,6 @@ export default function EditProductPage() {
                             p.filter((_, i) => i !== index),
                           )
                         }
-                        aria-label="Remove new document"
                       >
                         <Trash2 className="h-4 w-4 text-[#FF8A9A]" />
                       </button>
@@ -1348,7 +1295,6 @@ export default function EditProductPage() {
               </Section>
             )}
 
-            {/* Fulfillment */}
             <Section
               step={needsDocs ? "05" : "04"}
               title="Fulfillment location"
@@ -1411,73 +1357,153 @@ export default function EditProductPage() {
                 )}
             </Section>
 
-            {/* Shipping */}
             <Section
               step={needsDocs ? "06" : "05"}
-              title="Shipping method"
+              title="Delivery"
+              subtitle="How buyers are charged for delivery"
             >
-              <div className="mb-3.5 grid grid-cols-2 gap-2.5">
-                {(["self", "courier"] as const).map((m) => {
-                  const active = shippingMethod === m;
+              <Label>Delivery charge *</Label>
+              <div className="mb-3.5 grid grid-cols-1 gap-2 sm:grid-cols-3">
+                {(
+                  [
+                    { id: "free" as const, label: "Free delivery" },
+                    { id: "fixed" as const, label: "Fixed fee" },
+                    { id: "on_delivery" as const, label: "Pay on delivery" },
+                  ] as const
+                ).map((opt) => {
+                  const active = feeMode === opt.id;
                   return (
                     <button
-                      key={m}
+                      key={opt.id}
                       type="button"
-                      onClick={() => setShippingMethod(m)}
-                      className={`flex flex-col items-center rounded-[14px] border py-3.5 sm:py-4 ${
+                      onClick={() => {
+                        setFeeMode(opt.id);
+                        if (opt.id === "free") {
+                          setShippingMethod(null);
+                          setCourierCompany("");
+                          setDeliveryFee("");
+                          setDeliveryNote("");
+                        } else {
+                          setDeliveryFee("");
+                          if (opt.id !== "on_delivery") setDeliveryNote("");
+                        }
+                      }}
+                      className={`rounded-[14px] border px-3 py-3.5 text-left ${
                         active
                           ? "border-green/40 bg-green/8"
                           : "border-line bg-[#0A121C]"
                       }`}
                     >
-                      {m === "self" ? (
-                        <Footprints
-                          className={`h-5 w-5 ${active ? "text-green" : "text-[#737A86]"}`}
-                        />
-                      ) : (
-                        <Truck
-                          className={`h-5 w-5 ${active ? "text-green" : "text-[#737A86]"}`}
-                        />
-                      )}
                       <span
-                        className={`mt-2 text-[12px] font-semibold sm:text-[13px] ${
+                        className={`text-[13px] font-semibold ${
                           active ? "text-text" : "text-[#737A86]"
                         }`}
                       >
-                        {m === "self" ? "Self delivery" : "Courier"}
+                        {opt.label}
                       </span>
                     </button>
                   );
                 })}
               </div>
-              {shippingMethod === "courier" && (
+
+              {feeMode && feeMode !== "free" && (
                 <>
-                  <Label>Courier company *</Label>
-                  <input
-                    className={inputCls}
-                    value={courierCompany}
-                    onChange={(e) => setCourierCompany(e.target.value)}
-                    placeholder="e.g. DHL, GIG, FedEx"
-                  />
+                  <Label>Way of delivering *</Label>
+                  <div className="mb-3.5 grid grid-cols-2 gap-2.5">
+                    {(["self", "courier"] as const).map((m) => {
+                      const active = shippingMethod === m;
+                      return (
+                        <button
+                          key={m}
+                          type="button"
+                          onClick={() => setShippingMethod(m)}
+                          className={`flex flex-col items-center rounded-[14px] border py-3.5 sm:py-4 ${
+                            active
+                              ? "border-green/40 bg-green/8"
+                              : "border-line bg-[#0A121C]"
+                          }`}
+                        >
+                          {m === "self" ? (
+                            <Footprints
+                              className={`h-5 w-5 ${
+                                active ? "text-green" : "text-[#737A86]"
+                              }`}
+                            />
+                          ) : (
+                            <Truck
+                              className={`h-5 w-5 ${
+                                active ? "text-green" : "text-[#737A86]"
+                              }`}
+                            />
+                          )}
+                          <span
+                            className={`mt-2 text-[12px] font-semibold sm:text-[13px] ${
+                              active ? "text-text" : "text-[#737A86]"
+                            }`}
+                          >
+                            {m === "self" ? "Self delivery" : "Courier"}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {shippingMethod === "courier" && (
+                    <>
+                      <Label>Courier company *</Label>
+                      <input
+                        className={inputCls}
+                        value={courierCompany}
+                        onChange={(e) => setCourierCompany(e.target.value)}
+                        placeholder="e.g. DHL, GIG, FedEx"
+                      />
+                    </>
+                  )}
+
+                  {feeMode === "fixed" && (
+                    <>
+                      <Label>
+                        Delivery fee * ({sellerRegionConfig.currency.symbol})
+                      </Label>
+                      <input
+                        className={inputCls}
+                        value={deliveryFee}
+                        onChange={(e) =>
+                          setDeliveryFee(
+                            e.target.value.replace(/[^0-9.]/g, ""),
+                          )
+                        }
+                        placeholder="0.00"
+                        inputMode="decimal"
+                      />
+                    </>
+                  )}
+
+                  {feeMode === "on_delivery" && (
+                    <>
+                      <Label>Note (optional)</Label>
+                      <input
+                        className={inputCls}
+                        value={deliveryNote}
+                        onChange={(e) => setDeliveryNote(e.target.value)}
+                        placeholder="e.g. Cash or POS on arrival"
+                      />
+                      <p className="mb-3 -mt-2 text-[11px] text-[#737A86]">
+                        Buyer pays delivery when the order arrives — not in
+                        checkout total.
+                      </p>
+                    </>
+                  )}
                 </>
               )}
-              {!!shippingMethod && (
-                <>
-                  <Label>Delivery fee *</Label>
-                  <input
-                    className={inputCls}
-                    value={deliveryFee}
-                    onChange={(e) =>
-                      setDeliveryFee(e.target.value.replace(/[^0-9.]/g, ""))
-                    }
-                    placeholder="0.00"
-                    inputMode="decimal"
-                  />
-                </>
+
+              {feeMode === "free" && (
+                <p className="text-[12px] text-[#737A86]">
+                  No delivery charge. Checkout will show Free delivery.
+                </p>
               )}
             </Section>
 
-            {/* Save */}
             <Section step={needsDocs ? "07" : "06"} title="Save changes">
               <div className="mb-1.5 flex justify-between text-[13px]">
                 <span className="text-[#737A86]">Plan</span>
@@ -1498,7 +1524,10 @@ export default function EditProductPage() {
               </p>
             </Section>
 
-            {/* Sticky-ish save on mobile: full width, safe bottom space */}
+            <div className="mb-4 lg:hidden">
+              <BuyerLivePreview {...previewProps} />
+            </div>
+
             <div className="pb-[max(1.5rem,env(safe-area-inset-bottom))]">
               <button
                 type="button"
@@ -1518,7 +1547,6 @@ export default function EditProductPage() {
             </div>
           </div>
 
-          {/* Desktop sticky preview */}
           <div className="hidden lg:sticky lg:top-6 lg:block lg:self-start">
             <BuyerLivePreview {...previewProps} />
           </div>

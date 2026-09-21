@@ -38,7 +38,7 @@ export const HERO_SLIDES: HeroSlide[] = [
     campaignKey: 'entrance_welcome',
     media: {
       kind: 'image',
-      source: require('../assets/hero/welcome.jpg'),
+      source: require('../assets/hero/welcome.png'),
     },
     headline: 'Plazore',
     subheadline:
