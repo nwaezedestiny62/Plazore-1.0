@@ -17,7 +17,7 @@ import {
   XCircle,
 } from "lucide-react";
 
-const API = process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com";
+const API = process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com/api";
 const CLEARED_KEY = "plazore_cleared_notification_ids";
 
 type NotifType =

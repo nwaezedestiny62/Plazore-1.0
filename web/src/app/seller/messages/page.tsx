@@ -5,7 +5,7 @@ import { MessageCircle, User } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-const API = process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com";
+const API = process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com/api";
 const INACTIVITY_MS = 2 * 24 * 60 * 60 * 1000; // 2 days
 
 type Conversation = {

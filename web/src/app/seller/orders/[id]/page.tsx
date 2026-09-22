@@ -16,7 +16,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { useMarketplace } from "@/context/MarketplaceContext";
 
-const API = process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com";
+const API = process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com/api";
 const GRAD = "linear-gradient(90deg,#00E575,#3B82F6)";
 
 const CANCEL_OPTIONS = [

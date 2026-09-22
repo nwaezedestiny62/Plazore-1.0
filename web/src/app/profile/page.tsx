@@ -19,7 +19,7 @@ import {
   User,
 } from "lucide-react";
 
-const BASE = process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com";
+const BASE = process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com/api";
 const GRAD = "linear-gradient(90deg,#00E575,#14B8A6,#3B82F6)";
 
 const MENU = [

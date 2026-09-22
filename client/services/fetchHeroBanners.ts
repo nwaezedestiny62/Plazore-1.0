@@ -1,7 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { HERO_SLIDES, type HeroSlide } from "@/constants/heroCampaigns";
 
-const BASE = process.env.EXPO_PUBLIC_API_URL || "https://plazore-api.onrender.com";
+const BASE = process.env.EXPO_PUBLIC_API_URL || "https://plazore-api.onrender.com/api";
 
 type ApiHeroBanner = {
   position: number;

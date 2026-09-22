@@ -13,7 +13,7 @@ import {
   X,
 } from "lucide-react";
 
-const BASE = process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com";
+const BASE = process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com/api";
 const steps = ["Preparing", "Shipped", "Delivered"];
 
 export default function OrderDetailPage() {

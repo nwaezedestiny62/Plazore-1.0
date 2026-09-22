@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronLeft, MessageCircle, User } from "lucide-react";
 
-const API = process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com";
+const API = process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com/api";
 const INACTIVITY_MS = 2 * 24 * 60 * 60 * 1000;
 
 type Conversation = {

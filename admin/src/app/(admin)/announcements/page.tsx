@@ -890,7 +890,7 @@ function AnnouncementsInner() {
       form.append("file", file);
       form.append("kind", kind);
       const base =
-        process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com";
+        process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com/api";
       const res = await fetch(`${base}/admin/announcements/upload`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
@@ -925,7 +925,7 @@ function AnnouncementsInner() {
       form.append("file", file);
       form.append("kind", "image");
       const base =
-        process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com";
+        process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com/api";
       const res = await fetch(`${base}/admin/announcements/upload`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },

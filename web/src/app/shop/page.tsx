@@ -18,7 +18,7 @@ import {
 import { CATEGORY_LIST, PRODUCT_CATEGORIES } from "@/lib/productCatalog";
 import type { Product } from "@/lib/types";
 
-const API = process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com";
+const API = process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com/api";
 const BG = "#090B0F";
 const SURFACE = "#11141A";
 const SURFACE_2 = "#171B22";

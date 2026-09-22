@@ -26,7 +26,7 @@ import {
 import { ProductCard } from "./ProductCard";
 import { ShowroomFlyCartProvider, useShowroomFlyCart } from "./ShowroomFlyCart";
 
-const API = process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com";
+const API = process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com/api";
 const PENDING_KEY = "plazore_pending_action";
 
 /** Must match server/services/showroomRanker.ts */

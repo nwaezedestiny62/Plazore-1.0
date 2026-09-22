@@ -30,7 +30,7 @@ import {
   formatProductPrice,
 } from "@/lib/regions";
 
-const BASE = process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com";
+const BASE = process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com/api";
 const GRAD = "linear-gradient(90deg,#00E575,#14B8A6,#2563EB)";
 
 type Address = {

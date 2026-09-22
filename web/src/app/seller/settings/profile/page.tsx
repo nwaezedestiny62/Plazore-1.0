@@ -16,7 +16,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useMarketplace } from "@/context/MarketplaceContext";
 import { getRegion, REGION_LIST } from "@/lib/regions";
 
-const API = process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com";
+const API = process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com/api";
 const GRAD = "linear-gradient(90deg,#00E575,#14B8A6,#3B82F6)";
 
 async function readJson(res: Response) {

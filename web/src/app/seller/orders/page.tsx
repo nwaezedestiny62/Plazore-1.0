@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Check, Receipt, SlidersHorizontal, X } from "lucide-react";
 import { useMarketplace } from "@/context/MarketplaceContext";
 
-const API = process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com";
+const API = process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com/api";
 
 const STATUS_META: Record<string, { color: string; bg: string; label: string }> = {
   Preparing: { color: "#F0C070", bg: "rgba(240,192,112,0.12)", label: "Preparing" },

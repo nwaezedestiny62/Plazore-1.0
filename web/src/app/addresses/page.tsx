@@ -14,7 +14,7 @@ import {
   X,
 } from "lucide-react";
 
-const API = process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com";
+const API = process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com/api";
 const GRAD = "linear-gradient(90deg,#00E575,#14B8A6,#3B82F6)";
 
 const ADDRESS_TYPES = [

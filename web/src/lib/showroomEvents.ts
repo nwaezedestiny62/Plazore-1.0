@@ -1,5 +1,5 @@
 const SESSION_KEY = "plazore_showroom_session";
-const BASE = process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com";
+const BASE = process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com/api";
 
 export function getShowroomSessionId(): string {
   if (typeof window === "undefined") return "";

@@ -9,7 +9,7 @@ import {
   saveShowroomSessionId,
 } from "@/lib/showroomEvents";
 
-const API = process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com";
+const API = process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com/api";
 
 export type ApiHeroBanner = {
   position: number;

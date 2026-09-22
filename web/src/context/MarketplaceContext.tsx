@@ -22,7 +22,7 @@ import {
 
 const STORAGE_KEY = "plazore_marketplace_region";
 const RATES_CACHE_KEY = "plazore_currency_rates_v1";
-const API = process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com";
+const API = process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com/api";
 
 function isValidRegion(code?: string | null): code is string {
   if (!code) return false;

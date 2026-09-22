@@ -1,4 +1,4 @@
-const BASE = process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com";
+const BASE = process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com/api";
 
 export async function apiGet<T>(path: string, token?: string): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
