@@ -867,20 +867,41 @@ export default function ProductDetails() {
   }
 
   const images: string[] = product.images?.length > 0 ? product.images : [];
+  // ── Shipping (multi-region aware) ──
   const ship = product.shipping || {};
+  const feeMode = String(ship.feeMode || "fixed").toLowerCase(); // free | fixed | on_delivery
   const deliveryFee = Number(ship.deliveryFee) || 0;
   const isSelf = ship.method === "self";
+  const isFree = feeMode === "free";
+  const isOnDelivery = feeMode === "on_delivery";
+
   const courierName =
+    ship.courierCompany ||
     ship.courier ||
     ship.courierName ||
-    ship.courierCompany ||
     ship.company ||
     null;
+
   const deliveryMethodLabel = isSelf
     ? "Direct Merchant Delivery"
     : courierName
       ? courierName
       : "Courier Delivery";
+
+  // Same pattern used for product.price on this page
+  const feeLabel = isFree
+    ? "Delivery"
+    : isOnDelivery
+      ? "Delivery fee"
+      : "Delivery fee";
+
+  const feeValue = isFree
+    ? "Free"
+    : isOnDelivery
+      ? "Pay on delivery"
+      : formatProduct(deliveryFee, product.region); // ← product.region is the source of truth
+
+  const deliveryNote = String(ship.deliveryNote || "").trim();
 
   const categoryLabel =
     typeof product.category === "string"
@@ -1280,8 +1301,11 @@ export default function ProductDetails() {
               </View>
             )}
 
+                       {/* ── Shipping Details ── */}
             <Text style={styles.sectionEyebrow}>Shipping Details</Text>
+
             <View style={[styles.card, { marginBottom: 10 }]}>
+              {/* Method */}
               <View style={styles.shipHeader}>
                 <View style={styles.shipIcon}>
                   <Ionicons
@@ -1291,24 +1315,50 @@ export default function ProductDetails() {
                   />
                 </View>
                 <View style={{ flex: 1, minWidth: 0 }}>
-                  <Text style={styles.shipLabel}>Delivery</Text>
+                  <Text style={styles.shipLabel}>Delivery method</Text>
                   <Text style={styles.shipMethod} numberOfLines={2}>
                     {deliveryMethodLabel}
                   </Text>
                 </View>
               </View>
+
+              {/* Fee */}
               <View style={styles.shipFeeRow}>
-                <Text style={styles.shipFeeLabel}>Delivery fee</Text>
-                <Text style={styles.shipFeeValue} numberOfLines={1}>
-                  {formatProduct(deliveryFee, productRegion)}
+                <Text style={styles.shipFeeLabel}>{feeLabel}</Text>
+                <Text
+                  style={[
+                    styles.shipFeeValue,
+                    (isFree || isOnDelivery) && { color: AI_GREEN },
+                  ]}
+                  numberOfLines={1}
+                >
+                  {feeValue}
                 </Text>
               </View>
+
+              {/* Optional note from seller */}
+              {!!deliveryNote && (
+                <View style={styles.shipNoteRow}>
+                  <Ionicons
+                    name="information-circle-outline"
+                    size={14}
+                    color={MUTED}
+                    style={{ marginTop: 1 }}
+                  />
+                  <Text style={styles.shipNoteText}>{deliveryNote}</Text>
+                </View>
+              )}
             </View>
 
+            {/* Ships from */}
             {!!shipsFrom && (
               <View style={[styles.card, styles.shipsFromCard]}>
                 <View style={styles.shipIcon}>
-                  <Ionicons name="location-outline" size={16} color={SECONDARY} />
+                  <Ionicons
+                    name="location-outline"
+                    size={16}
+                    color={SECONDARY}
+                  />
                 </View>
                 <View style={{ flex: 1, minWidth: 0 }}>
                   <Text style={styles.shipLabel}>Ships from</Text>
@@ -2361,6 +2411,21 @@ const styles = StyleSheet.create({
     borderRadius: 2,
     backgroundColor: "rgba(255,255,255,0.14)",
     marginBottom: 12,
+  },
+    shipNoteRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 8,
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: LINE,
+  },
+  shipNoteText: {
+    color: MUTED,
+    fontSize: 13,
+    lineHeight: 18,
+    flex: 1,
   },
   sheetHead: {
     flexDirection: "row",

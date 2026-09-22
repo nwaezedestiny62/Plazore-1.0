@@ -5,7 +5,12 @@ import { Check, ChevronLeft } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useMarketplace } from "@/context/MarketplaceContext";
-import { REGION_LIST, getRegion } from "@/lib/regions";
+import {
+  DEFAULT_REGION,
+  REGION_LIST,
+  getRegion,
+  resolveRegionCode,
+} from "@/lib/regions";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000/api";
 
@@ -13,7 +18,7 @@ async function readJson(res: Response) {
   const ct = res.headers.get("content-type") || "";
   if (!ct.includes("application/json")) {
     const t = await res.text();
-    throw new Error(`Bad response ${res.status}`);
+    throw new Error(`Bad response ${res.status}: ${t.slice(0, 120)}`);
   }
   return res.json();
 }
@@ -23,9 +28,14 @@ export default function SellerMarketplaceRegionPage() {
   const getTokenRef = useRef(getToken);
   getTokenRef.current = getToken;
 
-  const { setRegion: setRegionCtx, refreshRegion } = useMarketplace() as any;
+  const {
+    region: ctxRegion,
+    setRegion: setRegionCtx,
+    setRegionLocal,
+    refreshRegion,
+  } = useMarketplace() as any;
 
-  const [region, setRegion] = useState("NG");
+  const [region, setRegion] = useState(DEFAULT_REGION);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState<string | null>(null);
@@ -35,38 +45,53 @@ export default function SellerMarketplaceRegionPage() {
     setTimeout(() => setToast(null), 3200);
   };
 
+  // Load server value once
   useEffect(() => {
-    if (!isLoaded || !isSignedIn) {
-      if (isLoaded) setLoading(false);
+    if (!isLoaded) return;
+    if (!isSignedIn) {
+      setRegion(resolveRegionCode(ctxRegion) || DEFAULT_REGION);
+      setLoading(false);
       return;
     }
+
     (async () => {
       try {
         const token = await getTokenRef.current();
-        if (!token) return;
+        if (!token) {
+          setRegion(resolveRegionCode(ctxRegion) || DEFAULT_REGION);
+          return;
+        }
         const res = await fetch(`${API}/users/me`, {
           headers: { Authorization: `Bearer ${token}` },
         });
         const json = await readJson(res);
         if (json?.success) {
-          setRegion(json.data?.marketplaceRegion || "NG");
+          const saved = resolveRegionCode(
+            json.data?.marketplaceRegion || DEFAULT_REGION
+          );
+          setRegion(saved);
+        } else {
+          setRegion(resolveRegionCode(ctxRegion) || DEFAULT_REGION);
         }
       } catch {
-        /* keep default */
+        setRegion(resolveRegionCode(ctxRegion) || DEFAULT_REGION);
       } finally {
         setLoading(false);
       }
     })();
-  }, [isLoaded, isSignedIn]);
+  }, [isLoaded, isSignedIn]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSelect = useCallback(
-    async (code: string) => {
+    async (rawCode: string) => {
+      const code = resolveRegionCode(rawCode);
       if (code === region || saving) return;
+
+      // Optimistic UI + local context (sticky so refreshRegion doesn't overwrite)
       setRegion(code);
       try {
-        setRegionCtx?.(code);
+        setRegionLocal?.(code);
       } catch {
-        /* optional local sync */
+        /* optional */
       }
 
       try {
@@ -76,6 +101,7 @@ export default function SellerMarketplaceRegionPage() {
           showToast("Sign in required");
           return;
         }
+
         const res = await fetch(`${API}/users/me`, {
           method: "PATCH",
           headers: {
@@ -85,27 +111,37 @@ export default function SellerMarketplaceRegionPage() {
           body: JSON.stringify({ marketplaceRegion: code }),
         });
         const json = await readJson(res);
+
         if (json?.success) {
-          const saved = json.data?.marketplaceRegion || code;
+          const saved = resolveRegionCode(
+            json.data?.marketplaceRegion || code
+          );
           setRegion(saved);
           try {
-            setRegionCtx?.(saved);
+            await setRegionCtx?.(saved);
             await refreshRegion?.();
           } catch {
-            /* ignore */
+            /* local already set */
           }
           const meta = getRegion(saved);
           showToast(`Store marketplace → ${meta?.name || saved}`);
         } else {
-          showToast(json?.message || "Could not save");
+          // Revert UI to last known good
+          showToast(json?.message || "Could not save region");
+          const fallback = resolveRegionCode(ctxRegion) || DEFAULT_REGION;
+          setRegion(fallback);
+          setRegionLocal?.(fallback);
         }
       } catch {
         showToast("Could not save store region");
+        const fallback = resolveRegionCode(ctxRegion) || DEFAULT_REGION;
+        setRegion(fallback);
+        setRegionLocal?.(fallback);
       } finally {
         setSaving(false);
       }
     },
-    [region, saving, setRegionCtx, refreshRegion]
+    [region, saving, setRegionCtx, setRegionLocal, refreshRegion, ctxRegion]
   );
 
   if (!isLoaded || loading) {
@@ -134,7 +170,9 @@ export default function SellerMarketplaceRegionPage() {
         </Link>
         <div className="min-w-0 flex-1 text-center sm:text-left">
           <h1 className="text-[17px] font-extrabold">Marketplace region</h1>
-          <p className="text-[11px] text-[#737A86]">Seller store currency & catalog</p>
+          <p className="text-[11px] text-[#737A86]">
+            Seller store currency & catalog
+          </p>
         </div>
         <div className="w-10" />
       </header>
@@ -146,7 +184,7 @@ export default function SellerMarketplaceRegionPage() {
         </p>
 
         <div className="overflow-hidden rounded-[22px] border border-white/[0.07] bg-[#11141A]">
-          {REGION_LIST.map((r: any, index: number) => {
+          {REGION_LIST.map((r, index) => {
             const selected = region === r.code;
             return (
               <button
@@ -155,17 +193,23 @@ export default function SellerMarketplaceRegionPage() {
                 disabled={saving}
                 onClick={() => handleSelect(r.code)}
                 className={`flex w-full items-center px-4 py-3.5 text-left disabled:opacity-60 ${
-                  index < REGION_LIST.length - 1 ? "border-b border-white/[0.07]" : ""
+                  index < REGION_LIST.length - 1
+                    ? "border-b border-white/[0.07]"
+                    : ""
                 } ${selected ? "bg-[#00E575]/[0.08]" : ""}`}
               >
                 <span className="mr-3 text-xl">{r.flag}</span>
                 <span className="min-w-0 flex-1">
-                  <span className="block text-[15px] font-medium">{r.name}</span>
+                  <span className="block text-[15px] font-medium">
+                    {r.name}
+                  </span>
                   <span className="mt-0.5 block text-xs text-[#737A86]">
                     {r.currency?.symbol} · {r.currency?.code}
                   </span>
                 </span>
-                {selected && <Check className="h-[22px] w-[22px] text-[#00E575]" />}
+                {selected && (
+                  <Check className="h-[22px] w-[22px] text-[#00E575]" />
+                )}
               </button>
             );
           })}

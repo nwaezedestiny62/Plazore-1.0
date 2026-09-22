@@ -284,8 +284,15 @@ function dedupeUrls(urls: string[]): string[] {
   return out;
 }
 
+/** Normalize feeMode safely */
+function normalizeFeeMode(value: any, fallback: string = "fixed"): "free" | "fixed" | "on_delivery" {
+  const raw = String(value ?? fallback).toLowerCase().trim();
+  if (raw === "free" || raw === "on_delivery") return raw;
+  return "fixed";
+}
+
 // ======================================================
-// PUBLIC - Get products
+// PUBLIC - Get products (search + filters + sort + region)
 // ======================================================
 export const getProducts = async (req: Request, res: Response) => {
   try {
@@ -293,31 +300,107 @@ export const getProducts = async (req: Request, res: Response) => {
     const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 12));
     const buyerRegion = String(req.query.region || "NG").trim() || "NG";
     const sortParam = String(req.query.sort || "").toLowerCase().trim();
+    const q = String(req.query.q || req.query.search || "").trim();
 
-    const baseQuery: any = { isActive: true };
+    const minPrice = Number(req.query.minPrice);
+    const maxPrice = Number(req.query.maxPrice);
+    const inStockRaw = String(
+      req.query.inStock ?? req.query.inStockOnly ?? ""
+    ).toLowerCase();
+    const inStockOnly = inStockRaw === "1" || inStockRaw === "true";
 
-    if (req.query.seller) baseQuery.seller = req.query.seller;
-    if (req.query.category)
-      baseQuery.category = String(req.query.category).trim();
-    if (req.query.subCategory)
-      baseQuery.subCategory = String(req.query.subCategory).trim();
+    // ── Shared filters (no region yet) ───────────────────
+    const filters: any[] = [{ isActive: true }];
 
+    if (req.query.seller) {
+      filters.push({ seller: req.query.seller });
+    }
+    if (req.query.category) {
+      filters.push({ category: String(req.query.category).trim() });
+    }
+    if (req.query.subCategory) {
+      filters.push({ subCategory: String(req.query.subCategory).trim() });
+    }
+
+    // Text search
+    if (q) {
+      const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const rx = new RegExp(escaped, "i");
+      filters.push({
+        $or: [
+          { name: rx },
+          { brand: rx },
+          { category: rx },
+          { subCategory: rx },
+          { description: rx },
+        ],
+      });
+    }
+
+    // Price range (raw product price — same currency units as stored)
+    if (Number.isFinite(minPrice) && minPrice > 0) {
+      filters.push({ price: { $gte: minPrice } });
+    }
+    if (Number.isFinite(maxPrice) && maxPrice > 0) {
+      filters.push({ price: { $lte: maxPrice } });
+    }
+
+    // In stock
+    if (inStockOnly) {
+      filters.push({ stock: { $gt: 0 } });
+    }
+
+    const baseQuery =
+      filters.length === 1 ? filters[0] : { $and: filters };
+
+    // Local region first, then others
     const localQuery = {
-      ...baseQuery,
-      $or: [
-        { region: buyerRegion },
-        { region: { $exists: false } },
-        { region: null },
+      $and: [
+        ...filters,
+        {
+          $or: [
+            { region: buyerRegion },
+            { region: { $exists: false } },
+            { region: null },
+          ],
+        },
       ],
     };
 
     const otherQuery = {
-      ...baseQuery,
-      region: { $nin: [buyerRegion, null] },
+      $and: [
+        ...filters,
+        { region: { $nin: [buyerRegion, null] } },
+      ],
     };
 
+    // Sort
     let mongoSort: any = { isFeatured: -1, createdAt: -1 };
-    if (sortParam === "newest") mongoSort = { createdAt: -1 };
+    switch (sortParam) {
+      case "newest":
+        mongoSort = { createdAt: -1 };
+        break;
+      case "oldest":
+        mongoSort = { createdAt: 1 };
+        break;
+      case "price_asc":
+      case "price_low":
+        mongoSort = { price: 1 };
+        break;
+      case "price_desc":
+      case "price_high":
+        mongoSort = { price: -1 };
+        break;
+      case "name":
+      case "name_az":
+        mongoSort = { name: 1 };
+        break;
+      case "name_za":
+        mongoSort = { name: -1 };
+        break;
+      default:
+        mongoSort = { isFeatured: -1, createdAt: -1 };
+    }
 
     const [localProducts, total, localCount] = await Promise.all([
       Product.find(localQuery)
@@ -330,7 +413,7 @@ export const getProducts = async (req: Request, res: Response) => {
       Product.countDocuments(localQuery),
     ]);
 
-    let products = localProducts;
+    let products = localProducts as any[];
     const usedLocal = localProducts.length;
 
     if (usedLocal < limit) {
@@ -343,19 +426,15 @@ export const getProducts = async (req: Request, res: Response) => {
       products = [...products, ...otherProducts];
     }
 
-    const wantsRank =
-      sortParam === "trending" ||
-      sortParam === "relevant" ||
-      Boolean(req.query.q || req.query.search);
-
-    if (wantsRank && products.length > 0) {
+    // Rank only for trending (search is already filtered in Mongo)
+    if (sortParam === "trending" && products.length > 0) {
       const user = getUser(req);
       products = await rankProductsForSearch({
         products,
         region: buyerRegion,
         userId: user?._id ? String(user._id) : null,
         sessionId: String(req.query.sessionId || "list"),
-        searchQuery: String(req.query.q || req.query.search || ""),
+        searchQuery: q,
       });
     }
 
@@ -373,6 +452,7 @@ export const getProducts = async (req: Request, res: Response) => {
         localCount,
         showingLocal: usedLocal,
         sort: sortParam || "default",
+        q: q || undefined,
       },
     });
   } catch (error: any) {
@@ -495,10 +575,12 @@ export const createProduct = async (req: Request, res: Response) => {
       });
     }
 
-    // Shipping: JSON blob or flat
+    // ── Shipping: JSON blob or flat fields ──
     let shippingMethod = req.body.shippingMethod;
     let courierCompany = req.body.courierCompany || req.body.courier;
     let deliveryFee = req.body.deliveryFee;
+    let feeMode = req.body.feeMode;
+    let deliveryNote = req.body.deliveryNote;
 
     if (req.body.shipping !== undefined) {
       const ship = parseJsonField<any>(req.body.shipping, null);
@@ -508,6 +590,8 @@ export const createProduct = async (req: Request, res: Response) => {
           ship.courierCompany || ship.courier || courierCompany;
         deliveryFee =
           ship.deliveryFee !== undefined ? ship.deliveryFee : deliveryFee;
+        feeMode = ship.feeMode ?? feeMode;
+        deliveryNote = ship.deliveryNote ?? deliveryNote;
       }
     }
 
@@ -550,6 +634,7 @@ export const createProduct = async (req: Request, res: Response) => {
     const method = shippingMethod === "self" ? "self" : "courier";
     const fee = Number(deliveryFee);
     const safeFee = Number.isFinite(fee) && fee >= 0 ? fee : 0;
+    const normalizedFeeMode = normalizeFeeMode(feeMode, "fixed");
 
     if (method === "courier" && !(courierCompany || "").trim()) {
       return res.status(400).json({
@@ -591,10 +676,12 @@ export const createProduct = async (req: Request, res: Response) => {
       isFeatured: false,
       isActive: true,
       shipping: {
+        feeMode: normalizedFeeMode,
         method,
         courierCompany:
           method === "courier" ? String(courierCompany || "").trim() : "",
         deliveryFee: safeFee,
+        deliveryNote: String(deliveryNote || "").trim(),
       },
       fulfillmentLocation,
       specifications,
@@ -747,7 +834,7 @@ export const updateProduct = async (req: Request, res: Response) => {
         raw === true || raw === "true" || raw === 1 || raw === "1";
     }
 
-    // ── Shipping: JSON blob OR flat fields ──
+    // ── Shipping: JSON blob OR flat fields (FIXED for feeMode) ──
     {
       let shipBody: any = null;
       if (req.body.shipping !== undefined) {
@@ -756,9 +843,11 @@ export const updateProduct = async (req: Request, res: Response) => {
 
       const hasFlatShip =
         req.body.shippingMethod !== undefined ||
+        req.body.feeMode !== undefined ||
         req.body.courierCompany !== undefined ||
         req.body.courier !== undefined ||
-        req.body.deliveryFee !== undefined;
+        req.body.deliveryFee !== undefined ||
+        req.body.deliveryNote !== undefined;
 
       if (shipBody && typeof shipBody === "object") {
         const method =
@@ -767,10 +856,18 @@ export const updateProduct = async (req: Request, res: Response) => {
             : shipBody.method === "courier"
               ? "courier"
               : product.shipping?.method || "courier";
+
+        const feeMode = normalizeFeeMode(
+          shipBody.feeMode ?? product.shipping?.feeMode,
+          "fixed"
+        );
+
         const fee = Number(
           shipBody.deliveryFee ?? product.shipping?.deliveryFee ?? 0
         );
+
         updates.shipping = {
+          feeMode,
           method,
           courierCompany:
             method === "courier"
@@ -782,6 +879,9 @@ export const updateProduct = async (req: Request, res: Response) => {
                 ).trim()
               : "",
           deliveryFee: Number.isFinite(fee) && fee >= 0 ? fee : 0,
+          deliveryNote: String(
+            shipBody.deliveryNote ?? product.shipping?.deliveryNote ?? ""
+          ).trim(),
         };
       } else if (hasFlatShip) {
         const method =
@@ -790,11 +890,19 @@ export const updateProduct = async (req: Request, res: Response) => {
             : req.body.shippingMethod === "courier"
               ? "courier"
               : product.shipping?.method || "courier";
+
+        const feeMode = normalizeFeeMode(
+          req.body.feeMode ?? product.shipping?.feeMode,
+          "fixed"
+        );
+
         const fee =
           req.body.deliveryFee !== undefined
             ? Number(req.body.deliveryFee)
             : product.shipping?.deliveryFee || 0;
+
         updates.shipping = {
+          feeMode,
           method,
           courierCompany:
             method === "courier"
@@ -806,6 +914,9 @@ export const updateProduct = async (req: Request, res: Response) => {
                 ).trim()
               : "",
           deliveryFee: Number.isFinite(fee) && fee >= 0 ? fee : 0,
+          deliveryNote: String(
+            req.body.deliveryNote ?? product.shipping?.deliveryNote ?? ""
+          ).trim(),
         };
       }
     }

@@ -84,6 +84,7 @@ function readShipping(product: Product) {
   const extra = product as unknown as { shipping?: Record<string, unknown> };
   const raw = extra.shipping;
   const ship = raw && typeof raw === "object" ? raw : {};
+
   const method = typeof ship.method === "string" ? ship.method : "";
   const deliveryFee = Number(ship.deliveryFee) || 0;
   const courierName =
@@ -103,12 +104,13 @@ function readShipping(product: Product) {
         ? "fixed"
         : "free";
 
+  // Method only — never mix with feeMode
   const deliveryMethodLabel =
-    feeMode === "free"
-      ? "Free delivery"
-      : method === "self"
-        ? "Self delivery"
-        : courierName || "Courier";
+    method === "self"
+      ? "Direct Merchant Delivery"
+      : courierName
+        ? courierName
+        : "Courier Delivery";
 
   return {
     feeMode,
@@ -598,21 +600,43 @@ export function ProductView({ product }: { product: Product }) {
     marketplace,
   ]);
 
-  const feeLabel = useMemo(() => {
+    const feeDisplay = useMemo(() => {
+    // free / on_delivery never show money
+    if (feeMode === "free") {
+      return { label: "Delivery", value: "Free" };
+    }
+    if (feeMode === "on_delivery") {
+      return { label: "Delivery fee", value: "Pay on delivery" };
+    }
+
+    // fixed → real multi-region conversion
     const productRegion = product.region || DEFAULT_REGION;
+    const amount = Number(deliveryFee) || 0;
+
+    let value: string;
     if (!mounted) {
-      return formatMoneyFixed(deliveryFee, productRegion);
+      // SSR + first paint: stable, no hydration mismatch
+      value = formatMoneyFixed(amount, productRegion);
+    } else if (typeof marketplace.formatProduct === "function") {
+      value = marketplace.formatProduct(amount, productRegion);
+    } else {
+      value = formatProductPrice(
+        amount,
+        productRegion,
+        displayRegion,
+        marketplace.ratesToNgn || undefined
+      );
     }
-    if (typeof marketplace.formatProduct === "function") {
-      return marketplace.formatProduct(deliveryFee, productRegion);
-    }
-    return formatProductPrice(
-      deliveryFee,
-      productRegion,
-      displayRegion,
-      marketplace.ratesToNgn || undefined
-    );
-  }, [mounted, deliveryFee, product.region, displayRegion, marketplace]);
+
+    return { label: "Delivery fee", value };
+  }, [
+    feeMode,
+    deliveryFee,
+    product.region,
+    mounted,
+    displayRegion,
+    marketplace,
+  ]);
 
   const doBag = useCallback(() => {
     addToCart(product);
@@ -1106,36 +1130,48 @@ export function ProductView({ product }: { product: Product }) {
             </div>
           )}
 
-          <p className="mb-2 mt-7 text-sm font-semibold uppercase tracking-[0.14em]">
+                  <p className="mb-2 mt-7 text-sm font-semibold uppercase tracking-[0.14em]">
             Shipping Details
           </p>
           <div className="rounded-[20px] border border-line bg-surface p-4 sm:p-[18px]">
+            {/* Method */}
             <div className="mb-3 flex items-center gap-3">
               <span className="flex h-[38px] w-[38px] shrink-0 items-center justify-center rounded-xl border border-line bg-surface-2">
                 <Truck className="h-4 w-4 text-secondary" />
               </span>
               <div className="min-w-0">
                 <p className="text-[10.5px] font-semibold uppercase tracking-widest text-muted">
-                  Delivery
+                  Delivery method
                 </p>
                 <p className="text-[15.5px] font-semibold">
                   {deliveryMethodLabel}
                 </p>
               </div>
             </div>
+
+            {/* Fee */}
             <div className="flex justify-between border-t border-line pt-3 text-[14.5px]">
-              <span className="text-secondary">
-                {feeMode === "on_delivery" ? "Delivery charge" : "Delivery fee"}
-              </span>
-              <span className="font-semibold" suppressHydrationWarning>
-                {feeLabel}
+              <span className="text-secondary">{feeDisplay.label}</span>
+              <span
+                className={`font-semibold ${
+                  feeMode === "free" || feeMode === "on_delivery"
+                    ? "text-ai-green"
+                    : ""
+                }`}
+                suppressHydrationWarning
+              >
+                {feeDisplay.value}
               </span>
             </div>
-            {feeMode === "on_delivery" && deliveryNote ? (
+
+            {/* Seller note */}
+            {deliveryNote ? (
               <p className="mt-2.5 text-[13px] leading-5 text-secondary">
                 {deliveryNote}
               </p>
             ) : null}
+
+            {/* Extra clarity for on_delivery */}
             {feeMode === "on_delivery" ? (
               <p className="mt-2 text-[12px] text-muted">
                 Paid when the order arrives — not added at checkout.

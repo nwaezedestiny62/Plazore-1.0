@@ -49,7 +49,7 @@ const productSchema = new Schema<IProduct>(
       index: true,
     },
 
-        shipping: {
+    shipping: {
       feeMode: {
         type: String,
         enum: ["free", "fixed", "on_delivery"],

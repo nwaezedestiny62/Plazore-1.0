@@ -103,9 +103,11 @@ export interface IProduct extends Document {
   seller: Types.ObjectId;
   region: string;
   shipping?: {
-    method: "self" | "courier";
+    feeMode: "free" | "fixed" | "on_delivery";
+    method?: "self" | "courier";
     courierCompany?: string;
     deliveryFee?: number;
+    deliveryNote?: string;
   };
   fulfillmentLocation?: IFulfillmentLocation;
   specifications?: Map<string, string> | Record<string, string>;

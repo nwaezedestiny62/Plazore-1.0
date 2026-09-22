@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Check, ChevronLeft, Globe } from "lucide-react";
 import { useMarketplace } from "@/context/MarketplaceContext";
-import { REGION_LIST } from "@/lib/regions";
+import { REGION_LIST, resolveRegionCode } from "@/lib/regions";
 
 export default function RegionSettingsPage() {
   const router = useRouter();
@@ -12,14 +12,18 @@ export default function RegionSettingsPage() {
   const [saving, setSaving] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const onPick = async (code: string) => {
+  const onPick = async (rawCode: string) => {
+    const code = resolveRegionCode(rawCode);
     if (code === region || saving) return;
+
     setSaving(code);
     setError(null);
     try {
-      await setRegion(code);
+      await setRegion(code); // persists local + PATCH /users/me
     } catch {
-      setError("Could not save region. Your local choice is still applied.");
+      setError(
+        "Could not save region on the server. Your local choice is still applied."
+      );
     } finally {
       setSaving(null);
     }
@@ -37,8 +41,12 @@ export default function RegionSettingsPage() {
           <ChevronLeft className="h-[22px] w-[22px]" />
         </button>
         <div>
-          <h1 className="text-lg font-extrabold tracking-tight">Marketplace region</h1>
-          <p className="text-[11px] text-[#6B7280]">Currency & product catalog</p>
+          <h1 className="text-lg font-extrabold tracking-tight">
+            Marketplace region
+          </h1>
+          <p className="text-[11px] text-[#6B7280]">
+            Currency & product catalog
+          </p>
         </div>
       </header>
 
@@ -50,8 +58,8 @@ export default function RegionSettingsPage() {
           <div>
             <p className="text-sm font-bold">Active marketplace</p>
             <p className="mt-1 text-[13px] leading-5 text-[#A7ADB8]">
-              Prices convert into your region’s currency. Catalogs prefer this marketplace when
-              the API supports region filtering.
+              Prices convert into your region’s currency. Catalogs prefer this
+              marketplace when the API supports region filtering.
             </p>
             {!loading && (
               <p className="mt-2 text-[12px] font-semibold text-[#00E575]">
@@ -89,7 +97,9 @@ export default function RegionSettingsPage() {
                 >
                   <span className="text-xl leading-none">{r.flag}</span>
                   <span className="min-w-0 flex-1">
-                    <span className="block text-[15px] font-semibold">{r.name}</span>
+                    <span className="block text-[15px] font-semibold">
+                      {r.name}
+                    </span>
                     <span className="mt-0.5 block text-[12px] text-[#737A86]">
                       {r.currency.code} · {r.currency.symbol}
                     </span>
