@@ -14,7 +14,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useMarketplace } from "@/context/MarketplaceContext";
 
-const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000/api";
+const API = process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com";
 
 type StoreForm = {
   storeName: string;

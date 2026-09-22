@@ -15,7 +15,7 @@ import {
 import { useMarketplace } from "@/context/MarketplaceContext";
 import { getRegion, REGION_LIST } from "@/lib/regions";
 
-const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000/api";
+const API = process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com";
 const GRAD = "linear-gradient(90deg,#00E575,#14B8A6,#3B82F6)";
 
 function OrbPreloader() {

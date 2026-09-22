@@ -10,15 +10,15 @@ const getBaseURL = () => {
   if (__DEV__) {
     if (Platform.OS === "android") {
       // Emulator: return "http://10.0.2.2:3000/api";
-      return "http:///192.168.100.82:3000/api";
+      return "https://plazore-api.onrender.com";
     }
 
     if (Platform.OS === "ios") {
-      return "http://localhost:3000/api";
+      return "https://plazore-api.onrender.com";
     }
   }
 
-  return "http:///192.168.100.82:3000/api";
+  return "https://plazore-api.onrender.com/";
 };
 
 const api = axios.create({

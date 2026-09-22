@@ -15,7 +15,7 @@ import {
   Receipt,
 } from "lucide-react";
 
-const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000/api";
+const API = process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com";
 
 const CONTACT_CATEGORIES = [
   { value: "buying", label: "Buying on Plazore" },

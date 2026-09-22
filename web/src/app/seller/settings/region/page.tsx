@@ -12,7 +12,7 @@ import {
   resolveRegionCode,
 } from "@/lib/regions";
 
-const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000/api";
+const API = process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com";
 
 async function readJson(res: Response) {
   const ct = res.headers.get("content-type") || "";

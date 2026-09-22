@@ -6,7 +6,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000/api";
+const API = process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com";
 
 type DayPoint = {
   date?: string;

@@ -36,7 +36,7 @@ import {
 } from "@/lib/regions";
 import type { Product } from "@/lib/types";
 
-const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000/api";
+const API = process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com";
 const GRAD = "linear-gradient(90deg,#10B981,#14B8A6,#3B82F6)";
 const GOOGLE_G =
   "https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg";

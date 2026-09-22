@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import { REGION_LIST, DEFAULT_REGION } from "@/lib/regions";
 
-const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000/api";
+const API = process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com";
 const FALLBACK_BG =
   "https://images.unsplash.com/photo-1441986300917-64674bd600d8?auto=format&fit=crop&w=1600&q=80";
 

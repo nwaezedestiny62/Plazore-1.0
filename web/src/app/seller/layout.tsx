@@ -20,7 +20,7 @@ import {
   isContextBlocked,
 } from "@/lib/moderation";
 
-const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000/api";
+const API = process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com";
 const PENDING_STATUSES = new Set(["Preparing"]);
 const RAIL_KEY = "plazore.seller.railOpen";
 

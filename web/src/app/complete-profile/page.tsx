@@ -6,7 +6,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, ArrowRight, CheckCircle, Phone, User } from "lucide-react";
 import { DEFAULT_REGION, REGION_LIST, type RegionCode } from "@/lib/regions";
 
-const BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000/api";
+const BASE = process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com";
 const GRAD = "linear-gradient(90deg,#00E575,#14B8A6,#3B82F6)";
 const FALLBACK_BG =
   "https://images.unsplash.com/photo-1441986300917-64674bd600d8?auto=format&fit=crop&w=1400&q=80";

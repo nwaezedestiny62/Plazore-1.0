@@ -4,7 +4,7 @@ import { useAuth } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 
-const BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000/api";
+const BASE = process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com";
 
 function safeReturnTo() {
   try {

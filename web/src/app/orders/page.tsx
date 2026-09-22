@@ -24,7 +24,7 @@ import {
   X,
 } from "lucide-react";
 
-const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000/api";
+const API = process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com";
 const HIDDEN_KEY = "@plazore_hidden_completed_orders";
 
 const statusColor: Record<string, string> = {

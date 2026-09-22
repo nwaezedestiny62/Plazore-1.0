@@ -20,7 +20,7 @@ import {
 } from "lucide-react";
 import { useMarketplace } from "@/context/MarketplaceContext";
 
-const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000/api";
+const API = process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com";
 
 const PLAN_FEES: Record<string, number> = {
   free: 8,

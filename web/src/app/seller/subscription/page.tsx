@@ -11,7 +11,7 @@ import {
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useMarketplace } from "@/context/MarketplaceContext";
 
-const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000/api";
+const API = process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com";
 const DEFAULT_REGION = "NG";
 
 const PLAN_PRICE_USD: Record<string, number | null> = {

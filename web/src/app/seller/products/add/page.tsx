@@ -36,7 +36,7 @@ import {
 } from "@/lib/productSpecs";
 import { formatMoney, getRegion } from "@/lib/regions";
 
-const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000/api";
+const API = process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com";
 const CURRENT_PLAN = "free" as keyof typeof PLAN_IMAGE_LIMITS;
 
 type OverlayTone = "info" | "success" | "danger";

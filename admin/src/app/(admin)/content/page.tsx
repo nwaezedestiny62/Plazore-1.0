@@ -39,7 +39,7 @@ const poppins = Poppins({
   display: "swap",
 });
 
-const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000/api";
+const API = process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com";
 const GATE_KEY = "plazore.admin.contentGate.v1";
 const EXPECTED_PASSWORD =
   process.env.NEXT_PUBLIC_ADMIN_CONTENT_PASSWORD || "";
