@@ -1,10 +1,4 @@
 import api from '@/constants/api'
-import {
-  convertPrice,
-  DEFAULT_REGION,
-  formatMoney,
-  formatProductPrice,
-} from '@/constants/regions'
 import { useMarketplace } from '@/context/MarketplaceContext'
 import { useAuth } from '@clerk/clerk-expo'
 import { Ionicons } from '@expo/vector-icons'
@@ -64,16 +58,6 @@ type OverlayState = {
   durationMs?: number
   actions?: OverlayAction[]
 } | null
-
-function resolveOrderRegion(order: any, item?: any): string {
-  if (item?.product?.region) return String(item.product.region)
-  if (item?.region) return String(item.region)
-  if (order?.region) return String(order.region)
-  if (order?.seller?.marketplaceRegion) {
-    return String(order.seller.marketplaceRegion)
-  }
-  return DEFAULT_REGION
-}
 
 function resolveNote(note: unknown): string {
   if (typeof note !== 'string') return ''
@@ -395,12 +379,7 @@ export default function SellerOrderDetails() {
   const { id } = useLocalSearchParams<{ id: string }>()
   const { getToken } = useAuth()
   const router = useRouter()
-  const {
-    format,
-    formatProduct,
-    region: viewerRegion,
-    refreshRegion,
-  } = useMarketplace()
+  const { format, refreshRegion } = useMarketplace()
 
   const [order, setOrder] = useState<any>(null)
   const [loading, setLoading] = useState(true)
@@ -429,7 +408,6 @@ export default function SellerOrderDetails() {
   const [overlay, setOverlay] = useState<OverlayState>(null)
   const [showDeliveredBurst, setShowDeliveredBurst] = useState(false)
 
-  const displayRegion = viewerRegion || DEFAULT_REGION
   const minDate = useMemo(() => startOfToday(), [])
 
   const toast = useCallback(
@@ -441,25 +419,10 @@ export default function SellerOrderDetails() {
     [],
   )
 
+  /** Frozen order amounts — never FX-convert with formatProduct */
   const fmt = useCallback(
-    (amount: number, fromRegion?: string | null) => {
-      try {
-        if (fromRegion && fromRegion !== displayRegion) {
-          return formatProduct
-            ? formatProduct(amount, fromRegion)
-            : formatProductPrice(amount, fromRegion, displayRegion)
-        }
-        return format ? format(amount) : formatMoney(amount, displayRegion)
-      } catch {
-        const converted = convertPrice(
-          amount,
-          fromRegion || displayRegion,
-          displayRegion,
-        )
-        return formatMoney(converted, displayRegion)
-      }
-    },
-    [format, formatProduct, displayRegion],
+    (amount: number) => format(Number(amount) || 0),
+    [format],
   )
 
   const loadOrder = useCallback(async () => {
@@ -481,11 +444,6 @@ export default function SellerOrderDetails() {
     refreshRegion?.()
     void loadOrder()
   }, [id])
-
-  const orderMoneyRegion = useMemo(() => {
-    if (!order) return DEFAULT_REGION
-    return resolveOrderRegion(order, order.items?.[0])
-  }, [order])
 
   const impliedMethod =
     order?.productShipping?.method === 'self' ? 'self' : 'courier'
@@ -539,7 +497,6 @@ export default function SellerOrderDetails() {
       }
     }
 
-    // Courier tracking: if filled, must look valid (not junk)
     if (impliedMethod === 'courier') {
       const tn = trackingNumber.trim()
       if (tn) {
@@ -558,11 +515,7 @@ export default function SellerOrderDetails() {
     setFieldErrors(errors)
 
     if (messages.length > 0) {
-      toast(
-        'Fix shipping details',
-        messages.join('\n'),
-        'danger',
-      )
+      toast('Fix shipping details', messages.join('\n'), 'danger')
       return false
     }
     return true
@@ -625,10 +578,7 @@ export default function SellerOrderDetails() {
         'Is this order really delivered?',
       tone: 'info',
       actions: [
-        {
-          label: 'Not yet',
-          onPress: () => {},
-        },
+        { label: 'Not yet', onPress: () => {} },
         {
           label: 'Yes, delivered',
           primary: true,
@@ -864,7 +814,6 @@ export default function SellerOrderDetails() {
 
         <Text style={styles.blockLabel}>Products</Text>
         {order.items?.map((item: any, index: number) => {
-          const itemRegion = resolveOrderRegion(order, item)
           const unit = Number(item.price) || 0
           const buyerNote = resolveNote(item.note)
 
@@ -887,7 +836,7 @@ export default function SellerOrderDetails() {
                     {item.name}
                   </Text>
                   <Text style={styles.meta}>
-                    Qty: {item.quantity} · {fmt(unit, itemRegion)}
+                    Qty: {item.quantity} · {fmt(unit)}
                   </Text>
                 </View>
               </View>
@@ -1115,26 +1064,23 @@ export default function SellerOrderDetails() {
         <View style={styles.card}>
           <View style={styles.totalRow}>
             <Text style={styles.meta}>Subtotal</Text>
-            <Text style={styles.body}>
-              {fmt(Number(order.subtotal) || 0, orderMoneyRegion)}
-            </Text>
+            <Text style={styles.body}>{fmt(Number(order.subtotal) || 0)}</Text>
           </View>
           <View style={styles.totalRow}>
             <Text style={styles.meta}>Delivery</Text>
             <Text style={styles.body}>
-              {fmt(Number(order.shippingCost) || 0, orderMoneyRegion)}
+              {fmt(Number(order.shippingCost) || 0)}
             </Text>
           </View>
           <View style={[styles.totalRow, { marginTop: 8 }]}>
             <Text style={styles.meta}>Total</Text>
             <Text style={styles.totalValue}>
-              {fmt(Number(order.totalAmount) || 0, orderMoneyRegion)}
+              {fmt(Number(order.totalAmount) || 0)}
             </Text>
           </View>
         </View>
       </ScrollView>
 
-      {/* Pure JS calendar — no native module */}
       <Modal
         visible={showDatePicker}
         animationType="slide"
@@ -1196,7 +1142,8 @@ export default function SellerOrderDetails() {
                 }
                 const disabled = cell < minDate
                 const selected =
-                  !!estimatedDeliveryDate && sameDay(cell, estimatedDeliveryDate)
+                  !!estimatedDeliveryDate &&
+                  sameDay(cell, estimatedDeliveryDate)
                 const isToday = sameDay(cell, minDate)
                 return (
                   <TouchableOpacity

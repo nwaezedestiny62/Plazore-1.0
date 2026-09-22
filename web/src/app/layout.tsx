@@ -9,13 +9,15 @@ import { NetworkStatusBanner } from "@/components/network/NetworkStatusBanner";
 const manrope = Manrope({
   subsets: ["latin"],
   variable: "--font-manrope",
+  // optional: you can keep the weight array for Manrope or also remove it
   weight: ["300", "400", "600", "700"],
 });
 
 const spaceGrotesk = Space_Grotesk({
   subsets: ["latin"],
   variable: "--font-space",
-  weight: ["500", "600"],
+  // REMOVE the weight array – Space Grotesk is variable
+  // weight: ["500", "600"],   ← delete this line
 });
 
 export const metadata: Metadata = {

@@ -15,7 +15,6 @@ import {
   User,
 } from "lucide-react";
 import { useMarketplace } from "@/context/MarketplaceContext";
-import { DEFAULT_REGION, formatProductPrice } from "@/lib/regions";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000/api";
 
@@ -114,8 +113,7 @@ export default function ChatPage() {
   const fromParam = (search.get("from") || "").toLowerCase();
   const router = useRouter();
   const { getToken, isSignedIn, isLoaded } = useAuth();
-  const { region: marketplaceRegion } = useMarketplace();
-  const displayRegion = marketplaceRegion || DEFAULT_REGION;
+  const { formatProduct } = useMarketplace();
 
   const getTokenRef = useRef(getToken);
   getTokenRef.current = getToken;
@@ -130,6 +128,8 @@ export default function ChatPage() {
   const [text, setText] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [focused, setFocused] = useState(false);
+  /** Full product from /products/:id when chat payload is missing region */
+  const [productOverride, setProductOverride] = useState<ProductMeta | null>(null);
 
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -158,6 +158,7 @@ export default function ChatPage() {
     setBooting(true);
     setError(null);
     setMessages([]);
+    setProductOverride(null);
     if (conversationId) {
       setConversation(readCache(conversationId));
     } else {
@@ -383,6 +384,72 @@ export default function ChatPage() {
     scrollEnd();
   }, [messages.length, scrollEnd]);
 
+  const productBase = pickProduct(conversation, productHint);
+
+  /**
+   * /chat/start often omits product.region → formatProduct treats price as NGN
+   * and shows e.g. $0.01 instead of $15.00.
+   * Fetch the real product so region + price match the product page.
+   */
+  useEffect(() => {
+    const pid = productBase?._id || productHint;
+    if (!pid) return;
+    if (productBase?.region && productBase?.price != null) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`${API}/products/${pid}`);
+        const json = await res.json();
+        const p = json?.data;
+        if (!cancelled && p && (p.price != null || p.region)) {
+          const next: ProductMeta = {
+            _id: String(p._id || pid),
+            name: p.name,
+            images: p.images,
+            price: p.price,
+            region: p.region,
+          };
+          setProductOverride(next);
+          // Keep cache in sync so later loads stay correct
+          if (conversationId) {
+            const cached = readCache(conversationId) || { _id: conversationId };
+            writeCache(conversationId, {
+              ...cached,
+              product: { ...(typeof cached.product === "object" ? cached.product : {}), ...next },
+            });
+          }
+        }
+      } catch {
+        /* keep whatever we have */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    productBase?._id,
+    productBase?.region,
+    productBase?.price,
+    productHint,
+    conversationId,
+  ]);
+
+  const product: ProductMeta | null = useMemo(() => {
+    if (!productBase && !productOverride) return null;
+    if (!productOverride) return productBase;
+    if (!productBase) return productOverride;
+    return {
+      ...productBase,
+      ...productOverride,
+      _id: productOverride._id || productBase._id,
+      name: productOverride.name || productBase.name,
+      images: productOverride.images?.length ? productOverride.images : productBase.images,
+      price: productOverride.price ?? productBase.price,
+      region: productOverride.region || productBase.region,
+    };
+  }, [productBase, productOverride]);
+
   const handleSend = async () => {
     if (!text.trim() || sending || !conversationId) return;
     const messageText = text.trim();
@@ -501,8 +568,6 @@ export default function ChatPage() {
     );
   };
 
-  const product = pickProduct(conversation, productHint);
-
   if (!isLoaded || booting) return <OrbLoader />;
 
   return (
@@ -561,7 +626,7 @@ export default function ChatPage() {
           <div className="ml-3 min-w-0 flex-1">
             <p className="truncate text-[13px] font-semibold">{product.name || "This listing"}</p>
             <p className="mt-0.5 text-sm font-bold text-[#10B981]">
-              {formatProductPrice(Number(product.price || 0), product.region, displayRegion)}
+              {formatProduct(Number(product.price || 0), product.region)}
             </p>
           </div>
           <ChevronRight className="h-4 w-4 shrink-0 text-[#737A86]" />

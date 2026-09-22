@@ -3,7 +3,7 @@
 import { useParams, useRouter } from "next/navigation";
 import { useAuth } from "@clerk/nextjs";
 import { useMarketplace } from "@/context/MarketplaceContext";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   Check,
   ChevronLeft,
@@ -12,23 +12,9 @@ import {
   Receipt,
   X,
 } from "lucide-react";
-import {
-  DEFAULT_REGION,
-  formatMoney,
-  formatProductPrice,
-} from "@/lib/regions";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000/api";
 const steps = ["Preparing", "Shipped", "Delivered"];
-
-function resolveOrderRegion(order: any, item?: any) {
-  if (item?.product?.region) return String(item.product.region);
-  if (item?.region) return String(item.region);
-  if (order?.region) return String(order.region);
-  if (order?.seller?.marketplaceRegion)
-    return String(order.seller.marketplaceRegion);
-  return DEFAULT_REGION;
-}
 
 export default function OrderDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -39,17 +25,16 @@ export default function OrderDetailPage() {
   const [toast, setToast] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
   const [actionError, setActionError] = useState("");
-  const { region: marketplaceRegion } = useMarketplace();
-  const displayRegion = marketplaceRegion || DEFAULT_REGION;
+  const { format } = useMarketplace();
 
+  /**
+   * Order totals / line prices are frozen at purchase.
+   * Do NOT run formatProduct (FX) on them — only format in the buyer's
+   * current marketplace currency for display.
+   */
   const fmt = useCallback(
-    (amount: number, fromRegion?: string | null) => {
-      if (fromRegion && fromRegion !== displayRegion) {
-        return formatProductPrice(amount, fromRegion, displayRegion);
-      }
-      return formatMoney(amount, displayRegion);
-    },
-    [displayRegion]
+    (amount: number) => format(Number(amount) || 0),
+    [format]
   );
 
   const loadOrder = useCallback(async () => {
@@ -79,11 +64,6 @@ export default function OrderDetailPage() {
     }
     void loadOrder();
   }, [isLoaded, isSignedIn, router, loadOrder]);
-
-  const orderMoneyRegion = useMemo(() => {
-    if (!order) return DEFAULT_REGION;
-    return resolveOrderRegion(order, order.items?.[0]);
-  }, [order]);
 
   const copyTracking = async (value: string) => {
     try {
@@ -240,7 +220,6 @@ export default function OrderDetailPage() {
 
       <div className="mx-auto grid max-w-5xl gap-3 p-4 md:grid-cols-[1.1fr_0.9fr]">
         <div>
-          {/* Delivery confirmation — only when seller marked Delivered */}
           {needsConfirm && (
             <div className="mb-3 rounded-2xl border border-[#00E575]/25 bg-[#00E575]/[0.06] p-4">
               <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#00E575]/90">
@@ -412,45 +391,41 @@ export default function OrderDetailPage() {
           <p className="mb-2.5 ml-0.5 mt-1 text-[11px] font-bold uppercase tracking-[0.12em] text-[#6B7280]">
             Items
           </p>
-          {order.items?.map((item: any, idx: number) => {
-            const itemRegion = resolveOrderRegion(order, item);
-            return (
-              <div
-                key={idx}
-                className="mb-2.5 rounded-2xl border border-white/7 bg-surface p-3.5"
-              >
-                <div className="flex items-center">
-                  {item.image ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={item.image}
-                      alt=""
-                      className="h-14 w-14 rounded-xl object-cover bg-surface-2"
-                    />
-                  ) : (
-                    <div className="h-14 w-14 rounded-xl bg-surface-2" />
-                  )}
-                  <div className="ml-3 min-w-0 flex-1">
-                    <p className="text-sm font-semibold leading-[19px]">
-                      {item.name}
-                    </p>
-                    <p className="mt-0.5 text-xs text-secondary">
-                      Qty {item.quantity} ·{" "}
-                      {fmt(Number(item.price) || 0, itemRegion)}
-                    </p>
-                  </div>
-                </div>
-                <div className="mt-3 rounded-xl bg-surface-2 px-3 py-2.5">
-                  <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[#6B7280]">
-                    Your note
+          {order.items?.map((item: any, idx: number) => (
+            <div
+              key={idx}
+              className="mb-2.5 rounded-2xl border border-white/7 bg-surface p-3.5"
+            >
+              <div className="flex items-center">
+                {item.image ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={item.image}
+                    alt=""
+                    className="h-14 w-14 rounded-xl object-cover bg-surface-2"
+                  />
+                ) : (
+                  <div className="h-14 w-14 rounded-xl bg-surface-2" />
+                )}
+                <div className="ml-3 min-w-0 flex-1">
+                  <p className="text-sm font-semibold leading-[19px]">
+                    {item.name}
                   </p>
-                  <p className="text-[13px] leading-[18px] text-secondary">
-                    {item.note?.trim() ? item.note : "No note added."}
+                  <p className="mt-0.5 text-xs text-secondary">
+                    Qty {item.quantity} · {fmt(Number(item.price) || 0)}
                   </p>
                 </div>
               </div>
-            );
-          })}
+              <div className="mt-3 rounded-xl bg-surface-2 px-3 py-2.5">
+                <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[#6B7280]">
+                  Your note
+                </p>
+                <p className="text-[13px] leading-[18px] text-secondary">
+                  {item.note?.trim() ? item.note : "No note added."}
+                </p>
+              </div>
+            </div>
+          ))}
         </div>
 
         <div>
@@ -549,20 +524,20 @@ export default function OrderDetailPage() {
             <div className="mb-2.5 flex justify-between text-[13px]">
               <span className="text-secondary">Subtotal</span>
               <span className="font-semibold">
-                {fmt(Number(order.subtotal) || 0, orderMoneyRegion)}
+                {fmt(Number(order.subtotal) || 0)}
               </span>
             </div>
             <div className="mb-2.5 flex justify-between text-[13px]">
               <span className="text-secondary">Delivery</span>
               <span className="font-semibold">
-                {fmt(Number(order.shippingCost) || 0, orderMoneyRegion)}
+                {fmt(Number(order.shippingCost) || 0)}
               </span>
             </div>
             <div className="my-2 h-px bg-white/7" />
             <div className="flex justify-between">
               <span className="text-sm font-bold">Order Total</span>
               <span className="text-xl font-extrabold tracking-tight">
-                {fmt(Number(order.totalAmount) || 0, orderMoneyRegion)}
+                {fmt(Number(order.totalAmount) || 0)}
               </span>
             </div>
           </div>

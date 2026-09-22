@@ -1,5 +1,6 @@
 import api from '@/constants/api'
 import { ScreenConfigMenu } from '@/components/ScreenConfigMenu'
+import { DEFAULT_REGION } from '@/constants/regions'
 import { useMarketplace } from '@/context/MarketplaceContext'
 import { useAuth } from '@clerk/clerk-expo'
 import { Ionicons } from '@expo/vector-icons'
@@ -43,6 +44,18 @@ const statusColor: Record<string, string> = {
 const STATUS_ORDER = ['Preparing', 'Shipped', 'Delivered', 'Cancelled']
 
 type SortMode = 'newest' | 'oldest' | 'status'
+
+function resolveOrderRegion(order: any): string {
+  if (order?.items?.[0]?.product?.region) {
+    return String(order.items[0].product.region)
+  }
+  if (order?.items?.[0]?.region) return String(order.items[0].region)
+  if (order?.region) return String(order.region)
+  if (order?.seller?.marketplaceRegion) {
+    return String(order.seller.marketplaceRegion)
+  }
+  return DEFAULT_REGION
+}
 
 function confirmationHint(order: any): { label: string; color: string } | null {
   if (order?.orderStatus !== 'Delivered') return null
@@ -99,7 +112,7 @@ function PlazoreOrbPreloader() {
 export default function BuyerOrders() {
   const { getToken, isSignedIn, isLoaded } = useAuth()
   const router = useRouter()
-  const { format } = useMarketplace()
+  const { formatProduct } = useMarketplace()
 
   const [orders, setOrders] = useState<any[]>([])
   const [hiddenIds, setHiddenIds] = useState<string[]>([])
@@ -292,6 +305,7 @@ export default function BuyerOrders() {
           const count = item.items?.length || 0
           const color = statusColor[item.orderStatus] || MUTED
           const hint = confirmationHint(item)
+          const orderRegion = resolveOrderRegion(item)
 
           return (
             <TouchableOpacity
@@ -344,7 +358,7 @@ export default function BuyerOrders() {
               <View style={styles.cardBottom}>
                 <Text style={styles.meta}>
                   {count} item{count !== 1 ? 's' : ''} ·{' '}
-                  {format(Number(item.totalAmount) || 0)}
+                  {formatProduct(Number(item.totalAmount) || 0, orderRegion)}
                 </Text>
                 <Text style={styles.date}>
                   {item.createdAt

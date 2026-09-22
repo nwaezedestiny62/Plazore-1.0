@@ -13,12 +13,11 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useMarketplace } from "@/context/MarketplaceContext";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000/api";
 const GRAD = "linear-gradient(90deg,#00E575,#3B82F6)";
-const DEFAULT_REGION = "NG";
 
 const CANCEL_OPTIONS = [
   { code: "out_of_stock", label: "Product is out of stock" },
@@ -43,14 +42,6 @@ type Overlay = {
   actions?: OverlayAction[];
   durationMs?: number;
 } | null;
-
-function resolveOrderRegion(order: any, item?: any): string {
-  if (item?.product?.region) return String(item.product.region);
-  if (item?.region) return String(item.region);
-  if (order?.region) return String(order.region);
-  if (order?.seller?.marketplaceRegion) return String(order.seller.marketplaceRegion);
-  return DEFAULT_REGION;
-}
 
 function statusColor(status: string) {
   if (status === "Cancelled") return "#EF4444";
@@ -151,7 +142,7 @@ function DeliveredBurst({ visible, onDone }: { visible: boolean; onDone: () => v
         <p className="mt-4 text-[22px] font-extrabold tracking-tight text-[#F5F7FA]">
           Delivered
         </p>
-        <p className="mt-1 text-[13px] text-[#A7ADB8]">Buyer will see the update</p>
+        <p className="mt-1 text-[13px] text-[#A7ADB8]">Waiting for buyer confirmation</p>
       </div>
     </div>
   );
@@ -173,7 +164,7 @@ export default function SellerOrderDetailsPage() {
   const id = String(params?.id || "");
   const { getToken, isLoaded, isSignedIn } = useAuth();
   const router = useRouter();
-  const { formatProduct } = useMarketplace();
+  const { format } = useMarketplace();
 
   const [order, setOrder] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -198,15 +189,10 @@ export default function SellerOrderDetailsPage() {
     []
   );
 
+  /** Frozen order amounts — never FX-convert with formatProduct */
   const fmt = useCallback(
-    (amount: number, fromRegion?: string | null) => {
-      try {
-        return formatProduct(amount, (fromRegion || DEFAULT_REGION) as any);
-      } catch {
-        return String(amount);
-      }
-    },
-    [formatProduct]
+    (amount: number) => format(Number(amount) || 0),
+    [format]
   );
 
   const loadOrder = useCallback(async () => {
@@ -237,14 +223,20 @@ export default function SellerOrderDetailsPage() {
     loadOrder();
   }, [isLoaded, isSignedIn, loadOrder]);
 
-  const orderMoneyRegion = useMemo(() => {
-    if (!order) return DEFAULT_REGION;
-    return resolveOrderRegion(order, order.items?.[0]);
-  }, [order]);
-
   const impliedMethod =
     order?.productShipping?.method === "self" ? "self" : "courier";
   const courierName = order?.productShipping?.courierCompany || "";
+
+  /* Buyer confirmation — same wiring as mobile seller order details */
+  const confStatus =
+    order?.buyerConfirmation?.status ||
+    (order?.orderStatus === "Delivered" ? "pending" : "none");
+  const buyerPending =
+    order?.orderStatus === "Delivered" &&
+    confStatus !== "confirmed" &&
+    confStatus !== "issue_reported";
+  const buyerConfirmed = confStatus === "confirmed";
+  const buyerIssue = confStatus === "issue_reported";
 
   const handleShip = async () => {
     if (!estimatedDelivery.trim()) {
@@ -318,7 +310,8 @@ export default function SellerOrderDetailsPage() {
       message:
         "Only confirm if the buyer has received this order.\n\n" +
         "• Status will change to Delivered\n" +
-        "• The buyer will be notified\n" +
+        "• The buyer will be notified to confirm receipt\n" +
+        "• Your payout stays pending until the buyer confirms\n" +
         "• This cannot be undone from here\n\n" +
         "Is this order really delivered?",
       tone: "info",
@@ -418,7 +411,11 @@ export default function SellerOrderDetailsPage() {
         visible={showDeliveredBurst}
         onDone={() => {
           setShowDeliveredBurst(false);
-          toast("Delivered", "Order marked as delivered.", "success");
+          toast(
+            "Delivered",
+            "Buyer has been asked to confirm receipt. Payout stays pending until they confirm.",
+            "success"
+          );
         }}
       />
 
@@ -442,7 +439,6 @@ export default function SellerOrderDetailsPage() {
       </header>
 
       <div className="mx-auto max-w-3xl space-y-3.5 px-4 py-4 sm:px-6 lg:px-8">
-        {/* Status */}
         <section className="border border-white/[0.07] bg-[#11141A] p-4">
           <p className="mb-1 text-[11px] font-bold uppercase tracking-[0.8px] text-[#737A86]">
             Current status
@@ -453,6 +449,40 @@ export default function SellerOrderDetailsPage() {
               : order.orderStatus}
           </p>
         </section>
+
+        {/* Buyer confirmation status — same as mobile */}
+        {isDelivered && buyerPending && (
+          <section className="border border-[#00E575]/25 bg-[#00E575]/[0.06] p-4">
+            <p className="mb-1.5 text-[11px] font-bold uppercase tracking-[1.2px] text-[#00E575]">
+              Buyer confirmation
+            </p>
+            <p className="text-[15px] font-bold text-[#F5F7FA]">Waiting for buyer</p>
+            <p className="mt-1.5 text-[13px] leading-5 text-[#A7ADB8]">
+              You marked this as delivered. The buyer still needs to confirm
+              receipt. Your payout stays pending until they confirm or an issue
+              is resolved.
+            </p>
+          </section>
+        )}
+
+        {isDelivered && buyerConfirmed && (
+          <section className="border border-[#00E575]/20 bg-[#00E575]/[0.05] p-4">
+            <p className="text-sm font-bold text-[#F5F7FA]">Buyer confirmed delivery</p>
+            <p className="mt-1.5 text-[13px] leading-5 text-[#A7ADB8]">
+              The buyer confirmed they received this order.
+            </p>
+          </section>
+        )}
+
+        {isDelivered && buyerIssue && (
+          <section className="border border-amber-500/30 bg-amber-500/10 p-4">
+            <p className="text-sm font-bold text-amber-100">Issue under review</p>
+            <p className="mt-1.5 text-[13px] leading-5 text-amber-100/80">
+              The buyer reported a problem. Payout stays pending while Plazore
+              reviews.
+            </p>
+          </section>
+        )}
 
         {isCancelled && order.cancellation && (
           <section className="border border-[#EF4444]/25 bg-[#EF4444]/[0.06] p-4">
@@ -471,7 +501,6 @@ export default function SellerOrderDetailsPage() {
           </section>
         )}
 
-        {/* Buyer */}
         <section className="border border-white/[0.07] bg-[#11141A] p-4">
           <h2 className="mb-3 text-[17px] font-bold tracking-tight">Buyer</h2>
           <p className="mb-1 text-[11px] font-bold uppercase tracking-[0.8px] text-[#737A86]">
@@ -502,12 +531,10 @@ export default function SellerOrderDetailsPage() {
           </div>
         </section>
 
-        {/* Products */}
         <p className="ml-0.5 text-[11px] font-bold uppercase tracking-[1.2px] text-[#737A86]">
           Products
         </p>
         {order.items?.map((item: any, index: number) => {
-          const itemRegion = resolveOrderRegion(order, item);
           const unit = Number(item.price) || 0;
           return (
             <section
@@ -530,7 +557,7 @@ export default function SellerOrderDetailsPage() {
                 <div className="min-w-0 flex-1">
                   <p className="line-clamp-2 text-[15px] font-semibold">{item.name}</p>
                   <p className="mt-0.5 text-xs text-[#737A86]">
-                    Qty: {item.quantity} · {fmt(unit, itemRegion)}
+                    Qty: {item.quantity} · {fmt(unit)}
                   </p>
                 </div>
               </div>
@@ -546,7 +573,6 @@ export default function SellerOrderDetailsPage() {
           );
         })}
 
-        {/* Preparing */}
         {isPreparing && (
           <>
             <div className="grid grid-cols-2 gap-2.5">
@@ -700,30 +726,28 @@ export default function SellerOrderDetailsPage() {
           </button>
         )}
 
-        {/* Totals */}
         <section className="border border-white/[0.07] bg-[#11141A] p-4">
           <div className="mb-1.5 flex justify-between text-xs text-[#737A86]">
             <span>Subtotal</span>
             <span className="text-sm text-[#A7ADB8]">
-              {fmt(Number(order.subtotal) || 0, orderMoneyRegion)}
+              {fmt(Number(order.subtotal) || 0)}
             </span>
           </div>
           <div className="mb-2 flex justify-between text-xs text-[#737A86]">
             <span>Delivery</span>
             <span className="text-sm text-[#A7ADB8]">
-              {fmt(Number(order.shippingCost) || 0, orderMoneyRegion)}
+              {fmt(Number(order.shippingCost) || 0)}
             </span>
           </div>
           <div className="flex justify-between">
             <span className="text-xs text-[#737A86]">Total</span>
             <span className="text-lg font-extrabold">
-              {fmt(Number(order.totalAmount) || 0, orderMoneyRegion)}
+              {fmt(Number(order.totalAmount) || 0)}
             </span>
           </div>
         </section>
       </div>
 
-      {/* Cancel sheet */}
       {showCancel && (
         <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/65 sm:items-center sm:p-6">
           <button

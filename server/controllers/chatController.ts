@@ -69,8 +69,8 @@ export const startConversation = async (req: Request, res: Response) => {
     }
 
     const product = await Product.findById(productId).select(
-      "seller isActive name images price"
-    );
+  "seller isActive name images price region"
+);
 
     if (!product || product.isActive === false) {
       return res.status(404).json({
@@ -100,7 +100,7 @@ export const startConversation = async (req: Request, res: Response) => {
     }
 
     await conversation.populate([
-      { path: "product", select: "name images price" },
+      { path: "product", select: "name images price region" },
       { path: "buyer", select: "name image" },
       { path: "seller", select: "name storeName storeLogo image" },
     ]);

@@ -1,17 +1,11 @@
 import api from '@/constants/api'
-import {
-  convertPrice,
-  DEFAULT_REGION,
-  formatMoney,
-  formatProductPrice,
-} from '@/constants/regions'
 import { useMarketplace } from '@/context/MarketplaceContext'
 import { useAuth } from '@clerk/clerk-expo'
 import { Ionicons } from '@expo/vector-icons'
 import * as Clipboard from 'expo-clipboard'
 import { LinearGradient } from 'expo-linear-gradient'
 import { useLocalSearchParams, useRouter } from 'expo-router'
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Animated,
@@ -38,16 +32,6 @@ const DANGER = '#EF4444'
 const AMBER = '#F59E0B'
 
 const steps = ['Preparing', 'Shipped', 'Delivered']
-
-function resolveOrderRegion(order: any, item?: any): string {
-  if (item?.product?.region) return String(item.product.region)
-  if (item?.region) return String(item.region)
-  if (order?.region) return String(order.region)
-  if (order?.seller?.marketplaceRegion) {
-    return String(order.seller.marketplaceRegion)
-  }
-  return DEFAULT_REGION
-}
 
 /** Only real buyer notes — empty / garbage → treat as none */
 function resolveBuyerNote(note: unknown): string {
@@ -101,12 +85,7 @@ export default function BuyerOrderDetails() {
   const id = Array.isArray(rawId) ? rawId[0] : rawId
   const { getToken, isSignedIn, isLoaded } = useAuth()
   const router = useRouter()
-  const {
-    format,
-    formatProduct,
-    region: viewerRegion,
-    refreshRegion,
-  } = useMarketplace()
+  const { format, refreshRegion } = useMarketplace()
 
   const [order, setOrder] = useState<any>(null)
   const [loading, setLoading] = useState(true)
@@ -116,27 +95,14 @@ export default function BuyerOrderDetails() {
   const toastAnim = useRef(new Animated.Value(0)).current
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const displayRegion = viewerRegion || DEFAULT_REGION
-
+  /**
+   * Order totals / line prices are frozen at purchase.
+   * Do NOT run formatProduct (FX) on them — only format in the buyer's
+   * current marketplace currency for display.
+   */
   const fmt = useCallback(
-    (amount: number, fromRegion?: string | null) => {
-      try {
-        if (fromRegion && fromRegion !== displayRegion) {
-          return formatProduct
-            ? formatProduct(amount, fromRegion)
-            : formatProductPrice(amount, fromRegion, displayRegion)
-        }
-        return format ? format(amount) : formatMoney(amount, displayRegion)
-      } catch {
-        const converted = convertPrice(
-          amount,
-          fromRegion || displayRegion,
-          displayRegion,
-        )
-        return formatMoney(converted, displayRegion)
-      }
-    },
-    [format, formatProduct, displayRegion],
+    (amount: number) => format(Number(amount) || 0),
+    [format],
   )
 
   const loadOrder = useCallback(async () => {
@@ -172,11 +138,6 @@ export default function BuyerOrderDetails() {
       if (toastTimer.current) clearTimeout(toastTimer.current)
     }
   }, [])
-
-  const orderMoneyRegion = useMemo(() => {
-    if (!order) return DEFAULT_REGION
-    return resolveOrderRegion(order, order.items?.[0])
-  }, [order])
 
   const confStatus =
     order?.buyerConfirmation?.status ||
@@ -528,7 +489,6 @@ export default function BuyerOrderDetails() {
 
         <Text style={styles.sectionLabel}>Items</Text>
         {order.items?.map((item: any, idx: number) => {
-          const itemRegion = resolveOrderRegion(order, item)
           const unit = Number(item.price) || 0
           const buyerNote = resolveBuyerNote(item.note)
 
@@ -547,7 +507,7 @@ export default function BuyerOrderDetails() {
                     {item.name}
                   </Text>
                   <Text style={styles.itemMeta}>
-                    Qty {item.quantity} · {fmt(unit, itemRegion)}
+                    Qty {item.quantity} · {fmt(unit)}
                   </Text>
                 </View>
               </View>
@@ -650,20 +610,20 @@ export default function BuyerOrderDetails() {
           <View style={styles.receiptRow}>
             <Text style={styles.receiptLabel}>Subtotal</Text>
             <Text style={styles.receiptValue}>
-              {fmt(Number(order.subtotal) || 0, orderMoneyRegion)}
+              {fmt(Number(order.subtotal) || 0)}
             </Text>
           </View>
           <View style={styles.receiptRow}>
             <Text style={styles.receiptLabel}>Delivery</Text>
             <Text style={styles.receiptValue}>
-              {fmt(Number(order.shippingCost) || 0, orderMoneyRegion)}
+              {fmt(Number(order.shippingCost) || 0)}
             </Text>
           </View>
           <View style={styles.receiptDivider} />
           <View style={styles.receiptRow}>
             <Text style={styles.totalLabel}>Order Total</Text>
             <Text style={styles.totalValue}>
-              {fmt(Number(order.totalAmount) || 0, orderMoneyRegion)}
+              {fmt(Number(order.totalAmount) || 0)}
             </Text>
           </View>
         </View>

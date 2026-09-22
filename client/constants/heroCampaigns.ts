@@ -40,7 +40,7 @@ export const HERO_SLIDES: HeroSlide[] = [
       kind: 'image',
       source: require('../assets/hero/welcome.png'),
     },
-    headline: 'Plazore',
+    headline: 'Discover with intent. Make decisions with confidence.',
     subheadline:
       'A quieter way to discover what matters.',
     ctaLabel: 'Enter',
