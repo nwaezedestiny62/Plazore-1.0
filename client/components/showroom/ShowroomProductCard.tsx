@@ -9,8 +9,6 @@ import { Link, usePathname, useRouter } from 'expo-router'
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
-  Animated,
-  Easing,
   Image,
   Modal,
   Platform,
@@ -28,11 +26,7 @@ const H_PADDING = 16
 const GAP = 4
 /** Was 1.35 — shorter product cards */
 const IMAGE_ASPECT = 1.08
-const HOLD_MS = 5200
-const CROSSFADE_MS = 1800
-const EASE = Easing.bezier(0.4, 0.0, 0.2, 1.0)
 
-const BG = '#090B0F'
 const SURFACE = '#11141A'
 const LINE = 'rgba(255,255,255,0.1)'
 const TEXT = '#F5F7FA'
@@ -91,7 +85,7 @@ function resolvePrice(product: Product): number {
   return 0
 }
 
-export default function ShowroomProductCard({
+function ShowroomProductCard({
   product,
   style,
   dark = false,
@@ -112,6 +106,8 @@ export default function ShowroomProductCard({
 
   /** Product waiting to be added after successful auth */
   const pendingCartRef = useRef<Product | null>(null)
+  const cartBtnRef = useRef<View>(null)
+  const impressed = useRef(false)
 
   const defaultW = (screenW - H_PADDING * 2 - GAP) / 2
   const cardW = Number(style?.width) > 0 ? Number(style.width) : defaultW
@@ -124,86 +120,22 @@ export default function ShowroomProductCard({
     [formatProduct, product],
   )
 
-  const images = useMemo(() => {
+  // Only keep the first image — this alone removes most of the lag
+  const primaryImage = useMemo(() => {
     const raw = Array.isArray(product.images) ? product.images : []
-    const list = raw.map(imageUri).filter(Boolean)
-    return Array.from(new Set(list))
+    for (const img of raw) {
+      const uri = imageUri(img)
+      if (uri) return uri
+    }
+    return ''
   }, [product.images])
 
-  const cartBtnRef = useRef<View>(null)
-  const impressed = useRef(false)
-  const currentRef = useRef(0)
-  const busy = useRef(false)
-  const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const opacities = useRef<Animated.Value[]>([]).current
-
-  if (opacities.length !== images.length) {
-    opacities.splice(0, opacities.length)
-    images.forEach((_, i) => {
-      opacities.push(new Animated.Value(i === 0 ? 1 : 0))
-    })
-    currentRef.current = 0
-  }
-
-  const clearHold = useCallback(() => {
-    if (holdTimer.current) {
-      clearTimeout(holdTimer.current)
-      holdTimer.current = null
+  // Prefetch ONLY the visible image
+  useEffect(() => {
+    if (primaryImage) {
+      Image.prefetch(primaryImage).catch(() => {})
     }
-  }, [])
-
-  const goTo = useCallback(
-    (raw: number) => {
-      if (busy.current || images.length < 2) return
-      const from = currentRef.current
-      const target = ((raw % images.length) + images.length) % images.length
-      if (target === from) return
-      if (!opacities[from] || !opacities[target]) return
-
-      busy.current = true
-      clearHold()
-
-      Animated.parallel([
-        Animated.timing(opacities[from], {
-          toValue: 0,
-          duration: CROSSFADE_MS,
-          easing: EASE,
-          useNativeDriver: true,
-        }),
-        Animated.timing(opacities[target], {
-          toValue: 1,
-          duration: CROSSFADE_MS,
-          easing: EASE,
-          useNativeDriver: true,
-        }),
-      ]).start(({ finished }) => {
-        if (finished) {
-          images.forEach((_, i) => {
-            opacities[i]?.setValue(i === target ? 1 : 0)
-          })
-          currentRef.current = target
-        }
-        busy.current = false
-        if (finished) {
-          holdTimer.current = setTimeout(() => goTo(target + 1), HOLD_MS)
-        }
-      })
-    },
-    [images, opacities, clearHold],
-  )
-
-  useEffect(() => {
-    images.forEach((uri) => {
-      Image.prefetch(uri).catch(() => {})
-    })
-  }, [images])
-
-  useEffect(() => {
-    clearHold()
-    if (images.length < 2) return
-    holdTimer.current = setTimeout(() => goTo(1), HOLD_MS)
-    return () => clearHold()
-  }, [images, goTo, clearHold])
+  }, [primaryImage])
 
   useEffect(() => {
     if (impressed.current || !product?._id) return
@@ -245,7 +177,6 @@ export default function ShowroomProductCard({
     if (!pending) return
     pendingCartRef.current = null
     setAuthOpen(false)
-    // small delay so session is fully ready
     const t = setTimeout(() => doAddToCart(pending), 120)
     return () => clearTimeout(t)
   }, [isLoaded, isSignedIn, doAddToCart])
@@ -277,7 +208,6 @@ export default function ShowroomProductCard({
 
   const onSignIn = useCallback(() => {
     setAuthOpen(false)
-    // Keep pending product so useEffect adds it after return
     router.push({
       pathname: '/(auth)/sign-in' as any,
       params: { redirect_url: returnPath },
@@ -290,11 +220,10 @@ export default function ShowroomProductCard({
       const { createdSessionId, setActive } = await startOAuthFlow()
       if (createdSessionId && setActive) {
         await setActive({ session: createdSessionId })
-        // pending product stays in ref → useEffect will add to cart
         setAuthOpen(false)
       }
     } catch {
-      // user cancelled or error — keep sheet open
+      // user cancelled or error
     } finally {
       setGoogleBusy(false)
     }
@@ -309,19 +238,12 @@ export default function ShowroomProductCard({
       <View style={[styles.imageWrap, { height: imageHeight }]}>
         <Link href={`/product/${product._id}` as any} asChild>
           <Pressable style={styles.fill} onPress={trackOpen}>
-            {images.length > 0 ? (
-              images.map((uri, i) => (
-                <Animated.Image
-                  key={`${product._id}-${i}`}
-                  source={{ uri }}
-                  resizeMode="cover"
-                  style={[
-                    styles.image,
-                    styles.fill,
-                    { opacity: opacities[i] ?? 1 },
-                  ]}
-                />
-              ))
+            {primaryImage ? (
+              <Image
+                source={{ uri: primaryImage }}
+                resizeMode="cover"
+                style={[styles.image, styles.fill]}
+              />
             ) : (
               <View style={[styles.image, styles.placeholder]} />
             )}
@@ -366,7 +288,7 @@ export default function ShowroomProductCard({
         </Pressable>
       </Link>
 
-      {/* Auth sheet — same idea as web */}
+      {/* Auth sheet — identical design */}
       <Modal
         visible={authOpen}
         transparent
@@ -456,6 +378,8 @@ export default function ShowroomProductCard({
     </View>
   )
 }
+
+export default React.memo(ShowroomProductCard)
 
 const styles = StyleSheet.create({
   card: { backgroundColor: 'transparent' },

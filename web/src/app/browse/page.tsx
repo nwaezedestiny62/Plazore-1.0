@@ -15,7 +15,7 @@ import {
   ShowroomFlyCartProvider,
   useShowroomFlyCart,
 } from "@/components/mall/ShowroomFlyCart";
-import { fetchMallProducts, searchSuggest } from "@/lib/api";
+import { fetchMallProducts } from "@/lib/api";
 import { cartCount } from "@/lib/cart";
 import { CATEGORY_TO_FLOOR, FLOORS } from "@/lib/floors";
 import { CATEGORY_LIST } from "@/lib/productCatalog";
@@ -92,8 +92,12 @@ function viewScore(p: Product): number {
 }
 
 function productPrice(p: Product) {
-  const n = Number((p as any).price);
-  return Number.isFinite(n) ? n : 0;
+  const x = p as any;
+  for (const c of [x.price, x.salePrice, x.displayPrice, x.amount, x.unitPrice]) {
+    const n = typeof c === "string" ? parseFloat(c) : Number(c);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  return 0;
 }
 
 function productCreated(p: Product) {
@@ -194,6 +198,35 @@ function sortProducts(list: Product[], sort: SortKey): Product[] {
   }
 }
 
+/** UI sort → GET /products?sort= */
+function toApiSort(sort: SortKey): string | undefined {
+  switch (sort) {
+    case "newest":
+      return "newest";
+    case "oldest":
+      return "oldest";
+    case "price_high":
+      return "price_desc";
+    case "price_low":
+      return "price_asc";
+    case "name_az":
+      return "name";
+    case "name_za":
+      return "name_za";
+    case "views":
+      return "trending";
+    default:
+      return undefined;
+  }
+}
+
+function resolveCategoryParam(active: string | null): string | undefined {
+  if (!active) return undefined;
+  const floor = FLOORS.find((f) => f.id === active);
+  if (floor) return floor.match.length === 1 ? floor.match[0] : undefined;
+  return active;
+}
+
 const SORT_OPTIONS: { key: SortKey; label: string }[] = [
   { key: "relevance", label: "Relevance" },
   { key: "newest", label: "Newest first" },
@@ -246,6 +279,9 @@ function BrowseInner() {
   const [minPrice, setMinPrice] = useState("");
   const [maxPrice, setMaxPrice] = useState("");
   const [inStockOnly, setInStockOnly] = useState(false);
+  const [draftMin, setDraftMin] = useState("");
+  const [draftMax, setDraftMax] = useState("");
+  const [draftStock, setDraftStock] = useState(false);
   const [loc, setLoc] = useState<LocFilter>({
     region: null,
     state: null,
@@ -255,7 +291,6 @@ function BrowseInner() {
   const [bagCount, setBagCount] = useState(0);
   const [appFeature, setAppFeature] = useState<AppFeature | null>(null);
 
-  /** Register bag as fly-to-cart target (updates on resize/scroll) */
   useEffect(() => {
     const el = bagRef.current;
     if (!el || !flyCart?.registerBagTarget) return;
@@ -265,7 +300,6 @@ function BrowseInner() {
     };
 
     update();
-    // re-measure after layout settles
     const t = window.setTimeout(update, 100);
 
     window.addEventListener("resize", update);
@@ -306,7 +340,7 @@ function BrowseInner() {
   useEffect(() => {
     let alive = true;
     (async () => {
-      const list = await fetchMallProducts();
+      const list = await fetchMallProducts({ limit: 50, sort: "trending" });
       if (!alive) return;
       setAllProducts(list);
       try {
@@ -334,46 +368,34 @@ function BrowseInner() {
     setVisibleCount(PAGE_SIZE);
   }, [debounced, activeCategory, sortKey, minPrice, maxPrice, inStockOnly, loc]);
 
- useEffect(() => {
-  if (debounced.length < 1 || activeCategory) {
-    setServerProducts([]);
-    setSearchLoading(false);
-    return;
-  }
-  let cancelled = false;
-  setSearchLoading(true);
-
-  fetchMallProducts({
-    q: debounced,
-    limit: 48,
-    minPrice: minPrice || undefined,
-    maxPrice: maxPrice || undefined,
-    inStock: inStockOnly || undefined,
-    sort:
-      sortKey === "price_high"
-        ? "price_desc"
-        : sortKey === "price_low"
-          ? "price_asc"
-          : sortKey === "newest"
-            ? "newest"
-            : sortKey === "oldest"
-              ? "oldest"
-              : sortKey === "name_az"
-                ? "name_az"
-                : sortKey === "name_za"
-                  ? "name_za"
-                  : undefined,
-  }).then((products) => {
-    if (!cancelled) {
-      setServerProducts(products);
+  useEffect(() => {
+    if (debounced.length < 1 && !activeCategory) {
+      setServerProducts([]);
       setSearchLoading(false);
+      return;
     }
-  });
+    let cancelled = false;
+    setSearchLoading(true);
 
-  return () => {
-    cancelled = true;
-  };
-}, [debounced, activeCategory, minPrice, maxPrice, inStockOnly, sortKey]);
+    fetchMallProducts({
+      q: activeCategory ? undefined : debounced || undefined,
+      category: resolveCategoryParam(activeCategory),
+      limit: 50,
+      minPrice: minPrice || undefined,
+      maxPrice: maxPrice || undefined,
+      inStock: inStockOnly || undefined,
+      sort: toApiSort(sortKey),
+    }).then((products) => {
+      if (!cancelled) {
+        setServerProducts(products);
+        setSearchLoading(false);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [debounced, activeCategory, minPrice, maxPrice, inStockOnly, sortKey]);
 
   const locationIndex = useMemo(() => {
     const regions = new Map<string, number>();
@@ -439,12 +461,10 @@ function BrowseInner() {
     const q = debounced.toLowerCase();
     if (!q && !activeCategory) return [] as Product[];
     let products =
-      serverProducts.length > 0 && !activeCategory
-        ? serverProducts
-        : allProducts;
+      serverProducts.length > 0 ? serverProducts : allProducts;
     if (activeCategory) {
       products = products.filter((p) => matchesFloor(p, activeCategory));
-    } else if (q) {
+    } else if (q && serverProducts.length === 0) {
       products = products.filter((p) => matchesSearch(p, q));
     }
     products = applyLoc(products);
@@ -529,18 +549,45 @@ function BrowseInner() {
     setMinPrice("");
     setMaxPrice("");
     setInStockOnly(false);
+    setDraftMin("");
+    setDraftMax("");
+    setDraftStock(false);
     setLoc({ region: null, state: null, city: null });
     setSortKey("relevance");
     setVisibleCount(PAGE_SIZE);
   };
 
   const selectFloor = (id: string) => {
-  setQuery("");
-  setDebounced("");
-  setCategoryLoading(true);
-  setActiveCategory(id);
-  setTimeout(() => setCategoryLoading(false), 400);
-};
+    setQuery("");
+    setDebounced("");
+    setCategoryLoading(true);
+    setActiveCategory(id);
+    setTimeout(() => setCategoryLoading(false), 400);
+  };
+
+  const openPrice = () => {
+    setDraftMin(minPrice);
+    setDraftMax(maxPrice);
+    setDraftStock(inStockOnly);
+    setPriceOpen(true);
+  };
+
+  const applyPrice = () => {
+    setMinPrice(draftMin.trim());
+    setMaxPrice(draftMax.trim());
+    setInStockOnly(!!draftStock);
+    setPriceOpen(false);
+  };
+
+  const resetPrice = () => {
+    setDraftMin("");
+    setDraftMax("");
+    setDraftStock(false);
+    setMinPrice("");
+    setMaxPrice("");
+    setInStockOnly(false);
+    setPriceOpen(false);
+  };
 
   const locActive = !!(loc.region || loc.state || loc.city);
   const priceActive = !!(minPrice || maxPrice) || inStockOnly;
@@ -691,7 +738,6 @@ function BrowseInner() {
     <div className="min-h-screen bg-bg text-text">
       <header className="sticky top-0 z-40 border-b border-white/5 bg-bg/90 backdrop-blur-md">
         <div className="mx-auto flex h-14 max-w-7xl items-center gap-2 px-3 sm:gap-3 sm:px-6 lg:px-8">
-          {/* Left cluster */}
           <div className="flex shrink-0 items-center gap-1.5">
             <Link
               href="/lounge"
@@ -714,7 +760,6 @@ function BrowseInner() {
             </Link>
           </div>
 
-          {/* Desktop nav */}
           <nav className="ml-6 hidden flex-1 items-center gap-6 md:flex lg:ml-10 lg:gap-8">
             <Link
               href="/"
@@ -729,38 +774,35 @@ function BrowseInner() {
               Browse
             </Link>
 
-            {/* Lounge — Plazore brand badge (green → blue, sharp, light 3D) */}
-<Link
-  href="/lounge"
-  className="group relative inline-flex items-center gap-2.5 overflow-hidden border border-white/15 px-4 py-2 text-[11px] font-extrabold tracking-[0.22em] uppercase text-white transition duration-200 hover:brightness-110 active:translate-y-[1px]"
-  style={{
-    background:
-      "linear-gradient(135deg, #00E575 0%, #0ECF7A 38%, #2B6DE8 72%, #3B82F6 100%)",
-    boxShadow:
-      "0 1px 0 rgba(255,255,255,0.35) inset, 0 -2px 0 rgba(0,0,0,0.28) inset, 0 6px 18px rgba(59,130,246,0.28), 0 2px 0 rgba(0,0,0,0.35)",
-  }}
->
-  {/* top sheen */}
-  <span
-    aria-hidden
-    className="pointer-events-none absolute inset-x-0 top-0 h-[45%] bg-gradient-to-b from-white/25 to-transparent"
-  />
-  {/* left green / right blue edge accent like the mark */}
-  <span
-    aria-hidden
-    className="pointer-events-none absolute left-0 top-0 h-full w-[3px] bg-[#00E575]"
-  />
-  <span
-    aria-hidden
-    className="pointer-events-none absolute right-0 top-0 h-full w-[3px] bg-[#3B82F6]"
-  />
+            <Link
+              href="/lounge"
+              className="group relative inline-flex items-center gap-2.5 overflow-hidden border border-white/15 px-4 py-2 text-[11px] font-extrabold tracking-[0.22em] uppercase text-white transition duration-200 hover:brightness-110 active:translate-y-[1px]"
+              style={{
+                background:
+                  "linear-gradient(135deg, #00E575 0%, #0ECF7A 38%, #2B6DE8 72%, #3B82F6 100%)",
+                boxShadow:
+                  "0 1px 0 rgba(255,255,255,0.35) inset, 0 -2px 0 rgba(0,0,0,0.28) inset, 0 6px 18px rgba(59,130,246,0.28), 0 2px 0 rgba(0,0,0,0.35)",
+              }}
+            >
+              <span
+                aria-hidden
+                className="pointer-events-none absolute inset-x-0 top-0 h-[45%] bg-gradient-to-b from-white/25 to-transparent"
+              />
+              <span
+                aria-hidden
+                className="pointer-events-none absolute left-0 top-0 h-full w-[3px] bg-[#00E575]"
+              />
+              <span
+                aria-hidden
+                className="pointer-events-none absolute right-0 top-0 h-full w-[3px] bg-[#3B82F6]"
+              />
 
-  <span className="relative">Lounge</span>
-  <span className="relative flex h-1.5 w-1.5 shrink-0">
-    <span className="absolute inline-flex h-full w-full animate-ping bg-white/80 opacity-45" />
-    <span className="relative inline-flex h-1.5 w-1.5 bg-white shadow-[0_0_8px_rgba(255,255,255,0.8)]" />
-  </span>
-</Link>
+              <span className="relative">Lounge</span>
+              <span className="relative flex h-1.5 w-1.5 shrink-0">
+                <span className="absolute inline-flex h-full w-full animate-ping bg-white/80 opacity-45" />
+                <span className="relative inline-flex h-1.5 w-1.5 bg-white shadow-[0_0_8px_rgba(255,255,255,0.8)]" />
+              </span>
+            </Link>
 
             <button
               type="button"
@@ -771,7 +813,6 @@ function BrowseInner() {
             </button>
           </nav>
 
-          {/* Bag — far right + registered as fly target */}
           <Link
             ref={bagRef}
             href="/cart"
@@ -836,7 +877,7 @@ function BrowseInner() {
               </button>
               <button
                 type="button"
-                onClick={() => setPriceOpen(true)}
+                onClick={openPrice}
                 className={`h-12 shrink-0 border px-4 text-xs font-semibold tracking-wide ${
                   priceActive
                     ? "border-ai-green/40 bg-ai-green/10 text-ai-green"
@@ -1074,18 +1115,18 @@ function BrowseInner() {
             <p className="mt-5 text-sm font-semibold text-secondary">Price range</p>
             <div className="mt-2 flex gap-2">
               <input
-                value={minPrice}
+                value={draftMin}
                 onChange={(e) =>
-                  setMinPrice(e.target.value.replace(/[^\d.]/g, ""))
+                  setDraftMin(e.target.value.replace(/[^\d.]/g, ""))
                 }
                 placeholder="Min"
                 inputMode="decimal"
                 className="h-11 flex-1 border border-line bg-surface-2 px-3 text-sm outline-none"
               />
               <input
-                value={maxPrice}
+                value={draftMax}
                 onChange={(e) =>
-                  setMaxPrice(e.target.value.replace(/[^\d.]/g, ""))
+                  setDraftMax(e.target.value.replace(/[^\d.]/g, ""))
                 }
                 placeholder="Max"
                 inputMode="decimal"
@@ -1095,26 +1136,22 @@ function BrowseInner() {
             <label className="mt-6 flex items-center gap-3 text-sm">
               <input
                 type="checkbox"
-                checked={inStockOnly}
-                onChange={(e) => setInStockOnly(e.target.checked)}
+                checked={draftStock}
+                onChange={(e) => setDraftStock(e.target.checked)}
               />
               In stock only
             </label>
             <div className="mt-8 flex gap-3">
               <button
                 type="button"
-                onClick={() => {
-                  setMinPrice("");
-                  setMaxPrice("");
-                  setInStockOnly(false);
-                }}
+                onClick={resetPrice}
                 className="h-12 flex-1 border border-line bg-surface-2 font-semibold text-secondary"
               >
                 Reset
               </button>
               <button
                 type="button"
-                onClick={() => setPriceOpen(false)}
+                onClick={applyPrice}
                 className="h-12 flex-1 bg-text font-bold text-bg"
               >
                 Apply

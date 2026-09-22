@@ -2,6 +2,9 @@
  * PlazoreHeroBanner — 5-slot carousel like web Mall.tsx
  * GET /content/hero (auth, personalized 1+4) + /content/hero/public (admin 2,3,5)
  * Rotation is ALWAYS 12s — never use server cycleMs (that value is a 30min cache TTL)
+ *
+ * Image rule: never show a blank slot. Remote URLs only win if they are real
+ * http(s) (or origin-resolvable) AND they actually load. On error → local asset.
  */
 
 import {
@@ -32,14 +35,14 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 const SLOT_COUNT = 5
 const HOLD_MS = 12000
-const CROSSFADE_MS = 2800
+/** Image + copy crossfade together — cinematic, not sluggish */
+const CROSSFADE_MS = 1100
 const SWIPE_THRESH = 48
-const TEXT_ENTER_MS = 900
-const TEXT_EXIT_MS = 420
-const KEN_BURNS_SCALE = 1.06
+const TEXT_MS = 720
+const KEN_BURNS_SCALE = 1.045
 
-const EASE_CROSSFADE = Easing.bezier(0.4, 0.0, 0.2, 1.0)
-const EASE_TEXT = Easing.bezier(0.25, 0.1, 0.25, 1.0)
+const EASE_CROSSFADE = Easing.bezier(0.22, 1, 0.36, 1)
+const EASE_TEXT = Easing.bezier(0.16, 1, 0.3, 1)
 
 const FILL = {
   position: 'absolute' as const,
@@ -94,7 +97,6 @@ type Props = {
   offlineOnly?: boolean
 }
 
-/** Fit copy to the phone width. Long text shrinks + wraps. Nothing is ellipsized. */
 function copyMetrics(screenW: number) {
   const pad = screenW < 360 ? 16 : 20
   const maxW = Math.max(220, screenW - pad * 2)
@@ -146,13 +148,38 @@ function localSource(index: number): ImageSourcePropType | undefined {
   return HERO_SLIDES[index % n]?.media?.source
 }
 
-function resolveImageSource(imageUrl: string, index: number): ImageSourcePropType {
+function isUsableRemoteUrl(url: string): boolean {
+  const u = String(url || '').trim()
+  if (!u) return false
+  if (u.startsWith('data:image/gif')) return false
+  if (u === 'null' || u === 'undefined' || u === 'None') return false
+  if (/^https?:\/\//i.test(u)) return true
+  if (u.startsWith('/') && WEB_ORIGIN) return true
+  return false
+}
+
+function sourceHasUsableUri(source: ImageSourcePropType | undefined): boolean {
+  if (!source || typeof source !== 'object') return false
+  if ('uri' in source) {
+    return isUsableRemoteUrl(String((source as { uri?: string }).uri || ''))
+  }
+  return true
+}
+
+function resolveImageSource(
+  imageUrl: string,
+  index: number,
+): ImageSourcePropType {
   const url = String(imageUrl || '').trim()
   const fallback = localSource(index)
-  if (/^https?:\/\//i.test(url)) return { uri: url }
-  if (url.startsWith('/') && WEB_ORIGIN) return { uri: `${WEB_ORIGIN}${url}` }
+
+  if (isUsableRemoteUrl(url)) {
+    if (/^https?:\/\//i.test(url)) return { uri: url }
+    if (url.startsWith('/') && WEB_ORIGIN) return { uri: `${WEB_ORIGIN}${url}` }
+  }
+
   if (fallback) return fallback
-  return { uri: url || 'data:image/gif;base64,R0lGODlhAQABAAAAACw=' }
+  return { uri: 'data:image/gif;base64,R0lGODlhAQABAAAAACw=' }
 }
 
 function staticToBanner(s: StaticHeroSlide, index: number): BannerSlide {
@@ -200,23 +227,31 @@ function apiToBanner(raw: any, index: number): BannerSlide | null {
 
   if (b.isActive === false && !imageUrl && !headline) return null
 
+  const hasRealImage = isUsableRemoteUrl(imageUrl)
+
   return {
     id: `slot-${pos}`,
     position: pos,
     kicker: String(b.kicker || 'PLAZORE').toUpperCase(),
     headline: headline || fallback?.headline || 'Plazore',
-    subheadline: String(b.subheadline || '').trim() || fallback?.subheadline || '',
+    subheadline:
+      String(b.subheadline || '').trim() || fallback?.subheadline || '',
     ctaLabel: String(b.ctaLabel || '').trim() || fallback?.ctaLabel || 'Explore',
     ctaAction: String(b.ctaAction || 'scroll_showroom'),
     ctaTarget: String(b.ctaTarget || ''),
     media: {
       kind: 'image',
-      source: resolveImageSource(imageUrl, pos - 1),
+      source: hasRealImage
+        ? resolveImageSource(imageUrl, pos - 1)
+        : fallback?.media?.source || resolveImageSource('', pos - 1),
     },
   }
 }
 
-function fiveSlotDeck(remote: BannerSlide[], fallback: BannerSlide[]): BannerSlide[] {
+function fiveSlotDeck(
+  remote: BannerSlide[],
+  fallback: BannerSlide[],
+): BannerSlide[] {
   const byPos = new Map<number, BannerSlide>()
   remote.forEach((s) => {
     const pos = Math.min(SLOT_COUNT, Math.max(1, Number(s.position) || 1))
@@ -225,15 +260,19 @@ function fiveSlotDeck(remote: BannerSlide[], fallback: BannerSlide[]): BannerSli
 
   const deck: BannerSlide[] = []
   for (let pos = 1; pos <= SLOT_COUNT; pos++) {
-    const base = fallback[pos - 1] || fallback[(pos - 1) % Math.max(fallback.length, 1)]
+    const base =
+      fallback[pos - 1] ||
+      fallback[(pos - 1) % Math.max(fallback.length, 1)]
     const slot = byPos.get(pos)
+
     if (slot) {
+      const remoteWins = sourceHasUsableUri(slot.media?.source)
       deck.push({
         ...base,
         ...slot,
         id: `slot-${pos}`,
         position: pos,
-        media: slot.media || base.media,
+        media: remoteWins ? slot.media : base?.media || slot.media,
       })
     } else if (base) {
       deck.push({ ...base, id: `static-${pos}`, position: pos })
@@ -318,6 +357,13 @@ function KenBurnsImage({
   isActive: boolean
 }) {
   const scale = useRef(new Animated.Value(1)).current
+  const [source, setSource] = useState<ImageSourcePropType>(slide.media.source)
+  const indexHint = Math.max(0, (slide.position || 1) - 1)
+  const fallback = localSource(indexHint)
+
+  useEffect(() => {
+    setSource(slide.media.source)
+  }, [slide.id, slide.media.source])
 
   useEffect(() => {
     scale.stopAnimation()
@@ -325,10 +371,11 @@ function KenBurnsImage({
       scale.setValue(1)
       return
     }
+    scale.setValue(1)
     Animated.timing(scale, {
       toValue: KEN_BURNS_SCALE,
       duration: HOLD_MS,
-      easing: Easing.linear,
+      easing: Easing.inOut(Easing.quad),
       useNativeDriver: true,
     }).start()
   }, [isActive, scale, slide.id])
@@ -338,17 +385,20 @@ function KenBurnsImage({
       <Animated.View
         style={{
           position: 'absolute',
-          top: -height * 0.03,
-          left: -width * 0.03,
-          width: width * 1.06,
-          height: height * 1.06,
+          top: -height * 0.025,
+          left: -width * 0.025,
+          width: width * 1.05,
+          height: height * 1.05,
           transform: [{ scale }],
         }}
       >
         <Image
-          source={slide.media.source}
-          style={{ width: width * 1.06, height: height * 1.06 }}
+          source={source}
+          style={{ width: width * 1.05, height: height * 1.05 }}
           resizeMode="cover"
+          onError={() => {
+            if (fallback) setSource(fallback)
+          }}
         />
       </Animated.View>
     </View>
@@ -420,6 +470,15 @@ export default function HeroBanner({
     }
   }, [slidesProp, token, region, sessionId, offlineOnly, staticFallback])
 
+  useEffect(() => {
+    slides.forEach((s) => {
+      const src = s.media?.source as any
+      if (src?.uri) {
+        Image.prefetch(src.uri).catch(() => {})
+      }
+    })
+  }, [slides])
+
   const goTo = useCallback(
     (raw: number) => {
       const deck = slidesRef.current
@@ -430,57 +489,44 @@ export default function HeroBanner({
       if (!opacities[from] || !opacities[target]) return
 
       busyRef.current = true
+      currentRef.current = target
+      setCurrent(target)
+
+      textY.setValue(14)
+      textOpacity.setValue(0)
 
       Animated.parallel([
-        Animated.timing(textOpacity, {
+        Animated.timing(opacities[from], {
           toValue: 0,
-          duration: TEXT_EXIT_MS,
+          duration: CROSSFADE_MS,
           easing: EASE_CROSSFADE,
+          useNativeDriver: true,
+        }),
+        Animated.timing(opacities[target], {
+          toValue: 1,
+          duration: CROSSFADE_MS,
+          easing: EASE_CROSSFADE,
+          useNativeDriver: true,
+        }),
+        Animated.timing(textOpacity, {
+          toValue: 1,
+          duration: TEXT_MS,
+          delay: 180,
+          easing: EASE_TEXT,
           useNativeDriver: true,
         }),
         Animated.timing(textY, {
-          toValue: 10,
-          duration: TEXT_EXIT_MS,
-          easing: EASE_CROSSFADE,
+          toValue: 0,
+          duration: TEXT_MS,
+          delay: 180,
+          easing: EASE_TEXT,
           useNativeDriver: true,
         }),
-      ]).start(() => {
-        Animated.parallel([
-          Animated.timing(opacities[from], {
-            toValue: 0,
-            duration: CROSSFADE_MS,
-            easing: EASE_CROSSFADE,
-            useNativeDriver: true,
-          }),
-          Animated.timing(opacities[target], {
-            toValue: 1,
-            duration: CROSSFADE_MS,
-            easing: EASE_CROSSFADE,
-            useNativeDriver: true,
-          }),
-        ]).start(() => {
+      ]).start(({ finished }) => {
+        if (finished) {
           opacities.forEach((v, i) => v.setValue(i === target ? 1 : 0))
-          currentRef.current = target
-          setCurrent(target)
-          textY.setValue(12)
-          textOpacity.setValue(0)
-          Animated.parallel([
-            Animated.timing(textOpacity, {
-              toValue: 1,
-              duration: TEXT_ENTER_MS,
-              easing: EASE_TEXT,
-              useNativeDriver: true,
-            }),
-            Animated.timing(textY, {
-              toValue: 0,
-              duration: TEXT_ENTER_MS,
-              easing: EASE_TEXT,
-              useNativeDriver: true,
-            }),
-          ]).start(() => {
-            busyRef.current = false
-          })
-        })
+        }
+        busyRef.current = false
       })
     },
     [opacities, textOpacity, textY],
@@ -511,102 +557,84 @@ export default function HeroBanner({
   const copy = slides[current] || slides[0]
   if (!copy) return null
 
- const handleCta = () => {
-  if (onCtaPress) {
-    onCtaPress(copy)
-    return
-  }
-
-  const action = String(copy.ctaAction || 'scroll_showroom')
-    .toLowerCase()
-    .trim()
-  let target = String(copy.ctaTarget || '').trim()
-
-  // If API stuffed a full path into the action field
-  if (
-    !target &&
-    (action.startsWith('/') || action.startsWith('http'))
-  ) {
-    target = action
-  }
-
-  // External URL
-  if (
-    target.startsWith('http://') ||
-    target.startsWith('https://') ||
-    action === 'url' ||
-    action === 'external'
-  ) {
-    if (target.startsWith('http')) {
-      Linking.openURL(target).catch(() => {})
-    } else {
-      onScrollToShowroom?.()
-    }
-    return
-  }
-
-  // Absolute in-app path from API (normalize web → mobile)
-  if (target.startsWith('/')) {
-    let path = target
-
-    // web → mobile
-    if (path.startsWith('/browse')) {
-      path = path.replace(/^\/browse/, '/search')
-    } else if (path.startsWith('/shop')) {
-      path = path.replace(/^\/shop/, '/search')
+  const handleCta = () => {
+    if (onCtaPress) {
+      onCtaPress(copy)
+      return
     }
 
-    try {
-      router.push(path as any)
-    } catch {
-      onScrollToShowroom?.()
-    }
-    return
-  }
+    const action = String(copy.ctaAction || 'scroll_showroom')
+      .toLowerCase()
+      .trim()
+    let target = String(copy.ctaTarget || '').trim()
 
-  switch (action) {
-    case 'store':
-    case 'storefront':
-    case 'seller': {
-      if (target) {
-        router.push(`/store/${target}` as any)
+    if (!target && (action.startsWith('/') || action.startsWith('http'))) {
+      target = action
+    }
+
+    if (
+      target.startsWith('http://') ||
+      target.startsWith('https://') ||
+      action === 'url' ||
+      action === 'external'
+    ) {
+      if (target.startsWith('http')) {
+        Linking.openURL(target).catch(() => {})
       } else {
         onScrollToShowroom?.()
       }
-      break
+      return
     }
 
-    case 'product': {
-      if (target) {
-        router.push(`/product/${target}` as any)
-      } else {
+    if (target.startsWith('/')) {
+      let path = target
+      if (path.startsWith('/browse')) {
+        path = path.replace(/^\/browse/, '/search')
+      } else if (path.startsWith('/shop')) {
+        path = path.replace(/^\/shop/, '/search')
+      }
+      try {
+        router.push(path as any)
+      } catch {
         onScrollToShowroom?.()
       }
-      break
+      return
     }
 
-    case 'category':
-    case 'search':
-    case 'browse': {
-      if (target) {
-        router.push({
-          pathname: '/search',
-          params: { category: target, q: target },
-        } as any)
-      } else {
-        router.push('/search' as any)
+    switch (action) {
+      case 'store':
+      case 'storefront':
+      case 'seller': {
+        if (target) router.push(`/store/${target}` as any)
+        else onScrollToShowroom?.()
+        break
       }
-      break
+      case 'product': {
+        if (target) router.push(`/product/${target}` as any)
+        else onScrollToShowroom?.()
+        break
+      }
+      case 'category':
+      case 'search':
+      case 'browse': {
+        if (target) {
+          router.push({
+            pathname: '/search',
+            params: { category: target, q: target },
+          } as any)
+        } else {
+          router.push('/search' as any)
+        }
+        break
+      }
+      case 'scroll_showroom':
+      case 'showroom':
+      case 'campaign':
+      default:
+        onScrollToShowroom?.()
+        break
     }
-
-    case 'scroll_showroom':
-    case 'showroom':
-    case 'campaign':
-    default:
-      onScrollToShowroom?.()
-      break
   }
-}
 
   const kStyle = kickerFit(copy.kicker || '', maxW)
   const hStyle = headlineFit(copy.headline || '', maxW)

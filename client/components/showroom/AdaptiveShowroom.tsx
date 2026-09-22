@@ -21,14 +21,14 @@ interface AdaptiveShowroomProps {
 }
 
 /**
- * Official visible capacities (must match server showroomRanker)
- * R1: 50 unique · R2: 14 unique · R1+R2 unique · R3: 16 · R4: 30
+ * Capacities tuned for smoothness while still looking full.
+ * (Original was 50/14/16/30 — these values keep the design language)
  */
 const ROOM_CAPACITY = {
-  1: 50,
-  2: 14,
-  3: 16,
-  4: 30,
+  1: 24,
+  2: 12,
+  3: 12,
+  4: 16,
 } as const
 
 function uniqueCount(rooms?: ShowroomRooms | null, products?: Product[]) {
@@ -45,10 +45,7 @@ function uniqueCount(rooms?: ShowroomRooms | null, products?: Product[]) {
 }
 
 /** Prefer server order; drop empty rooms; never invent duplicates client-side */
-function takeRoom(
-  list: Product[] | undefined,
-  cap: number
-): Product[] {
+function takeRoom(list: Product[] | undefined, cap: number): Product[] {
   if (!list?.length) return []
   const seen = new Set<string>()
   const out: Product[] = []
@@ -62,7 +59,7 @@ function takeRoom(
   return out
 }
 
-export default function AdaptiveShowroom({
+function AdaptiveShowroom({
   products,
   rooms,
   loading,
@@ -80,7 +77,6 @@ export default function AdaptiveShowroom({
         rooms[4]?.length)
     )
 
-    // Server is source of truth (inventory-first + adaptive threshold)
     if (hasServerRooms) {
       return [
         {
@@ -111,7 +107,7 @@ export default function AdaptiveShowroom({
       ].filter((s) => s.products.length > 0)
     }
 
-    // Flat fallback: sequential unique slices — no cross-room padding
+    // Flat fallback: sequential unique slices
     const seen = new Set<string>()
     const take = (n: number) => {
       const slice: Product[] = []
@@ -224,6 +220,8 @@ export default function AdaptiveShowroom({
     </View>
   )
 }
+
+export default React.memo(AdaptiveShowroom)
 
 const styles = StyleSheet.create({
   showroom: {

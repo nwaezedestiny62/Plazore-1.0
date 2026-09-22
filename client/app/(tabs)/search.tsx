@@ -5,6 +5,7 @@ import { ShowroomFlyCartProvider } from '@/components/showroom/ShowroomFlyCart'
 import api from '@/constants/api'
 import { CATEGORY_LIST } from '@/constants/productCatalog'
 import { Product } from '@/constants/types'
+import { useMarketplace } from '@/context/MarketplaceContext'
 import { Ionicons } from '@expo/vector-icons'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { Image } from 'expo-image'
@@ -15,7 +16,9 @@ import {
   Animated,
   Easing,
   Keyboard,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -42,6 +45,13 @@ const PAD = 16
 const GAP = 10
 const PAGE_SIZE = 20
 const MOVING_NOW_MAX = 14
+const ABSOLUTE_FILL = {
+  position: 'absolute' as const,
+  top: 0,
+  right: 0,
+  bottom: 0,
+  left: 0,
+}
 
 type SortKey =
   | 'relevance'
@@ -64,7 +74,28 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
   { key: 'views', label: 'Most viewed' },
 ]
 
-/** Exact floor images from your original paste */
+/** Maps UI sort → GET /products?sort= (server getProducts) */
+function toApiSort(sort: SortKey): string | undefined {
+  switch (sort) {
+    case 'newest':
+      return 'newest'
+    case 'oldest':
+      return 'oldest'
+    case 'price_high':
+      return 'price_desc'
+    case 'price_low':
+      return 'price_asc'
+    case 'name_az':
+      return 'name'
+    case 'name_za':
+      return 'name_za'
+    case 'views':
+      return 'trending'
+    default:
+      return undefined
+  }
+}
+
 const FLOORS: {
   id: string
   short: string
@@ -270,8 +301,12 @@ function viewScore(p: any): number {
 }
 
 function productPrice(p: any) {
-  const n = Number(p.price)
-  return Number.isFinite(n) ? n : 0
+  const candidates = [p.price, p.salePrice, p.displayPrice, p.amount, p.unitPrice]
+  for (const c of candidates) {
+    const n = typeof c === 'string' ? parseFloat(c) : Number(c)
+    if (Number.isFinite(n) && n > 0) return n
+  }
+  return 0
 }
 
 function productCreated(p: any) {
@@ -312,18 +347,19 @@ function sortProducts(list: any[], sort: SortKey): any[] {
   }
 }
 
+function resolveCategoryParam(active: string | null): string | undefined {
+  if (!active) return undefined
+  const floor = FLOORS.find((f) => f.id === active)
+  if (floor) return floor.match.length === 1 ? floor.match[0] : undefined
+  return active
+}
+
 function FloorImage({ images }: { images: [string, string, string] }) {
   const [idx, setIdx] = useState(0)
   return (
     <Image
       source={{ uri: images[Math.min(idx, 2)] }}
-      style={{
-        position: 'absolute',
-        top: 0,
-        right: 0,
-        bottom: 0,
-        left: 0,
-      }}
+      style={ABSOLUTE_FILL}
       contentFit="cover"
       transition={0}
       cachePolicy="memory-disk"
@@ -411,6 +447,7 @@ export default function BrowseScreen() {
   const insets = useSafeAreaInsets()
   const router = useRouter()
   const inputRef = useRef<TextInput>(null)
+  const { region } = useMarketplace()
 
   const [hubOpen, setHubOpen] = useState(false)
   const [query, setQuery] = useState('')
@@ -429,6 +466,9 @@ export default function BrowseScreen() {
   const [minPrice, setMinPrice] = useState('')
   const [maxPrice, setMaxPrice] = useState('')
   const [inStockOnly, setInStockOnly] = useState(false)
+  const [draftMin, setDraftMin] = useState('')
+  const [draftMax, setDraftMax] = useState('')
+  const [draftStock, setDraftStock] = useState(false)
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE)
 
   useEffect(() => {
@@ -436,11 +476,14 @@ export default function BrowseScreen() {
     ;(async () => {
       try {
         const [res, stored] = await Promise.all([
-          api.get('/products?limit=120'),
+          api.get('/products', {
+            params: { limit: 50, page: 1, region: region || 'NG', sort: 'trending' },
+          }),
           AsyncStorage.getItem(RECENT_KEY),
         ])
         if (!alive) return
-        if (res.data?.success) setAllProducts(res.data.data || [])
+        const list = Array.isArray(res.data?.data) ? res.data.data : []
+        setAllProducts(list)
         if (stored) {
           try {
             const p = JSON.parse(stored)
@@ -456,7 +499,7 @@ export default function BrowseScreen() {
     return () => {
       alive = false
     }
-  }, [])
+  }, [region])
 
   useEffect(() => {
     const t = setTimeout(() => setDebounced(query.trim()), DEBOUNCE)
@@ -466,47 +509,6 @@ export default function BrowseScreen() {
   useEffect(() => {
     setVisibleCount(PAGE_SIZE)
   }, [debounced, activeCategory, sortKey, minPrice, maxPrice, inStockOnly])
-
-  useEffect(() => {
-    if (debounced.length < 1 || activeCategory) {
-      setServerProducts([])
-      setSearchLoading(false)
-      return
-    }
-    let cancelled = false
-    setSearchLoading(true)
-    ;(async () => {
-      try {
-        const res = await api.get(
-          `/ai/search-suggest?q=${encodeURIComponent(debounced)}`,
-        )
-        if (cancelled || !res.data?.success) return
-        setServerProducts(
-          Array.isArray(res.data.data?.products) ? res.data.data.products : [],
-        )
-      } catch {
-        if (!cancelled) setServerProducts([])
-      } finally {
-        if (!cancelled) setSearchLoading(false)
-      }
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [debounced, activeCategory])
-
-  const getSeller = (p: any): SellerInfo | null => {
-    const s = p.seller
-    if (!s) return null
-    if (typeof s === 'string') return { _id: s }
-    if (!s._id) return null
-    return {
-      _id: String(s._id),
-      name: s.name,
-      storeName: s.storeName,
-      storeLogo: s.storeLogo,
-    }
-  }
 
   const matchesActive = useCallback((p: any, active: string) => {
     const cat = getProductCategory(p)
@@ -522,6 +524,72 @@ export default function BrowseScreen() {
     return false
   }, [])
 
+  // Live search / floor / sort / filters always go through GET /products
+  useEffect(() => {
+    if (debounced.length < 1 && !activeCategory) {
+      setServerProducts([])
+      setSearchLoading(false)
+      return
+    }
+
+    let cancelled = false
+    setSearchLoading(true)
+
+    const params: Record<string, string> = {
+      page: '1',
+      limit: '50',
+      region: String(region || 'NG'),
+    }
+    if (!activeCategory && debounced) params.q = debounced
+    const cat = resolveCategoryParam(activeCategory)
+    if (cat) params.category = cat
+    const apiSort = toApiSort(sortKey)
+    if (apiSort) params.sort = apiSort
+    const min = Number(minPrice)
+    const max = Number(maxPrice)
+    if (Number.isFinite(min) && min > 0) params.minPrice = String(min)
+    if (Number.isFinite(max) && max > 0) params.maxPrice = String(max)
+    if (inStockOnly) params.inStock = 'true'
+
+    ;(async () => {
+      try {
+        const res = await api.get('/products', { params })
+        if (cancelled) return
+        const list = Array.isArray(res.data?.data) ? res.data.data : []
+        setServerProducts(list)
+      } catch {
+        if (!cancelled) setServerProducts([])
+      } finally {
+        if (!cancelled) setSearchLoading(false)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [
+    debounced,
+    activeCategory,
+    sortKey,
+    minPrice,
+    maxPrice,
+    inStockOnly,
+    region,
+  ])
+
+  const getSeller = (p: any): SellerInfo | null => {
+    const s = p.seller
+    if (!s) return null
+    if (typeof s === 'string') return { _id: s }
+    if (!s._id) return null
+    return {
+      _id: String(s._id),
+      name: s.name,
+      storeName: s.storeName,
+      storeLogo: s.storeLogo,
+    }
+  }
+
   const movingNow = useMemo(
     () => sortProducts(allProducts, 'views').slice(0, MOVING_NOW_MAX),
     [allProducts],
@@ -532,13 +600,13 @@ export default function BrowseScreen() {
     if (!q && !activeCategory) return [] as any[]
 
     let products =
-      serverProducts.length > 0 && !activeCategory
+      serverProducts.length > 0
         ? serverProducts
         : allProducts
 
     if (activeCategory) {
       products = products.filter((p: any) => matchesActive(p, activeCategory))
-    } else if (q) {
+    } else if (q && serverProducts.length === 0) {
       products = products.filter((p: any) => {
         const name = (p.name || '').toLowerCase()
         const brand = (p.brand || '').toLowerCase()
@@ -626,11 +694,8 @@ export default function BrowseScreen() {
 
   const gridAnimKey = useMemo(
     () =>
-      `${activeCategory || debounced || 'idle'}-${sortKey}-${visibleCount}-${live.products
-        .map((p: any) => p._id)
-        .join(',')
-        .slice(0, 60)}`,
-    [activeCategory, debounced, sortKey, visibleCount, live.products],
+      `${activeCategory || debounced || 'idle'}-${sortKey}-${minPrice}-${maxPrice}-${inStockOnly}-${visibleCount}`,
+    [activeCategory, debounced, sortKey, minPrice, maxPrice, inStockOnly, visibleCount],
   )
 
   const pushRecent = useCallback(async (term: string) => {
@@ -655,6 +720,9 @@ export default function BrowseScreen() {
     setMinPrice('')
     setMaxPrice('')
     setInStockOnly(false)
+    setDraftMin('')
+    setDraftMax('')
+    setDraftStock(false)
     setSortKey('relevance')
     setVisibleCount(PAGE_SIZE)
     inputRef.current?.focus()
@@ -666,7 +734,7 @@ export default function BrowseScreen() {
     setCategoryLoading(true)
     setActiveCategory(floorId)
     Keyboard.dismiss()
-    setTimeout(() => setCategoryLoading(false), 500)
+    setTimeout(() => setCategoryLoading(false), 400)
   }
 
   const selectExactCategory = (cat: string) => {
@@ -675,11 +743,42 @@ export default function BrowseScreen() {
     setCategoryLoading(true)
     setActiveCategory(cat)
     Keyboard.dismiss()
-    setTimeout(() => setCategoryLoading(false), 500)
+    setTimeout(() => setCategoryLoading(false), 400)
   }
 
   const openTrendingShop = () => {
     router.push('/shop?mode=trending' as any)
+  }
+
+  const applySort = (key: SortKey) => {
+    setSortKey(key)
+    setSortOpen(false)
+  }
+
+  const openPrice = () => {
+    setDraftMin(minPrice)
+    setDraftMax(maxPrice)
+    setDraftStock(inStockOnly)
+    setSortOpen(false)
+    setPriceOpen(true)
+  }
+
+  const applyPrice = () => {
+    Keyboard.dismiss()
+    setMinPrice(String(draftMin || '').trim())
+    setMaxPrice(String(draftMax || '').trim())
+    setInStockOnly(!!draftStock)
+    setPriceOpen(false)
+  }
+
+  const resetPrice = () => {
+    setDraftMin('')
+    setDraftMax('')
+    setDraftStock(false)
+    setMinPrice('')
+    setMaxPrice('')
+    setInStockOnly(false)
+    setPriceOpen(false)
   }
 
   const renderProductGrid = (items: Product[], key: string) => (
@@ -717,7 +816,7 @@ export default function BrowseScreen() {
               <FloorImage images={f.images} />
               <LinearGradient
                 colors={['transparent', 'rgba(9,11,15,0.88)']}
-                style={StyleSheet.absoluteFill}
+                style={ABSOLUTE_FILL}
               />
               <Text style={styles.floorLabel}>{f.short}</Text>
               <Text style={styles.floorHint} numberOfLines={1}>
@@ -979,7 +1078,10 @@ export default function BrowseScreen() {
             {isSearching && (
               <>
                 <Pressable
-                  onPress={() => setSortOpen(true)}
+                  onPress={() => {
+                    setPriceOpen(false)
+                    setSortOpen(true)
+                  }}
                   style={[styles.toolBtn, sortActive && styles.toolBtnOn]}
                 >
                   <Ionicons
@@ -989,7 +1091,7 @@ export default function BrowseScreen() {
                   />
                 </Pressable>
                 <Pressable
-                  onPress={() => setPriceOpen(true)}
+                  onPress={openPrice}
                   style={[styles.toolBtn, priceActive && styles.toolBtnOn]}
                 >
                   <Ionicons
@@ -1012,101 +1114,111 @@ export default function BrowseScreen() {
           onClose={() => setHubOpen(false)}
         />
 
-        <Modal visible={sortOpen} transparent animationType="fade">
-          <Pressable
-            style={styles.modalScrim}
-            onPress={() => setSortOpen(false)}
-          />
-          <View style={styles.sheet}>
-            <Text style={styles.sheetTitle}>Sort</Text>
-            {SORT_OPTIONS.map((o) => (
-              <Pressable
-                key={o.key}
-                onPress={() => setSortKey(o.key)}
-                style={[styles.sortRow, sortKey === o.key && styles.sortRowOn]}
-              >
-                <Text
-                  style={[
-                    styles.sortRowText,
-                    sortKey === o.key && styles.sortRowTextOn,
-                  ]}
-                >
-                  {o.label}
-                </Text>
-                {sortKey === o.key ? (
-                  <Ionicons name="checkmark" size={18} color={ACCENT} />
-                ) : null}
-              </Pressable>
-            ))}
+        <Modal
+          visible={sortOpen}
+          transparent
+          animationType="slide"
+          onRequestClose={() => setSortOpen(false)}
+        >
+          <View style={styles.sheetRoot}>
             <Pressable
+              style={styles.modalScrim}
               onPress={() => setSortOpen(false)}
-              style={styles.sheetDone}
-            >
-              <Text style={styles.sheetDoneText}>Done</Text>
-            </Pressable>
+            />
+            <View style={styles.sheet}>
+              <Text style={styles.sheetTitle}>Sort</Text>
+              {SORT_OPTIONS.map((o) => (
+                <Pressable
+                  key={o.key}
+                  onPress={() => applySort(o.key)}
+                  style={[styles.sortRow, sortKey === o.key && styles.sortRowOn]}
+                >
+                  <Text
+                    style={[
+                      styles.sortRowText,
+                      sortKey === o.key && styles.sortRowTextOn,
+                    ]}
+                  >
+                    {o.label}
+                  </Text>
+                  {sortKey === o.key ? (
+                    <Ionicons name="checkmark" size={18} color={ACCENT} />
+                  ) : null}
+                </Pressable>
+              ))}
+              <Pressable
+                onPress={() => setSortOpen(false)}
+                style={styles.sheetDone}
+              >
+                <Text style={styles.sheetDoneText}>Done</Text>
+              </Pressable>
+            </View>
           </View>
         </Modal>
 
-        <Modal visible={priceOpen} transparent animationType="fade">
-          <Pressable
-            style={styles.modalScrim}
-            onPress={() => setPriceOpen(false)}
-          />
-          <View style={styles.sheet}>
-            <Text style={styles.sheetTitle}>Price filter</Text>
-            <Text style={styles.filterLabel}>Price range</Text>
-            <View style={{ flexDirection: 'row', gap: 10, marginBottom: 20 }}>
-              <TextInput
-                style={styles.filterInput}
-                placeholder="Min"
-                keyboardType="numeric"
-                value={minPrice}
-                onChangeText={(t) => setMinPrice(t.replace(/[^\d.]/g, ''))}
-                placeholderTextColor={DIM}
-                selectionColor={ACCENT}
-              />
-              <TextInput
-                style={styles.filterInput}
-                placeholder="Max"
-                keyboardType="numeric"
-                value={maxPrice}
-                onChangeText={(t) => setMaxPrice(t.replace(/[^\d.]/g, ''))}
-                placeholderTextColor={DIM}
-                selectionColor={ACCENT}
-              />
-            </View>
+        <Modal
+          visible={priceOpen}
+          transparent
+          animationType="slide"
+          onRequestClose={() => setPriceOpen(false)}
+        >
+          <KeyboardAvoidingView
+            style={styles.sheetRoot}
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          >
             <Pressable
-              onPress={() => setInStockOnly((v) => !v)}
-              style={styles.checkRow}
-            >
-              <View
-                style={[styles.checkBox, inStockOnly && styles.checkBoxOn]}
-              >
-                {inStockOnly && (
-                  <Ionicons name="checkmark" size={14} color={BG} />
-                )}
+              style={styles.modalScrim}
+              onPress={() => {
+                Keyboard.dismiss()
+                setPriceOpen(false)
+              }}
+            />
+            <View style={styles.sheet}>
+              <Text style={styles.sheetTitle}>Price filter</Text>
+              <Text style={styles.filterLabel}>Price range</Text>
+              <View style={{ flexDirection: 'row', gap: 10, marginBottom: 20 }}>
+                <TextInput
+                  style={styles.filterInput}
+                  placeholder="Min"
+                  keyboardType="numeric"
+                  value={draftMin}
+                  onChangeText={(t) => setDraftMin(t.replace(/[^\d.]/g, ''))}
+                  placeholderTextColor={DIM}
+                  selectionColor={ACCENT}
+                />
+                <TextInput
+                  style={styles.filterInput}
+                  placeholder="Max"
+                  keyboardType="numeric"
+                  value={draftMax}
+                  onChangeText={(t) => setDraftMax(t.replace(/[^\d.]/g, ''))}
+                  placeholderTextColor={DIM}
+                  selectionColor={ACCENT}
+                />
               </View>
-              <Text style={{ fontSize: 14, color: TEXT }}>In stock only</Text>
-            </Pressable>
-            <View style={{ flexDirection: 'row', gap: 12 }}>
               <Pressable
-                onPress={() => {
-                  setMinPrice('')
-                  setMaxPrice('')
-                  setInStockOnly(false)
-                }}
-                style={styles.filterReset}
+                onPress={() => setDraftStock((v) => !v)}
+                style={styles.checkRow}
               >
-                <Text style={{ fontWeight: '600', color: MUTED }}>Reset</Text>
+                <View
+                  style={[styles.checkBox, draftStock && styles.checkBoxOn]}
+                >
+                  {draftStock && (
+                    <Ionicons name="checkmark" size={14} color={BG} />
+                  )}
+                </View>
+                <Text style={{ fontSize: 14, color: TEXT }}>In stock only</Text>
               </Pressable>
-              <Pressable
-                onPress={() => setPriceOpen(false)}
-                style={styles.filterApply}
-              >
-                <Text style={{ fontWeight: '700', color: BG }}>Apply</Text>
-              </Pressable>
+              <View style={{ flexDirection: 'row', gap: 12 }}>
+                <Pressable onPress={resetPrice} style={styles.filterReset}>
+                  <Text style={{ fontWeight: '600', color: MUTED }}>Reset</Text>
+                </Pressable>
+                <Pressable onPress={applyPrice} style={styles.filterApply}>
+                  <Text style={{ fontWeight: '700', color: BG }}>Apply</Text>
+                </Pressable>
+              </View>
             </View>
-          </View>
+          </KeyboardAvoidingView>
         </Modal>
       </View>
     </ShowroomFlyCartProvider>
@@ -1210,13 +1322,6 @@ const styles = StyleSheet.create({
     color: DIM,
     paddingHorizontal: PAD,
     marginBottom: 12,
-  },
-  sectionSub: {
-    fontSize: 12,
-    color: MUTED,
-    paddingHorizontal: PAD,
-    marginTop: -6,
-    marginBottom: 14,
   },
   clearTxt: { fontSize: 13, fontWeight: '600', color: ACCENT },
   floorCard: {
@@ -1351,7 +1456,15 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     paddingHorizontal: PAD,
   },
-  modalScrim: { flex: 1, backgroundColor: 'rgba(0,0,0,0.65)' },
+  sheetRoot: { flex: 1, justifyContent: 'flex-end' },
+  modalScrim: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    backgroundColor: 'rgba(0,0,0,0.65)',
+  },
   sheet: {
     backgroundColor: SURFACE,
     borderTopWidth: StyleSheet.hairlineWidth,

@@ -21,7 +21,9 @@ import {
   FlatList,
   Image,
   Keyboard,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -194,11 +196,38 @@ type StoreItem = {
 };
 
 function str(v: any): string {
-  if (Array.isArray(v)) return v[0] || "";
-  return v || "";
+  if (Array.isArray(v)) return String(v[0] || "");
+  return v == null ? "" : String(v);
 }
 
-/** Same orb loader used on the product page */
+function defaultSortForMode(mode: string): SortKey {
+  if (mode === "new") return "newest";
+  if (mode === "trending") return "trending";
+  return "relevance";
+}
+
+/** Match server getProducts price candidates */
+function productPrice(p: Product): number {
+  const raw = p as any;
+  const candidates = [
+    raw.price,
+    raw.salePrice,
+    raw.displayPrice,
+    raw.amount,
+    raw.unitPrice,
+  ];
+  for (const c of candidates) {
+    const n = typeof c === "string" ? parseFloat(c) : Number(c);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  return 0;
+}
+
+function productStock(p: Product): number {
+  const n = Number((p as any).stock ?? 0);
+  return Number.isFinite(n) ? n : 0;
+}
+
 function StorePreloader() {
   const rotation = useRef(new Animated.Value(0)).current;
 
@@ -254,11 +283,7 @@ function CategoryImage({ category }: { category: string }) {
 
 function MenuToggle({ onPress }: { onPress: () => void }) {
   return (
-    <Pressable
-      onPress={onPress}
-      hitSlop={12}
-      style={styles.menuBtn}
-    >
+    <Pressable onPress={onPress} hitSlop={12} style={styles.menuBtn}>
       <View style={{ width: 20, gap: 5 }}>
         <View style={styles.menuLine} />
         <View style={[styles.menuLine, { width: "68%" }]} />
@@ -276,6 +301,46 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
   { key: "price_desc", label: "Price · High to low" },
   { key: "name", label: "Name A–Z" },
 ];
+
+/** Params the server getProducts actually reads */
+function buildProductParams(opts: {
+  region: string;
+  search: string;
+  mode: string;
+  category: string;
+  sub: string;
+  sort: SortKey;
+  minPrice: string;
+  maxPrice: string;
+  inStockOnly: boolean;
+}) {
+  const params: Record<string, string> = {
+    page: "1",
+    limit: "50",
+    region: opts.region || "NG",
+  };
+
+  if (opts.search.trim()) params.q = opts.search.trim();
+
+  if (opts.mode === "category" && opts.category) {
+    params.category = opts.category;
+    if (opts.sub) params.subCategory = opts.sub;
+  }
+
+  let sort = opts.sort;
+  if (opts.mode === "new" && sort === "relevance") sort = "newest";
+  if (opts.mode === "trending" && sort === "relevance") sort = "trending";
+
+  if (sort && sort !== "relevance") params.sort = sort;
+
+  const min = Number(opts.minPrice);
+  const max = Number(opts.maxPrice);
+  if (Number.isFinite(min) && min > 0) params.minPrice = String(min);
+  if (Number.isFinite(max) && max > 0) params.maxPrice = String(max);
+  if (opts.inStockOnly) params.inStock = "true";
+
+  return params;
+}
 
 export default function Shop() {
   const { region } = useMarketplace();
@@ -301,18 +366,17 @@ export default function Shop() {
   const [filterOpen, setFilterOpen] = useState(false);
   const [sortOpen, setSortOpen] = useState(false);
 
-  // Applied filters (only change on Apply)
-  const [sort, setSort] = useState<SortKey>(
-    mode === "new" ? "newest" : mode === "trending" ? "trending" : "relevance"
-  );
+  const [sort, setSort] = useState<SortKey>(() => defaultSortForMode(mode));
   const [minPrice, setMinPrice] = useState("");
   const [maxPrice, setMaxPrice] = useState("");
   const [inStockOnly, setInStockOnly] = useState(false);
 
-  // Draft filters inside the sheet
   const [draftMin, setDraftMin] = useState("");
   const [draftMax, setDraftMax] = useState("");
   const [draftStock, setDraftStock] = useState(false);
+
+  const routeKey = `${mode}|${selectedCategory}|${selectedSub}`;
+  const prevRouteKey = useRef(routeKey);
 
   const activeFilterCount = useMemo(() => {
     let n = 0;
@@ -333,9 +397,12 @@ export default function Shop() {
     setLoading(true);
     try {
       if (isStores) {
-        const res = await api.get(`/products?limit=120&region=${region || "NG"}`);
+        const res = await api.get("/products", {
+          params: { limit: 50, page: 1, region: region || "NG" },
+        });
+        const list = Array.isArray(res.data?.data) ? res.data.data : [];
         const map = new Map<string, StoreItem>();
-        (res.data?.data || []).forEach((p: any) => {
+        list.forEach((p: any) => {
           const s = p.seller;
           if (!s?._id) return;
           const id = String(s._id);
@@ -352,35 +419,21 @@ export default function Shop() {
         setStores(Array.from(map.values()));
         setProducts([]);
       } else {
-        const qs = new URLSearchParams();
-qs.set("page", "1");
-qs.set("limit", "48");
-qs.set("region", region || "NG");
-
-// search
-if (search.trim()) qs.set("q", search.trim());
-
-// category
-if (mode === "category" && selectedCategory) {
-  qs.set("category", selectedCategory);
-  if (selectedSub) qs.set("subCategory", selectedSub);
-}
-
-// sort → API
-if (sort === "newest" || mode === "new") qs.set("sort", "newest");
-else if (sort === "trending" || mode === "trending") qs.set("sort", "trending");
-else if (sort === "price_asc") qs.set("sort", "price_asc");
-else if (sort === "price_desc") qs.set("sort", "price_desc");
-else if (sort === "name") qs.set("sort", "name");
-
-// filters → API (applied state, not draft)
-if (minPrice.trim()) qs.set("minPrice", minPrice.trim());
-if (maxPrice.trim()) qs.set("maxPrice", maxPrice.trim());
-if (inStockOnly) qs.set("inStock", "true");
-
-const res = await api.get(`/products?${qs.toString()}`);
-setProducts(Array.isArray(res.data?.data) ? res.data.data : []);
-setStores([]);
+        const params = buildProductParams({
+          region: region || "NG",
+          search,
+          mode,
+          category: selectedCategory,
+          sub: selectedSub,
+          sort,
+          minPrice,
+          maxPrice,
+          inStockOnly,
+        });
+        const res = await api.get("/products", { params });
+        const list = Array.isArray(res.data?.data) ? res.data.data : [];
+        setProducts(list);
+        setStores([]);
       }
     } catch {
       setProducts([]);
@@ -389,21 +442,23 @@ setStores([]);
       setLoading(false);
     }
   }, [
-  mode,
-  selectedCategory,
-  selectedSub,
-  region,
-  isCategories,
-  isStores,
-  search,
-  sort,
-  minPrice,
-  maxPrice,
-  inStockOnly,
-]);
+    mode,
+    selectedCategory,
+    selectedSub,
+    region,
+    isCategories,
+    isStores,
+    search,
+    sort,
+    minPrice,
+    maxPrice,
+    inStockOnly,
+  ]);
 
-  // Reset local state when route mode/category changes
+  // Reset only when the actual shop route changes — not on every render
   useEffect(() => {
+    if (prevRouteKey.current === routeKey) return;
+    prevRouteKey.current = routeKey;
     setSearch("");
     setDraftSearch("");
     setMinPrice("");
@@ -412,12 +467,11 @@ setStores([]);
     setDraftMin("");
     setDraftMax("");
     setDraftStock(false);
-    setSort(
-      mode === "new" ? "newest" : mode === "trending" ? "trending" : "relevance"
-    );
-  }, [mode, selectedCategory, selectedSub]);
+    setSort(defaultSortForMode(mode));
+    setFilterOpen(false);
+    setSortOpen(false);
+  }, [routeKey, mode]);
 
-  // Debounced search → applied search
   useEffect(() => {
     const t = setTimeout(() => setSearch(draftSearch.trim()), 320);
     return () => clearTimeout(t);
@@ -431,28 +485,35 @@ setStores([]);
     let list = [...products];
     const q = search.trim().toLowerCase();
 
+    // Client fallback — server already filtered, this keeps the UI honest
     if (q) {
-      list = list.filter(
-        (p) =>
-          (p.name || "").toLowerCase().includes(q) ||
-          (p.brand || "").toLowerCase().includes(q) ||
-          String((p as any).category || "").toLowerCase().includes(q)
-      );
+      list = list.filter((p) => {
+        const hay = [
+          p.name,
+          p.brand,
+          (p as any).category,
+          (p as any).subCategory,
+          (p as any).description,
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+        return hay.includes(q);
+      });
     }
 
     const min = Number(minPrice);
     const max = Number(maxPrice);
     if (Number.isFinite(min) && min > 0)
-      list = list.filter((p) => Number(p.price) >= min);
+      list = list.filter((p) => productPrice(p) >= min);
     if (Number.isFinite(max) && max > 0)
-      list = list.filter((p) => Number(p.price) <= max);
-    if (inStockOnly) list = list.filter((p) => Number(p.stock ?? 0) > 0);
+      list = list.filter((p) => productPrice(p) <= max);
+    if (inStockOnly) list = list.filter((p) => productStock(p) > 0);
 
-    // Client sort fallback (always works even if API ignores sort)
     if (sort === "price_asc")
-      list.sort((a, b) => Number(a.price) - Number(b.price));
+      list.sort((a, b) => productPrice(a) - productPrice(b));
     else if (sort === "price_desc")
-      list.sort((a, b) => Number(b.price) - Number(a.price));
+      list.sort((a, b) => productPrice(b) - productPrice(a));
     else if (sort === "name")
       list.sort((a, b) =>
         String(a.name || "").localeCompare(String(b.name || ""))
@@ -497,20 +558,24 @@ setStores([]);
             : "Categories";
 
   const openFilters = () => {
+    Keyboard.dismiss();
     setDraftMin(minPrice);
     setDraftMax(maxPrice);
     setDraftStock(inStockOnly);
+    setSortOpen(false);
     setFilterOpen(true);
   };
 
   const applyFilters = () => {
-    setMinPrice(draftMin);
-    setMaxPrice(draftMax);
-    setInStockOnly(draftStock);
+    Keyboard.dismiss();
+    setMinPrice(String(draftMin || "").trim());
+    setMaxPrice(String(draftMax || "").trim());
+    setInStockOnly(!!draftStock);
     setFilterOpen(false);
   };
 
   const resetFilters = () => {
+    Keyboard.dismiss();
     setDraftMin("");
     setDraftMax("");
     setDraftStock(false);
@@ -518,6 +583,11 @@ setStores([]);
     setMaxPrice("");
     setInStockOnly(false);
     setFilterOpen(false);
+  };
+
+  const applySort = (key: SortKey) => {
+    setSort(key);
+    setSortOpen(false);
   };
 
   const header = (
@@ -561,7 +631,13 @@ setStores([]);
 
       {showTools ? (
         <>
-          <Pressable onPress={() => setSortOpen(true)} style={styles.toolBtn}>
+          <Pressable
+            onPress={() => {
+              setFilterOpen(false);
+              setSortOpen(true);
+            }}
+            style={styles.toolBtn}
+          >
             <Ionicons name="swap-vertical" size={18} color={TEXT} />
           </Pressable>
           <Pressable
@@ -583,7 +659,111 @@ setStores([]);
     </View>
   );
 
-  // ── Categories ─────────────────────────────────────────
+  const sortSheet = (
+    <Modal
+      visible={sortOpen}
+      transparent
+      animationType="slide"
+      onRequestClose={() => setSortOpen(false)}
+    >
+      <View style={styles.sheetRoot}>
+        <Pressable
+          style={styles.sheetBackdrop}
+          onPress={() => setSortOpen(false)}
+        />
+        <View style={styles.sheet}>
+          <View style={styles.sheetHandle} />
+          <Text style={styles.sheetTitle}>Sort by</Text>
+          {SORT_OPTIONS.map((opt) => {
+            const on = sort === opt.key;
+            return (
+              <Pressable
+                key={opt.key}
+                onPress={() => applySort(opt.key)}
+                style={styles.sheetRow}
+              >
+                <Text style={[styles.sheetRowText, on && styles.sheetRowOn]}>
+                  {opt.label}
+                </Text>
+                {on ? (
+                  <Ionicons name="checkmark" size={18} color={GREEN} />
+                ) : null}
+              </Pressable>
+            );
+          })}
+        </View>
+      </View>
+    </Modal>
+  );
+
+  const filterSheet = (
+    <Modal
+      visible={filterOpen}
+      transparent
+      animationType="slide"
+      onRequestClose={() => setFilterOpen(false)}
+    >
+      <KeyboardAvoidingView
+        style={styles.sheetRoot}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+      >
+        <Pressable
+          style={styles.sheetBackdrop}
+          onPress={() => {
+            Keyboard.dismiss();
+            setFilterOpen(false);
+          }}
+        />
+        <View style={styles.sheet}>
+          <View style={styles.sheetHandle} />
+          <Text style={styles.sheetTitle}>Filters</Text>
+
+          <Text style={styles.filterLabel}>PRICE RANGE</Text>
+          <View style={styles.priceRow}>
+            <TextInput
+              style={styles.priceInput}
+              placeholder="Min"
+              keyboardType="numeric"
+              value={draftMin}
+              onChangeText={setDraftMin}
+              placeholderTextColor={MUTED}
+            />
+            <Text style={{ color: MUTED }}>–</Text>
+            <TextInput
+              style={styles.priceInput}
+              placeholder="Max"
+              keyboardType="numeric"
+              value={draftMax}
+              onChangeText={setDraftMax}
+              placeholderTextColor={MUTED}
+            />
+          </View>
+
+          <Pressable
+            onPress={() => setDraftStock((v) => !v)}
+            style={styles.checkRow}
+          >
+            <View style={[styles.checkbox, draftStock && styles.checkboxOn]}>
+              {draftStock ? (
+                <Ionicons name="checkmark" size={14} color="#041412" />
+              ) : null}
+            </View>
+            <Text style={styles.checkLabel}>In stock only</Text>
+          </Pressable>
+
+          <View style={styles.sheetActions}>
+            <Pressable onPress={resetFilters} style={styles.btnGhost}>
+              <Text style={styles.btnGhostText}>Reset</Text>
+            </Pressable>
+            <Pressable onPress={applyFilters} style={styles.btnPrimary}>
+              <Text style={styles.btnPrimaryText}>Apply</Text>
+            </Pressable>
+          </View>
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+
   if (isCategories) {
     return (
       <SafeAreaView style={styles.root} edges={["top"]}>
@@ -616,7 +796,8 @@ setStores([]);
                       {item}
                     </Text>
                     <Text style={styles.catMeta}>
-                      {subCount} {subCount === 1 ? "sub-category" : "sub-categories"}
+                      {subCount}{" "}
+                      {subCount === 1 ? "sub-category" : "sub-categories"}
                     </Text>
                   </View>
                 </View>
@@ -631,12 +812,14 @@ setStores([]);
           }
         />
 
-        <PlazoreNavigationHub visible={hubOpen} onClose={() => setHubOpen(false)} />
+        <PlazoreNavigationHub
+          visible={hubOpen}
+          onClose={() => setHubOpen(false)}
+        />
       </SafeAreaView>
     );
   }
 
-  // ── Stores ─────────────────────────────────────────────
   if (isStores) {
     return (
       <SafeAreaView style={styles.root} edges={["top"]}>
@@ -695,12 +878,14 @@ setStores([]);
           />
         )}
 
-        <PlazoreNavigationHub visible={hubOpen} onClose={() => setHubOpen(false)} />
+        <PlazoreNavigationHub
+          visible={hubOpen}
+          onClose={() => setHubOpen(false)}
+        />
       </SafeAreaView>
     );
   }
 
-  // ── Products ───────────────────────────────────────────
   return (
     <SafeAreaView style={styles.root} edges={["top"]}>
       {header}
@@ -753,7 +938,13 @@ setStores([]);
         <Text style={styles.metaLeft}>
           {loading ? "Loading…" : `${displayedProducts.length} results`}
         </Text>
-        <Pressable onPress={() => setSortOpen(true)} hitSlop={8}>
+        <Pressable
+          onPress={() => {
+            setFilterOpen(false);
+            setSortOpen(true);
+          }}
+          hitSlop={8}
+        >
           <Text style={styles.metaRight}>
             {SORT_OPTIONS.find((s) => s.key === sort)?.label || "Relevance"}
           </Text>
@@ -767,6 +958,7 @@ setStores([]);
           data={displayedProducts}
           keyExtractor={(item) => String(item._id)}
           numColumns={2}
+          extraData={`${sort}|${minPrice}|${maxPrice}|${inStockOnly}|${search}`}
           contentContainerStyle={styles.listPad}
           columnWrapperStyle={{ justifyContent: "space-between" }}
           renderItem={({ item }) => (
@@ -790,96 +982,13 @@ setStores([]);
         />
       )}
 
-      {/* Sort sheet */}
-      <Modal visible={sortOpen} transparent animationType="slide">
-        <Pressable
-          style={styles.sheetBackdrop}
-          onPress={() => setSortOpen(false)}
-        />
-        <View style={styles.sheet}>
-          <View style={styles.sheetHandle} />
-          <Text style={styles.sheetTitle}>Sort by</Text>
-          {SORT_OPTIONS.map((opt) => {
-            const on = sort === opt.key;
-            return (
-              <Pressable
-                key={opt.key}
-                onPress={() => {
-                  setSort(opt.key);
-                  setSortOpen(false);
-                }}
-                style={styles.sheetRow}
-              >
-                <Text style={[styles.sheetRowText, on && styles.sheetRowOn]}>
-                  {opt.label}
-                </Text>
-                {on ? <Ionicons name="checkmark" size={18} color={GREEN} /> : null}
-              </Pressable>
-            );
-          })}
-        </View>
-      </Modal>
+      {sortSheet}
+      {filterSheet}
 
-      {/* Filter sheet — draft → apply */}
-      <Modal visible={filterOpen} transparent animationType="slide">
-        <Pressable
-          style={styles.sheetBackdrop}
-          onPress={() => setFilterOpen(false)}
-        />
-        <View style={styles.sheet}>
-          <View style={styles.sheetHandle} />
-          <Text style={styles.sheetTitle}>Filters</Text>
-
-          <Text style={styles.filterLabel}>PRICE RANGE</Text>
-          <View style={styles.priceRow}>
-            <TextInput
-              style={styles.priceInput}
-              placeholder="Min"
-              keyboardType="numeric"
-              value={draftMin}
-              onChangeText={setDraftMin}
-              placeholderTextColor={MUTED}
-            />
-            <Text style={{ color: MUTED }}>–</Text>
-            <TextInput
-              style={styles.priceInput}
-              placeholder="Max"
-              keyboardType="numeric"
-              value={draftMax}
-              onChangeText={setDraftMax}
-              placeholderTextColor={MUTED}
-            />
-          </View>
-
-          <Pressable
-            onPress={() => setDraftStock((v) => !v)}
-            style={styles.checkRow}
-          >
-            <View
-              style={[
-                styles.checkbox,
-                draftStock && styles.checkboxOn,
-              ]}
-            >
-              {draftStock ? (
-                <Ionicons name="checkmark" size={14} color="#041412" />
-              ) : null}
-            </View>
-            <Text style={styles.checkLabel}>In stock only</Text>
-          </Pressable>
-
-          <View style={styles.sheetActions}>
-            <Pressable onPress={resetFilters} style={styles.btnGhost}>
-              <Text style={styles.btnGhostText}>Reset</Text>
-            </Pressable>
-            <Pressable onPress={applyFilters} style={styles.btnPrimary}>
-              <Text style={styles.btnPrimaryText}>Apply</Text>
-            </Pressable>
-          </View>
-        </View>
-      </Modal>
-
-      <PlazoreNavigationHub visible={hubOpen} onClose={() => setHubOpen(false)} />
+      <PlazoreNavigationHub
+        visible={hubOpen}
+        onClose={() => setHubOpen(false)}
+      />
     </SafeAreaView>
   );
 }
@@ -961,7 +1070,6 @@ const styles = StyleSheet.create({
 
   listPad: { paddingHorizontal: 16, paddingBottom: 110 },
 
-  // Categories — full-bleed image + overlay text
   catCard: {
     marginBottom: 12,
     overflow: "hidden",
@@ -975,13 +1083,13 @@ const styles = StyleSheet.create({
     position: "relative",
   },
   catGradient: {
-  position: "absolute",
-  top: 0,
-  right: 0,
-  bottom: 0,
-  left: 0,
-  backgroundColor: "rgba(9,11,15,0.45)",
-},
+    position: "absolute",
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    backgroundColor: "rgba(9,11,15,0.45)",
+  },
   catOverlay: {
     position: "absolute",
     left: 0,
@@ -1001,7 +1109,6 @@ const styles = StyleSheet.create({
     marginTop: 3,
   },
 
-  // Stores
   storeRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -1023,7 +1130,6 @@ const styles = StyleSheet.create({
   storeName: { color: TEXT, fontSize: 14, fontWeight: "600" },
   storeBadge: { color: MUTED, fontSize: 11, marginTop: 3, fontWeight: "600" },
 
-  // Chips
   chipRow: { paddingHorizontal: 16, gap: 8, paddingBottom: 8 },
   chip: {
     paddingHorizontal: 14,
@@ -1057,8 +1163,18 @@ const styles = StyleSheet.create({
   },
   emptyActionText: { color: GREEN, fontWeight: "700", fontSize: 13 },
 
-  // Sheets
-  sheetBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.55)" },
+  sheetRoot: {
+    flex: 1,
+    justifyContent: "flex-end",
+  },
+  sheetBackdrop: {
+    position: "absolute",
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    backgroundColor: "rgba(0,0,0,0.55)",
+  },
   sheet: {
     backgroundColor: SURFACE,
     borderTopLeftRadius: 18,
@@ -1157,7 +1273,6 @@ const styles = StyleSheet.create({
   },
   btnPrimaryText: { fontWeight: "800", color: "#041412" },
 
-  // Orb loader (same as product page)
   loaderRoot: {
     flex: 1,
     backgroundColor: BG,
