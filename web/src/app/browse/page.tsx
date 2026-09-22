@@ -334,24 +334,46 @@ function BrowseInner() {
     setVisibleCount(PAGE_SIZE);
   }, [debounced, activeCategory, sortKey, minPrice, maxPrice, inStockOnly, loc]);
 
-  useEffect(() => {
-    if (debounced.length < 1 || activeCategory) {
-      setServerProducts([]);
+ useEffect(() => {
+  if (debounced.length < 1 || activeCategory) {
+    setServerProducts([]);
+    setSearchLoading(false);
+    return;
+  }
+  let cancelled = false;
+  setSearchLoading(true);
+
+  fetchMallProducts({
+    q: debounced,
+    limit: 48,
+    minPrice: minPrice || undefined,
+    maxPrice: maxPrice || undefined,
+    inStock: inStockOnly || undefined,
+    sort:
+      sortKey === "price_high"
+        ? "price_desc"
+        : sortKey === "price_low"
+          ? "price_asc"
+          : sortKey === "newest"
+            ? "newest"
+            : sortKey === "oldest"
+              ? "oldest"
+              : sortKey === "name_az"
+                ? "name_az"
+                : sortKey === "name_za"
+                  ? "name_za"
+                  : undefined,
+  }).then((products) => {
+    if (!cancelled) {
+      setServerProducts(products);
       setSearchLoading(false);
-      return;
     }
-    let cancelled = false;
-    setSearchLoading(true);
-    searchSuggest(debounced).then((products) => {
-      if (!cancelled) {
-        setServerProducts(products);
-        setSearchLoading(false);
-      }
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [debounced, activeCategory]);
+  });
+
+  return () => {
+    cancelled = true;
+  };
+}, [debounced, activeCategory, minPrice, maxPrice, inStockOnly, sortKey]);
 
   const locationIndex = useMemo(() => {
     const regions = new Map<string, number>();
@@ -513,12 +535,12 @@ function BrowseInner() {
   };
 
   const selectFloor = (id: string) => {
-    setQuery("");
-    setDebounced("");
-    setCategoryLoading(true);
-    setActiveCategory(id);
-    setTimeout(() => setCategoryLoading(false), 400);
-  };
+  setQuery("");
+  setDebounced("");
+  setCategoryLoading(true);
+  setActiveCategory(id);
+  setTimeout(() => setCategoryLoading(false), 400);
+};
 
   const locActive = !!(loc.region || loc.state || loc.city);
   const priceActive = !!(minPrice || maxPrice) || inStockOnly;

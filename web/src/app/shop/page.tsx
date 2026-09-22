@@ -284,18 +284,28 @@ const region = marketplaceRegion || DEFAULT_REGION;
         setProducts([]);
       } else {
         const qs = new URLSearchParams();
-        qs.set("page", "1");
-        qs.set("limit", "24");
-        qs.set("region", region);
-        if (mode === "new") qs.set("sort", "newest");
-        if (mode === "trending") qs.set("sort", "trending");
-        if (mode === "category" && selectedCategory) {
-          qs.set("category", selectedCategory);
-          if (selectedSub) qs.set("subCategory", selectedSub);
-        }
-        const res = await fetch(`${API}/products?${qs.toString()}`);
-        const json = await res.json();
-        setProducts(Array.isArray(json?.data) ? json.data : []);
+qs.set("page", "1");
+qs.set("limit", "48");
+qs.set("region", region);
+
+if (search.trim()) qs.set("q", search.trim());
+
+if (mode === "new") qs.set("sort", "newest");
+if (mode === "trending") qs.set("sort", "trending");
+// if you add sort state on web shop, map it the same as mobile
+
+if (mode === "category" && selectedCategory) {
+  qs.set("category", selectedCategory);
+  if (selectedSub) qs.set("subCategory", selectedSub);
+}
+
+if (minPrice.trim()) qs.set("minPrice", minPrice.trim());
+if (maxPrice.trim()) qs.set("maxPrice", maxPrice.trim());
+if (inStockOnly) qs.set("inStock", "true");
+
+const res = await fetch(`${API}/products?${qs.toString()}`);
+const json = await res.json();
+setProducts(Array.isArray(json?.data) ? json.data : []);
         setStores([]);
       }
     } catch {
@@ -304,7 +314,18 @@ const region = marketplaceRegion || DEFAULT_REGION;
     } finally {
       setLoading(false);
     }
-   }, [mode, selectedCategory, selectedSub, isCategories, isStores, region]);
+}, [
+  mode,
+  selectedCategory,
+  selectedSub,
+  region,
+  isCategories,
+  isStores,
+  search,
+  minPrice,
+  maxPrice,
+  inStockOnly,
+]);
 
   useEffect(() => {
     setSearch("");

@@ -22,15 +22,7 @@ export type ProductsResponse = {
 };
 
 export async function searchSuggest(q: string) {
-  try {
-    const json = await apiGet<{
-      success: boolean;
-      data?: { products?: import("./types").Product[] };
-    }>(`/ai/search-suggest?q=${encodeURIComponent(q)}`);
-    return Array.isArray(json.data?.products) ? json.data.products : [];
-  } catch {
-    return [];
-  }
+  return fetchMallProducts({ q, limit: 48, sort: "relevance" });
 }
 
 export async function fetchProduct(id: string) {
@@ -103,9 +95,32 @@ export type ShowroomResponse = {
   };
 };
 
-export async function fetchMallProducts() {
+export async function fetchMallProducts(opts?: {
+  q?: string;
+  category?: string;
+  subCategory?: string;
+  sort?: string;
+  minPrice?: string;
+  maxPrice?: string;
+  inStock?: boolean;
+  region?: string;
+  limit?: number;
+  page?: number;
+}) {
   try {
-    const json = await apiGet<ProductsResponse>("/products?limit=140");
+    const qs = new URLSearchParams();
+    qs.set("limit", String(opts?.limit ?? 48));
+    qs.set("page", String(opts?.page ?? 1));
+    if (opts?.region) qs.set("region", opts.region);
+    if (opts?.q) qs.set("q", opts.q);
+    if (opts?.category) qs.set("category", opts.category);
+    if (opts?.subCategory) qs.set("subCategory", opts.subCategory);
+    if (opts?.sort) qs.set("sort", opts.sort);
+    if (opts?.minPrice) qs.set("minPrice", opts.minPrice);
+    if (opts?.maxPrice) qs.set("maxPrice", opts.maxPrice);
+    if (opts?.inStock) qs.set("inStock", "true");
+
+    const json = await apiGet<ProductsResponse>(`/products?${qs.toString()}`);
     return json.data || [];
   } catch {
     return [];

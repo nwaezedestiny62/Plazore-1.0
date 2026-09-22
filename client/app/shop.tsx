@@ -389,15 +389,18 @@ setStores([]);
       setLoading(false);
     }
   }, [
-    mode,
-    selectedCategory,
-    selectedSub,
-    region,
-    isCategories,
-    isStores,
-    search,
-    sort,
-  ]);
+  mode,
+  selectedCategory,
+  selectedSub,
+  region,
+  isCategories,
+  isStores,
+  search,
+  sort,
+  minPrice,
+  maxPrice,
+  inStockOnly,
+]);
 
   // Reset local state when route mode/category changes
   useEffect(() => {
