@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { AppFeaturePrompt, type AppOnlyFeature } from "@/components/app/AppFeaturePrompt";
-import { bagCount, subscribeBag } from "@/lib/cart";
+import { AppFeaturePrompt, type AppFeature } from "@/components/app/AppFeaturePrompt";
+import { cartCount } from "@/lib/cart";
 
 const LINKS = [
   { href: "/", label: "Mall", id: "mall" },
@@ -14,12 +14,14 @@ const LINKS = [
 ];
 
 export function PlazoreNav({ active }: { active?: string }) {
-  const [feature, setFeature] = useState<AppOnlyFeature | null>(null);
+  const [feature, setFeature] = useState<AppFeature | null>(null);
   const [count, setCount] = useState(0);
 
   useEffect(() => {
-    setCount(bagCount());
-    return subscribeBag(() => setCount(bagCount()));
+    const sync = () => setCount(cartCount());
+    sync();
+    window.addEventListener("plazore-cart", sync);
+    return () => window.removeEventListener("plazore-cart", sync);
   }, []);
 
   return (
