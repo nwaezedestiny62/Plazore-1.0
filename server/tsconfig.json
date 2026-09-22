@@ -5,7 +5,11 @@
     "outDir": "./dist",
     "rootDir": "./",
     "esModuleInterop": true,
-    "moduleResolution": "NodeNext"
+    "moduleResolution": "NodeNext",
+    "skipLibCheck": true,
+    "strict": false,
+    "noEmitOnError": false
   },
-  "include": ["**/*.ts"]
+  "include": ["**/*.ts"],
+  "exclude": ["node_modules", "dist"]
 }
