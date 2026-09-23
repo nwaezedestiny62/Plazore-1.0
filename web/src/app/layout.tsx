@@ -24,8 +24,8 @@ export const metadata: Metadata = {
   title: "Plazore",
   description: "A discovery-driven commerce platform designed to make buying and selling online feel more natural. Plazore combines immersive product discovery, intelligent insights, and a structured shopping environment to reduce uncertainty between finding a product and confidently purchasing it. For sellers, Plazore provides the tools and insights to present, manage, and grow their products with greater clarity. Plazore is commerce built around discovery, insight, and confidence.",
   icons: {
-    icon: "/favicon.ico",           // → web/public/favicon.ico
-    apple: "/favicon.ico", // → web/public/apple-touch-icon.png
+    icon: "/favicon.png",           // → web/public/favicon.ico
+    apple: "/favicon.png", // → web/public/apple-touch-icon.png
   },
 };
 

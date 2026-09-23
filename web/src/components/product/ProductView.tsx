@@ -946,7 +946,7 @@ export function ProductView({ product }: { product: Product }) {
         </div>
       </header>
 
-      <div className="grid min-h-0 min-w-0 flex-1 grid-rows-[minmax(260px,48dvh)_minmax(0,1fr)] overflow-hidden lg:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)] lg:grid-rows-1">
+      <div className="grid min-h-0 min-w-0 flex-1 grid-rows-[minmax(220px,37dvh)_minmax(0,1fr)] overflow-hidden lg:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)] lg:grid-rows-1">
         <section className="relative min-h-0 min-w-0 overflow-hidden border-b border-white/6 lg:border-b-0 lg:border-r lg:border-white/6">
           <Gallery images={images} name={product.name} />
         </section>
