@@ -22,7 +22,7 @@ const spaceGrotesk = Space_Grotesk({
 
 export const metadata: Metadata = {
   title: "Plazore",
-  description: "Discovery-driven. Intelligence-led commerce platform. Aimed at reducing the Information-Confidence Gap when it comes to purchasing and lisitngs products/goods online. Online shopping made easier, smarter and more efficient. Online selling that makes the merchants ask the right questiona and solving them with all supported tools and environment. Plazore is an insight-driven ecommerce platform.",
+  description: "A discovery-driven commerce platform designed to make buying and selling online feel more natural. Plazore combines immersive product discovery, intelligent insights, and a structured shopping environment to reduce uncertainty between finding a product and confidently purchasing it. For sellers, Plazore provides the tools and insights to present, manage, and grow their products with greater clarity. Plazore is commerce built around discovery, insight, and confidence.",
   icons: {
     icon: "/favicon.ico",           // → web/public/favicon.ico
     apple: "/favicon.ico", // → web/public/apple-touch-icon.png

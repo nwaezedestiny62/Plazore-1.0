@@ -896,7 +896,7 @@ export default function PublicStorefront() {
               paddingHorizontal: H_PAD,
             }}
           >
-            <Text style={styles.sectionEyebrow}>Featured</Text>
+            <Text style={styles.sectionEyebrow}>Limelight</Text>
             <Text style={styles.sectionTitle}>From this store</Text>
 
             <ScrollView

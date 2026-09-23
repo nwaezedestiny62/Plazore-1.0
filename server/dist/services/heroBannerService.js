@@ -161,138 +161,220 @@ async function buildInterestProfile(userId, sessionId) {
 function pickWording(category, firstName, position, intensity) {
     const cat = softCat(category);
     const name = firstNameOnly(firstName);
-    // Name is a soft welcome — not every line
-    const useName = !!name &&
+
+    // A name should feel like a welcome, not a personalization gimmick.
+    const useName =
+        !!name &&
         (intensity === "strong"
             ? crypto.randomInt(0, 10) < 5
             : intensity === "medium"
                 ? crypto.randomInt(0, 10) < 4
                 : crypto.randomInt(0, 10) < 5);
+
     const framesStrong = [
         {
-            headline: useName ? `${name}, more ${cat}` : `More in ${cat}`,
-            subheadline: "A clear next step from what you already liked.",
-            ctaLabel: "Continue",
+            headline: useName ? `${name}, more to discover` : "More to discover",
+            subheadline: `${cat} is finding its way to your Showroom.`,
+            ctaLabel: "Explore",
             kicker: "FOR YOU",
             usedName: useName,
         },
         {
-            headline: useName ? `${cat} for you, ${name}` : `Worth a second look`,
-            subheadline: `${cat} — gathered simply, without the noise.`,
-            ctaLabel: "Browse",
+            headline: useName
+                ? `${name}, your Showroom has more`
+                : "Your Showroom has more",
+            subheadline: `A closer look at ${cat}, presented for where your shopping is heading.`,
+            ctaLabel: "Enter Showroom",
             kicker: cat.toUpperCase().slice(0, 18),
             usedName: useName,
         },
         {
             headline: `Keep exploring ${cat}`,
             subheadline: useName
-                ? `${name}, a short edit that follows your interest.`
-                : "A short edit that follows your interest.",
-            ctaLabel: "See the edit",
-            kicker: "FOR YOU",
+                ? `${name}, more of what caught your attention is waiting on the floor.`
+                : "More of what caught your attention is waiting on the floor.",
+            ctaLabel: "Keep exploring",
+            kicker: "SHOWROOM",
             usedName: useName,
         },
         {
-            headline: useName ? `Hi ${name} — ${cat} awaits` : `${cat}, refined`,
-            subheadline: "Trusted sellers. No rush. Your pace.",
-            ctaLabel: "Open",
-            kicker: cat.toUpperCase().slice(0, 18),
+            headline: useName
+                ? `${name}, something worth seeing`
+                : "Something worth seeing",
+            subheadline: `${cat}, brought closer to your shopping journey.`,
+            ctaLabel: "Discover",
+            kicker: "PLAZORE",
             usedName: useName,
         },
     ];
+
     const framesMedium = [
         {
-            headline: useName ? `${name}, try ${cat}` : `Exploring ${cat}`,
-            subheadline: "A few pieces that match where you’ve been looking.",
-            ctaLabel: "Take a look",
+            headline: useName
+                ? `${name}, explore ${cat}`
+                : `Explore ${cat}`,
+            subheadline: "The Showroom brings the next discovery closer.",
+            ctaLabel: "Explore",
             kicker: "DISCOVERY",
             usedName: useName,
         },
         {
-            headline: `Ideas in ${cat}`,
+            headline: `More in ${cat}`,
             subheadline: useName
-                ? `${name}, curated to feel useful — not pushy.`
-                : "Curated to feel useful — not pushy.",
-            ctaLabel: "View",
+                ? `${name}, a new part of the Showroom is ready to explore.`
+                : "A new part of the Showroom is ready to explore.",
+            ctaLabel: "View Showroom",
             kicker: cat.toUpperCase().slice(0, 18),
             usedName: useName,
         },
         {
-            headline: useName ? `For you, ${name}` : `A focused edit`,
-            subheadline: `${cat} that sits close to your recent path.`,
-            ctaLabel: "Browse",
-            kicker: "FOR YOU",
-            usedName: useName,
-        },
-        {
-            headline: `${cat} nearby`,
-            subheadline: "Small selection. Clear choices. Easy to leave.",
+            headline: useName
+                ? `For you, ${name}`
+                : "Something for your journey",
+            subheadline: `${cat} appearing closer to where your shopping is taking you.`,
             ctaLabel: "Explore",
-            kicker: cat.toUpperCase().slice(0, 18),
+            kicker: "SHOWROOM",
+            usedName: useName,
+        },
+        {
+            headline: `${cat} on the floor`,
+            subheadline: "Look around. Discover something you didn't come searching for.",
+            ctaLabel: "Step inside",
+            kicker: "SHOWROOM",
             usedName: false,
         },
     ];
+
     const framesWeakNamed = name
         ? [
             {
-                headline: position === 1 ? `Welcome, ${name}` : `Hello, ${name}`,
-                subheadline: position === 1
-                    ? "The mall is calm on purpose. Start anywhere."
-                    : "New pieces are on the floor when you’re ready.",
-                ctaLabel: position === 1 ? "Enter the mall" : "See what's new",
-                kicker: position === 1 ? "PLAZORE" : "ARRIVALS",
+                headline:
+                    position === 1
+                        ? `Welcome to Plazore, ${name}`
+                        : `Welcome back, ${name}`,
+                subheadline:
+                    position === 1
+                        ? "Let the shopping come to you."
+                        : "There's more to discover across the Showroom.",
+                ctaLabel:
+                    position === 1
+                        ? "Enter Showroom"
+                        : "Explore Showroom",
+                kicker: "PLAZORE",
                 usedName: true,
             },
             {
-                headline: position === 1
-                    ? `${name}, the mall is open`
-                    : `${name}, something new`,
-                subheadline: position === 1
-                    ? "Curated finds. Trusted sellers. Your time."
-                    : "Fresh arrivals — same quiet energy.",
-                ctaLabel: position === 1 ? "Begin" : "Explore",
-                kicker: position === 1 ? "PLAZORE" : "ARRIVALS",
+                headline:
+                    position === 1
+                        ? `${name}, the Showroom is open`
+                        : `${name}, something new is on the floor`,
+                subheadline:
+                    position === 1
+                        ? "Products, sellers and discoveries — all waiting to be explored."
+                        : "Take your time. The next discovery may already be here.",
+                ctaLabel:
+                    position === 1
+                        ? "Enter Showroom"
+                        : "Explore",
+                kicker:
+                    position === 1
+                        ? "SHOWROOM"
+                        : "NEW ON THE FLOOR",
                 usedName: true,
             },
         ]
         : [];
+
     const framesWeak = [
         {
-            headline: position === 1 ? "Discover with intention" : "Just placed",
-            subheadline: position === 1
-                ? "A quieter Digital Mall — curated pieces, trusted sellers."
-                : "New work on the floor. Same calm pace.",
-            ctaLabel: position === 1 ? "Enter the mall" : "See what's new",
-            kicker: position === 1 ? "PLAZORE" : "ARRIVALS",
+            headline:
+                position === 1
+                    ? "Let the shopping come to you."
+                    : "New on the floor",
+            subheadline:
+                position === 1
+                    ? "Welcome to the Plazore Showroom — a place to look around, discover, and shop."
+                    : "Fresh products have arrived. Take a look around.",
+            ctaLabel:
+                position === 1
+                    ? "Enter Showroom"
+                    : "Explore",
+            kicker:
+                position === 1
+                    ? "PLAZORE"
+                    : "NEW ON THE FLOOR",
             usedName: false,
         },
         {
-            headline: position === 1 ? "Shop at your pace" : "Fresh on the floor",
-            subheadline: position === 1
-                ? "No noise. Look around when it feels right."
-                : "New arrivals, same considered energy.",
-            ctaLabel: position === 1 ? "Step inside" : "Browse new",
-            kicker: position === 1 ? "PLAZORE" : "ARRIVALS",
+            headline:
+                position === 1
+                    ? "Shop beyond the search."
+                    : "Something new to discover",
+            subheadline:
+                position === 1
+                    ? "You don't always need to know what you're looking for. Start exploring."
+                    : "The Showroom brings new possibilities closer to you.",
+            ctaLabel:
+                position === 1
+                    ? "Explore Showroom"
+                    : "Discover",
+            kicker:
+                position === 1
+                    ? "SHOWROOM"
+                    : "DISCOVERY",
             usedName: false,
         },
         {
-            headline: position === 1 ? "The Digital Mall" : "New this week",
-            subheadline: position === 1
-                ? "Global finds. Local trust. Plazore."
-                : "Recently listed — ready when you are.",
-            ctaLabel: position === 1 ? "Enter" : "View arrivals",
-            kicker: position === 1 ? "PLAZORE" : "ARRIVALS",
+            headline:
+                position === 1
+                    ? "Welcome to the Digital Mall"
+                    : "Fresh on the floor",
+            subheadline:
+                position === 1
+                    ? "Explore products, sellers and discoveries — all in one place."
+                    : "Newly listed products, ready whenever you are.",
+            ctaLabel:
+                position === 1
+                    ? "Enter Showroom"
+                    : "View arrivals",
+            kicker:
+                position === 1
+                    ? "PLAZORE SHOWROOM"
+                    : "NEW ARRIVALS",
+            usedName: false,
+        },
+        {
+            headline:
+                position === 1
+                    ? "There's more to discover."
+                    : "Keep looking around.",
+            subheadline:
+                position === 1
+                    ? "The Showroom is built for the things you didn't know you wanted to see."
+                    : "You might find your next purchase somewhere you weren't expecting.",
+            ctaLabel:
+                position === 1
+                    ? "Start exploring"
+                    : "Explore",
+            kicker:
+                position === 1
+                    ? "DISCOVERY"
+                    : "SHOWROOM",
             usedName: false,
         },
         ...framesWeakNamed,
     ];
-    const pool = intensity === "strong"
-        ? framesStrong
-        : intensity === "medium"
-            ? framesMedium
-            : framesWeak;
+
+    const pool =
+        intensity === "strong"
+            ? framesStrong
+            : intensity === "medium"
+                ? framesMedium
+                : framesWeak;
+
     return pool[crypto.randomInt(0, pool.length)];
 }
+
 async function pickVisual(category, region) {
     if (category) {
         const esc = category.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

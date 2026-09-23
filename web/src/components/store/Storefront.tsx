@@ -392,7 +392,7 @@ export function Storefront({
         {products.length > 0 ? (
           <section className="mt-9">
             <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#737A86]">
-              Featured
+              Limelight
             </p>
             <p className="mt-1 text-xl font-bold tracking-tight">A closer look</p>
             <div
