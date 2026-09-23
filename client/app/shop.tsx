@@ -82,7 +82,7 @@ const CATEGORY_IMAGES: Record<string, [string, string, string]> = {
     "https://images.unsplash.com/photo-1586023492125-27b2c045efd7?w=600&q=80",
   ],
   "Kitchen & Dining": [
-    "https://images.unsplash.com/photo-1556911220-bff31c812dce?w=600&q=80",
+    "https://images.unsplash.com/photo-1556911220-bff31c812dba?w=600&q=80",
     "https://images.unsplash.com/photo-1556909114-f6e7ad7d3136?w=600&q=80",
     "https://images.unsplash.com/photo-1585515320310-4726b6f1f3d4?w=600&q=80",
   ],
@@ -195,28 +195,41 @@ type StoreItem = {
   isSellerVerified?: boolean;
 };
 
+const MODE_TABS = [
+  { label: "Categories", params: { mode: "categories" as const } },
+  { label: "New", params: { mode: "new" as const } },
+  { label: "Trending", params: { mode: "trending" as const } },
+  { label: "Stores", params: { mode: "stores" as const } },
+];
+
+const SORT_OPTIONS: { key: SortKey; label: string }[] = [
+  { key: "relevance", label: "Recommended" },
+  { key: "newest", label: "Newest" },
+  { key: "trending", label: "Most viewed" },
+  { key: "price_asc", label: "Price · Low to high" },
+  { key: "price_desc", label: "Price · High to low" },
+  { key: "name", label: "Name A–Z" },
+];
+
 function str(v: any): string {
   if (Array.isArray(v)) return String(v[0] || "");
   return v == null ? "" : String(v);
 }
 
-function defaultSortForMode(mode: string): SortKey {
-  if (mode === "new") return "newest";
-  if (mode === "trending") return "trending";
-  return "relevance";
+function viewScore(p: Product): number {
+  const any = p as any;
+  return Number(any.views ?? any.viewCount ?? p.wishlistCount ?? 0) || 0;
 }
 
-/** Match server getProducts price candidates */
 function productPrice(p: Product): number {
   const raw = p as any;
-  const candidates = [
+  for (const c of [
     raw.price,
     raw.salePrice,
     raw.displayPrice,
     raw.amount,
     raw.unitPrice,
-  ];
-  for (const c of candidates) {
+  ]) {
     const n = typeof c === "string" ? parseFloat(c) : Number(c);
     if (Number.isFinite(n) && n > 0) return n;
   }
@@ -228,21 +241,42 @@ function productStock(p: Product): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-function StorePreloader() {
+function OrbPreloader({ label }: { label?: string }) {
   const rotation = useRef(new Animated.Value(0)).current;
+  const pulse = useRef(new Animated.Value(0.7)).current;
 
   useEffect(() => {
-    const loop = Animated.loop(
+    const spin = Animated.loop(
       Animated.timing(rotation, {
         toValue: 1,
-        duration: 2600,
+        duration: 1400,
         easing: Easing.linear,
         useNativeDriver: true,
       })
     );
-    loop.start();
-    return () => loop.stop();
-  }, [rotation]);
+    const breathe = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, {
+          toValue: 1,
+          duration: 900,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulse, {
+          toValue: 0.7,
+          duration: 900,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+      ])
+    );
+    spin.start();
+    breathe.start();
+    return () => {
+      spin.stop();
+      breathe.stop();
+    };
+  }, [rotation, pulse]);
 
   const rotate = rotation.interpolate({
     inputRange: [0, 1],
@@ -253,14 +287,20 @@ function StorePreloader() {
     <View style={styles.loaderRoot}>
       <View style={styles.orbWrapper}>
         <Animated.View style={[styles.orbRing, { transform: [{ rotate }] }]} />
-        <View style={styles.orbLogoWrap}>
+        <Animated.View
+          style={[
+            styles.orbCore,
+            { opacity: pulse, transform: [{ scale: pulse }] },
+          ]}
+        >
           <Image
             source={require("@/assets/logo-1.png")}
             style={styles.orbLogo}
             resizeMode="contain"
           />
-        </View>
+        </Animated.View>
       </View>
+      {label ? <Text style={styles.loaderLabel}>{label}</Text> : null}
     </View>
   );
 }
@@ -274,6 +314,7 @@ function CategoryImage({ category }: { category: string }) {
       style={{ width: "100%", height: "100%" }}
       contentFit="cover"
       transition={220}
+      cachePolicy="memory-disk"
       onError={() => {
         if (idx < 2) setIdx((i) => i + 1);
       }}
@@ -293,16 +334,6 @@ function MenuToggle({ onPress }: { onPress: () => void }) {
   );
 }
 
-const SORT_OPTIONS: { key: SortKey; label: string }[] = [
-  { key: "relevance", label: "Relevance" },
-  { key: "newest", label: "Newest" },
-  { key: "trending", label: "Trending" },
-  { key: "price_asc", label: "Price · Low to high" },
-  { key: "price_desc", label: "Price · High to low" },
-  { key: "name", label: "Name A–Z" },
-];
-
-/** Params the server getProducts actually reads */
 function buildProductParams(opts: {
   region: string;
   search: string;
@@ -313,10 +344,11 @@ function buildProductParams(opts: {
   minPrice: string;
   maxPrice: string;
   inStockOnly: boolean;
+  allowUserSort: boolean;
 }) {
   const params: Record<string, string> = {
     page: "1",
-    limit: "50",
+    limit: "48",
     region: opts.region || "NG",
   };
 
@@ -327,17 +359,28 @@ function buildProductParams(opts: {
     if (opts.sub) params.subCategory = opts.sub;
   }
 
-  let sort = opts.sort;
-  if (opts.mode === "new" && sort === "relevance") sort = "newest";
-  if (opts.mode === "trending" && sort === "relevance") sort = "trending";
+  if (opts.mode === "new") {
+    params.sort = "newest";
+  } else if (opts.mode === "trending") {
+    params.sort = "trending";
+  } else if (opts.allowUserSort && opts.sort && opts.sort !== "relevance") {
+    const map: Record<string, string> = {
+      newest: "newest",
+      trending: "trending",
+      price_asc: "price_low",
+      price_desc: "price_high",
+      name: "name_az",
+    };
+    params.sort = map[opts.sort] || opts.sort;
+  }
 
-  if (sort && sort !== "relevance") params.sort = sort;
-
-  const min = Number(opts.minPrice);
-  const max = Number(opts.maxPrice);
-  if (Number.isFinite(min) && min > 0) params.minPrice = String(min);
-  if (Number.isFinite(max) && max > 0) params.maxPrice = String(max);
-  if (opts.inStockOnly) params.inStock = "true";
+  if (opts.allowUserSort) {
+    const min = Number(opts.minPrice);
+    const max = Number(opts.maxPrice);
+    if (Number.isFinite(min) && min > 0) params.minPrice = String(min);
+    if (Number.isFinite(max) && max > 0) params.maxPrice = String(max);
+    if (opts.inStockOnly) params.inStock = "true";
+  }
 
   return params;
 }
@@ -356,6 +399,9 @@ export default function Shop() {
 
   const isCategories = mode === "categories" && !selectedCategory;
   const isStores = mode === "stores";
+  const isCategoryBrowse = mode === "category" && !!selectedCategory;
+  const showSortFilter = isCategoryBrowse;
+  const showSortOnly = isStores;
 
   const [hubOpen, setHubOpen] = useState(false);
   const [products, setProducts] = useState<Product[]>([]);
@@ -366,7 +412,7 @@ export default function Shop() {
   const [filterOpen, setFilterOpen] = useState(false);
   const [sortOpen, setSortOpen] = useState(false);
 
-  const [sort, setSort] = useState<SortKey>(() => defaultSortForMode(mode));
+  const [sort, setSort] = useState<SortKey>("relevance");
   const [minPrice, setMinPrice] = useState("");
   const [maxPrice, setMaxPrice] = useState("");
   const [inStockOnly, setInStockOnly] = useState(false);
@@ -398,7 +444,7 @@ export default function Shop() {
     try {
       if (isStores) {
         const res = await api.get("/products", {
-          params: { limit: 50, page: 1, region: region || "NG" },
+          params: { limit: 80, page: 1, region: region || "NG" },
         });
         const list = Array.isArray(res.data?.data) ? res.data.data : [];
         const map = new Map<string, StoreItem>();
@@ -429,6 +475,7 @@ export default function Shop() {
           minPrice,
           maxPrice,
           inStockOnly,
+          allowUserSort: showSortFilter,
         });
         const res = await api.get("/products", { params });
         const list = Array.isArray(res.data?.data) ? res.data.data : [];
@@ -453,9 +500,9 @@ export default function Shop() {
     minPrice,
     maxPrice,
     inStockOnly,
+    showSortFilter,
   ]);
 
-  // Reset only when the actual shop route changes — not on every render
   useEffect(() => {
     if (prevRouteKey.current === routeKey) return;
     prevRouteKey.current = routeKey;
@@ -467,13 +514,13 @@ export default function Shop() {
     setDraftMin("");
     setDraftMax("");
     setDraftStock(false);
-    setSort(defaultSortForMode(mode));
+    setSort("relevance");
     setFilterOpen(false);
     setSortOpen(false);
-  }, [routeKey, mode]);
+  }, [routeKey]);
 
   useEffect(() => {
-    const t = setTimeout(() => setSearch(draftSearch.trim()), 320);
+    const t = setTimeout(() => setSearch(draftSearch.trim()), 300);
     return () => clearTimeout(t);
   }, [draftSearch]);
 
@@ -485,7 +532,6 @@ export default function Shop() {
     let list = [...products];
     const q = search.trim().toLowerCase();
 
-    // Client fallback — server already filtered, this keeps the UI honest
     if (q) {
       list = list.filter((p) => {
         const hay = [
@@ -493,7 +539,6 @@ export default function Shop() {
           p.brand,
           (p as any).category,
           (p as any).subCategory,
-          (p as any).description,
         ]
           .filter(Boolean)
           .join(" ")
@@ -502,41 +547,81 @@ export default function Shop() {
       });
     }
 
-    const min = Number(minPrice);
-    const max = Number(maxPrice);
-    if (Number.isFinite(min) && min > 0)
-      list = list.filter((p) => productPrice(p) >= min);
-    if (Number.isFinite(max) && max > 0)
-      list = list.filter((p) => productPrice(p) <= max);
-    if (inStockOnly) list = list.filter((p) => productStock(p) > 0);
+    if (showSortFilter) {
+      const min = Number(minPrice);
+      const max = Number(maxPrice);
+      if (Number.isFinite(min) && min > 0)
+        list = list.filter((p) => productPrice(p) >= min);
+      if (Number.isFinite(max) && max > 0)
+        list = list.filter((p) => productPrice(p) <= max);
+      if (inStockOnly) list = list.filter((p) => productStock(p) > 0);
+    }
 
-    if (sort === "price_asc")
-      list.sort((a, b) => productPrice(a) - productPrice(b));
-    else if (sort === "price_desc")
-      list.sort((a, b) => productPrice(b) - productPrice(a));
-    else if (sort === "name")
-      list.sort((a, b) =>
-        String(a.name || "").localeCompare(String(b.name || ""))
-      );
-    else if (sort === "newest")
+    if (mode === "trending") {
+      list.sort((a, b) => {
+        const dv = viewScore(b) - viewScore(a);
+        if (dv !== 0) return dv;
+        return (
+          new Date((b as any).createdAt || 0).getTime() -
+          new Date((a as any).createdAt || 0).getTime()
+        );
+      });
+    } else if (mode === "new") {
       list.sort(
         (a, b) =>
           new Date((b as any).createdAt || 0).getTime() -
           new Date((a as any).createdAt || 0).getTime()
       );
+    } else if (showSortFilter) {
+      if (sort === "price_asc")
+        list.sort((a, b) => productPrice(a) - productPrice(b));
+      else if (sort === "price_desc")
+        list.sort((a, b) => productPrice(b) - productPrice(a));
+      else if (sort === "name")
+        list.sort((a, b) =>
+          String(a.name || "").localeCompare(String(b.name || ""))
+        );
+      else if (sort === "newest")
+        list.sort(
+          (a, b) =>
+            new Date((b as any).createdAt || 0).getTime() -
+            new Date((a as any).createdAt || 0).getTime()
+        );
+      else if (sort === "trending")
+        list.sort((a, b) => viewScore(b) - viewScore(a));
+    }
 
     return list;
-  }, [products, search, minPrice, maxPrice, inStockOnly, sort]);
+  }, [
+    products,
+    search,
+    minPrice,
+    maxPrice,
+    inStockOnly,
+    sort,
+    mode,
+    showSortFilter,
+  ]);
 
   const displayedStores = useMemo(() => {
-    if (!search.trim()) return stores;
-    const q = search.toLowerCase();
-    return stores.filter(
-      (s) =>
-        (s.storeName || "").toLowerCase().includes(q) ||
-        (s.name || "").toLowerCase().includes(q)
-    );
-  }, [stores, search]);
+    let list = [...stores];
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      list = list.filter(
+        (s) =>
+          (s.storeName || "").toLowerCase().includes(q) ||
+          (s.name || "").toLowerCase().includes(q)
+      );
+    }
+    if (showSortOnly && sort === "name") {
+      list.sort((a, b) =>
+        String(a.storeName || a.name || "").localeCompare(
+          String(b.storeName || b.name || "")
+        )
+      );
+    }
+    return list;
+  }, [stores, search, sort, showSortOnly]);
 
   const filteredCategories = useMemo(() => {
     if (!search.trim()) return CATEGORY_LIST;
@@ -590,6 +675,34 @@ export default function Shop() {
     setSortOpen(false);
   };
 
+  /** Equal-width segment control — no scroll jitter */
+  const modeTabs = (
+    <View style={styles.modeTrack}>
+      {MODE_TABS.map((tab) => {
+        const active =
+          tab.params.mode === "categories"
+            ? isCategories
+            : mode === tab.params.mode;
+        return (
+          <Pressable
+            key={tab.label}
+            onPress={() =>
+              router.push({ pathname: "/shop", params: tab.params } as any)
+            }
+            style={[styles.modeTab, active && styles.modeTabOn]}
+          >
+            <Text
+              style={[styles.modeTabText, active && styles.modeTabTextOn]}
+              numberOfLines={1}
+            >
+              {tab.label}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+
   const header = (
     <View style={styles.header}>
       <MenuToggle onPress={() => setHubOpen(true)} />
@@ -600,7 +713,10 @@ export default function Shop() {
     </View>
   );
 
-  const searchBar = (placeholder: string, showTools?: boolean) => (
+  const searchBar = (
+    placeholder: string,
+    tools: "none" | "category" | "stores" = "none"
+  ) => (
     <View style={styles.searchRow}>
       <View style={styles.searchBox}>
         <Ionicons name="search" size={17} color={MUTED} />
@@ -629,7 +745,7 @@ export default function Shop() {
         )}
       </View>
 
-      {showTools ? (
+      {tools === "category" ? (
         <>
           <Pressable
             onPress={() => {
@@ -656,12 +772,24 @@ export default function Shop() {
           </Pressable>
         </>
       ) : null}
+
+      {tools === "stores" ? (
+        <Pressable
+          onPress={() => {
+            setFilterOpen(false);
+            setSortOpen(true);
+          }}
+          style={styles.toolBtn}
+        >
+          <Ionicons name="swap-vertical" size={18} color={TEXT} />
+        </Pressable>
+      ) : null}
     </View>
   );
 
   const sortSheet = (
     <Modal
-      visible={sortOpen}
+      visible={sortOpen && (showSortFilter || showSortOnly)}
       transparent
       animationType="slide"
       onRequestClose={() => setSortOpen(false)}
@@ -674,7 +802,12 @@ export default function Shop() {
         <View style={styles.sheet}>
           <View style={styles.sheetHandle} />
           <Text style={styles.sheetTitle}>Sort by</Text>
-          {SORT_OPTIONS.map((opt) => {
+          {(showSortOnly
+            ? SORT_OPTIONS.filter(
+                (o) => o.key === "relevance" || o.key === "name"
+              )
+            : SORT_OPTIONS
+          ).map((opt) => {
             const on = sort === opt.key;
             return (
               <Pressable
@@ -698,7 +831,7 @@ export default function Shop() {
 
   const filterSheet = (
     <Modal
-      visible={filterOpen}
+      visible={filterOpen && showSortFilter}
       transparent
       animationType="slide"
       onRequestClose={() => setFilterOpen(false)}
@@ -717,7 +850,6 @@ export default function Shop() {
         <View style={styles.sheet}>
           <View style={styles.sheetHandle} />
           <Text style={styles.sheetTitle}>Filters</Text>
-
           <Text style={styles.filterLabel}>PRICE RANGE</Text>
           <View style={styles.priceRow}>
             <TextInput
@@ -725,7 +857,7 @@ export default function Shop() {
               placeholder="Min"
               keyboardType="numeric"
               value={draftMin}
-              onChangeText={setDraftMin}
+              onChangeText={(t) => setDraftMin(t.replace(/[^\d.]/g, ""))}
               placeholderTextColor={MUTED}
             />
             <Text style={{ color: MUTED }}>–</Text>
@@ -734,11 +866,10 @@ export default function Shop() {
               placeholder="Max"
               keyboardType="numeric"
               value={draftMax}
-              onChangeText={setDraftMax}
+              onChangeText={(t) => setDraftMax(t.replace(/[^\d.]/g, ""))}
               placeholderTextColor={MUTED}
             />
           </View>
-
           <Pressable
             onPress={() => setDraftStock((v) => !v)}
             style={styles.checkRow}
@@ -750,7 +881,6 @@ export default function Shop() {
             </View>
             <Text style={styles.checkLabel}>In stock only</Text>
           </Pressable>
-
           <View style={styles.sheetActions}>
             <Pressable onPress={resetFilters} style={styles.btnGhost}>
               <Text style={styles.btnGhostText}>Reset</Text>
@@ -769,7 +899,7 @@ export default function Shop() {
       <SafeAreaView style={styles.root} edges={["top"]}>
         {header}
         {searchBar("Search categories…")}
-
+        {modeTabs}
         <FlatList
           data={filteredCategories}
           keyExtractor={(item) => item}
@@ -811,7 +941,6 @@ export default function Shop() {
             </View>
           }
         />
-
         <PlazoreNavigationHub
           visible={hubOpen}
           onClose={() => setHubOpen(false)}
@@ -824,10 +953,10 @@ export default function Shop() {
     return (
       <SafeAreaView style={styles.root} edges={["top"]}>
         {header}
-        {searchBar("Search stores…")}
-
+        {searchBar("Search stores…", "stores")}
+        {modeTabs}
         {loading ? (
-          <StorePreloader />
+          <OrbPreloader label="Loading stores…" />
         ) : (
           <FlatList
             data={displayedStores}
@@ -844,9 +973,14 @@ export default function Shop() {
                       source={{ uri: item.storeLogo }}
                       style={{ width: 52, height: 52 }}
                       contentFit="cover"
+                      cachePolicy="memory-disk"
                     />
                   ) : (
-                    <Ionicons name="storefront-outline" size={20} color={MUTED} />
+                    <Ionicons
+                      name="storefront-outline"
+                      size={20}
+                      color={MUTED}
+                    />
                   )}
                 </View>
                 <View style={{ flex: 1 }}>
@@ -877,7 +1011,7 @@ export default function Shop() {
             }
           />
         )}
-
+        {sortSheet}
         <PlazoreNavigationHub
           visible={hubOpen}
           onClose={() => setHubOpen(false)}
@@ -889,13 +1023,18 @@ export default function Shop() {
   return (
     <SafeAreaView style={styles.root} edges={["top"]}>
       {header}
-      {searchBar("Search products…", true)}
+      {searchBar(
+        "Search products…",
+        showSortFilter ? "category" : "none"
+      )}
+      {modeTabs}
 
       {mode === "category" && selectedCategory ? (
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.chipRow}
+          contentContainerStyle={styles.subChipRow}
+          decelerationRate="fast"
         >
           <Pressable
             onPress={() =>
@@ -905,9 +1044,11 @@ export default function Shop() {
                 sub: "",
               })
             }
-            style={[styles.chip, !selectedSub && styles.chipOn]}
+            style={[styles.subChip, !selectedSub && styles.subChipOn]}
           >
-            <Text style={[styles.chipText, !selectedSub && styles.chipTextOn]}>
+            <Text
+              style={[styles.subChipText, !selectedSub && styles.subChipTextOn]}
+            >
               All
             </Text>
           </Pressable>
@@ -923,9 +1064,12 @@ export default function Shop() {
                     sub,
                   })
                 }
-                style={[styles.chip, on && styles.chipOn]}
+                style={[styles.subChip, on && styles.subChipOn]}
               >
-                <Text style={[styles.chipText, on && styles.chipTextOn]}>
+                <Text
+                  style={[styles.subChipText, on && styles.subChipTextOn]}
+                  numberOfLines={1}
+                >
                   {sub}
                 </Text>
               </Pressable>
@@ -936,29 +1080,45 @@ export default function Shop() {
 
       <View style={styles.metaRow}>
         <Text style={styles.metaLeft}>
-          {loading ? "Loading…" : `${displayedProducts.length} results`}
+          {loading
+            ? "Loading…"
+            : mode === "trending"
+              ? "Most viewed on Plazore"
+              : mode === "new"
+                ? "Newest listings first"
+                : `${displayedProducts.length} results`}
         </Text>
-        <Pressable
-          onPress={() => {
-            setFilterOpen(false);
-            setSortOpen(true);
-          }}
-          hitSlop={8}
-        >
-          <Text style={styles.metaRight}>
-            {SORT_OPTIONS.find((s) => s.key === sort)?.label || "Relevance"}
-          </Text>
-        </Pressable>
+        {showSortFilter ? (
+          <Pressable
+            onPress={() => {
+              setFilterOpen(false);
+              setSortOpen(true);
+            }}
+            hitSlop={8}
+          >
+            <Text style={styles.metaRight}>
+              {SORT_OPTIONS.find((s) => s.key === sort)?.label || "Recommended"}
+            </Text>
+          </Pressable>
+        ) : null}
       </View>
 
       {loading ? (
-        <StorePreloader />
+        <OrbPreloader
+          label={
+            mode === "new"
+              ? "Loading new arrivals…"
+              : mode === "trending"
+                ? "Loading trending…"
+                : "Loading products…"
+          }
+        />
       ) : (
         <FlatList
           data={displayedProducts}
           keyExtractor={(item) => String(item._id)}
           numColumns={2}
-          extraData={`${sort}|${minPrice}|${maxPrice}|${inStockOnly}|${search}`}
+          extraData={`${sort}|${minPrice}|${maxPrice}|${inStockOnly}|${search}|${mode}`}
           contentContainerStyle={styles.listPad}
           columnWrapperStyle={{ justifyContent: "space-between" }}
           renderItem={({ item }) => (
@@ -984,7 +1144,6 @@ export default function Shop() {
 
       {sortSheet}
       {filterSheet}
-
       <PlazoreNavigationHub
         visible={hubOpen}
         onClose={() => setHubOpen(false)}
@@ -995,6 +1154,7 @@ export default function Shop() {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: BG },
+
   header: {
     flexDirection: "row",
     alignItems: "center",
@@ -1027,7 +1187,8 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: 8,
     paddingHorizontal: 16,
-    paddingVertical: 10,
+    paddingTop: 12,
+    paddingBottom: 10,
   },
   searchBox: {
     flex: 1,
@@ -1066,6 +1227,67 @@ const styles = StyleSheet.create({
     height: 7,
     borderRadius: 4,
     backgroundColor: "#041412",
+  },
+
+  /* Mode segment — fixed height, equal tabs, no horizontal scroll */
+  modeTrack: {
+    flexDirection: "row",
+    marginHorizontal: 16,
+    marginBottom: 12,
+    padding: 3,
+    height: 40,
+    backgroundColor: SURFACE,
+    borderWidth: 1,
+    borderColor: LINE,
+  },
+  modeTab: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    height: "100%",
+  },
+  modeTabOn: {
+    backgroundColor: TEXT,
+  },
+  modeTabText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: MUTED,
+    letterSpacing: 0.1,
+  },
+  modeTabTextOn: {
+    color: BG,
+    fontWeight: "700",
+  },
+
+  /* Sub-category chips — fixed height */
+  subChipRow: {
+    paddingHorizontal: 16,
+    paddingBottom: 10,
+    gap: 8,
+    alignItems: "center",
+  },
+  subChip: {
+    height: 34,
+    paddingHorizontal: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: SURFACE,
+    borderWidth: 1,
+    borderColor: LINE,
+  },
+  subChipOn: {
+    backgroundColor: GREEN,
+    borderColor: GREEN,
+  },
+  subChipText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: TEXT,
+  },
+  subChipTextOn: {
+    color: "#041412",
+    fontWeight: "700",
   },
 
   listPad: { paddingHorizontal: 16, paddingBottom: 110 },
@@ -1130,18 +1352,6 @@ const styles = StyleSheet.create({
   storeName: { color: TEXT, fontSize: 14, fontWeight: "600" },
   storeBadge: { color: MUTED, fontSize: 11, marginTop: 3, fontWeight: "600" },
 
-  chipRow: { paddingHorizontal: 16, gap: 8, paddingBottom: 8 },
-  chip: {
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-    backgroundColor: SURFACE,
-    borderWidth: 1,
-    borderColor: LINE,
-  },
-  chipOn: { backgroundColor: GREEN, borderColor: GREEN },
-  chipText: { fontSize: 12, fontWeight: "700", color: TEXT },
-  chipTextOn: { color: "#041412" },
-
   metaRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -1163,10 +1373,7 @@ const styles = StyleSheet.create({
   },
   emptyActionText: { color: GREEN, fontWeight: "700", fontSize: 13 },
 
-  sheetRoot: {
-    flex: 1,
-    justifyContent: "flex-end",
-  },
+  sheetRoot: { flex: 1, justifyContent: "flex-end" },
   sheetBackdrop: {
     position: "absolute",
     top: 0,
@@ -1278,6 +1485,7 @@ const styles = StyleSheet.create({
     backgroundColor: BG,
     alignItems: "center",
     justifyContent: "center",
+    gap: 16,
   },
   orbWrapper: {
     width: 110,
@@ -1297,13 +1505,19 @@ const styles = StyleSheet.create({
     borderBottomColor: "transparent",
     borderLeftColor: AI_GREEN,
   },
-  orbLogoWrap: {
+  orbCore: {
     width: 56,
     height: 56,
     borderRadius: 28,
-    backgroundColor: "rgba(16,185,129,0.1)",
+    backgroundColor: "rgba(16,185,129,0.12)",
     alignItems: "center",
     justifyContent: "center",
   },
   orbLogo: { width: 32, height: 32 },
+  loaderLabel: {
+    color: MUTED,
+    fontSize: 12,
+    fontWeight: "500",
+    letterSpacing: 0.3,
+  },
 });

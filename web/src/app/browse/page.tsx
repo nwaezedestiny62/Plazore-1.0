@@ -189,6 +189,8 @@ function sortProducts(list: Product[], sort: SortKey): Product[] {
         }),
       );
     case "views":
+    case "relevance":
+      // Relevance = most viewed when searching (same as mobile)
       return arr.sort((a, b) => {
         const d = viewScore(b) - viewScore(a);
         return d !== 0 ? d : productCreated(b) - productCreated(a);
@@ -198,8 +200,8 @@ function sortProducts(list: Product[], sort: SortKey): Product[] {
   }
 }
 
-/** UI sort → GET /products?sort= */
-function toApiSort(sort: SortKey): string | undefined {
+/** UI sort → GET /products?sort=  (matches mobile + server) */
+function toApiSort(sort: SortKey, hasQuery: boolean): string | undefined {
   switch (sort) {
     case "newest":
       return "newest";
@@ -215,6 +217,9 @@ function toApiSort(sort: SortKey): string | undefined {
       return "name_za";
     case "views":
       return "trending";
+    case "relevance":
+      // When searching → trending (views). Idle → newest.
+      return hasQuery ? "trending" : "newest";
     default:
       return undefined;
   }
@@ -254,8 +259,9 @@ function MenuLines() {
   );
 }
 
+// More breathing room between product cards
 const PRODUCT_GRID =
-  "grid grid-cols-2 gap-4 sm:gap-5 md:grid-cols-3 md:gap-5 lg:grid-cols-4 xl:grid-cols-5";
+  "grid grid-cols-2 gap-4 sm:gap-5 md:grid-cols-3 md:gap-5 lg:grid-cols-4 lg:gap-6 xl:grid-cols-5 xl:gap-6";
 
 function BrowseInner() {
   const flyCart = useShowroomFlyCart();
@@ -377,6 +383,9 @@ function BrowseInner() {
     let cancelled = false;
     setSearchLoading(true);
 
+    const hasQuery = debounced.length > 0;
+    const apiSort = toApiSort(sortKey, hasQuery);
+
     fetchMallProducts({
       q: activeCategory ? undefined : debounced || undefined,
       category: resolveCategoryParam(activeCategory),
@@ -384,7 +393,7 @@ function BrowseInner() {
       minPrice: minPrice || undefined,
       maxPrice: maxPrice || undefined,
       inStock: inStockOnly || undefined,
-      sort: toApiSort(sortKey),
+      sort: apiSort,
     }).then((products) => {
       if (!cancelled) {
         setServerProducts(products);
@@ -469,9 +478,13 @@ function BrowseInner() {
     }
     products = applyLoc(products);
     products = applyPriceStock(products);
-    const effectiveSort =
-      sortKey === "relevance" ? (q ? "views" : "newest") : sortKey;
-    return sortProducts(products, effectiveSort);
+
+    // Always re-sort client-side so Relevance + Most viewed actually change order
+    let effective: SortKey = sortKey;
+    if (sortKey === "relevance") {
+      effective = q ? "views" : "newest";
+    }
+    return sortProducts(products, effective);
   }, [
     debounced,
     activeCategory,
@@ -627,12 +640,12 @@ function BrowseInner() {
         <p className="mb-4 text-[11px] font-bold tracking-[0.12em] text-muted">
           STOREFRONTS
         </p>
-        <div className="flex gap-3 overflow-x-auto pb-1">
+        <div className="-mx-3 flex gap-3 overflow-x-auto px-3 pb-1 scrollbar-none sm:-mx-0 sm:px-0">
           {live.stores.map((s) => (
             <Link
               key={s._id}
               href={`/store/${s._id}`}
-              className="w-28 shrink-0 border border-line bg-surface p-3 text-center"
+              className="w-[7rem] shrink-0 border border-line bg-surface p-3 text-center"
             >
               <div className="mx-auto mb-2 flex h-14 w-14 items-center justify-center overflow-hidden bg-surface-2">
                 {s.storeLogo ? (
@@ -830,44 +843,45 @@ function BrowseInner() {
         </div>
       </header>
 
-      <div className="mx-auto max-w-7xl px-4 pb-28 pt-8 sm:px-6 sm:pt-10 lg:px-8">
+      <div className="mx-auto max-w-7xl px-3 pb-28 pt-6 sm:px-6 sm:pt-10 lg:px-8">
         <h1 className="font-display text-3xl tracking-tight sm:text-4xl md:text-5xl">
           Browse
         </h1>
 
-        <div className="mt-6 flex flex-col gap-3 sm:mt-8 sm:flex-row sm:items-center">
-          <label className="flex h-14 min-w-0 flex-1 items-center gap-3 border border-line bg-surface px-4 sm:h-12">
-            <span className="text-base text-muted sm:text-sm">⌕</span>
-            <input
-              value={query}
-              onChange={(e) => {
-                setQuery(e.target.value);
-                if (activeCategory) setActiveCategory(null);
-                setCategoryLoading(false);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && query.trim()) pushRecent(query);
-              }}
-              placeholder="Name, brand, category, location…"
-              className="w-full bg-transparent text-base text-text outline-none placeholder:text-muted sm:text-[15px]"
-            />
-            {(query || activeCategory || locActive || priceActive) && (
-              <button
-                type="button"
-                onClick={clearAll}
-                className="text-lg leading-none text-muted hover:text-text"
-              >
-                ×
-              </button>
-            )}
-          </label>
+        {/* Significantly taller search field */}
+        <div className="mt-6 flex flex-col gap-3 sm:mt-8 sm:flex-row sm:items-stretch">
+          <label className="flex h-10 min-w-0 flex-1 items-center gap-3 border border-line bg-surface px-4 sm:h-[5.8rem] sm:px-5">
+  <span className="text-xl text-muted sm:text-lg">⌕</span>
+  <input
+    value={query}
+    onChange={(e) => {
+      setQuery(e.target.value);
+      if (activeCategory) setActiveCategory(null);
+      setCategoryLoading(false);
+    }}
+    onKeyDown={(e) => {
+      if (e.key === "Enter" && query.trim()) pushRecent(query);
+    }}
+    placeholder="Name, brand, category, location…"
+    className="w-full bg-transparent text-base text-text outline-none placeholder:text-muted sm:text-[16px]"
+  />
+  {(query || activeCategory || locActive || priceActive) && (
+    <button
+      type="button"
+      onClick={clearAll}
+      className="text-xl leading-none text-muted hover:text-text"
+    >
+      ×
+    </button>
+  )}
+</label>
 
           {showFilterBar ? (
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-2 sm:items-stretch">
               <button
                 type="button"
                 onClick={() => setSortOpen(true)}
-                className={`h-12 shrink-0 border px-4 text-xs font-semibold tracking-wide ${
+                className={`h-14 shrink-0 border px-4 text-xs font-semibold tracking-wide sm:h-auto sm:min-h-[4.25rem] ${
                   sortActive || structure !== "products_first"
                     ? "border-ai-green/40 bg-ai-green/10 text-ai-green"
                     : "border-line bg-surface-2 text-text"
@@ -878,7 +892,7 @@ function BrowseInner() {
               <button
                 type="button"
                 onClick={openPrice}
-                className={`h-12 shrink-0 border px-4 text-xs font-semibold tracking-wide ${
+                className={`h-14 shrink-0 border px-4 text-xs font-semibold tracking-wide sm:h-auto sm:min-h-[4.25rem] ${
                   priceActive
                     ? "border-ai-green/40 bg-ai-green/10 text-ai-green"
                     : "border-line bg-surface-2 text-text"
@@ -889,7 +903,7 @@ function BrowseInner() {
               <button
                 type="button"
                 onClick={() => setLocOpen(true)}
-                className={`h-12 shrink-0 border px-4 text-xs font-semibold tracking-wide ${
+                className={`h-14 shrink-0 border px-4 text-xs font-semibold tracking-wide sm:h-auto sm:min-h-[4.25rem] ${
                   locActive
                     ? "border-ai-green/40 bg-ai-green/10 text-ai-green"
                     : "border-line bg-surface-2 text-text"
@@ -903,30 +917,38 @@ function BrowseInner() {
 
         {!isSearching ? (
           <div className="mt-10 sm:mt-12">
-            <p className="text-[11px] font-bold tracking-[0.12em] text-muted">
+            <p className="px-0 text-[11px] font-bold tracking-[0.12em] text-muted">
               EXPLORE
             </p>
-            <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-3 sm:gap-4 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-7">
-              {FLOORS.map((f) => (
-                <button
-                  key={f.id}
-                  type="button"
-                  onClick={() => selectFloor(f.id)}
-                  className="relative aspect-[3/4] overflow-hidden border border-line bg-surface text-left sm:aspect-auto sm:h-44"
-                >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={f.images[0]}
-                    alt=""
-                    className="absolute inset-0 h-full w-full object-cover"
-                  />
-                  <div className="absolute inset-0 bg-gradient-to-t from-bg via-bg/30 to-transparent" />
-                  <div className="absolute inset-x-3 bottom-3">
-                    <p className="text-sm font-semibold">{f.short}</p>
-                    <p className="truncate text-[10px] text-white/55">{f.hint}</p>
-                  </div>
-                </button>
-              ))}
+
+            {/* Horizontal swipe rail — smaller category cards (like mobile) */}
+            <div className="-mx-3 mt-4 overflow-x-auto px-3 pb-2 scrollbar-none sm:-mx-0 sm:px-0">
+              <div className="flex w-max gap-3 pr-3 sm:gap-3.5">
+                {FLOORS.map((f) => (
+                  <button
+                    key={f.id}
+                    type="button"
+                    onClick={() => selectFloor(f.id)}
+                    className="relative h-[9.5rem] w-[6.75rem] shrink-0 overflow-hidden border border-line bg-surface text-left sm:h-[10.5rem] sm:w-[7.25rem]"
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={f.images[0]}
+                      alt=""
+                      className="absolute inset-0 h-full w-full object-cover"
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-bg via-bg/40 to-transparent" />
+                    <div className="absolute inset-x-2.5 bottom-2.5">
+                      <p className="text-[13px] font-semibold leading-tight">
+                        {f.short}
+                      </p>
+                      <p className="mt-0.5 truncate text-[10px] text-white/55">
+                        {f.hint}
+                      </p>
+                    </div>
+                  </button>
+                ))}
+              </div>
             </div>
 
             {recent.length > 0 ? (
@@ -1059,7 +1081,9 @@ function BrowseInner() {
                 <button
                   key={o.key}
                   type="button"
-                  onClick={() => setSortKey(o.key)}
+                  onClick={() => {
+                    setSortKey(o.key);
+                  }}
                   className={`flex w-full items-center justify-between border px-3 py-2.5 text-left text-sm ${
                     sortKey === o.key
                       ? "border-ai-green/40 bg-ai-green/10 font-semibold text-ai-green"

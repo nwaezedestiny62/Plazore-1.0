@@ -1,10 +1,7 @@
 /**
- * PlazoreHeroBanner — 5-slot carousel like web Mall.tsx
- * GET /content/hero (auth, personalized 1+4) + /content/hero/public (admin 2,3,5)
- * Rotation is ALWAYS 12s — never use server cycleMs (that value is a 30min cache TTL)
- *
- * Image rule: never show a blank slot. Remote URLs only win if they are real
- * http(s) (or origin-resolvable) AND they actually load. On error → local asset.
+ * PlazoreHeroBanner — 5-slot carousel (web Mall parity)
+ * GET /content/hero + /content/hero/public
+ * Rotation ALWAYS 12s. Images never blank. Text is dual-phase + staggered.
  */
 
 import {
@@ -34,15 +31,16 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 const SLOT_COUNT = 5
-const HOLD_MS = 12000
-/** Image + copy crossfade together — cinematic, not sluggish */
-const CROSSFADE_MS = 1100
+const HOLD_MS = 12_000
+const CROSSFADE_MS = 3_200
+const TEXT_EXIT_MS = 720
+const TEXT_ENTER_MS = 1_150
+const TEXT_STAGGER = 95
 const SWIPE_THRESH = 48
-const TEXT_MS = 720
-const KEN_BURNS_SCALE = 1.045
+const KEN_BURNS_SCALE = 1.07
 
-const EASE_CROSSFADE = Easing.bezier(0.22, 1, 0.36, 1)
-const EASE_TEXT = Easing.bezier(0.16, 1, 0.3, 1)
+const EASE_CROSSFADE = Easing.bezier(0.33, 0, 0.2, 1)
+const EASE_TEXT = Easing.bezier(0.22, 1, 0.36, 1)
 
 const FILL = {
   position: 'absolute' as const,
@@ -68,6 +66,7 @@ export type BannerSlide = {
   ctaAction: string
   ctaTarget?: string
   media: { kind: 'image'; source: ImageSourcePropType }
+  remoteUrl?: string
 }
 
 type ApiHeroBanner = {
@@ -158,28 +157,29 @@ function isUsableRemoteUrl(url: string): boolean {
   return false
 }
 
-function sourceHasUsableUri(source: ImageSourcePropType | undefined): boolean {
-  if (!source || typeof source !== 'object') return false
-  if ('uri' in source) {
-    return isUsableRemoteUrl(String((source as { uri?: string }).uri || ''))
-  }
-  return true
+function toAbsoluteUrl(url: string): string {
+  const u = String(url || '').trim()
+  if (/^https?:\/\//i.test(u)) return u
+  if (u.startsWith('/') && WEB_ORIGIN) return `${WEB_ORIGIN}${u}`
+  return u
 }
 
 function resolveImageSource(
   imageUrl: string,
   index: number,
-): ImageSourcePropType {
-  const url = String(imageUrl || '').trim()
+): { source: ImageSourcePropType; remoteUrl?: string } {
   const fallback = localSource(index)
+  const url = String(imageUrl || '').trim()
 
   if (isUsableRemoteUrl(url)) {
-    if (/^https?:\/\//i.test(url)) return { uri: url }
-    if (url.startsWith('/') && WEB_ORIGIN) return { uri: `${WEB_ORIGIN}${url}` }
+    const absolute = toAbsoluteUrl(url)
+    return { source: { uri: absolute }, remoteUrl: absolute }
   }
 
-  if (fallback) return fallback
-  return { uri: 'data:image/gif;base64,R0lGODlhAQABAAAAACw=' }
+  if (fallback) return { source: fallback }
+  return {
+    source: { uri: 'data:image/gif;base64,R0lGODlhAQABAAAAACw=' },
+  }
 }
 
 function staticToBanner(s: StaticHeroSlide, index: number): BannerSlide {
@@ -198,23 +198,36 @@ function staticToBanner(s: StaticHeroSlide, index: number): BannerSlide {
 }
 
 function flattenBanner(raw: any, index: number): ApiHeroBanner {
-  const nested = raw?.published || raw?.creative || raw?.slot || {}
+  const nested =
+    raw?.published ||
+    raw?.creative ||
+    raw?.slot ||
+    raw?.banner ||
+    raw?.data ||
+    {}
+
+  const imageUrl =
+    raw?.imageUrl ||
+    raw?.image ||
+    raw?.mediaUrl ||
+    raw?.url ||
+    nested?.imageUrl ||
+    nested?.image ||
+    nested?.mediaUrl ||
+    nested?.url ||
+    ''
+
   return {
     position: Number(raw?.position ?? nested?.position ?? index + 1),
     controlType: raw?.controlType || nested?.controlType,
     isActive: raw?.isActive !== false && nested?.isActive !== false,
-    imageUrl:
-      raw?.imageUrl ||
-      raw?.image ||
-      nested?.imageUrl ||
-      nested?.image ||
-      '',
-    headline: raw?.headline || nested?.headline || '',
-    subheadline: raw?.subheadline || nested?.subheadline || '',
-    ctaLabel: raw?.ctaLabel || nested?.ctaLabel || '',
-    ctaAction: raw?.ctaAction || nested?.ctaAction || '',
-    ctaTarget: raw?.ctaTarget || nested?.ctaTarget || '',
-    kicker: raw?.kicker || nested?.kicker || '',
+    imageUrl: String(imageUrl || '').trim(),
+    headline: String(raw?.headline || nested?.headline || '').trim(),
+    subheadline: String(raw?.subheadline || nested?.subheadline || '').trim(),
+    ctaLabel: String(raw?.ctaLabel || nested?.ctaLabel || '').trim(),
+    ctaAction: String(raw?.ctaAction || nested?.ctaAction || '').trim(),
+    ctaTarget: String(raw?.ctaTarget || nested?.ctaTarget || '').trim(),
+    kicker: String(raw?.kicker || nested?.kicker || '').trim(),
   }
 }
 
@@ -227,7 +240,7 @@ function apiToBanner(raw: any, index: number): BannerSlide | null {
 
   if (b.isActive === false && !imageUrl && !headline) return null
 
-  const hasRealImage = isUsableRemoteUrl(imageUrl)
+  const resolved = resolveImageSource(imageUrl, pos - 1)
 
   return {
     id: `slot-${pos}`,
@@ -239,12 +252,8 @@ function apiToBanner(raw: any, index: number): BannerSlide | null {
     ctaLabel: String(b.ctaLabel || '').trim() || fallback?.ctaLabel || 'Explore',
     ctaAction: String(b.ctaAction || 'scroll_showroom'),
     ctaTarget: String(b.ctaTarget || ''),
-    media: {
-      kind: 'image',
-      source: hasRealImage
-        ? resolveImageSource(imageUrl, pos - 1)
-        : fallback?.media?.source || resolveImageSource('', pos - 1),
-    },
+    media: { kind: 'image', source: resolved.source },
+    remoteUrl: resolved.remoteUrl,
   }
 }
 
@@ -266,13 +275,21 @@ function fiveSlotDeck(
     const slot = byPos.get(pos)
 
     if (slot) {
-      const remoteWins = sourceHasUsableUri(slot.media?.source)
+      const hasRemote =
+        !!slot.remoteUrl ||
+        (typeof slot.media?.source === 'object' &&
+          'uri' in (slot.media.source as object) &&
+          isUsableRemoteUrl(
+            String((slot.media.source as { uri?: string }).uri || ''),
+          ))
+
       deck.push({
         ...base,
         ...slot,
         id: `slot-${pos}`,
         position: pos,
-        media: remoteWins ? slot.media : base?.media || slot.media,
+        media: hasRemote ? slot.media : base?.media || slot.media,
+        remoteUrl: hasRemote ? slot.remoteUrl : undefined,
       })
     } else if (base) {
       deck.push({ ...base, id: `static-${pos}`, position: pos })
@@ -312,6 +329,7 @@ async function fetchSlotList(opts: {
     headers: opts.token
       ? { Authorization: `Bearer ${opts.token}` }
       : undefined,
+    timeout: 12_000,
   })
   const json = res?.data ?? res
   return extractBanners(json)
@@ -345,6 +363,21 @@ async function loadHeroFromApi(opts: {
   return Array.from(merged.values())
 }
 
+function prefetchDeck(slides: BannerSlide[]) {
+  slides.forEach((s) => {
+    const uri =
+      s.remoteUrl ||
+      (typeof s.media?.source === 'object' &&
+      s.media.source &&
+      'uri' in s.media.source
+        ? String((s.media.source as { uri?: string }).uri || '')
+        : '')
+    if (uri && /^https?:\/\//i.test(uri)) {
+      Image.prefetch(uri).catch(() => {})
+    }
+  })
+}
+
 function KenBurnsImage({
   slide,
   width,
@@ -357,12 +390,15 @@ function KenBurnsImage({
   isActive: boolean
 }) {
   const scale = useRef(new Animated.Value(1)).current
-  const [source, setSource] = useState<ImageSourcePropType>(slide.media.source)
   const indexHint = Math.max(0, (slide.position || 1) - 1)
-  const fallback = localSource(indexHint)
+  const local = localSource(indexHint)
+
+  const [remoteOk, setRemoteOk] = useState(true)
+  const [source, setSource] = useState<ImageSourcePropType>(slide.media.source)
 
   useEffect(() => {
     setSource(slide.media.source)
+    setRemoteOk(true)
   }, [slide.id, slide.media.source])
 
   useEffect(() => {
@@ -380,24 +416,41 @@ function KenBurnsImage({
     }).start()
   }, [isActive, scale, slide.id])
 
+  const showRemote =
+    remoteOk &&
+    typeof source === 'object' &&
+    source &&
+    'uri' in source &&
+    isUsableRemoteUrl(String((source as { uri?: string }).uri || ''))
+
   return (
     <View style={[styles.mediaClip, { width, height }]}>
+      {local ? (
+        <Image
+          source={local}
+          style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 }}
+          resizeMode="cover"
+        />
+      ) : null}
+
       <Animated.View
         style={{
           position: 'absolute',
-          top: -height * 0.025,
-          left: -width * 0.025,
-          width: width * 1.05,
-          height: height * 1.05,
+          top: -height * 0.03,
+          left: -width * 0.03,
+          width: width * 1.06,
+          height: height * 1.06,
           transform: [{ scale }],
+          opacity: showRemote || !local ? 1 : 0,
         }}
       >
         <Image
           source={source}
-          style={{ width: width * 1.05, height: height * 1.05 }}
+          style={{ width: width * 1.06, height: height * 1.06 }}
           resizeMode="cover"
           onError={() => {
-            if (fallback) setSource(fallback)
+            setRemoteOk(false)
+            if (local) setSource(local)
           }}
         />
       </Animated.View>
@@ -436,11 +489,22 @@ export default function HeroBanner({
   const [current, setCurrent] = useState(0)
   const currentRef = useRef(0)
   const busyRef = useRef(false)
+
   const opacities = useRef(
-    Array.from({ length: SLOT_COUNT }, (_, i) => new Animated.Value(i === 0 ? 1 : 0)),
+    Array.from({ length: SLOT_COUNT }, (_, i) =>
+      new Animated.Value(i === 0 ? 1 : 0),
+    ),
   ).current
-  const textOpacity = useRef(new Animated.Value(1)).current
-  const textY = useRef(new Animated.Value(0)).current
+
+  const kickerOp = useRef(new Animated.Value(1)).current
+  const headOp = useRef(new Animated.Value(1)).current
+  const subOp = useRef(new Animated.Value(1)).current
+  const ctaOp = useRef(new Animated.Value(1)).current
+  const kickerY = useRef(new Animated.Value(0)).current
+  const headY = useRef(new Animated.Value(0)).current
+  const subY = useRef(new Animated.Value(0)).current
+  const ctaY = useRef(new Animated.Value(0)).current
+
   const slidesRef = useRef(slides)
   slidesRef.current = slides
 
@@ -450,7 +514,11 @@ export default function HeroBanner({
 
   useEffect(() => {
     if ((slidesProp && slidesProp.length > 0) || offlineOnly) {
-      if (slidesProp?.length) setSlides(fiveSlotDeck(slidesProp, staticFallback))
+      if (slidesProp?.length) {
+        const deck = fiveSlotDeck(slidesProp, staticFallback)
+        setSlides(deck)
+        prefetchDeck(deck)
+      }
       return
     }
 
@@ -459,7 +527,9 @@ export default function HeroBanner({
       try {
         const remote = await loadHeroFromApi({ token, region, sessionId })
         if (cancelled) return
-        setSlides(fiveSlotDeck(remote, staticFallback))
+        const deck = fiveSlotDeck(remote, staticFallback)
+        setSlides(deck)
+        prefetchDeck(deck)
       } catch {
         if (!cancelled) setSlides(fiveSlotDeck([], staticFallback))
       }
@@ -471,12 +541,7 @@ export default function HeroBanner({
   }, [slidesProp, token, region, sessionId, offlineOnly, staticFallback])
 
   useEffect(() => {
-    slides.forEach((s) => {
-      const src = s.media?.source as any
-      if (src?.uri) {
-        Image.prefetch(src.uri).catch(() => {})
-      }
-    })
+    prefetchDeck(slides)
   }, [slides])
 
   const goTo = useCallback(
@@ -489,47 +554,94 @@ export default function HeroBanner({
       if (!opacities[from] || !opacities[target]) return
 
       busyRef.current = true
-      currentRef.current = target
-      setCurrent(target)
 
-      textY.setValue(14)
-      textOpacity.setValue(0)
+      const linesOp = [kickerOp, headOp, subOp, ctaOp]
+      const linesY = [kickerY, headY, subY, ctaY]
 
+      // 1) Text fully out
       Animated.parallel([
-        Animated.timing(opacities[from], {
-          toValue: 0,
-          duration: CROSSFADE_MS,
-          easing: EASE_CROSSFADE,
-          useNativeDriver: true,
-        }),
-        Animated.timing(opacities[target], {
-          toValue: 1,
-          duration: CROSSFADE_MS,
-          easing: EASE_CROSSFADE,
-          useNativeDriver: true,
-        }),
-        Animated.timing(textOpacity, {
-          toValue: 1,
-          duration: TEXT_MS,
-          delay: 180,
-          easing: EASE_TEXT,
-          useNativeDriver: true,
-        }),
-        Animated.timing(textY, {
-          toValue: 0,
-          duration: TEXT_MS,
-          delay: 180,
-          easing: EASE_TEXT,
-          useNativeDriver: true,
-        }),
-      ]).start(({ finished }) => {
-        if (finished) {
-          opacities.forEach((v, i) => v.setValue(i === target ? 1 : 0))
-        }
-        busyRef.current = false
+        ...linesOp.map((v) =>
+          Animated.timing(v, {
+            toValue: 0,
+            duration: TEXT_EXIT_MS,
+            easing: EASE_TEXT,
+            useNativeDriver: true,
+          }),
+        ),
+        ...linesY.map((v) =>
+          Animated.timing(v, {
+            toValue: 14,
+            duration: TEXT_EXIT_MS,
+            easing: EASE_TEXT,
+            useNativeDriver: true,
+          }),
+        ),
+      ]).start(() => {
+        // 2) Swap content only after text is gone
+        currentRef.current = target
+        setCurrent(target)
+
+        // 3) Image crossfade
+        Animated.parallel([
+          Animated.timing(opacities[from], {
+            toValue: 0,
+            duration: CROSSFADE_MS,
+            easing: EASE_CROSSFADE,
+            useNativeDriver: true,
+          }),
+          Animated.timing(opacities[target], {
+            toValue: 1,
+            duration: CROSSFADE_MS,
+            easing: EASE_CROSSFADE,
+            useNativeDriver: true,
+          }),
+        ]).start()
+
+        // 4) Text in, staggered
+        linesY.forEach((v) => v.setValue(16))
+        linesOp.forEach((v) => v.setValue(0))
+
+        Animated.parallel(
+          linesOp
+            .map((v, i) =>
+              Animated.timing(v, {
+                toValue: 1,
+                duration: TEXT_ENTER_MS,
+                delay: i * TEXT_STAGGER,
+                easing: EASE_TEXT,
+                useNativeDriver: true,
+              }),
+            )
+            .concat(
+              linesY.map((v, i) =>
+                Animated.timing(v, {
+                  toValue: 0,
+                  duration: TEXT_ENTER_MS,
+                  delay: i * TEXT_STAGGER,
+                  easing: EASE_TEXT,
+                  useNativeDriver: true,
+                }),
+              ),
+            ),
+        ).start(({ finished }) => {
+          if (finished) {
+            opacities.forEach((v, i) => v.setValue(i === target ? 1 : 0))
+          }
+          busyRef.current = false
+        })
       })
     },
-    [opacities, textOpacity, textY],
+    [
+      opacities,
+      kickerOp,
+      headOp,
+      subOp,
+      ctaOp,
+      kickerY,
+      headY,
+      subY,
+      ctaY,
+    ],
   )
 
   const goToRef = useRef(goTo)
@@ -578,21 +690,15 @@ export default function HeroBanner({
       action === 'url' ||
       action === 'external'
     ) {
-      if (target.startsWith('http')) {
-        Linking.openURL(target).catch(() => {})
-      } else {
-        onScrollToShowroom?.()
-      }
+      if (target.startsWith('http')) Linking.openURL(target).catch(() => {})
+      else onScrollToShowroom?.()
       return
     }
 
     if (target.startsWith('/')) {
       let path = target
-      if (path.startsWith('/browse')) {
-        path = path.replace(/^\/browse/, '/search')
-      } else if (path.startsWith('/shop')) {
-        path = path.replace(/^\/shop/, '/search')
-      }
+      if (path.startsWith('/browse')) path = path.replace(/^\/browse/, '/search')
+      else if (path.startsWith('/shop')) path = path.replace(/^\/shop/, '/search')
       try {
         router.push(path as any)
       } catch {
@@ -604,19 +710,17 @@ export default function HeroBanner({
     switch (action) {
       case 'store':
       case 'storefront':
-      case 'seller': {
+      case 'seller':
         if (target) router.push(`/store/${target}` as any)
         else onScrollToShowroom?.()
         break
-      }
-      case 'product': {
+      case 'product':
         if (target) router.push(`/product/${target}` as any)
         else onScrollToShowroom?.()
         break
-      }
       case 'category':
       case 'search':
-      case 'browse': {
+      case 'browse':
         if (target) {
           router.push({
             pathname: '/search',
@@ -626,10 +730,6 @@ export default function HeroBanner({
           router.push('/search' as any)
         }
         break
-      }
-      case 'scroll_showroom':
-      case 'showroom':
-      case 'campaign':
       default:
         onScrollToShowroom?.()
         break
@@ -700,7 +800,7 @@ export default function HeroBanner({
         style={FILL}
       />
 
-      <Animated.View
+      <View
         pointerEvents="box-none"
         style={[
           styles.copyBlock,
@@ -708,60 +808,77 @@ export default function HeroBanner({
             paddingHorizontal: pad,
             paddingTop: statusTop + 56,
             paddingBottom: bottomPad + 78,
-            opacity: textOpacity,
-            transform: [{ translateY: textY }],
           },
         ]}
       >
-        <Text
-          style={[styles.kicker, kStyle]}
+        <Animated.Text
+          style={[
+            styles.kicker,
+            kStyle,
+            { opacity: kickerOp, transform: [{ translateY: kickerY }] },
+          ]}
           numberOfLines={2}
           adjustsFontSizeToFit
           minimumFontScale={0.65}
         >
           {copy.kicker}
-        </Text>
+        </Animated.Text>
 
-        <Text
-          style={[styles.headline, hStyle]}
+        <Animated.Text
+          style={[
+            styles.headline,
+            hStyle,
+            { opacity: headOp, transform: [{ translateY: headY }] },
+          ]}
           numberOfLines={4}
           adjustsFontSizeToFit
           minimumFontScale={0.62}
         >
           {copy.headline}
-        </Text>
+        </Animated.Text>
 
         {!!copy.subheadline && (
-          <Text
-            style={[styles.sub, sStyle]}
+          <Animated.Text
+            style={[
+              styles.sub,
+              sStyle,
+              { opacity: subOp, transform: [{ translateY: subY }] },
+            ]}
             numberOfLines={5}
             adjustsFontSizeToFit
             minimumFontScale={0.7}
           >
             {copy.subheadline}
-          </Text>
+          </Animated.Text>
         )}
 
-        <Pressable
-          onPress={handleCta}
-          style={({ pressed }) => [
-            styles.cta,
-            { paddingHorizontal: cStyle.paddingHorizontal, maxWidth: maxW },
-            pressed && styles.ctaPressed,
-          ]}
+        <Animated.View
+          style={{ opacity: ctaOp, transform: [{ translateY: ctaY }] }}
         >
-          <Text
-            style={[
-              styles.ctaText,
-              { fontSize: cStyle.fontSize, letterSpacing: cStyle.letterSpacing },
+          <Pressable
+            onPress={handleCta}
+            style={({ pressed }) => [
+              styles.cta,
+              { paddingHorizontal: cStyle.paddingHorizontal, maxWidth: maxW },
+              pressed && styles.ctaPressed,
             ]}
-            numberOfLines={2}
-            adjustsFontSizeToFit
-            minimumFontScale={0.7}
           >
-            {copy.ctaLabel}
-          </Text>
-        </Pressable>
+            <Text
+              style={[
+                styles.ctaText,
+                {
+                  fontSize: cStyle.fontSize,
+                  letterSpacing: cStyle.letterSpacing,
+                },
+              ]}
+              numberOfLines={2}
+              adjustsFontSizeToFit
+              minimumFontScale={0.7}
+            >
+              {copy.ctaLabel}
+            </Text>
+          </Pressable>
+        </Animated.View>
 
         <View style={styles.dotsRow}>
           {slides.map((_, i) => (
@@ -769,19 +886,30 @@ export default function HeroBanner({
               key={`dot-${i}`}
               onPress={() => goTo(i)}
               hitSlop={12}
-              style={[styles.dot, i === current ? styles.dotActive : styles.dotIdle]}
+              style={[
+                styles.dot,
+                i === current ? styles.dotActive : styles.dotIdle,
+              ]}
             />
           ))}
         </View>
-      </Animated.View>
+      </View>
 
       <View
         pointerEvents="box-none"
         style={[styles.arrowBar, { paddingBottom: bottomPad + 8 }]}
       >
-        <Pressable onPress={onScrollToShowroom} hitSlop={20} style={styles.arrowHit}>
+        <Pressable
+          onPress={onScrollToShowroom}
+          hitSlop={20}
+          style={styles.arrowHit}
+        >
           <Text style={styles.arrowLabel}>SHOWROOM</Text>
-          <Ionicons name="chevron-down" size={24} color="rgba(255,255,255,0.5)" />
+          <Ionicons
+            name="chevron-down"
+            size={24}
+            color="rgba(255,255,255,0.5)"
+          />
         </Pressable>
       </View>
     </View>

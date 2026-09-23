@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { HeroStage } from "@/components/mall/HeroStage";
 import {
   Bell,
   ChevronDown,
@@ -913,95 +914,7 @@ function MallInner({
     <div className="min-h-dvh bg-bg text-text">
       <MallChrome progress={progress} bagN={bagN} notifN={notifN} />
 
-      <section className="relative h-dvh min-h-[560px] overflow-hidden bg-[#090B0F]">
-        {heroSlides.map((s, i) => {
-          const active = i === slide;
-          return (
-            <div
-              key={s.id}
-              className="absolute inset-0"
-              style={{
-                opacity: active ? 1 : 0,
-                transition: "opacity 2800ms cubic-bezier(0.4, 0, 0.2, 1)",
-                pointerEvents: active ? "auto" : "none",
-              }}
-            >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={s.image}
-                alt=""
-                className="h-full w-full origin-center object-cover will-change-transform"
-                style={{
-                  transform: active ? "scale(1.06)" : "scale(1)",
-                  transition: active
-                    ? "transform 12s linear"
-                    : "transform 0ms linear",
-                }}
-              />
-            </div>
-          );
-        })}
-
-        <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-[#090B0F] via-[#090B0F]/55 to-transparent" />
-        <div className="pointer-events-none absolute inset-0 bg-gradient-to-r from-[#090B0F]/55 via-[#090B0F]/15 to-transparent" />
-        <div className="pointer-events-none absolute inset-x-0 top-0 h-28 bg-gradient-to-b from-black/40 to-transparent" />
-
-        <div className="relative z-10 flex h-full flex-col justify-end px-5 pb-28 pt-24 sm:px-8 md:px-16 md:pb-32 lg:px-24">
-          <div className="max-w-[min(100%,26rem)] md:max-w-[min(100%,32rem)]">
-            <p className="text-[10px] font-semibold tracking-[0.36em] text-[#00E575]/90 sm:text-[11px]">
-              {current.kicker}
-            </p>
-            <h1
-              className="mt-3 font-display font-medium leading-[1.12] tracking-tight text-white"
-              style={{ fontSize: headlineFs }}
-            >
-              <span className="line-clamp-3">{current.headline}</span>
-            </h1>
-            <p
-              className={`mt-3 max-w-lg leading-relaxed text-white/65 line-clamp-3 ${subClass}`}
-            >
-              {current.subheadline}
-            </p>
-            <button
-              type="button"
-              onClick={enterShowroom}
-              className="mt-7 w-fit border border-white/35 px-6 py-2.5 text-[11px] font-semibold tracking-[0.2em] uppercase text-white transition duration-300 hover:border-white hover:bg-white/5"
-            >
-              {current.ctaLabel}
-            </button>
-          </div>
-
-          {heroSlides.length > 1 ? (
-            <div className="mt-8 flex items-center gap-1.5">
-              {heroSlides.map((_, i) => (
-                <button
-                  key={i}
-                  type="button"
-                  aria-label={`Slide ${i + 1}`}
-                  onClick={() => setSlide(i)}
-                  className={`h-1 rounded-full transition-all duration-500 ${
-                    i === slide
-                      ? "w-5 bg-white/90"
-                      : "w-1.5 bg-white/25 hover:bg-white/40"
-                  }`}
-                />
-              ))}
-            </div>
-          ) : null}
-        </div>
-
-        <button
-          type="button"
-          onClick={enterShowroom}
-          className="absolute bottom-6 left-1/2 z-10 flex -translate-x-1/2 flex-col items-center gap-1 text-white/50 transition hover:text-white/90"
-          aria-label="Enter showroom"
-        >
-          <span className="text-[9px] font-semibold tracking-[0.28em] uppercase">
-            Showroom
-          </span>
-          <ChevronDown className="h-5 w-5 animate-bounce" strokeWidth={1.5} />
-        </button>
-      </section>
+      <HeroStage slides={heroSlides} onEnterShowroom={enterShowroom} />
 
       <div
         className={`fixed right-4 top-1/2 z-40 hidden -translate-y-1/2 flex-col gap-2.5 md:flex ${

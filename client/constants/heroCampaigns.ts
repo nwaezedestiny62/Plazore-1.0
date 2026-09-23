@@ -38,9 +38,9 @@ export const HERO_SLIDES: HeroSlide[] = [
     campaignKey: 'entrance_welcome',
     media: {
       kind: 'image',
-      source: require('../assets/hero/welcome.png'),
+      source: require('../assets/hero/welcome.jpg'),
     },
-    headline: 'Discover with intent. Decide with confidence.',
+    headline: 'Plaozre. Commerce in 2040.',
     subheadline:
       'A quieter way to discover what matters.',
     ctaLabel: 'Enter',

@@ -10,9 +10,9 @@ export type HeroSlide = {
 export const HERO_SLIDES: HeroSlide[] = [
   {
     id: "welcome",
-  image: "/hero/welcome.png",
+  image: "/hero/welcome.jpg",
   kicker: "PLAZORE",
-  headline: "Let the shopping come to you.",
+  headline: "Shopping and Earning evolved.",
   subheadline: "Explore the Plazore Showroom — products, sellers, and discoveries worth seeing.",
   ctaLabel: "Explore the Showroom",
 },

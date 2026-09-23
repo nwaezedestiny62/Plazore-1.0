@@ -28,7 +28,7 @@ const STATIC_FALLBACKS: Record<
   }
 > = {
   1: {
-  imageUrl: "/hero/welcome.png",
+  imageUrl: "/hero/welcome.jpg",
   headline: "Let the shopping come to you.",
   subheadline: "Explore the Plazore Showroom — products, sellers, and discoveries worth seeing.",
   ctaLabel: "Explore the Showroom",
@@ -522,7 +522,7 @@ export async function ensureHeroSlots() {
         : STATIC_FALLBACKS[s.position as 1 | 4];
 
     const creative = {
-      imageUrl: def?.imageUrl || "/hero/welcome.png",
+      imageUrl: def?.imageUrl || "/hero/welcome.jpg",
       headline: def?.headline || "Plazore",
       subheadline: def?.subheadline || "",
       ctaLabel: def?.ctaLabel || "Explore",

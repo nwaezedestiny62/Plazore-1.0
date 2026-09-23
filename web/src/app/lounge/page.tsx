@@ -5,7 +5,6 @@ import { usePathname, useRouter } from "next/navigation";
 import { useAuth, useClerk, useUser } from "@clerk/nextjs";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ArrowRight,
   Bell,
   Bookmark,
   Building2,
@@ -21,12 +20,10 @@ import {
   Music,
   Package,
   Search,
-  Settings,
   ShoppingBag,
   Sparkles,
   Store,
   User,
-  X,
 } from "lucide-react";
 import { AppFeaturePrompt, type AppFeature } from "@/components/app/AppFeaturePrompt";
 import { fetchMallProducts, searchSuggest } from "@/lib/api";
@@ -36,10 +33,9 @@ import { useMarketplace } from "@/context/MarketplaceContext";
 import type { Product } from "@/lib/types";
 import { cartCount } from "@/lib/cart";
 
-const API = process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com/api";
-const GRAD = "linear-gradient(90deg,#00E575,#3B82F6)";
+const API =
+  process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com/api";
 
-/** External category cover images */
 const CATEGORY_IMAGES: Record<string, string> = {
   Electronics:
     "https://images.unsplash.com/photo-1498049794561-7780e7231661?w=400&h=300&fit=crop",
@@ -169,7 +165,7 @@ const EXPLORE_CHIPS = [
   },
   {
     id: "trending",
-    label: "What’s popular",
+    label: "What's popular",
     href: "/shop?mode=trending",
     bg: "linear-gradient(90deg,#DB2777,#FB7185)",
   },
@@ -186,6 +182,52 @@ const EXPLORE_CHIPS = [
     bg: "linear-gradient(90deg,#7C3AED,#C084FC)",
   },
 ];
+
+/* ─── LOUNGE image fallback ─── */
+function LoungeImg({
+  src,
+  alt = "",
+  className = "h-full w-full object-cover",
+  loading = "lazy" as "lazy" | "eager",
+}: {
+  src?: string | null;
+  alt?: string;
+  className?: string;
+  loading?: "lazy" | "eager";
+}) {
+  const [failed, setFailed] = useState(!src);
+
+  useEffect(() => {
+    setFailed(!src);
+  }, [src]);
+
+  if (!src || failed) {
+    return (
+      <div
+        className={`flex items-center justify-center bg-[#12141C] ${
+          className.includes("absolute") ? "absolute inset-0" : "h-full w-full"
+        }`}
+        aria-hidden
+      >
+        <span className="select-none text-[11px] font-extrabold tracking-[0.28em] text-white/25">
+          LOUNGE
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={src}
+      alt={alt}
+      className={className}
+      loading={loading}
+      decoding="async"
+      onError={() => setFailed(true)}
+    />
+  );
+}
 
 function resolveHref(item: LoungeItem) {
   if (item.id === "help") return "/help";
@@ -289,12 +331,12 @@ function Tile({
   );
 
   const className =
-    "relative flex min-h-[132px] flex-col justify-between overflow-hidden p-3.5 transition duration-300 hover:brightness-110 sm:min-h-[140px] sm:p-4";
+    "relative flex min-h-[132px] flex-col justify-between overflow-hidden p-3.5 transition duration-200 hover:brightness-110 sm:min-h-[140px] sm:p-4";
 
   const style: React.CSSProperties = {
     background: palette.bg,
     border: `1px solid ${active ? palette.accent : "rgba(255,255,255,0.08)"}`,
-    animation: `loungeIn 700ms cubic-bezier(0.22,1,0.36,1) ${160 + index * 48}ms both`,
+    animation: `loungeIn 500ms ease-out ${Math.min(index, 12) * 30}ms both`,
   };
 
   if (isAppOnly) {
@@ -340,7 +382,7 @@ function TvAppIcon({
   const inner = (
     <>
       <span
-        className="relative flex h-[72px] w-[118px] items-center justify-center overflow-hidden shadow-[0_8px_24px_rgba(0,0,0,0.35)] transition duration-300 group-hover:brightness-110 group-focus-visible:ring-2 group-focus-visible:ring-white"
+        className="relative flex h-[72px] w-[118px] items-center justify-center overflow-hidden shadow-[0_8px_24px_rgba(0,0,0,0.35)] transition duration-200 group-hover:brightness-110 group-focus-visible:ring-2 group-focus-visible:ring-white"
         style={{
           background: `linear-gradient(160deg, ${palette.bg} 0%, #0A0B10 100%)`,
           boxShadow: `inset 0 1px 0 ${palette.accent}40, 0 8px 24px ${palette.glow}`,
@@ -366,7 +408,7 @@ function TvAppIcon({
   const wrap =
     "group flex w-[118px] shrink-0 flex-col items-center outline-none";
   const anim = {
-    animation: `loungeIn 600ms cubic-bezier(0.22,1,0.36,1) ${100 + index * 35}ms both`,
+    animation: `loungeIn 450ms ease-out ${Math.min(index, 14) * 25}ms both`,
   } as React.CSSProperties;
 
   if (isAppOnly) {
@@ -408,22 +450,11 @@ function PosterCard({
 }) {
   const inner = (
     <>
-      {image ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={image}
-          alt=""
-          className="absolute inset-0 h-full w-full object-cover"
-        />
-      ) : (
-        <div
-          className="absolute inset-0"
-          style={{
-            background:
-              "linear-gradient(115deg,#0B1220 0%,#0C1A16 45%,#0A1018 100%)",
-          }}
-        />
-      )}
+      <LoungeImg
+        src={image}
+        loading="eager"
+        className="absolute inset-0 h-full w-full object-cover"
+      />
       <div className="absolute inset-0 bg-gradient-to-t from-black/88 via-black/30 to-black/10" />
       <div className="relative z-[1] flex h-full flex-col justify-end p-6 lg:p-8">
         <p className="text-[11px] font-semibold tracking-[0.18em] text-white/55">
@@ -447,7 +478,7 @@ function PosterCard({
   );
 
   const cls =
-    "group relative block min-h-[240px] overflow-hidden bg-[#12141C] transition duration-300 hover:brightness-110 lg:min-h-[280px]";
+    "group relative block min-h-[240px] overflow-hidden bg-[#12141C] transition duration-200 hover:brightness-110 lg:min-h-[280px]";
 
   if (onClick) {
     return (
@@ -497,7 +528,13 @@ export default function LoungePage() {
   }, []);
 
   useEffect(() => {
-    fetchMallProducts().then(setAllProducts);
+    let cancelled = false;
+    fetchMallProducts().then((list) => {
+      if (!cancelled) setAllProducts(list || []);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -556,7 +593,7 @@ export default function LoungePage() {
     setSearchLoading(true);
     searchSuggest(debounced).then((products) => {
       if (!cancelled) {
-        setServerProducts(products);
+        setServerProducts(products || []);
         setSearchLoading(false);
       }
     });
@@ -583,7 +620,7 @@ export default function LoungePage() {
       };
 
     const products: Hit[] = (serverProducts || []).slice(0, 8).map((p) => ({
-      type: "product",
+      type: "product" as const,
       id: p._id,
       label: p.name,
       image: p.images?.[0],
@@ -664,8 +701,12 @@ export default function LoungePage() {
       [...regionalProducts]
         .filter((p) => p.images?.[0] && p.isActive !== false)
         .sort((a, b) => {
-          const aScore = Number((a as any).views ?? a.wishlistCount ?? 0);
-          const bScore = Number((b as any).views ?? b.wishlistCount ?? 0);
+          const aScore = Number(
+            (a as { views?: number }).views ?? a.wishlistCount ?? 0
+          );
+          const bScore = Number(
+            (b as { views?: number }).views ?? b.wishlistCount ?? 0
+          );
           if (bScore !== aScore) return bScore - aScore;
           return (
             new Date(b.createdAt || 0).getTime() -
@@ -679,7 +720,16 @@ export default function LoungePage() {
   const storePicks = useMemo(() => {
     const map = new Map<string, StorePick>();
     regionalProducts.forEach((p) => {
-      const s = p.seller as any;
+      const s = p.seller as
+        | {
+            _id?: string;
+            storeName?: string;
+            name?: string;
+            storeLogo?: string;
+          }
+        | string
+        | null
+        | undefined;
       if (!s || typeof s === "string" || !s._id) return;
       const id = String(s._id);
       if (map.has(id)) return;
@@ -690,84 +740,76 @@ export default function LoungePage() {
         cover: p.images?.[0],
       });
     });
-    return Array.from(map.values()).slice(0, 14);
+    return Array.from(map.values()).slice(0, 12);
   }, [regionalProducts]);
 
-  let mobileTileIndex = 0;
   const heroPoster =
-    newArrivals[0]?.images?.[0] || trendingPicks[0]?.images?.[0];
+    newArrivals[0]?.images?.[0] ||
+    trendingPicks[0]?.images?.[0] ||
+    null;
+
+  /* ── mobile grid tiles from first lounge section ── */
+  const mobileTiles = useMemo(() => {
+    const items = LOUNGE_SECTIONS[0]?.items || allLoungeItems.slice(0, 8);
+    return items;
+  }, [allLoungeItems]);
 
   return (
-    <div className="lounge-root min-h-dvh bg-[#050508] text-[#F5F7FA]">
-      <style>{`
+    <div className="min-h-dvh bg-[#090B0F] text-[#F5F7FA]">
+      <style jsx global>{`
         @keyframes loungeIn {
-          from { opacity: 0; transform: translateY(14px); }
-          to { opacity: 1; transform: translateY(0); }
+          from {
+            opacity: 0;
+            transform: translateY(10px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
         }
-        .tv-row::-webkit-scrollbar { display: none; }
-        .tv-row { scrollbar-width: none; }
-        .lounge-root, .lounge-root * { border-radius: 0 !important; }
+        .tv-row {
+          scrollbar-width: none;
+          -ms-overflow-style: none;
+        }
+        .tv-row::-webkit-scrollbar {
+          display: none;
+        }
       `}</style>
 
-      {/* ════════════ MOBILE ════════════ */}
-      <div className="md:hidden">
-        <header className="sticky top-0 z-40 flex h-14 items-center justify-between border-b border-white/5 bg-[#050508]/90 px-4 backdrop-blur-md">
-          <p className="text-[10px] font-extrabold tracking-[0.2em] text-white/35">
-            NAVIGATION
-          </p>
-          <Link
-            href="/"
-            className="flex h-9 w-9 items-center justify-center border border-white/10 bg-[#11131C]"
-            aria-label="Close lounge"
-          >
-            <X className="h-4 w-4" />
-          </Link>
-        </header>
-
-        <div className="px-4 pb-20 pt-5">
-          <div className="relative flex min-h-[72px] items-center justify-center">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src="/logo-2.png"
-              alt="Plazore"
-              className="h-[72px] w-[120px] object-contain"
-              onError={(e) => {
-                const el = e.target as HTMLImageElement;
-                if (el.src.indexOf("logo-2") === -1) el.src = "/logo-2.png";
-                else el.style.display = "none";
-              }}
-            />
+      {/* ═══════ MOBILE ═══════ */}
+      <div className="lg:hidden">
+        <header className="sticky top-0 z-30 border-b border-white/[0.06] bg-[#090B0F]/90 px-4 py-3 backdrop-blur-md">
+          <div className="flex items-center gap-3">
+            <div className="min-w-0 flex-1">
+              <p className="text-[11px] font-semibold tracking-[0.16em] text-white/40">
+                PLAZORE
+              </p>
+              <p className="truncate text-[15px] font-bold">Lounge</p>
+            </div>
+            <Link
+              href="/cart"
+              className="relative flex h-9 w-9 items-center justify-center border border-white/10 bg-[#11131C]"
+            >
+              <ShoppingBag className="h-4 w-4" />
+              {bag > 0 && (
+                <span className="absolute -right-1 -top-1 min-w-[16px] bg-[#00E575] px-1 text-center text-[9px] font-extrabold text-[#041412]">
+                  {bag > 99 ? "99+" : bag}
+                </span>
+              )}
+            </Link>
           </div>
-
-          <label
-            className="mx-auto mt-4 flex h-12 max-w-2xl items-center gap-3 border bg-[#0B0C12] px-4"
-            style={{
-              borderColor: query ? "#00E575" : "rgba(255,255,255,0.08)",
-            }}
-          >
-            <Search
-              className="h-4 w-4 shrink-0"
-              style={{
-                color: query ? "#00E575" : "rgba(245,247,250,0.35)",
-              }}
-            />
+          <label className="mt-3 flex h-11 items-center gap-2 border border-white/10 bg-white/[0.05] px-3">
+            <Search className="h-4 w-4 shrink-0 text-white/40" />
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Find products, stores, or categories"
-              className="w-full bg-transparent text-sm outline-none placeholder:text-white/35"
+              placeholder="Search the mall"
+              className="w-full bg-transparent text-[14px] outline-none placeholder:text-white/35"
             />
-            {query && (
-              <button
-                type="button"
-                onClick={() => setQuery("")}
-                className="text-lg leading-none text-white/35"
-              >
-                ×
-              </button>
-            )}
           </label>
+        </header>
 
+        <div className="px-4 pb-10 pt-4">
           {searching ? (
             <SearchResults
               query={query}
@@ -778,78 +820,237 @@ export default function LoungePage() {
             />
           ) : (
             <>
-              <button
-                type="button"
-                onClick={handleSellerCta}
-                className="mt-7 w-full overflow-hidden text-left"
-              >
+              <section className="mb-5 grid grid-cols-1 gap-3">
+                <PosterCard
+                  href="/shop"
+                  image={heroPoster}
+                  kicker="FOR YOU"
+                  title="Find something you actually want"
+                  body="Browse the mall, save what you like, and check out when you're ready."
+                  cta="Start shopping"
+                />
                 {isSeller ? (
-                  <div
-                    className="flex items-center gap-3 px-3.5 py-3.5"
-                    style={{ backgroundImage: GRAD }}
-                  >
-                    <span className="flex h-[42px] w-[42px] shrink-0 items-center justify-center overflow-hidden bg-black/15">
-                      {storeLogo ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={storeLogo}
-                          alt=""
-                          className="h-full w-full object-cover"
-                        />
-                      ) : (
-                        <Store className="h-[18px] w-[18px] text-[#050508]" />
-                      )}
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block text-sm font-bold text-[#050508]">
-                        {storeName || "Your store"}
-                      </span>
-                      <span className="mt-0.5 block text-xs text-[#050508]/65">
-                        Manage products, orders & messages
-                      </span>
-                    </span>
-                    <ArrowRight className="h-4 w-4 shrink-0 text-[#050508]" />
-                  </div>
+                  <PosterCard
+                    href="/seller"
+                    image={storeLogo}
+                    kicker="YOUR STORE"
+                    title={storeName || "Seller dashboard"}
+                    body="Listings, orders, messages, and payouts."
+                    cta="Open your store"
+                  />
                 ) : (
-                  <div className="flex items-center gap-3 border border-white/8 bg-[#0B0C12] px-3.5 py-3.5">
-                    <span className="flex h-[42px] w-[42px] items-center justify-center bg-[#11131C]">
-                      <Store className="h-5 w-5" />
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block text-sm font-bold">
-                        Start selling
-                      </span>
-                      <span className="mt-0.5 block text-xs text-white/65">
-                        Open a store and reach shoppers on Plazore
-                      </span>
-                    </span>
-                    <ArrowRight className="h-4 w-4 text-white/35" />
-                  </div>
+                  <PosterCard
+                    onClick={handleSellerCta}
+                    kicker="SELL ON PLAZORE"
+                    title="Turn what you sell into a store"
+                    body="List products and meet buyers already shopping."
+                    cta="Start selling"
+                  />
                 )}
-              </button>
+              </section>
 
-              {LOUNGE_SECTIONS.map((section) => (
-                <section key={section.id} className="mt-9">
-                  <p className="mb-3 text-[10px] font-extrabold tracking-[0.16em] uppercase text-white/35">
-                    {section.title}
-                  </p>
-                  <div className="grid grid-cols-2 gap-2.5 sm:gap-3">
-                    {section.items.map((item) => {
-                      const idx = mobileTileIndex++;
-                      return (
-                        <Tile
-                          key={item.id}
-                          item={item}
-                          active={isTileActive(item, pathname)}
-                          index={idx}
-                          bagCount={item.id === "cart" ? bag : undefined}
-                          onAppOnly={onAppOnly}
-                        />
-                      );
-                    })}
+              <section className="mb-6">
+                <div className="tv-row flex gap-2 overflow-x-auto pb-1">
+                  {EXPLORE_CHIPS.map((chip) => (
+                    <Link
+                      key={chip.id}
+                      href={chip.href}
+                      className="flex h-11 shrink-0 items-center px-4 text-[13px] font-bold text-white"
+                      style={{ background: chip.bg }}
+                    >
+                      {chip.label}
+                    </Link>
+                  ))}
+                </div>
+              </section>
+
+              {/* Jump in — ALL lounge tiles (profile, orders, messages, etc.) */}
+<section className="mb-8">
+  <p className="mb-3 text-[13px] font-medium text-white/60">Jump in</p>
+
+  {LOUNGE_SECTIONS.map((section) => (
+    <div key={section.id || section.title} className="mb-5 last:mb-0">
+      {section.title ? (
+        <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-white/35">
+          {section.title}
+        </p>
+      ) : null}
+
+      <div className="grid grid-cols-2 gap-2.5">
+        {section.items.map((item, index) => (
+          <Tile
+            key={item.id}
+            item={item}
+            active={isTileActive(item, pathname)}
+            index={index}
+            bagCount={item.id === "cart" ? bag : undefined}
+            onAppOnly={onAppOnly}
+          />
+        ))}
+      </div>
+    </div>
+  ))}
+</section>
+
+              {newArrivals.length > 0 && (
+                <section className="mb-8">
+                  <div className="mb-3 flex items-end justify-between">
+                    <p className="text-[13px] font-medium text-white/60">
+                      New to Plazore
+                    </p>
+                    <Link
+                      href="/shop?mode=new"
+                      className="text-[12px] font-semibold text-white/40"
+                    >
+                      See all
+                    </Link>
+                  </div>
+                  <div className="tv-row flex gap-3 overflow-x-auto pb-1">
+                    {newArrivals.map((p) => (
+                      <Link
+                        key={p._id}
+                        href={`/product/${p._id}`}
+                        className="group shrink-0"
+                      >
+                        <div className="relative h-[140px] w-[200px] overflow-hidden bg-[#12141C]">
+                          <LoungeImg
+                            src={p.images?.[0]}
+                            className="h-full w-full object-cover"
+                          />
+                          <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent px-3 pb-2.5 pt-10">
+                            <p className="truncate text-[13px] font-medium text-white">
+                              {p.name}
+                            </p>
+                            <p className="text-[12px] text-[#00E575]">
+                              {formatProduct(p.price, p.region)}
+                            </p>
+                          </div>
+                        </div>
+                      </Link>
+                    ))}
                   </div>
                 </section>
-              ))}
+              )}
+
+              {trendingPicks.length > 0 && (
+                <section className="mb-8">
+                  <div className="mb-3 flex items-end justify-between">
+                    <p className="text-[13px] font-medium text-white/60">
+                      Shoppers are looking at
+                    </p>
+                    <Link
+                      href="/shop?mode=trending"
+                      className="text-[12px] font-semibold text-white/40"
+                    >
+                      See all
+                    </Link>
+                  </div>
+                  <div className="tv-row flex gap-3 overflow-x-auto pb-1">
+                    {trendingPicks.map((p) => (
+                      <Link
+                        key={`tr-${p._id}`}
+                        href={`/product/${p._id}`}
+                        className="group shrink-0"
+                      >
+                        <div className="relative h-[140px] w-[200px] overflow-hidden bg-[#12141C]">
+                          <LoungeImg
+                            src={p.images?.[0]}
+                            className="h-full w-full object-cover"
+                          />
+                          <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent px-3 pb-2.5 pt-10">
+                            <p className="truncate text-[13px] font-medium text-white">
+                              {p.name}
+                            </p>
+                            <p className="text-[12px] text-[#FB7185]">
+                              {formatProduct(p.price, p.region)}
+                            </p>
+                          </div>
+                        </div>
+                      </Link>
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              <section className="mb-8">
+                <div className="mb-3 flex items-end justify-between">
+                  <p className="text-[13px] font-medium text-white/60">
+                    Shop by category
+                  </p>
+                  <Link
+                    href="/shop?mode=categories"
+                    className="text-[12px] font-semibold text-white/40"
+                  >
+                    See all
+                  </Link>
+                </div>
+                <div className="tv-row flex gap-2.5 overflow-x-auto pb-1">
+                  {CATEGORY_LIST.slice(0, 16).map((c) => (
+                    <Link
+                      key={c}
+                      href={`/shop?mode=category&category=${encodeURIComponent(c)}`}
+                      className="group relative h-[88px] w-[160px] shrink-0 overflow-hidden"
+                    >
+                      <LoungeImg
+                        src={CATEGORY_IMAGES[c] || FALLBACK_CATEGORY_IMAGE}
+                        alt={c}
+                        className="absolute inset-0 h-full w-full object-cover"
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/40 to-black/10" />
+                      <span className="relative z-[1] flex h-full items-end px-3.5 py-3 text-[13px] font-bold text-white">
+                        {c}
+                      </span>
+                    </Link>
+                  ))}
+                </div>
+              </section>
+
+              {storePicks.length > 0 && (
+                <section className="mb-6">
+                  <div className="mb-3 flex items-end justify-between">
+                    <p className="text-[13px] font-medium text-white/60">
+                      Stores to visit
+                    </p>
+                    <Link
+                      href="/shop?mode=stores"
+                      className="text-[12px] font-semibold text-white/40"
+                    >
+                      See all
+                    </Link>
+                  </div>
+                  <div className="tv-row flex gap-3 overflow-x-auto pb-1">
+                    {storePicks.map((s) => (
+                      <Link
+                        key={s.id}
+                        href={`/store/${s.id}`}
+                        className="group shrink-0"
+                      >
+                        <div className="relative h-[140px] w-[200px] overflow-hidden bg-[#12141C]">
+                          <LoungeImg
+                            src={s.cover}
+                            className="h-full w-full object-cover"
+                          />
+                          <div className="absolute inset-x-0 bottom-0 flex items-center gap-2 bg-gradient-to-t from-black/85 via-black/40 to-transparent px-3 pb-2.5 pt-10">
+                            <span className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden bg-white/10">
+                              {s.logo ? (
+                                <LoungeImg
+                                  src={s.logo}
+                                  className="h-full w-full object-cover"
+                                />
+                              ) : (
+                                <Store className="h-3.5 w-3.5 text-white/70" />
+                              )}
+                            </span>
+                            <p className="truncate text-[13px] font-medium text-white">
+                              {s.name}
+                            </p>
+                          </div>
+                        </div>
+                      </Link>
+                    ))}
+                  </div>
+                </section>
+              )}
 
               <ProfileCard
                 isLoaded={isLoaded}
@@ -863,437 +1064,324 @@ export default function LoungePage() {
         </div>
       </div>
 
-      {/* ════════════ DESKTOP ════════════ */}
-      <div className="relative hidden min-h-dvh md:flex">
-        <aside className="sticky top-0 z-20 flex h-dvh w-[72px] shrink-0 flex-col items-center gap-3 border-r border-white/6 bg-black/50 py-6 backdrop-blur-md">
-          <Link href="/profile" className="mb-2" aria-label="Profile">
-            {user?.imageUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={user.imageUrl}
-                alt=""
-                className="h-10 w-10 object-cover ring-1 ring-white/20"
-              />
-            ) : (
-              <span className="flex h-10 w-10 items-center justify-center bg-white/10">
-                <User className="h-4 w-4 text-white/70" />
-              </span>
-            )}
-          </Link>
-          <Link
-            href="/notifications"
-            className="flex h-10 w-10 items-center justify-center text-white/55 transition hover:bg-white/10 hover:text-white"
-            aria-label="Notifications"
-          >
-            <Bell className="h-[18px] w-[18px]" />
-          </Link>
-          <button
-            type="button"
-            onClick={() => searchRef.current?.focus()}
-            className="flex h-10 w-10 items-center justify-center text-white/55 transition hover:bg-white/10 hover:text-white"
-            aria-label="Search"
-          >
-            <Search className="h-[18px] w-[18px]" />
-          </button>
-          {isSeller && (
-            <button
-              type="button"
-              onClick={handleSellerCta}
-              className="flex h-10 w-10 items-center justify-center overflow-hidden bg-[#00E575]/15 text-[#00E575] transition hover:bg-[#00E575]/25"
-              aria-label="Seller dashboard"
-            >
-              {storeLogo ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={storeLogo}
-                  alt=""
-                  className="h-full w-full object-cover"
-                />
-              ) : (
-                <Store className="h-[18px] w-[18px]" />
-              )}
-            </button>
-          )}
-          <Link
-            href={isSeller ? "/seller/settings" : "/profile"}
-            className="flex h-10 w-10 items-center justify-center text-white/55 transition hover:bg-white/10 hover:text-white"
-            aria-label="Settings"
-          >
-            <Settings className="h-[18px] w-[18px]" />
-          </Link>
-          <div className="mt-auto" />
-          {isLoaded && isSignedIn ? (
-            <button
-              type="button"
-              onClick={() => signOut({ redirectUrl: "/sign-in" })}
-              className="flex h-10 w-10 items-center justify-center text-white/40 transition hover:bg-white/10 hover:text-white"
-              aria-label="Log out"
-            >
-              <LogOut className="h-4 w-4" />
-            </button>
-          ) : (
-            <Link
-              href="/sign-in"
-              className="flex h-10 w-10 items-center justify-center text-[#00E575]"
-              aria-label="Sign in"
-            >
-              <User className="h-4 w-4" />
-            </Link>
-          )}
-        </aside>
-
-        <div className="relative min-w-0 flex-1">
-          <div
-            className="pointer-events-none absolute inset-0"
-            style={{
-              background:
-                "radial-gradient(ellipse 80% 50% at 50% -5%, rgba(0,229,117,0.07), transparent 50%), radial-gradient(ellipse 60% 40% at 90% 30%, rgba(59,130,246,0.05), transparent 45%)",
-            }}
-          />
-
-          <div className="relative z-[1] mx-auto flex min-h-dvh max-w-[1600px] flex-col px-8 pb-12 pt-5 lg:px-10">
-            <header className="mb-6 flex items-center justify-between gap-4">
-              <div className="flex min-w-0 items-center gap-1">
-                <Link href="/" className="mr-3 flex shrink-0 items-center gap-2">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src="/logo.png"
-                    alt="Plazore"
-                    className="h-8 w-8 object-contain"
-                    onError={(e) => {
-                      (e.target as HTMLImageElement).src = "/logo.png";
-                    }}
-                  />
-                </Link>
-                <nav className="hidden items-center gap-1 lg:flex">
-                  {TOP_TABS.map((tab) => {
-                    const active =
-                      tab.id === "for-you"
-                        ? pathname === "/lounge"
-                        : pathname === tab.href ||
-                          (tab.href !== "/" &&
-                            !tab.href.includes("?") &&
-                            pathname.startsWith(tab.href));
-                    return (
-                      <Link
-                        key={tab.id}
-                        href={tab.href}
-                        className={`px-4 py-2 text-[13px] font-medium transition duration-300 ${
-                          active
-                            ? "bg-white text-[#0A0B10]"
-                            : "text-white/55 hover:bg-white/8 hover:text-white"
-                        }`}
-                      >
-                        {tab.label}
-                      </Link>
-                    );
-                  })}
-                </nav>
+      {/* ═══════ DESKTOP / TV ═══════ */}
+      <div className="hidden min-h-dvh lg:flex">
+        <div className="mx-auto flex w-full max-w-[1400px] flex-1 flex-col px-6 py-6 xl:px-10">
+          <header className="mb-6 flex items-center justify-between gap-4">
+            <div className="flex min-w-0 items-center gap-6">
+              <div>
+                <p className="text-[11px] font-semibold tracking-[0.18em] text-white/40">
+                  PLAZORE
+                </p>
+                <p className="text-[18px] font-bold tracking-tight">Lounge</p>
               </div>
-
-              <label className="flex h-9 w-56 shrink-0 items-center gap-2 border border-white/10 bg-white/[0.06] px-3.5">
-                <Search className="h-3.5 w-3.5 text-white/40" />
-                <input
-                  ref={searchRef}
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Search the mall"
-                  className="w-full bg-transparent text-[13px] outline-none placeholder:text-white/35"
-                />
-              </label>
-            </header>
-
-            {searching ? (
-              <div className="mx-auto w-full max-w-3xl flex-1 pt-8">
-                <SearchResults
-                  query={query}
-                  searchLoading={searchLoading}
-                  totalHits={totalHits}
-                  hits={hits}
-                  formatProduct={formatProduct}
-                />
-              </div>
-            ) : (
-              <>
-                <section className="mb-6 grid grid-cols-1 gap-3 lg:grid-cols-[1.35fr_1fr]">
-                  <PosterCard
-                    href="/shop"
-                    image={heroPoster}
-                    kicker="FOR YOU"
-                    title="Find something you actually want"
-                    body="Browse the mall, save what you like, and check out when you’re ready."
-                    cta="Start shopping"
-                  />
-                  {isSeller ? (
-                    <PosterCard
-                      href="/seller"
-                      image={storeLogo}
-                      kicker="YOUR STORE"
-                      title={storeName || "Seller dashboard"}
-                      body="Listings, orders, messages, and payouts — all in one place."
-                      cta="Open your store"
-                    />
-                  ) : (
-                    <PosterCard
-                      onClick={handleSellerCta}
-                      kicker="SELL ON PLAZORE"
-                      title="Turn what you sell into a store"
-                      body="List products and meet buyers already shopping the mall."
-                      cta="Start selling"
-                    />
-                  )}
-                </section>
-
-                <section className="mb-7">
-                  <div className="tv-row flex gap-2.5 overflow-x-auto pb-1">
-                    {EXPLORE_CHIPS.map((chip) => (
-                      <Link
-                        key={chip.id}
-                        href={chip.href}
-                        className="flex h-12 shrink-0 items-center px-6 text-[14px] font-bold text-white shadow-[0_8px_20px_rgba(0,0,0,0.25)] transition hover:brightness-110"
-                        style={{ background: chip.bg }}
-                      >
-                        {chip.label}
-                      </Link>
-                    ))}
+              <nav className="flex items-center gap-1">
+                {TOP_TABS.map((tab) => {
+                  const pathOnly = tab.href.split("?")[0];
+                  const active =
+                    pathOnly === "/lounge"
+                      ? pathname === "/lounge"
+                      : pathname === pathOnly ||
+                        pathname.startsWith(pathOnly + "/");
+                  return (
                     <Link
-                      href="/cart"
-                      className="flex h-12 shrink-0 items-center gap-2 bg-white/10 px-5 text-[14px] font-semibold text-white/90 transition hover:bg-white/15"
+                      key={tab.id}
+                      href={tab.href}
+                      className={`px-4 py-2 text-[13px] font-medium transition duration-200 ${
+                        active
+                          ? "bg-white text-[#0A0B10]"
+                          : "text-white/55 hover:bg-white/8 hover:text-white"
+                      }`}
                     >
-                      Your bag
-                      {bag > 0 && (
-                        <span className="bg-[#00E575] px-1.5 text-[10px] font-extrabold text-[#041412]">
-                          {bag > 99 ? "99+" : bag}
-                        </span>
-                      )}
+                      {tab.label}
                     </Link>
-                  </div>
-                </section>
+                  );
+                })}
+              </nav>
+            </div>
 
-                <section className="mb-9">
-                  <p className="mb-3 text-[14px] font-medium text-white/70">
-                    Jump in
-                  </p>
-                  <div className="tv-row flex gap-3 overflow-x-auto pb-2">
-                    {allLoungeItems.map((item, index) => (
-                      <TvAppIcon
-                        key={item.id}
-                        item={item}
-                        index={index}
-                        bagCount={item.id === "cart" ? bag : undefined}
-                        onAppOnly={onAppOnly}
-                      />
-                    ))}
-                  </div>
-                </section>
+            <label className="flex h-9 w-56 shrink-0 items-center gap-2 border border-white/10 bg-white/[0.06] px-3.5">
+              <Search className="h-3.5 w-3.5 text-white/40" />
+              <input
+                ref={searchRef}
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search the mall"
+                className="w-full bg-transparent text-[13px] outline-none placeholder:text-white/35"
+              />
+            </label>
+          </header>
 
-                {newArrivals.length > 0 && (
-                  <section className="mb-9">
-                    <div className="mb-3 flex items-end justify-between">
-                      <p className="text-[14px] font-medium text-white/70">
-                        New to Plazore
-                      </p>
-                      <Link
-                        href="/shop?mode=new"
-                        className="text-[12px] font-semibold text-white/40 hover:text-white/70"
-                      >
-                        See all
-                      </Link>
-                    </div>
-                    <div className="tv-row flex gap-3 overflow-x-auto pb-1">
-                      {newArrivals.map((p, i) => (
-                        <Link
-                          key={p._id}
-                          href={`/product/${p._id}`}
-                          className="group shrink-0"
-                          style={{
-                            animation: `loungeIn 600ms cubic-bezier(0.22,1,0.36,1) ${
-                              80 + i * 40
-                            }ms both`,
-                          }}
-                        >
-                          <div className="relative h-[148px] w-[240px] overflow-hidden bg-[#12141C] transition duration-300 group-hover:brightness-110">
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img
-                              src={p.images![0]}
-                              alt=""
-                              className="h-full w-full object-cover"
-                            />
-                            <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent px-3 pb-2.5 pt-10">
-                              <p className="truncate text-[13px] font-medium text-white">
-                                {p.name}
-                              </p>
-                              <p className="text-[12px] text-[#00E575]">
-                                {formatProduct(p.price, p.region)}
-                              </p>
-                            </div>
-                          </div>
-                        </Link>
-                      ))}
-                    </div>
-                  </section>
+          {searching ? (
+            <div className="mx-auto w-full max-w-3xl flex-1 pt-8">
+              <SearchResults
+                query={query}
+                searchLoading={searchLoading}
+                totalHits={totalHits}
+                hits={hits}
+                formatProduct={formatProduct}
+              />
+            </div>
+          ) : (
+            <>
+              <section className="mb-6 grid grid-cols-1 gap-3 lg:grid-cols-[1.35fr_1fr]">
+                <PosterCard
+                  href="/shop"
+                  image={heroPoster}
+                  kicker="FOR YOU"
+                  title="Find something you actually want"
+                  body="Browse the mall, save what you like, and check out when you're ready."
+                  cta="Start shopping"
+                />
+                {isSeller ? (
+                  <PosterCard
+                    href="/seller"
+                    image={storeLogo}
+                    kicker="YOUR STORE"
+                    title={storeName || "Seller dashboard"}
+                    body="Listings, orders, messages, and payouts — all in one place."
+                    cta="Open your store"
+                  />
+                ) : (
+                  <PosterCard
+                    onClick={handleSellerCta}
+                    kicker="SELL ON PLAZORE"
+                    title="Turn what you sell into a store"
+                    body="List products and meet buyers already shopping the mall."
+                    cta="Start selling"
+                  />
                 )}
+              </section>
 
-                {trendingPicks.length > 0 && (
-                  <section className="mb-9">
-                    <div className="mb-3 flex items-end justify-between">
-                      <p className="text-[14px] font-medium text-white/70">
-                        Shoppers are looking at
-                      </p>
-                      <Link
-                        href="/shop?mode=trending"
-                        className="text-[12px] font-semibold text-white/40 hover:text-white/70"
-                      >
-                        See all
-                      </Link>
-                    </div>
-                    <div className="tv-row flex gap-3 overflow-x-auto pb-1">
-                      {trendingPicks.map((p) => (
-                        <Link
-                          key={`tr-${p._id}`}
-                          href={`/product/${p._id}`}
-                          className="group shrink-0"
-                        >
-                          <div className="relative h-[148px] w-[240px] overflow-hidden bg-[#12141C] transition duration-300 group-hover:brightness-110">
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img
-                              src={p.images![0]}
-                              alt=""
-                              className="h-full w-full object-cover"
-                            />
-                            <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent px-3 pb-2.5 pt-10">
-                              <p className="truncate text-[13px] font-medium text-white">
-                                {p.name}
-                              </p>
-                              <p className="text-[12px] text-[#FB7185]">
-                                {formatProduct(p.price, p.region)}
-                              </p>
-                            </div>
-                          </div>
-                        </Link>
-                      ))}
-                    </div>
-                  </section>
-                )}
+              <section className="mb-7">
+                <div className="tv-row flex gap-2.5 overflow-x-auto pb-1">
+                  {EXPLORE_CHIPS.map((chip) => (
+                    <Link
+                      key={chip.id}
+                      href={chip.href}
+                      className="flex h-12 shrink-0 items-center px-6 text-[14px] font-bold text-white shadow-[0_8px_20px_rgba(0,0,0,0.25)] transition hover:brightness-110"
+                      style={{ background: chip.bg }}
+                    >
+                      {chip.label}
+                    </Link>
+                  ))}
+                  <Link
+                    href="/cart"
+                    className="flex h-12 shrink-0 items-center gap-2 bg-white/10 px-5 text-[14px] font-semibold text-white/90 transition hover:bg-white/15"
+                  >
+                    Your bag
+                    {bag > 0 && (
+                      <span className="bg-[#00E575] px-1.5 text-[10px] font-extrabold text-[#041412]">
+                        {bag > 99 ? "99+" : bag}
+                      </span>
+                    )}
+                  </Link>
+                </div>
+              </section>
 
+              <section className="mb-9">
+                <p className="mb-3 text-[14px] font-medium text-white/70">
+                  Jump in
+                </p>
+                <div className="tv-row flex gap-3 overflow-x-auto pb-2">
+                  {allLoungeItems.map((item, index) => (
+                    <TvAppIcon
+                      key={item.id}
+                      item={item}
+                      index={index}
+                      bagCount={item.id === "cart" ? bag : undefined}
+                      onAppOnly={onAppOnly}
+                    />
+                  ))}
+                </div>
+              </section>
+
+              {newArrivals.length > 0 && (
                 <section className="mb-9">
                   <div className="mb-3 flex items-end justify-between">
                     <p className="text-[14px] font-medium text-white/70">
-                      Shop by category
+                      New to Plazore
                     </p>
                     <Link
-                      href="/shop?mode=categories"
+                      href="/shop?mode=new"
                       className="text-[12px] font-semibold text-white/40 hover:text-white/70"
                     >
                       See all
                     </Link>
                   </div>
-                  <div className="tv-row flex gap-2.5 overflow-x-auto pb-1">
-                    {CATEGORY_LIST.slice(0, 16).map((c) => (
+                  <div className="tv-row flex gap-3 overflow-x-auto pb-1">
+                    {newArrivals.map((p) => (
                       <Link
-                        key={c}
-                        href={`/shop?mode=category&category=${encodeURIComponent(
-                          c
-                        )}`}
-                        className="group relative h-[88px] w-[160px] shrink-0 overflow-hidden transition hover:brightness-110"
+                        key={p._id}
+                        href={`/product/${p._id}`}
+                        className="group shrink-0"
                       >
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={CATEGORY_IMAGES[c] || FALLBACK_CATEGORY_IMAGE}
-                          alt={c}
-                          className="absolute inset-0 h-full w-full object-cover"
-                        />
-                        <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/40 to-black/10" />
-                        <span className="relative z-[1] flex h-full items-end px-3.5 py-3 text-[13px] font-bold text-white">
-                          {c}
-                        </span>
+                        <div className="relative h-[148px] w-[240px] overflow-hidden bg-[#12141C] transition duration-200 group-hover:brightness-110">
+                          <LoungeImg
+                            src={p.images?.[0]}
+                            className="h-full w-full object-cover"
+                          />
+                          <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent px-3 pb-2.5 pt-10">
+                            <p className="truncate text-[13px] font-medium text-white">
+                              {p.name}
+                            </p>
+                            <p className="text-[12px] text-[#00E575]">
+                              {formatProduct(p.price, p.region)}
+                            </p>
+                          </div>
+                        </div>
                       </Link>
                     ))}
                   </div>
                 </section>
+              )}
 
-                {storePicks.length > 0 && (
-                  <section className="mb-6">
-                    <div className="mb-3 flex items-end justify-between">
-                      <p className="text-[14px] font-medium text-white/70">
-                        Stores to visit
-                      </p>
-                      <Link
-                        href="/shop?mode=stores"
-                        className="text-[12px] font-semibold text-white/40 hover:text-white/70"
-                      >
-                        See all
-                      </Link>
-                    </div>
-                    <div className="tv-row flex gap-3 overflow-x-auto pb-1">
-                      {storePicks.map((s) => (
-                        <Link
-                          key={s.id}
-                          href={`/store/${s.id}`}
-                          className="group shrink-0"
-                        >
-                          <div className="relative h-[148px] w-[220px] overflow-hidden bg-[#12141C] transition duration-300 group-hover:brightness-110">
-                            {s.cover ? (
-                              // eslint-disable-next-line @next/next/no-img-element
-                              <img
-                                src={s.cover}
-                                alt=""
-                                className="h-full w-full object-cover"
-                              />
-                            ) : (
-                              <div className="h-full w-full bg-[#161822]" />
-                            )}
-                            <div className="absolute inset-x-0 bottom-0 flex items-center gap-2 bg-gradient-to-t from-black/85 via-black/40 to-transparent px-3 pb-2.5 pt-10">
-                              <span className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden bg-white/10">
-                                {s.logo ? (
-                                  // eslint-disable-next-line @next/next/no-img-element
-                                  <img
-                                    src={s.logo}
-                                    alt=""
-                                    className="h-full w-full object-cover"
-                                  />
-                                ) : (
-                                  <Store className="h-3.5 w-3.5 text-white/70" />
-                                )}
-                              </span>
-                              <p className="truncate text-[13px] font-medium text-white">
-                                {s.name}
-                              </p>
-                            </div>
-                          </div>
-                        </Link>
-                      ))}
-                    </div>
-                  </section>
-                )}
-
-                <div className="mt-auto flex items-center justify-between pt-6">
-                  <p className="text-[12px] text-white/30">
-                    {isLoaded && isSignedIn
-                      ? `Signed in as ${displayName}`
-                      : "Browsing as guest"}
-                  </p>
-                  {isLoaded && isSignedIn ? (
-                    <button
-                      type="button"
-                      onClick={() => signOut({ redirectUrl: "/sign-in" })}
-                      className="inline-flex items-center gap-1.5 text-[12px] text-white/40 transition hover:text-white/70"
-                    >
-                      <LogOut className="h-3.5 w-3.5" />
-                      Log out
-                    </button>
-                  ) : (
+              {trendingPicks.length > 0 && (
+                <section className="mb-9">
+                  <div className="mb-3 flex items-end justify-between">
+                    <p className="text-[14px] font-medium text-white/70">
+                      Shoppers are looking at
+                    </p>
                     <Link
-                      href="/sign-in"
-                      className="text-[12px] font-medium text-[#00E575]"
+                      href="/shop?mode=trending"
+                      className="text-[12px] font-semibold text-white/40 hover:text-white/70"
                     >
-                      Sign in
+                      See all
                     </Link>
-                  )}
+                  </div>
+                  <div className="tv-row flex gap-3 overflow-x-auto pb-1">
+                    {trendingPicks.map((p) => (
+                      <Link
+                        key={`tr-${p._id}`}
+                        href={`/product/${p._id}`}
+                        className="group shrink-0"
+                      >
+                        <div className="relative h-[148px] w-[240px] overflow-hidden bg-[#12141C] transition duration-200 group-hover:brightness-110">
+                          <LoungeImg
+                            src={p.images?.[0]}
+                            className="h-full w-full object-cover"
+                          />
+                          <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent px-3 pb-2.5 pt-10">
+                            <p className="truncate text-[13px] font-medium text-white">
+                              {p.name}
+                            </p>
+                            <p className="text-[12px] text-[#FB7185]">
+                              {formatProduct(p.price, p.region)}
+                            </p>
+                          </div>
+                        </div>
+                      </Link>
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              <section className="mb-9">
+                <div className="mb-3 flex items-end justify-between">
+                  <p className="text-[14px] font-medium text-white/70">
+                    Shop by category
+                  </p>
+                  <Link
+                    href="/shop?mode=categories"
+                    className="text-[12px] font-semibold text-white/40 hover:text-white/70"
+                  >
+                    See all
+                  </Link>
                 </div>
-              </>
-            )}
-          </div>
+                <div className="tv-row flex gap-2.5 overflow-x-auto pb-1">
+                  {CATEGORY_LIST.slice(0, 16).map((c) => (
+                    <Link
+                      key={c}
+                      href={`/shop?mode=category&category=${encodeURIComponent(c)}`}
+                      className="group relative h-[88px] w-[160px] shrink-0 overflow-hidden transition hover:brightness-110"
+                    >
+                      <LoungeImg
+                        src={CATEGORY_IMAGES[c] || FALLBACK_CATEGORY_IMAGE}
+                        alt={c}
+                        className="absolute inset-0 h-full w-full object-cover"
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/40 to-black/10" />
+                      <span className="relative z-[1] flex h-full items-end px-3.5 py-3 text-[13px] font-bold text-white">
+                        {c}
+                      </span>
+                    </Link>
+                  ))}
+                </div>
+              </section>
+
+              {storePicks.length > 0 && (
+                <section className="mb-6">
+                  <div className="mb-3 flex items-end justify-between">
+                    <p className="text-[14px] font-medium text-white/70">
+                      Stores to visit
+                    </p>
+                    <Link
+                      href="/shop?mode=stores"
+                      className="text-[12px] font-semibold text-white/40 hover:text-white/70"
+                    >
+                      See all
+                    </Link>
+                  </div>
+                  <div className="tv-row flex gap-3 overflow-x-auto pb-1">
+                    {storePicks.map((s) => (
+                      <Link
+                        key={s.id}
+                        href={`/store/${s.id}`}
+                        className="group shrink-0"
+                      >
+                        <div className="relative h-[148px] w-[220px] overflow-hidden bg-[#12141C] transition duration-200 group-hover:brightness-110">
+                          <LoungeImg
+                            src={s.cover}
+                            className="h-full w-full object-cover"
+                          />
+                          <div className="absolute inset-x-0 bottom-0 flex items-center gap-2 bg-gradient-to-t from-black/85 via-black/40 to-transparent px-3 pb-2.5 pt-10">
+                            <span className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden bg-white/10">
+                              {s.logo ? (
+                                <LoungeImg
+                                  src={s.logo}
+                                  className="h-full w-full object-cover"
+                                />
+                              ) : (
+                                <Store className="h-3.5 w-3.5 text-white/70" />
+                              )}
+                            </span>
+                            <p className="truncate text-[13px] font-medium text-white">
+                              {s.name}
+                            </p>
+                          </div>
+                        </div>
+                      </Link>
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              <div className="mt-auto flex items-center justify-between pt-6">
+                <p className="text-[12px] text-white/30">
+                  {isLoaded && isSignedIn
+                    ? `Signed in as ${displayName}`
+                    : "Browsing as guest"}
+                </p>
+                {isLoaded && isSignedIn ? (
+                  <button
+                    type="button"
+                    onClick={() => signOut({ redirectUrl: "/sign-in" })}
+                    className="inline-flex items-center gap-1.5 text-[12px] text-white/40 transition hover:text-white/70"
+                  >
+                    <LogOut className="h-3.5 w-3.5" />
+                    Log out
+                  </button>
+                ) : (
+                  <Link
+                    href="/sign-in"
+                    className="text-[12px] font-medium text-[#00E575]"
+                  >
+                    Sign in
+                  </Link>
+                )}
+              </div>
+            </>
+          )}
         </div>
       </div>
 
@@ -1345,14 +1433,10 @@ function SearchResults({
                   className="flex items-center gap-3"
                 >
                   <div className="h-16 w-16 overflow-hidden bg-[#11131C]">
-                    {h.image ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={h.image}
-                        alt=""
-                        className="h-full w-full object-cover"
-                      />
-                    ) : null}
+                    <LoungeImg
+                      src={h.image}
+                      className="h-full w-full object-cover"
+                    />
                   </div>
                   <div>
                     <p className="font-medium">{h.label}</p>
@@ -1380,10 +1464,8 @@ function SearchResults({
               >
                 <div className="flex h-16 w-16 items-center justify-center overflow-hidden bg-[#11131C]">
                   {h.logo ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
+                    <LoungeImg
                       src={h.logo}
-                      alt=""
                       className="h-full w-full object-cover"
                     />
                   ) : (
@@ -1445,11 +1527,10 @@ function ProfileCard({
       <div className="flex items-center gap-3">
         <div className="flex h-10 w-10 items-center justify-center overflow-hidden border border-[#00E575]/30 bg-[#11131C]">
           {imageUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
+            <LoungeImg
               src={imageUrl}
-              alt=""
               className="h-full w-full object-cover"
+              loading="eager"
             />
           ) : (
             <User className="h-4 w-4 text-white/65" />
@@ -1461,7 +1542,7 @@ function ProfileCard({
           </p>
           <p className="text-[11px] text-white/35">
             {isLoaded && isSignedIn
-              ? "You’re signed in"
+              ? "You're signed in"
               : "Sign in to save your bag and orders"}
           </p>
         </div>

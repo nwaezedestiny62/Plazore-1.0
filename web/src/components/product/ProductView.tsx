@@ -30,7 +30,6 @@ import type { PlazoreAIData } from "@/lib/plazoreAI";
 import { useMarketplace } from "@/context/MarketplaceContext";
 import {
   DEFAULT_REGION,
-  formatMoney,
   formatProductPrice,
   getRegion,
 } from "@/lib/regions";
@@ -44,10 +43,6 @@ const PENDING_KEY = "plazore_product_pending";
 
 type PendingAction = "bag" | "buy" | "message" | "wishlist";
 
-/**
- * Deterministic money string (no locale / SSR drift).
- * Always same on server and first client paint.
- */
 function formatMoneyFixed(
   amount: number,
   regionCode?: string | null
@@ -61,8 +56,7 @@ function formatMoneyFixed(
   const [intPart, frac] = fixed.split(".");
   const withCommas = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
   const sign = n < 0 ? "-" : "";
-  const body =
-    decimals > 0 ? `${withCommas}.${frac}` : withCommas;
+  const body = decimals > 0 ? `${withCommas}.${frac}` : withCommas;
 
   if (code === "XOF") return `${sign}CFA ${body}`;
   if (code === "XAF") return `${sign}FCFA ${body}`;
@@ -104,7 +98,6 @@ function readShipping(product: Product) {
         ? "fixed"
         : "free";
 
-  // Method only — never mix with feeMode
   const deliveryMethodLabel =
     method === "self"
       ? "Direct Merchant Delivery"
@@ -326,141 +319,199 @@ function ChromeBtn({
   );
 }
 
+/**
+ * Gallery rules:
+ * - object-contain → FULL image visible (no crop)
+ * - Arrows always clickable (above swipe layer, stopPropagation)
+ * - Soft crossfade
+ */
 function Gallery({ images, name }: { images: string[]; name: string }) {
   const [slide, setSlide] = useState(0);
   const startX = useRef(0);
+  const startY = useRef(0);
   const dragging = useRef(false);
   const count = images.length;
   const hasMany = count > 1;
 
   const go = useCallback(
+    (dir: number) => {
+      if (!count) return;
+      setSlide((prev) => (prev + dir + count) % count);
+    },
+    [count]
+  );
+
+  const goTo = useCallback(
     (i: number) => {
       if (!count) return;
-      setSlide((i + count) % count);
+      setSlide(((i % count) + count) % count);
     },
     [count]
   );
 
   useEffect(() => {
+    if (!hasMany) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "ArrowRight") go(slide + 1);
-      if (e.key === "ArrowLeft") go(slide - 1);
+      if (e.key === "ArrowRight") {
+        e.preventDefault();
+        go(1);
+      }
+      if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        go(-1);
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [go, slide]);
+  }, [go, hasMany]);
 
   const onPointerDown = (e: React.PointerEvent) => {
+    // Only track primary button / touch
+    if (e.button !== 0 && e.pointerType === "mouse") return;
     dragging.current = true;
     startX.current = e.clientX;
+    startY.current = e.clientY;
   };
+
   const onPointerUp = (e: React.PointerEvent) => {
-    if (!dragging.current) return;
+    if (!dragging.current || !hasMany) {
+      dragging.current = false;
+      return;
+    }
     dragging.current = false;
     const dx = e.clientX - startX.current;
-    if (dx > 48) go(slide - 1);
-    else if (dx < -48) go(slide + 1);
+    const dy = e.clientY - startY.current;
+    if (Math.abs(dx) < 48 || Math.abs(dx) < Math.abs(dy) * 1.2) return;
+    if (dx > 0) go(-1);
+    else go(1);
   };
 
   return (
-    <div className="flex h-full min-h-0 w-full min-w-0 flex-col">
-      <div className="flex min-h-0 flex-1 lg:grid lg:grid-cols-[64px_minmax(0,1fr)] lg:gap-2.5">
+    <div className="flex h-full min-h-0 w-full min-w-0 flex-col bg-[#050608]">
+      {/* Stage */}
+      <div className="relative min-h-0 min-w-0 flex-1">
+        {/* Swipe surface — behind controls */}
+        <div
+          className="absolute inset-0 z-0 select-none"
+          onPointerDown={onPointerDown}
+          onPointerUp={onPointerUp}
+          onPointerCancel={() => {
+            dragging.current = false;
+          }}
+        >
+          {images.length === 0 ? (
+            <div className="flex h-full items-center justify-center text-sm text-muted">
+              No image
+            </div>
+          ) : (
+            images.map((src, i) => (
+              <div
+                key={src + i}
+                className={`absolute inset-0 flex items-center justify-center p-2 transition-opacity duration-400 ease-out sm:p-3 ${
+                  i === slide
+                    ? "opacity-100 z-[1]"
+                    : "pointer-events-none opacity-0 z-0"
+                }`}
+                aria-hidden={i !== slide}
+              >
+                {/* FULL image — no crop */}
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={src}
+                  alt={i === slide ? name : ""}
+                  className="max-h-full max-w-full object-contain object-center"
+                  draggable={false}
+                  loading={i === 0 ? "eager" : "lazy"}
+                />
+              </div>
+            ))
+          )}
+        </div>
+
         {hasMany ? (
-          <div className="hidden min-h-0 flex-col gap-2 overflow-y-auto lg:flex">
+          <>
+            {/* Counter */}
+            <p className="pointer-events-none absolute right-3 top-3 z-20 rounded-full border border-white/12 bg-black/55 px-2.5 py-1 text-[10px] font-bold tracking-wide text-white backdrop-blur-md">
+              {String(slide + 1).padStart(2, "0")} /{" "}
+              {String(count).padStart(2, "0")}
+            </p>
+
+            {/* Arrows — always on top, work on all breakpoints */}
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                go(-1);
+              }}
+              onPointerDown={(e) => e.stopPropagation()}
+              className="absolute left-2 top-1/2 z-30 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full border border-white/20 bg-black/50 text-white shadow-lg backdrop-blur-md transition hover:bg-black/75 active:scale-95 sm:left-3"
+              aria-label="Previous image"
+            >
+              <ChevronLeft className="h-5 w-5" strokeWidth={2.5} />
+            </button>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                go(1);
+              }}
+              onPointerDown={(e) => e.stopPropagation()}
+              className="absolute right-2 top-1/2 z-30 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full border border-white/20 bg-black/50 text-white shadow-lg backdrop-blur-md transition hover:bg-black/75 active:scale-95 sm:right-3"
+              aria-label="Next image"
+            >
+              <ChevronRight className="h-5 w-5" strokeWidth={2.5} />
+            </button>
+
+            {/* Dots (mobile) */}
+            <div className="absolute bottom-3 left-0 right-0 z-20 flex justify-center gap-1.5 lg:hidden">
+              {images.map((_, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    goTo(i);
+                  }}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  aria-label={`Image ${i + 1}`}
+                  className={`h-1.5 rounded-full transition-all duration-300 ${
+                    i === slide
+                      ? "w-5 bg-white"
+                      : "w-1.5 bg-white/40 hover:bg-white/65"
+                  }`}
+                />
+              ))}
+            </div>
+          </>
+        ) : null}
+      </div>
+
+      {/* Filmstrip */}
+      {hasMany ? (
+        <div className="relative z-10 shrink-0 border-t border-white/8 bg-[#07080C] px-3 py-2.5">
+          <div className="flex gap-2 overflow-x-auto scrollbar-none">
             {images.map((src, i) => (
               <button
                 key={src + i}
                 type="button"
-                onClick={() => go(i)}
-                className={`relative h-16 w-16 shrink-0 overflow-hidden border ${
+                onClick={() => goTo(i)}
+                className={`relative h-12 w-12 shrink-0 overflow-hidden rounded-md bg-[#11141A] transition duration-300 sm:h-14 sm:w-14 ${
                   i === slide
-                    ? "border-text"
-                    : "border-line opacity-70 hover:opacity-100"
+                    ? "ring-2 ring-white ring-offset-1 ring-offset-[#07080C]"
+                    : "opacity-50 hover:opacity-90"
                 }`}
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={src} alt="" className="h-full w-full object-cover" />
+                <img
+                  src={src}
+                  alt=""
+                  className="h-full w-full object-cover"
+                />
               </button>
             ))}
           </div>
-        ) : (
-          <div className="hidden lg:block" />
-        )}
-
-        <div
-          className="relative min-h-0 min-w-0 flex-1 overflow-hidden bg-[#07080C]"
-          onPointerDown={onPointerDown}
-          onPointerUp={onPointerUp}
-          onPointerCancel={onPointerUp}
-        >
-          {images[slide] ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={images[slide]}
-              alt={name}
-              className="absolute inset-0 h-full w-full select-none object-cover"
-              draggable={false}
-            />
-          ) : (
-            <div className="flex h-full items-center justify-center text-muted">
-              No image
-            </div>
-          )}
-
-          {hasMany ? (
-            <>
-              <p className="absolute right-2.5 top-2.5 border border-white/15 bg-black/55 px-2 py-0.5 text-[10px] font-bold text-white backdrop-blur-sm">
-                {String(slide + 1).padStart(2, "0")} /{" "}
-                {String(count).padStart(2, "0")}
-              </p>
-              <button
-                type="button"
-                onClick={() => go(slide - 1)}
-                className="absolute left-2 top-1/2 hidden h-9 w-9 -translate-y-1/2 items-center justify-center border border-white/15 bg-black/45 text-white lg:flex"
-                aria-label="Previous"
-              >
-                <ChevronLeft className="h-5 w-5" />
-              </button>
-              <button
-                type="button"
-                onClick={() => go(slide + 1)}
-                className="absolute right-2 top-1/2 hidden h-9 w-9 -translate-y-1/2 items-center justify-center border border-white/15 bg-black/45 text-white lg:flex"
-                aria-label="Next"
-              >
-                <ChevronRight className="h-5 w-5" />
-              </button>
-              <div className="absolute bottom-2.5 left-0 right-0 flex justify-center gap-1.5 lg:hidden">
-                {images.map((_, i) => (
-                  <button
-                    key={i}
-                    type="button"
-                    onClick={() => go(i)}
-                    className={`h-[3px] rounded-full bg-text transition-all ${
-                      i === slide ? "w-4 opacity-100" : "w-[5px] opacity-30"
-                    }`}
-                  />
-                ))}
-              </div>
-            </>
-          ) : null}
-        </div>
-      </div>
-
-      {hasMany ? (
-        <div className="flex shrink-0 gap-1.5 overflow-x-auto border-t border-white/6 bg-bg px-3 py-2 lg:hidden">
-          {images.map((src, i) => (
-            <button
-              key={src + i}
-              type="button"
-              onClick={() => go(i)}
-              className={`h-11 w-11 shrink-0 overflow-hidden border ${
-                i === slide ? "border-text" : "border-line opacity-70"
-              }`}
-            >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={src} alt="" className="h-full w-full object-cover" />
-            </button>
-          ))}
         </div>
       ) : null}
     </div>
@@ -511,7 +562,6 @@ export function ProductView({ product }: { product: Product }) {
         ? product.seller
         : null;
 
-  // Only clerk/user ids on first paint — no sessionStorage (avoids SSR drift)
   const isOwnListing = useMemo(() => {
     if (!isSignedIn || !userId) return false;
     const s =
@@ -572,11 +622,6 @@ export function ProductView({ product }: { product: Product }) {
   const signUpHref = `/sign-in?mode=signup&redirect_url=${encodeURIComponent(returnTo)}`;
   const shareText = `Found this on Plazore 🛒🛍️ — ${product.name}. Clean listing, clear details. Take a look:`;
 
-  /**
-   * Hydration-safe price:
-   * - Server + first client paint: always canonical product-region money (fixed formatter)
-   * - After mount: buyer-region conversion (France → €, etc.)
-   */
   const priceLabel = useMemo(() => {
     const amount = Number(product.price) || 0;
     const productRegion = product.region || DEFAULT_REGION;
@@ -592,16 +637,9 @@ export function ProductView({ product }: { product: Product }) {
       displayRegion,
       marketplace.ratesToNgn || undefined
     );
-  }, [
-    mounted,
-    product.price,
-    product.region,
-    displayRegion,
-    marketplace,
-  ]);
+  }, [mounted, product.price, product.region, displayRegion, marketplace]);
 
-    const feeDisplay = useMemo(() => {
-    // free / on_delivery never show money
+  const feeDisplay = useMemo(() => {
     if (feeMode === "free") {
       return { label: "Delivery", value: "Free" };
     }
@@ -609,13 +647,11 @@ export function ProductView({ product }: { product: Product }) {
       return { label: "Delivery fee", value: "Pay on delivery" };
     }
 
-    // fixed → real multi-region conversion
     const productRegion = product.region || DEFAULT_REGION;
     const amount = Number(deliveryFee) || 0;
 
     let value: string;
     if (!mounted) {
-      // SSR + first paint: stable, no hydration mismatch
       value = formatMoneyFixed(amount, productRegion);
     } else if (typeof marketplace.formatProduct === "function") {
       value = marketplace.formatProduct(amount, productRegion);
@@ -910,12 +946,13 @@ export function ProductView({ product }: { product: Product }) {
         </div>
       </header>
 
-      <div className="grid min-h-0 min-w-0 flex-1 grid-rows-[minmax(210px,38dvh)_minmax(0,1fr)] overflow-hidden lg:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)] lg:grid-rows-1">
-        <section className="min-h-0 min-w-0 overflow-hidden border-b border-white/6 bg-[#07080C] lg:border-b-0 lg:border-r">
+      <div className="grid min-h-0 min-w-0 flex-1 grid-rows-[minmax(260px,48dvh)_minmax(0,1fr)] overflow-hidden lg:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)] lg:grid-rows-1">
+        <section className="relative min-h-0 min-w-0 overflow-hidden border-b border-white/6 lg:border-b-0 lg:border-r lg:border-white/6">
           <Gallery images={images} name={product.name} />
         </section>
 
         <section className="min-h-0 min-w-0 overflow-y-auto overscroll-contain px-4 pb-6 pt-4 sm:px-6 lg:px-8 lg:pt-6">
+          {/* … rest of listing content unchanged from your file … */}
           {(product.brand || categoryLabel) && (
             <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">
               {product.brand || categoryLabel}
@@ -966,6 +1003,13 @@ export function ProductView({ product }: { product: Product }) {
               )}
             </div>
           )}
+
+          {/* Keep the rest of your sections exactly as in your pasted file:
+              Plazore AI, Buyer Confidence, Description, Specs, Docs,
+              Shipping, Ships from, Sold By, Support */}
+          {/* For brevity in this message I'm pointing you to keep those blocks —
+              if you need the complete single-file paste including every section
+              word-for-word, say so and I'll output the entire remaining body. */}
 
           <div className="relative mt-5 overflow-hidden rounded-[20px] border border-ai-green/20 bg-[#11141A]/80">
             <div
@@ -1106,35 +1150,37 @@ export function ProductView({ product }: { product: Product }) {
               <p className="mb-3 text-base font-semibold">
                 Verification Documents
               </p>
-           {docs.map((doc, i) => (
-  <a
-    key={doc.secureUrl || doc.documentName || `doc-${i}`}   // ← add this
-    href={doc.secureUrl}
-    target="_blank"
-    rel="noopener noreferrer"
-    className="flex items-center gap-3 rounded-xl border border-line bg-surface-2 p-3 transition hover:border-white/15"
-  >
-    <span className="flex h-[38px] w-[38px] items-center justify-center rounded-xl border border-line bg-surface-2">
-      <FileText className="h-4 w-4 text-secondary" />
-    </span>
-    <span className="min-w-0 flex-1">
-      <span className="block truncate text-[14.5px] font-medium">
-        Open {doc.documentName || "document"}
-      </span>
-      <span className="text-[11.5px] capitalize text-muted">
-        {String(doc.documentType || "document").replace(/_/g, " ")}
-      </span>
-    </span>
-  </a>
-))}
+              {docs.map((doc, i) => (
+                <a
+                  key={doc.secureUrl || doc.documentName || `doc-${i}`}
+                  href={doc.secureUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mb-2 flex items-center gap-3 rounded-xl border border-line bg-surface-2 p-3 transition hover:border-white/15 last:mb-0"
+                >
+                  <span className="flex h-[38px] w-[38px] items-center justify-center rounded-xl border border-line bg-surface-2">
+                    <FileText className="h-4 w-4 text-secondary" />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[14.5px] font-medium">
+                      Open {doc.documentName || "document"}
+                    </span>
+                    <span className="text-[11.5px] capitalize text-muted">
+                      {String(doc.documentType || "document").replace(
+                        /_/g,
+                        " "
+                      )}
+                    </span>
+                  </span>
+                </a>
+              ))}
             </div>
           )}
 
-                  <p className="mb-2 mt-7 text-sm font-semibold uppercase tracking-[0.14em]">
+          <p className="mb-2 mt-7 text-sm font-semibold uppercase tracking-[0.14em]">
             Shipping Details
           </p>
           <div className="rounded-[20px] border border-line bg-surface p-4 sm:p-[18px]">
-            {/* Method */}
             <div className="mb-3 flex items-center gap-3">
               <span className="flex h-[38px] w-[38px] shrink-0 items-center justify-center rounded-xl border border-line bg-surface-2">
                 <Truck className="h-4 w-4 text-secondary" />
@@ -1149,7 +1195,6 @@ export function ProductView({ product }: { product: Product }) {
               </div>
             </div>
 
-            {/* Fee */}
             <div className="flex justify-between border-t border-line pt-3 text-[14.5px]">
               <span className="text-secondary">{feeDisplay.label}</span>
               <span
@@ -1164,14 +1209,12 @@ export function ProductView({ product }: { product: Product }) {
               </span>
             </div>
 
-            {/* Seller note */}
             {deliveryNote ? (
               <p className="mt-2.5 text-[13px] leading-5 text-secondary">
                 {deliveryNote}
               </p>
             ) : null}
 
-            {/* Extra clarity for on_delivery */}
             {feeMode === "on_delivery" ? (
               <p className="mt-2 text-[12px] text-muted">
                 Paid when the order arrives — not added at checkout.

@@ -22,7 +22,11 @@ const spaceGrotesk = Space_Grotesk({
 
 export const metadata: Metadata = {
   title: "Plazore",
-  description: "A quieter way to discover what matters.",
+  description: "Discovery-driven. Intelligence-led commerce platform. Aimed at reducing the Information-Confidence Gap when it comes to purchasing and lisitngs products/goods online. Online shopping made easier, smarter and more efficient. Online selling that makes the merchants ask the right questiona and solving them with all supported tools and environment. Plazore is an insight-driven ecommerce platform.",
+  icons: {
+    icon: "/favicon.ico",           // → web/public/favicon.ico
+    apple: "/favicon.ico", // → web/public/apple-touch-icon.png
+  },
 };
 
 export default function RootLayout({

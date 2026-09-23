@@ -2,7 +2,13 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { ChevronLeft } from "lucide-react";
 
 const GRAD = "linear-gradient(90deg,#00E575,#14B8A6,#3B82F6)";
@@ -37,7 +43,7 @@ const TRUST = [
 ];
 const ISSUE = ["Issue", "Plazore Contact", "Review", "Resolution"];
 
-/** External imagery (Unsplash) — add images.unsplash.com to next.config images.remotePatterns if needed */
+/** Primary external imagery */
 const IMG = {
   cityCommerce:
     "https://images.unsplash.com/photo-1441986300917-64674bd600d8?auto=format&fit=crop&w=1600&q=80",
@@ -57,7 +63,169 @@ const IMG = {
     "https://images.unsplash.com/photo-1563986768609-322da13575f3?auto=format&fit=crop&w=1400&q=80",
   direction:
     "https://images.unsplash.com/photo-1451187580459-43490279c0fa?auto=format&fit=crop&w=1600&q=80",
+} as const;
+
+/** Second-line external fallbacks if primary fails / is slow to 404 */
+const IMG_FALLBACK: Record<keyof typeof IMG, string> = {
+  cityCommerce:
+    "https://images.unsplash.com/photo-1472851294608-062f824d29cc?auto=format&fit=crop&w=1600&q=80",
+  discovery:
+    "https://images.unsplash.com/photo-1556742111-a301076d9d18?auto=format&fit=crop&w=1400&q=80",
+  autopilot:
+    "https://images.unsplash.com/photo-1519389950473-47ba0277781c?auto=format&fit=crop&w=1400&q=80",
+  buyers:
+    "https://images.unsplash.com/photo-1441986300917-64674bd600d8?auto=format&fit=crop&w=1400&q=80",
+  sellers:
+    "https://images.unsplash.com/photo-1460925895917-afdab827c52f?auto=format&fit=crop&w=1400&q=80",
+  showroom:
+    "https://images.unsplash.com/photo-1555529902-5261145633bf?auto=format&fit=crop&w=1400&q=80",
+  intelligence:
+    "https://images.unsplash.com/photo-1620712943543-bcc4688e7485?auto=format&fit=crop&w=1400&q=80",
+  trust:
+    "https://images.unsplash.com/photo-1563013544-824ae1b704d3?auto=format&fit=crop&w=1400&q=80",
+  direction:
+    "https://images.unsplash.com/photo-1446776811953-b23d57bd21aa?auto=format&fit=crop&w=1600&q=80",
 };
+
+const UNIVERSAL_FALLBACK =
+  "https://images.unsplash.com/photo-1472851294608-062f824d29cc?auto=format&fit=crop&w=1400&q=80";
+
+/* ─── Logo: image → text "PLAZORE" if slow/fail ─── */
+function PlazoreLogo({
+  className = "relative h-28 w-28 sm:h-36 sm:w-36",
+  priority = false,
+}: {
+  className?: string;
+  priority?: boolean;
+}) {
+  const [failed, setFailed] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // If logo takes too long, show text so the hero never feels empty
+  useEffect(() => {
+    timerRef.current = setTimeout(() => {
+      if (!loaded) setFailed(true);
+    }, 3500);
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, [loaded]);
+
+  if (failed) {
+    return (
+      <div
+        className={`flex items-center justify-center ${className}`}
+        aria-label="Plazore"
+      >
+        <span
+          className="select-none text-center text-[18px] font-extrabold tracking-[0.22em] sm:text-[22px]"
+          style={{
+            backgroundImage: GRAD,
+            WebkitBackgroundClip: "text",
+            backgroundClip: "text",
+            color: "transparent",
+          }}
+        >
+          PLAZORE
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <div className={className}>
+      {/* skeleton while decoding */}
+      {!loaded && (
+        <div
+          className="absolute inset-0 animate-pulse rounded-full bg-white/[0.06]"
+          aria-hidden
+        />
+      )}
+      <Image
+        src="/logo.png"
+        alt="Plazore"
+        fill
+        priority={priority}
+        className={`object-contain drop-shadow-[0_0_32px_rgba(0,229,117,0.25)] transition-opacity duration-500 ${
+          loaded ? "opacity-100" : "opacity-0"
+        }`}
+        onLoad={() => {
+          setLoaded(true);
+          if (timerRef.current) clearTimeout(timerRef.current);
+        }}
+        onError={() => setFailed(true)}
+      />
+    </div>
+  );
+}
+
+/* ─── Media image with primary → fallback → universal plate ─── */
+function SafeFillImage({
+  src,
+  fallbackSrc,
+  alt,
+  priority = false,
+}: {
+  src: string;
+  fallbackSrc?: string;
+  alt: string;
+  priority?: boolean;
+}) {
+  const [current, setCurrent] = useState(src);
+  const [stage, setStage] = useState<"primary" | "fallback" | "done">(
+    "primary"
+  );
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    setCurrent(src);
+    setStage("primary");
+    setLoaded(false);
+  }, [src]);
+
+  const onError = useCallback(() => {
+    if (stage === "primary" && fallbackSrc && fallbackSrc !== current) {
+      setStage("fallback");
+      setCurrent(fallbackSrc);
+      setLoaded(false);
+      return;
+    }
+    if (stage !== "done" && current !== UNIVERSAL_FALLBACK) {
+      setStage("done");
+      setCurrent(UNIVERSAL_FALLBACK);
+      setLoaded(false);
+      return;
+    }
+    setLoaded(true); // stop trying — show dark plate via parent bg
+  }, [stage, fallbackSrc, current]);
+
+  const isRemote = current.startsWith("http");
+
+  return (
+    <>
+      {!loaded && (
+        <div
+          className="absolute inset-0 animate-pulse bg-gradient-to-b from-[#151820] to-[#0B0C12]"
+          aria-hidden
+        />
+      )}
+      <Image
+        src={current}
+        alt={alt}
+        fill
+        priority={priority}
+        className={`object-cover transition-opacity duration-500 ${
+          loaded ? "opacity-100" : "opacity-0"
+        }`}
+        sizes="(max-width: 1024px) 100vw, 1024px"
+        onLoad={() => setLoaded(true)}
+        onError={onError}
+        unoptimized={isRemote}
+      />
+    </>
+  );
+}
 
 function useInView<T extends HTMLElement>(opts?: { threshold?: number }) {
   const ref = useRef<T | null>(null);
@@ -73,6 +241,11 @@ function useInView<T extends HTMLElement>(opts?: { threshold?: number }) {
       setInView(true);
       return;
     }
+    const rect = el.getBoundingClientRect();
+    if (rect.top < window.innerHeight * 0.92 && rect.bottom > 0) {
+      setInView(true);
+      return;
+    }
     const io = new IntersectionObserver(
       ([e]) => {
         if (e.isIntersecting) {
@@ -80,7 +253,7 @@ function useInView<T extends HTMLElement>(opts?: { threshold?: number }) {
           io.disconnect();
         }
       },
-      { threshold: opts?.threshold ?? 0.14, rootMargin: "0px 0px -6% 0px" },
+      { threshold: opts?.threshold ?? 0.12, rootMargin: "0px 0px -6% 0px" },
     );
     io.observe(el);
     return () => io.disconnect();
@@ -102,11 +275,11 @@ function Reveal({
   return (
     <div
       ref={ref}
-      className={`transition-all duration-700 ease-out ${className}`}
+      className={`transition-[opacity,transform] duration-700 ease-out ${className}`}
       style={{
         transitionDelay: inView ? `${delay}ms` : "0ms",
         opacity: inView ? 1 : 0,
-        transform: inView ? "translateY(0)" : "translateY(28px)",
+        transform: inView ? "translateY(0)" : "translateY(24px)",
       }}
     >
       {children}
@@ -152,23 +325,21 @@ function FlowCol({ steps }: { steps: string[] }) {
 }
 
 function SectionMedia({
-  src,
+  imgKey,
   alt,
   caption,
 }: {
-  src: string;
+  imgKey: keyof typeof IMG;
   alt: string;
   caption?: string;
 }) {
   return (
-    <div className="relative my-8 overflow-hidden border border-white/[0.08]">
+    <div className="relative my-8 overflow-hidden border border-white/[0.08] bg-[#0B0C12]">
       <div className="relative aspect-[21/9] w-full sm:aspect-[2.4/1]">
-        <Image
-          src={src}
+        <SafeFillImage
+          src={IMG[imgKey]}
+          fallbackSrc={IMG_FALLBACK[imgKey]}
           alt={alt}
-          fill
-          className="object-cover"
-          sizes="(max-width: 1024px) 100vw, 1024px"
         />
         <div
           className="pointer-events-none absolute inset-0"
@@ -236,14 +407,8 @@ export default function AboutPage() {
             aria-hidden
           />
           <Reveal>
-            <div className="relative mx-auto mb-6 h-28 w-28 sm:h-36 sm:w-36">
-              <Image
-                src="/logo.png"
-                alt="Plazore"
-                fill
-                className="object-contain drop-shadow-[0_0_32px_rgba(0,229,117,0.25)]"
-                priority
-              />
+            <div className="relative mx-auto mb-6 flex justify-center">
+              <PlazoreLogo priority />
             </div>
             <p className="mt-3 text-base font-bold text-[#00E575] sm:text-lg">
               The New Way to Shop and Earn.
@@ -266,7 +431,7 @@ export default function AboutPage() {
           </Reveal>
           <Reveal delay={80}>
             <SectionMedia
-              src={IMG.cityCommerce}
+              imgKey="cityCommerce"
               alt="Commerce and retail environment"
               caption="Commerce as a living system"
             />
@@ -351,7 +516,7 @@ export default function AboutPage() {
           </Reveal>
           <Reveal delay={80}>
             <SectionMedia
-              src={IMG.autopilot}
+              imgKey="autopilot"
               alt="Systems and circuitry representing automated intelligence"
               caption="Observe · understand · improve"
             />
@@ -389,7 +554,7 @@ export default function AboutPage() {
           </Reveal>
           <Reveal delay={60}>
             <SectionMedia
-              src={IMG.buyers}
+              imgKey="buyers"
               alt="People shopping and exploring products"
               caption="Discover · understand · buy"
             />
@@ -430,7 +595,7 @@ export default function AboutPage() {
           </Reveal>
           <Reveal delay={60}>
             <SectionMedia
-              src={IMG.sellers}
+              imgKey="sellers"
               alt="Seller and retail operations"
               caption="Build · reach · grow"
             />
@@ -475,7 +640,7 @@ export default function AboutPage() {
           </Reveal>
           <Reveal delay={60}>
             <SectionMedia
-              src={IMG.showroom}
+              imgKey="showroom"
               alt="Curated product discovery space"
               caption="Showroom as a living surface"
             />
@@ -514,7 +679,7 @@ export default function AboutPage() {
           </Reveal>
           <Reveal delay={60}>
             <SectionMedia
-              src={IMG.intelligence}
+              imgKey="intelligence"
               alt="Abstract intelligence and data visualization"
               caption="Product & commerce intelligence"
             />
@@ -618,7 +783,7 @@ export default function AboutPage() {
           </Reveal>
           <Reveal delay={60}>
             <SectionMedia
-              src={IMG.trust}
+              imgKey="trust"
               alt="Secure transaction and structure"
               caption="Payment · order · fulfilment · confirmation"
             />
@@ -703,7 +868,7 @@ export default function AboutPage() {
           </Reveal>
           <Reveal delay={60}>
             <SectionMedia
-              src={IMG.direction}
+              imgKey="direction"
               alt="Earth from space representing long-term direction"
               caption="Commerce is the beginning"
             />
@@ -771,13 +936,8 @@ export default function AboutPage() {
               }}
               aria-hidden
             />
-            <div className="relative mx-auto mb-5 h-24 w-24">
-              <Image
-                src="/logo.png"
-                alt="Plazore"
-                fill
-                className="object-contain"
-              />
+            <div className="relative mx-auto mb-5 flex justify-center">
+              <PlazoreLogo className="relative h-24 w-24" />
             </div>
             <p className="relative mt-3 text-xs font-extrabold tracking-[1.4px] text-[#00E575]">
               THE NEW WAY TO SHOP AND EARN.

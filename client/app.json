@@ -2,38 +2,52 @@
   "expo": {
     "name": "Plazore",
     "slug": "Plazore",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/logo-0.png",
     "scheme": "plazore",
     "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
     "androidStatusBar": {
       "barStyle": "light-content",
       "backgroundColor": "#090B0F",
       "translucent": false
     },
-    "android": {
-      "userInterfaceStyle": "dark",
-      "adaptiveIcon": {
-        "backgroundColor": "#090B0F",
-        "foregroundImage": "./assets/images/android-icon-foreground.png",
-        "backgroundImage": "./assets/images/android-icon-background.png",
-        "monochromeImage": "./assets/images/android-icon-monochrome.png"
-      },
-      "predictiveBackGestureEnabled": false,
-      "package": "com.anonymous.Plazore"
+    "splash": {
+      "image": "./assets/logo-0.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#090B0F"
     },
     "ios": {
       "supportsTablet": true,
-      "userInterfaceStyle": "dark"
+      "userInterfaceStyle": "dark",
+      "icon": "./assets/logo-0.png",
+      "bundleIdentifier": "com.plazore.app"
+    },
+    "android": {
+      "package": "com.plazore.app",
+      "versionCode": 1,
+      "userInterfaceStyle": "dark",
+      "predictiveBackGestureEnabled": false,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/logo-0.png",
+        "backgroundColor": "#090B0F"
+      }
+    },
+    "web": {
+      "favicon": "./assets/logo-0.png"
     },
     "plugins": [
       "expo-router",
       [
         "expo-splash-screen",
         {
-          "image": "./assets/images/splash-icon.png",
+          "image": "./assets/logo-0.png",
           "imageWidth": 200,
           "resizeMode": "contain",
           "backgroundColor": "#090B0F",
           "dark": {
+            "image": "./assets/logo-0.png",
             "backgroundColor": "#090B0F"
           }
         }
@@ -44,6 +58,12 @@
       "expo-secure-store",
       "expo-status-bar",
       "expo-web-browser"
-    ]
+    ],
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "94719469-9dc2-4ee9-9e38-8a25dd04b14d"
+      }
+    }
   }
 }

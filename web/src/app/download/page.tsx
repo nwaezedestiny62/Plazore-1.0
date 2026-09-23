@@ -3,6 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import {
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -21,7 +22,7 @@ const GRAD = "linear-gradient(90deg,#00E575,#14B8A6,#3B82F6)";
 const GRAD_SOFT =
   "linear-gradient(135deg, rgba(0,229,117,0.18), rgba(20,184,166,0.12), rgba(59,130,246,0.14))";
 
-/* ─── assets (do not rename) ─── */
+/* ─── local assets (do not rename) ─── */
 const SHOTS = {
   welcome: "/welcoming.png",
   home: "/home-page.png",
@@ -33,7 +34,111 @@ const SHOTS = {
 
 const DISCOVERY_VIDEO = "/discovery.mp4";
 
-/* ─── scroll reveal ─── */
+/**
+ * External fallbacks when local files are slow / missing / 404.
+ * Neutral dark product-UI style placeholders (Unsplash) — never blank screen.
+ */
+const FALLBACKS: Record<keyof typeof SHOTS, string> = {
+  welcome:
+    "https://images.unsplash.com/photo-1556742049-0cfed4f6a45d?w=760&h=1520&fit=crop&q=80",
+  home: "https://images.unsplash.com/photo-1556740758-90de374c12ad?w=760&h=1520&fit=crop&q=80",
+  showroom:
+    "https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=760&h=1520&fit=crop&q=80",
+  product:
+    "https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=760&h=1520&fit=crop&q=80",
+  dashboard:
+    "https://images.unsplash.com/photo-1460925895917-afdab827c52f?w=760&h=1520&fit=crop&q=80",
+  ai: "https://images.unsplash.com/photo-1677442136019-21780ecad995?w=760&h=1520&fit=crop&q=80",
+};
+
+const VIDEO_POSTER_FALLBACK = FALLBACKS.home;
+
+/* ─── fast media image with local → external fallback ─── */
+function FastShot({
+  localSrc,
+  fallbackSrc,
+  alt,
+  priority = false,
+  className = "h-auto w-full object-cover object-top",
+  width = 760,
+  height = 1520,
+  sizes = "(max-width: 640px) 90vw, 380px",
+  fill = false,
+}: {
+  localSrc: string;
+  fallbackSrc: string;
+  alt: string;
+  priority?: boolean;
+  className?: string;
+  width?: number;
+  height?: number;
+  sizes?: string;
+  fill?: boolean;
+}) {
+  const [src, setSrc] = useState(localSrc);
+  const [loaded, setLoaded] = useState(false);
+  const triedFallback = useRef(false);
+
+  // Reset if prop changes
+  useEffect(() => {
+    setSrc(localSrc);
+    setLoaded(false);
+    triedFallback.current = false;
+  }, [localSrc]);
+
+  const onError = useCallback(() => {
+    if (!triedFallback.current && src !== fallbackSrc) {
+      triedFallback.current = true;
+      setSrc(fallbackSrc);
+      setLoaded(false);
+    } else {
+      // Still show something — solid dark plate
+      setLoaded(true);
+    }
+  }, [fallbackSrc, src]);
+
+  return (
+    <div className="relative h-full w-full overflow-hidden bg-[#11141A]">
+      {/* Instant skeleton — never blank while decoding */}
+      <div
+        className={`absolute inset-0 bg-gradient-to-b from-[#151820] to-[#0B0C12] transition-opacity duration-500 ${
+          loaded ? "opacity-0" : "opacity-100"
+        }`}
+        aria-hidden
+      />
+      {fill ? (
+        <Image
+          src={src}
+          alt={alt}
+          fill
+          priority={priority}
+          className={className}
+          sizes={sizes}
+          onLoad={() => setLoaded(true)}
+          onError={onError}
+          unoptimized={src.startsWith("http")}
+        />
+      ) : (
+        <Image
+          src={src}
+          alt={alt}
+          width={width}
+          height={height}
+          priority={priority}
+          className={`${className} transition-opacity duration-500 ${
+            loaded ? "opacity-100" : "opacity-0"
+          }`}
+          sizes={sizes}
+          onLoad={() => setLoaded(true)}
+          onError={onError}
+          unoptimized={src.startsWith("http")}
+        />
+      )}
+    </div>
+  );
+}
+
+/* ─── scroll reveal (lightweight, never blocks paint) ─── */
 function useInView<T extends HTMLElement>(opts?: {
   threshold?: number;
   once?: boolean;
@@ -45,13 +150,23 @@ function useInView<T extends HTMLElement>(opts?: {
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const reduced =
+
+    // Prefer reduced motion / already visible
+    if (
       typeof window !== "undefined" &&
-      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (reduced) {
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    ) {
       setInView(true);
       return;
     }
+
+    // If already in viewport on mount, show immediately (no lag)
+    const rect = el.getBoundingClientRect();
+    if (rect.top < window.innerHeight * 0.92 && rect.bottom > 0) {
+      setInView(true);
+      if (once) return;
+    }
+
     const io = new IntersectionObserver(
       ([e]) => {
         if (e.isIntersecting) {
@@ -61,7 +176,7 @@ function useInView<T extends HTMLElement>(opts?: {
           setInView(false);
         }
       },
-      { threshold: opts?.threshold ?? 0.18, rootMargin: "0px 0px -8% 0px" },
+      { threshold: opts?.threshold ?? 0.12, rootMargin: "0px 0px -6% 0px" },
     );
     io.observe(el);
     return () => io.disconnect();
@@ -83,11 +198,11 @@ function Reveal({
   return (
     <div
       ref={ref}
-      className={`transition-all duration-700 ease-out ${className}`}
+      className={`transition-[opacity,transform] duration-600 ease-out will-change-[opacity,transform] ${className}`}
       style={{
         transitionDelay: inView ? `${delay}ms` : "0ms",
         opacity: inView ? 1 : 0,
-        transform: inView ? "translateY(0)" : "translateY(28px)",
+        transform: inView ? "translateY(0)" : "translateY(20px)",
       }}
     >
       {children}
@@ -116,13 +231,13 @@ function CalloutMarkers({
       {callouts.map((c, i) => (
         <div
           key={c.n}
-          className="pointer-events-none absolute z-10 transition-all duration-700 ease-out"
+          className="pointer-events-none absolute z-10 transition-all duration-500 ease-out"
           style={{
             top: c.top,
             left: c.left,
             opacity: inView ? 1 : 0,
-            transform: inView ? "scale(1)" : "scale(0.6)",
-            transitionDelay: inView ? `${180 + i * 90}ms` : "0ms",
+            transform: inView ? "scale(1)" : "scale(0.85)",
+            transitionDelay: inView ? `${120 + i * 70}ms` : "0ms",
           }}
         >
           <div className="relative flex items-center gap-2">
@@ -150,34 +265,35 @@ function CalloutMarkers({
 }
 
 function AnnotatedShot({
-  src,
+  shotKey,
   alt,
   callouts,
   priority,
 }: {
-  src: string;
+  shotKey: keyof typeof SHOTS;
   alt: string;
   callouts: Callout[];
   priority?: boolean;
 }) {
-  const { ref, inView } = useInView<HTMLDivElement>({ threshold: 0.2 });
+  const { ref, inView } = useInView<HTMLDivElement>({ threshold: 0.15 });
 
   return (
-    <div ref={ref} className="relative mx-auto w-full max-w-[340px] sm:max-w-[380px]">
+    <div
+      ref={ref}
+      className="relative mx-auto w-full max-w-[340px] sm:max-w-[380px]"
+    >
       <div
-        className="pointer-events-none absolute -inset-6 -z-10 rounded-[40px] opacity-60 blur-2xl"
+        className="pointer-events-none absolute -inset-6 -z-10 rounded-[40px] opacity-50 blur-2xl"
         style={{ background: GRAD_SOFT }}
         aria-hidden
       />
       <div className="relative overflow-hidden rounded-[28px] border border-white/[0.1] bg-[#0B0C12] shadow-[0_28px_80px_rgba(0,0,0,0.55)]">
-        <Image
-          src={src}
+        <FastShot
+          localSrc={SHOTS[shotKey]}
+          fallbackSrc={FALLBACKS[shotKey]}
           alt={alt}
-          width={760}
-          height={1520}
           priority={priority}
           className="h-auto w-full object-cover object-top"
-          sizes="(max-width: 640px) 90vw, 380px"
         />
         <CalloutMarkers callouts={callouts} inView={inView} />
       </div>
@@ -187,38 +303,42 @@ function AnnotatedShot({
 
 function AnnotatedDiscoveryVideo({
   callouts,
-  poster,
+  posterKey = "home" as keyof typeof SHOTS,
 }: {
   callouts: Callout[];
-  poster?: string;
+  posterKey?: keyof typeof SHOTS;
 }) {
-  const { ref, inView } = useInView<HTMLDivElement>({ threshold: 0.15 });
+  const { ref, inView } = useInView<HTMLDivElement>({
+    threshold: 0.12,
+    once: false,
+  });
   const videoRef = useRef<HTMLVideoElement>(null);
   const [failed, setFailed] = useState(false);
+const [posterSrc, setPosterSrc] = useState<string>(SHOTS[posterKey]);
 
   useEffect(() => {
     const el = videoRef.current;
     if (!el || failed) return;
+
     el.muted = true;
     el.defaultMuted = true;
-    el.setAttribute("muted", "");
     el.playsInline = true;
-    el.setAttribute("playsinline", "true");
-    el.setAttribute("webkit-playsinline", "true");
 
-    const tryPlay = () => {
-      if (inView) el.play().catch(() => {});
-      else el.pause();
-    };
-    tryPlay();
-    el.addEventListener("loadeddata", tryPlay);
-    return () => el.removeEventListener("loadeddata", tryPlay);
+    if (inView) {
+      const p = el.play();
+      if (p) p.catch(() => {});
+    } else {
+      el.pause();
+    }
   }, [failed, inView]);
 
   return (
-    <div ref={ref} className="relative mx-auto w-full max-w-[340px] sm:max-w-[380px]">
+    <div
+      ref={ref}
+      className="relative mx-auto w-full max-w-[340px] sm:max-w-[380px]"
+    >
       <div
-        className="pointer-events-none absolute -inset-6 -z-10 rounded-[40px] opacity-60 blur-2xl"
+        className="pointer-events-none absolute -inset-6 -z-10 rounded-[40px] opacity-50 blur-2xl"
         style={{ background: GRAD_SOFT }}
         aria-hidden
       />
@@ -228,27 +348,37 @@ function AnnotatedDiscoveryVideo({
             ref={videoRef}
             className="absolute inset-0 h-full w-full object-cover object-top"
             src={DISCOVERY_VIDEO}
-            poster={poster}
-            autoPlay
+            poster={posterSrc}
             muted
             loop
             playsInline
-            preload="auto"
+            preload="metadata"
             controls={false}
             disablePictureInPicture
             onError={() => setFailed(true)}
             aria-label="Plazore discovery experience"
           />
         ) : (
-          <Image
-            src={poster || SHOTS.home}
+          <FastShot
+            localSrc={SHOTS[posterKey]}
+            fallbackSrc={FALLBACKS[posterKey] || VIDEO_POSTER_FALLBACK}
             alt="Plazore home"
-            width={760}
-            height={1520}
-            className="h-full w-full object-cover object-top"
+            fill
+            className="object-cover object-top"
             sizes="(max-width: 640px) 90vw, 380px"
           />
         )}
+        {/* If poster itself 404s, swap once */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+  src={posterSrc}
+  alt=""
+  className="hidden"
+  onError={() => {
+    const fb = FALLBACKS[posterKey] ?? VIDEO_POSTER_FALLBACK;
+    if (posterSrc !== fb) setPosterSrc(fb);
+  }}
+/>
         <CalloutMarkers callouts={callouts} inView={inView} />
       </div>
     </div>
@@ -256,13 +386,11 @@ function AnnotatedDiscoveryVideo({
 }
 
 /* ─── CTAs ─── */
-/** Mobile-first gradient primary; desktop can pass className for width */
 function DownloadCta({
   className = "",
   variant = "default",
 }: {
   className?: string;
-  /** "hero" = full-width gradient emphasis (mobile landing) */
   variant?: "default" | "hero";
 }) {
   const apk = getApkDownloadUrl();
@@ -337,6 +465,7 @@ function QrBlock({ size = 168 }: { size?: number }) {
       <div
         className="animate-pulse rounded-2xl bg-white/10"
         style={{ width: size + 32, height: size + 80 }}
+        aria-hidden
       />
     );
   }
@@ -420,32 +549,27 @@ function SectionCopy({
 
 /* ─── PAGE ─── */
 export default function DownloadPage() {
-  /**
-   * Viewport-based device context (reliable for layout).
-   * lg+ = desktop/laptop canvas → QR on hero.
-   * < lg = phone → gradient download + image, no QR.
-   */
-  const [isDesktop, setIsDesktop] = useState(false);
-
-  useEffect(() => {
-    const mq = window.matchMedia("(min-width: 1024px)");
-    const apply = () => setIsDesktop(mq.matches);
-    apply();
-    mq.addEventListener("change", apply);
-    return () => mq.removeEventListener("change", apply);
-  }, []);
-
   const discoveryCallouts: Callout[] = [
     { n: 1, label: "Explore beyond the search bar", top: "10%", left: "12%" },
     { n: 2, label: "Discover products naturally", top: "42%", left: "14%" },
     { n: 3, label: "Find what's next on Plazore", top: "90%", left: "40%" },
   ];
 
+  const welcomeCallouts: Callout[] = [
+    { n: 1, label: "Your gateway to Plazore", top: "12%", left: "8%" },
+    { n: 2, label: "Discover, shop and explore", top: "48%", left: "10%" },
+    { n: 3, label: "Everything commerce, in one place", top: "88%", left: "42%" },
+  ];
+
   return (
     <div className="min-h-dvh bg-[#090B0F] text-[#F5F7FA]">
       <header className="sticky top-0 z-40 border-b border-white/[0.06] bg-[#090B0F]/85 backdrop-blur-md">
         <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-4 sm:px-6">
-          <Link href="/" className="flex items-center gap-2.5" aria-label="Plazore home">
+          <Link
+            href="/"
+            className="flex items-center gap-2.5"
+            aria-label="Plazore home"
+          >
             <Image
               src="/logo.png"
               alt="Plazore"
@@ -468,7 +592,7 @@ export default function DownloadPage() {
         </div>
       </header>
 
-            {/* ═══════ HERO — device-aware ═══════ */}
+      {/* ═══════ HERO ═══════ */}
       <section className="relative overflow-hidden border-b border-white/[0.05]">
         <div
           className="pointer-events-none absolute inset-0 opacity-40"
@@ -480,7 +604,7 @@ export default function DownloadPage() {
         />
 
         <div className="relative mx-auto max-w-6xl px-4 pb-16 pt-12 sm:px-6 sm:pb-24 sm:pt-16">
-          {/* ── MOBILE / TABLET: text → gradient download → image · NO QR ── */}
+          {/* ── MOBILE / TABLET: welcoming.png + CTA ── */}
           <div className="lg:hidden">
             <Reveal>
               <p
@@ -498,32 +622,27 @@ export default function DownloadPage() {
                 The new way to shop and earn.
               </h1>
               <p className="mt-4 max-w-[36ch] text-[15px] leading-[1.7] text-[#A7ADB8]">
-                Plazore is a Digital Mall built to change how
-                people discover, buy and sell goods.
+                Plazore is a Digital Mall built to change how people discover,
+                buy and sell goods.
               </p>
             </Reveal>
-            <Reveal delay={80} className="mt-8 flex flex-col gap-3">
+            <Reveal delay={60} className="mt-8 flex flex-col gap-3">
               <DownloadCta variant="hero" />
               <LearnMoreLink className="h-11 justify-center border border-white/10 bg-transparent px-4" />
             </Reveal>
-            <Reveal delay={140} className="mt-12">
+            <Reveal delay={100} className="mt-12">
               <AnnotatedShot
-                src={SHOTS.home}
-                alt="Plazore home screen"
+                shotKey="welcome"
+                alt="Plazore welcome screen"
                 priority
-                callouts={[
-                  { n: 1, label: "Discovery surface", top: "12%", left: "8%" },
-                  { n: 2, label: "Product rails", top: "48%", left: "10%" },
-                  { n: 3, label: "Navigation", top: "88%", left: "42%" },
-                ]}
+                callouts={welcomeCallouts}
               />
             </Reveal>
           </div>
 
-          {/* ── DESKTOP / LAPTOP: copy · QR center (dominant) · app visual ── */}
+          {/* ── DESKTOP: copy · QR · welcoming.png ── */}
           <div className="hidden lg:block">
             <div className="grid grid-cols-12 items-center gap-6 xl:gap-8">
-              {/* Left — copy */}
               <div className="col-span-4">
                 <Reveal>
                   <p
@@ -541,28 +660,18 @@ export default function DownloadPage() {
                     The new way to shop and earn.
                   </h1>
                   <p className="mt-5 max-w-[34ch] text-[15px] leading-[1.7] text-[#A7ADB8]">
-                    Plazore is a Digital Mall built to change
-                    how people discover, buy and sell goods.
+                    Plazore is a Digital Mall built to change how people
+                    discover, buy and sell goods.
                   </p>
                 </Reveal>
-                <Reveal delay={100} className="mt-8">
+                <Reveal delay={80} className="mt-8">
                   <LearnMoreLink className="h-12 items-center border border-white/10 px-5" />
                 </Reveal>
               </div>
 
-              {/* Center — dominant QR */}
               <div className="col-span-4 flex justify-center">
-                <Reveal delay={60}>
-                  <div
-                    className="
-                      relative flex flex-col items-center
-                      rounded-[28px] border border-white/[0.12]
-                      bg-[#0B0C12]/90 px-8 py-9
-                      shadow-[0_24px_80px_rgba(0,0,0,0.5)]
-                      backdrop-blur-md
-                    "
-                  >
-                    {/* gradient ring accent */}
+                <Reveal delay={40}>
+                  <div className="relative flex flex-col items-center rounded-[28px] border border-white/[0.12] bg-[#0B0C12]/90 px-8 py-9 shadow-[0_24px_80px_rgba(0,0,0,0.5)] backdrop-blur-md">
                     <div
                       className="pointer-events-none absolute -inset-px rounded-[28px] opacity-80"
                       style={{
@@ -585,18 +694,13 @@ export default function DownloadPage() {
                 </Reveal>
               </div>
 
-              {/* Right — app visual */}
               <div className="col-span-4 flex justify-end">
-                <Reveal delay={100}>
+                <Reveal delay={80}>
                   <AnnotatedShot
-                    src={SHOTS.welcome}
+                    shotKey="welcome"
                     alt="Plazore welcome screen"
                     priority
-                    callouts={[
-                      { n: 1, label: "Your gateway to Plazore", top: "12%", left: "8%" },
-                      { n: 2, label: "Discover, shop and explore", top: "48%", left: "10%" },
-                      { n: 3, label: "Everything commerce, in one place", top: "88%", left: "42%" },
-                    ]}
+                    callouts={welcomeCallouts}
                   />
                 </Reveal>
               </div>
@@ -605,7 +709,7 @@ export default function DownloadPage() {
         </div>
       </section>
 
-      {/* ═══════ 01 DISCOVERY — video loop ═══════ */}
+      {/* ═══════ 01 DISCOVERY ═══════ */}
       <section className="border-b border-white/[0.05] py-20 sm:py-28">
         <div className="mx-auto grid max-w-6xl items-center gap-12 px-4 sm:px-6 lg:grid-cols-2 lg:gap-16">
           <Reveal>
@@ -618,10 +722,10 @@ export default function DownloadPage() {
               <LearnMoreLink />
             </div>
           </Reveal>
-          <Reveal delay={100}>
+          <Reveal delay={80}>
             <AnnotatedDiscoveryVideo
               callouts={discoveryCallouts}
-              poster={SHOTS.home}
+              posterKey="home"
             />
           </Reveal>
         </div>
@@ -632,15 +736,25 @@ export default function DownloadPage() {
         <div className="mx-auto grid max-w-6xl items-center gap-12 px-4 sm:px-6 lg:grid-cols-2 lg:gap-16">
           <Reveal className="order-2 lg:order-1">
             <AnnotatedShot
-              src={SHOTS.showroom}
+              shotKey="showroom"
               alt="Plazore Showroom"
               callouts={[
-                { n: 1, label: "Discover what's happening across Plazore", top: "22%", left: "10%" },
-                { n: 2, label: "Move naturally from discovery to commerce", top: "48%", left: "18%" },
+                {
+                  n: 1,
+                  label: "Discover what's happening across Plazore",
+                  top: "22%",
+                  left: "10%",
+                },
+                {
+                  n: 2,
+                  label: "Move naturally from discovery to commerce",
+                  top: "48%",
+                  left: "18%",
+                },
               ]}
             />
           </Reveal>
-          <Reveal delay={80} className="order-1 lg:order-2">
+          <Reveal delay={60} className="order-1 lg:order-2">
             <SectionCopy
               kicker="02 · Plazore"
               title="A new way to experience commerce."
@@ -667,13 +781,18 @@ export default function DownloadPage() {
               <LearnMoreLink />
             </div>
           </Reveal>
-          <Reveal delay={100} className="mt-14">
+          <Reveal delay={80} className="mt-14">
             <AnnotatedShot
-              src={SHOTS.product}
+              shotKey="product"
               alt="Plazore product page"
               callouts={[
                 { n: 1, label: "Product imagery", top: "20%", left: "12%" },
-                { n: 2, label: "Name, Price & Availability", top: "55%", left: "14%" },
+                {
+                  n: 2,
+                  label: "Name, Price & Availability",
+                  top: "55%",
+                  left: "14%",
+                },
                 { n: 4, label: "Purchase controls", top: "76%", left: "3%" },
               ]}
             />
@@ -694,9 +813,9 @@ export default function DownloadPage() {
               <LearnMoreLink />
             </div>
           </Reveal>
-          <Reveal delay={100}>
+          <Reveal delay={80}>
             <AnnotatedShot
-              src={SHOTS.dashboard}
+              shotKey="dashboard"
               alt="Plazore seller dashboard"
               callouts={[
                 { n: 1, label: "Activity overview", top: "20%", left: "10%" },
@@ -722,13 +841,18 @@ export default function DownloadPage() {
               <LearnMoreLink />
             </div>
           </Reveal>
-          <Reveal delay={100} className="mt-14">
+          <Reveal delay={80} className="mt-14">
             <AnnotatedShot
-              src={SHOTS.ai}
+              shotKey="ai"
               alt="Plazore AI product intelligence"
               callouts={[
                 { n: 1, label: "Product intelligence", top: "14%", left: "10%" },
-                { n: 2, label: "Signal from activity", top: "46%", left: "12%" },
+                {
+                  n: 2,
+                  label: "Signal from activity",
+                  top: "46%",
+                  left: "12%",
+                },
                 { n: 3, label: "Clearer context", top: "64%", left: "56%" },
               ]}
             />
@@ -736,7 +860,7 @@ export default function DownloadPage() {
         </div>
       </section>
 
-      {/* ═══════ ABOUT TRANSITION ═══════ */}
+      {/* ═══════ ABOUT ═══════ */}
       <section className="border-b border-white/[0.05] py-20 sm:py-24">
         <div className="mx-auto max-w-3xl px-4 text-center sm:px-6">
           <Reveal>
@@ -758,7 +882,7 @@ export default function DownloadPage() {
         </div>
       </section>
 
-            {/* ═══════ FINAL ═══════ */}
+      {/* ═══════ FINAL ═══════ */}
       <section className="border-t border-white/[0.05] py-20 sm:py-28">
         <div className="mx-auto max-w-5xl px-4 sm:px-6">
           <Reveal>
@@ -766,7 +890,6 @@ export default function DownloadPage() {
               Do commerce like it&apos;s 2040.
             </h2>
 
-            {/* ── MOBILE: gradient download · no QR ── */}
             <div className="mt-10 flex flex-col items-center gap-4 lg:hidden">
               <div className="w-full max-w-sm">
                 <DownloadCta variant="hero" />
@@ -774,18 +897,9 @@ export default function DownloadPage() {
               <LearnMoreLink className="h-12 items-center border border-white/10 px-5" />
             </div>
 
-            {/* ── DESKTOP: QR dead-center & dominant ── */}
             <div className="mt-12 hidden lg:block">
               <div className="flex flex-col items-center">
-                <div
-                  className="
-                    relative flex flex-col items-center
-                    rounded-[28px] border border-white/[0.12]
-                    bg-[#0B0C12]/90 px-10 py-10
-                    shadow-[0_28px_90px_rgba(0,0,0,0.55)]
-                    backdrop-blur-md
-                  "
-                >
+                <div className="relative flex flex-col items-center rounded-[28px] border border-white/[0.12] bg-[#0B0C12]/90 px-10 py-10 shadow-[0_28px_90px_rgba(0,0,0,0.55)] backdrop-blur-md">
                   <div
                     className="pointer-events-none absolute -inset-px rounded-[28px] opacity-90"
                     style={{
@@ -805,12 +919,10 @@ export default function DownloadPage() {
                   />
                   <QrBlock size={220} />
                 </div>
-
                 <p className="mt-6 max-w-[28ch] text-center text-[13px] leading-relaxed text-white/45">
                   Scan with your phone to open the Plazore download page and get
                   the app.
                 </p>
-
                 <div className="mt-8">
                   <LearnMoreLink className="h-12 items-center border border-white/10 px-5" />
                 </div>
