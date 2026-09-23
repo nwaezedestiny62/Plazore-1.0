@@ -28,7 +28,6 @@ import {
   ActivityIndicator,
   Animated,
   Dimensions,
-  Easing,
   Image,
   KeyboardAvoidingView,
   NativeScrollEvent,
@@ -104,7 +103,6 @@ type OverlayState = {
   durationMs?: number
 } | null
 
-/* ── Top overlay ── */
 function TopOverlay({
   state,
   onDismiss,
@@ -148,15 +146,12 @@ function TopOverlay({
       }),
     ]).start()
     if (!state.actions?.length) {
-      timer.current = setTimeout(
-        () => onDismiss(),
-        state.durationMs ?? 4000,
-      )
+      timer.current = setTimeout(() => onDismiss(), state.durationMs ?? 4000)
     }
     return () => {
       if (timer.current) clearTimeout(timer.current)
     }
-  }, [state])
+  }, [state, onDismiss, translateY, opacity])
 
   if (!state) return null
   const accent =
@@ -344,7 +339,6 @@ function Label({
   return body
 }
 
-/* ── Showroom card preview (matches real showroom) ── */
 function ProductCardPreview({
   data,
   formatPrice,
@@ -432,7 +426,12 @@ function ProductCardPreview({
         )}
         {data.feeMode === 'free' ? (
           <Text
-            style={{ color: GREEN, fontSize: 11, marginTop: 3, fontWeight: '600' }}
+            style={{
+              color: GREEN,
+              fontSize: 11,
+              marginTop: 3,
+              fontWeight: '600',
+            }}
           >
             Free delivery
           </Text>
@@ -452,7 +451,6 @@ function ProductCardPreview({
   )
 }
 
-/* ── Phone frame + product page preview ── */
 function PhoneFrame({ children }: { children: React.ReactNode }) {
   return (
     <View style={styles.phoneOuter}>
@@ -705,7 +703,8 @@ function ProductPagePreview({
                     </Text>
                   </View>
                 )}
-                {data.feeMode === 'on_delivery' && !!data.deliveryNote?.trim() ? (
+                {data.feeMode === 'on_delivery' &&
+                !!data.deliveryNote?.trim() ? (
                   <Text
                     style={{
                       color: SECONDARY,
@@ -764,7 +763,6 @@ function ProductPagePreview({
   )
 }
 
-/* ── Success screen ── */
 function PublishedScreen({
   productId,
   name,
@@ -792,7 +790,7 @@ function PublishedScreen({
         useNativeDriver: true,
       }),
     ]).start()
-  }, [])
+  }, [fade, scale])
 
   return (
     <View style={styles.successRoot}>
@@ -845,14 +843,10 @@ function PublishedScreen({
   )
 }
 
-/* ══════════════════════════════════════════════
-   MAIN — Add Product (same rules as web add)
-══════════════════════════════════════════════ */
 export default function AddProduct() {
   const router = useRouter()
   const insets = useSafeAreaInsets()
   const { getToken, isLoaded, isSignedIn } = useAuth()
-  // SAME as web: lock region at creation time
   const { region, formatProduct } = useMarketplace()
 
   const maxImages = PLAN_IMAGE_LIMITS[CURRENT_PLAN] ?? 6
@@ -863,7 +857,6 @@ export default function AddProduct() {
   const [publishedId, setPublishedId] = useState<string | null>(null)
   const [storeName, setStoreName] = useState('')
 
-  // Images — first index is COVER (same as web FormData order)
   const [images, setImages] = useState<string[]>([])
 
   const [name, setName] = useState('')
@@ -956,11 +949,6 @@ export default function AddProduct() {
   const stockN = Math.max(0, parseInt(stock || '0', 10) || 0)
   const feeN = Number(deliveryFee) || 0
 
-  /**
-   * SAME as web add:
-   * Preview price uses seller's current marketplace region.
-   * On publish, that same region is locked into the product.
-   */
   const formatPreviewPrice = useCallback(
     (n: number) => {
       try {
@@ -1013,7 +1001,6 @@ export default function AddProduct() {
     ],
   )
 
-  /* ── Images: first = cover ── */
   const pickImages = async () => {
     const remaining = maxImages - images.length
     if (remaining <= 0) {
@@ -1035,7 +1022,6 @@ export default function AddProduct() {
     setImages((prev) => prev.filter((_, i) => i !== index))
   }
 
-  /** Move image to index 0 → becomes cover */
   const makeCover = (index: number) => {
     if (index <= 0) return
     setImages((prev) => {
@@ -1072,24 +1058,25 @@ export default function AddProduct() {
     })
   }
 
+  /** FIXED: uses `images` (not imageFiles) + free shipping skips method */
   const validate = () => {
-    if (!images.length) return 'Add at least one product image'
+    if (!images.length)
+      return 'Add at least one product image (first one becomes the cover)'
     if (!name.trim()) return 'Product name is required'
     if (!priceN || priceN <= 0) return 'Enter a valid price'
     if (!category) return 'Select a category'
     if (!fulfillCountryCode || !fulfillCity) return 'Set fulfillment location'
     if (!feeMode) return 'Choose a delivery charge option'
-    if (feeMode !== 'free') {
-      if (!shippingMethod) return 'Choose self delivery or courier'
-      if (shippingMethod === 'courier' && !courierCompany.trim()) {
-        return 'Courier company is required'
-      }
-      if (feeMode === 'fixed') {
-        if (deliveryFee === '' || !(feeN > 0)) {
-          return 'Enter a delivery fee greater than 0'
-        }
-      }
-    }
+
+    // Free delivery → no method / courier / fee required
+    if (feeMode === 'free') return null
+
+    if (!shippingMethod) return 'Choose self delivery or courier'
+    if (shippingMethod === 'courier' && !courierCompany.trim())
+      return 'Courier company is required'
+    if (feeMode === 'fixed' && (!(feeN > 0) || deliveryFee === ''))
+      return 'Enter a delivery fee greater than 0'
+
     return null
   }
 
@@ -1112,20 +1099,32 @@ export default function AddProduct() {
       fd.append('description', description.trim())
       fd.append('category', category)
       fd.append('subCategory', subCategory)
-      // LOCK region at creation — same as web
       fd.append('region', region || 'NG')
       fd.append('specifications', JSON.stringify(specs))
-      fd.append(
-        'shipping',
-        JSON.stringify({
-          feeMode,
-          method: feeMode === "free" ? undefined : shippingMethod,
-          courier: feeMode === "free" ? "" : courierCompany.trim(),
-          courierCompany: feeMode === "free" ? "" : courierCompany.trim(),
-          deliveryFee: feeMode === "fixed" ? feeN : 0,
-          deliveryNote: feeMode === "on_delivery" ? deliveryNote.trim() : "",
-        }),
-      )
+
+      // Free shipping payload — method never required by server
+      const shippingPayload =
+        feeMode === 'free'
+          ? {
+              feeMode: 'free' as const,
+              method: 'self',
+              courier: '',
+              courierCompany: '',
+              deliveryFee: 0,
+              deliveryNote: '',
+            }
+          : {
+              feeMode: feeMode as 'fixed' | 'on_delivery',
+              method: shippingMethod,
+              courier: courierCompany.trim(),
+              courierCompany: courierCompany.trim(),
+              deliveryFee: feeMode === 'fixed' ? feeN : 0,
+              deliveryNote:
+                feeMode === 'on_delivery' ? deliveryNote.trim() : '',
+            }
+
+      fd.append('shipping', JSON.stringify(shippingPayload))
+
       const country = FULFILLMENT_COUNTRIES.find(
         (c) => c.code === fulfillCountryCode,
       )
@@ -1144,7 +1143,6 @@ export default function AddProduct() {
         ),
       )
 
-      // First image in FormData = cover (order preserved)
       for (let i = 0; i < images.length; i++) {
         const uri = images[i]
         const nameGuess = uri.split('/').pop() || `image_${i}.jpg`
@@ -1191,7 +1189,9 @@ export default function AddProduct() {
       console.error(e)
       toast(
         'Error',
-        e?.response?.data?.message || e?.message || 'Could not publish product',
+        e?.response?.data?.message ||
+          e?.message ||
+          'Could not publish product',
         'danger',
       )
     } finally {
@@ -1201,7 +1201,14 @@ export default function AddProduct() {
 
   if (!isLoaded) {
     return (
-      <View style={{ flex: 1, backgroundColor: BG, alignItems: 'center', justifyContent: 'center' }}>
+      <View
+        style={{
+          flex: 1,
+          backgroundColor: BG,
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
         <ActivityIndicator color={GREEN} size="large" />
       </View>
     )
@@ -1272,7 +1279,6 @@ export default function AddProduct() {
           Listed in {region || 'NG'} marketplace · price locked to this region
         </Text>
 
-        {/* 01 Images — first is cover */}
         <Section
           step="01"
           title="Photos"
@@ -1355,7 +1361,6 @@ export default function AddProduct() {
           </ScrollView>
         </Section>
 
-        {/* 02 Basics */}
         <Section step="02" title="Basics">
           <Label onPress={() => nameRef.current?.focus()}>Name *</Label>
           <TextInput
@@ -1417,7 +1422,6 @@ export default function AddProduct() {
           />
         </Section>
 
-        {/* 03 Category */}
         <Section step="03" title="Category">
           <Label>Category *</Label>
           <ScrollView
@@ -1504,9 +1508,12 @@ export default function AddProduct() {
           )}
         </Section>
 
-        {/* 04 Docs (conditional) */}
         {needsDocs && (
-          <Section step="04" title="Documents" subtitle="Required for this category">
+          <Section
+            step="04"
+            title="Documents"
+            subtitle="Required for this category"
+          >
             {documents.map((doc, index) => (
               <View key={`${doc.uri}-${index}`} style={styles.docBox}>
                 <View
@@ -1567,7 +1574,10 @@ export default function AddProduct() {
               </View>
             ))}
             {documents.length < 5 && (
-              <TouchableOpacity onPress={pickDocuments} style={styles.dashedBtn}>
+              <TouchableOpacity
+                onPress={pickDocuments}
+                style={styles.dashedBtn}
+              >
                 <Ionicons
                   name="document-attach-outline"
                   size={22}
@@ -1581,7 +1591,6 @@ export default function AddProduct() {
           </Section>
         )}
 
-        {/* Fulfillment */}
         <Section
           step={needsDocs ? '05' : '04'}
           title="Fulfillment location"
@@ -1688,7 +1697,6 @@ export default function AddProduct() {
             )}
         </Section>
 
-        {/* Delivery */}
         <Section
           step={needsDocs ? '06' : '05'}
           title="Delivery"
@@ -1836,7 +1844,6 @@ export default function AddProduct() {
           ) : null}
         </Section>
 
-        {/* Live preview */}
         <View style={{ marginBottom: 8, marginTop: 4 }}>
           <Text style={styles.pageKicker}>Live preview</Text>
           <Text style={styles.previewHead}>What buyers will see</Text>
@@ -1871,7 +1878,6 @@ export default function AddProduct() {
           Preview the page · swipe through your images
         </Text>
 
-        {/* Publish */}
         <Section step={needsDocs ? '07' : '06'} title="Publish">
           <View style={styles.feeRow}>
             <Text style={{ color: MUTED, fontSize: 13 }}>Plan</Text>

@@ -1190,24 +1190,24 @@ export default function EditProduct() {
     })
   }
 
-  const validate = () => {
-    if (!images.length) return 'Add at least one product image'
+    const validate = () => {
+    if (!images.length)
+      return 'Add at least one product image (first one becomes the cover)'
     if (!name.trim()) return 'Product name is required'
     if (!priceN || priceN <= 0) return 'Enter a valid price'
     if (!category) return 'Select a category'
     if (!fulfillCountryCode || !fulfillCity) return 'Set fulfillment location'
     if (!feeMode) return 'Choose a delivery charge option'
-    if (feeMode !== 'free') {
-      if (!shippingMethod) return 'Choose self delivery or courier'
-      if (shippingMethod === 'courier' && !courierCompany.trim()) {
-        return 'Courier company is required'
-      }
-      if (feeMode === 'fixed') {
-        if (deliveryFee === '' || !(feeN > 0)) {
-          return 'Enter a delivery fee greater than 0'
-        }
-      }
-    }
+
+    // Free delivery → no method / courier / fee required
+    if (feeMode === 'free') return null
+
+    if (!shippingMethod) return 'Choose self delivery or courier'
+    if (shippingMethod === 'courier' && !courierCompany.trim())
+      return 'Courier company is required'
+    if (feeMode === 'fixed' && (!(feeN > 0) || deliveryFee === ''))
+      return 'Enter a delivery fee greater than 0'
+
     return null
   }
 
@@ -1234,17 +1234,27 @@ export default function EditProduct() {
       // NEVER change the creation region
       fd.append('region', productRegion)
       fd.append('specifications', JSON.stringify(specs))
-      fd.append(
-        'shipping',
-        JSON.stringify({
-          feeMode,
-          method: feeMode === "free" ? undefined : shippingMethod,
-          courier: feeMode === "free" ? "" : courierCompany.trim(),
-          courierCompany: feeMode === "free" ? "" : courierCompany.trim(),
-          deliveryFee: feeMode === "fixed" ? feeN : 0,
-          deliveryNote: feeMode === "on_delivery" ? deliveryNote.trim() : "",
-        }),
-      )
+            const shippingPayload =
+        feeMode === 'free'
+          ? {
+              feeMode: 'free' as const,
+              method: 'self',
+              courier: '',
+              courierCompany: '',
+              deliveryFee: 0,
+              deliveryNote: '',
+            }
+          : {
+              feeMode: feeMode as 'fixed' | 'on_delivery',
+              method: shippingMethod,
+              courier: courierCompany.trim(),
+              courierCompany: courierCompany.trim(),
+              deliveryFee: feeMode === 'fixed' ? feeN : 0,
+              deliveryNote:
+                feeMode === 'on_delivery' ? deliveryNote.trim() : '',
+            }
+
+      fd.append('shipping', JSON.stringify(shippingPayload))
       const country = FULFILLMENT_COUNTRIES.find(
         (c) => c.code === fulfillCountryCode,
       )

@@ -1,18 +1,21 @@
 /**
- * Seller register — still-image bg (no expo-av)
+ * Seller register — external still-image bg + store logo + store banner
  * Route: /seller-register
+ * Saves: POST /seller/apply then PUT /seller/store (storeLogo, storeBanner)
  */
 
 import api from '@/constants/api'
 import { REGION_LIST } from '@/constants/regions'
 import { useAuth, useUser } from '@clerk/clerk-expo'
 import { Ionicons } from '@expo/vector-icons'
+import * as ImagePicker from 'expo-image-picker'
 import { LinearGradient } from 'expo-linear-gradient'
 import { useRouter } from 'expo-router'
 import React, { useEffect, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
+  Image,
   ImageBackground,
   KeyboardAvoidingView,
   Platform,
@@ -43,6 +46,8 @@ const FILL = {
   left: 0,
 }
 
+type LocalImage = { uri: string; name: string; type: string }
+
 export default function SellerRegister() {
   const { getToken } = useAuth()
   const { user } = useUser()
@@ -60,6 +65,9 @@ export default function SellerRegister() {
   const [loading, setLoading] = useState(false)
   const [focus, setFocus] = useState<string | null>(null)
 
+  const [storeLogo, setStoreLogo] = useState<LocalImage | null>(null)
+  const [storeBanner, setStoreBanner] = useState<LocalImage | null>(null)
+
   useEffect(() => {
     const load = async () => {
       try {
@@ -74,11 +82,60 @@ export default function SellerRegister() {
           setMarketplaceRegion(res.data.data.marketplaceRegion)
         }
       } catch {
-        /* offline — form still usable */
+        /* offline */
       }
     }
     void load()
   }, [getToken])
+
+  const pickImage = async (kind: 'logo' | 'banner') => {
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync()
+    if (!perm.granted) {
+      Alert.alert('Permission needed', 'Allow photo access to upload store images.')
+      return
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: kind === 'logo' ? [1, 1] : [16, 9],
+      quality: 0.85,
+    })
+    if (result.canceled || !result.assets?.[0]) return
+    const asset = result.assets[0]
+    const uri = asset.uri
+    const name =
+      uri.split('/').pop() ||
+      (kind === 'logo' ? 'store-logo.jpg' : 'store-banner.jpg')
+    const type = asset.mimeType || 'image/jpeg'
+    const img: LocalImage = { uri, name, type }
+    if (kind === 'logo') setStoreLogo(img)
+    else setStoreBanner(img)
+  }
+
+  const uploadStoreImages = async (token: string | null) => {
+    if (!storeLogo && !storeBanner) return
+    const fd = new FormData()
+    if (storeLogo) {
+      fd.append('storeLogo', {
+        uri: storeLogo.uri,
+        name: storeLogo.name,
+        type: storeLogo.type,
+      } as any)
+    }
+    if (storeBanner) {
+      fd.append('storeBanner', {
+        uri: storeBanner.uri,
+        name: storeBanner.name,
+        type: storeBanner.type,
+      } as any)
+    }
+    await api.put('/seller/store', fd, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'multipart/form-data',
+      },
+    })
+  }
 
   const handleRegister = async () => {
     if (!storeName.trim()) {
@@ -122,28 +179,36 @@ export default function SellerRegister() {
           accountNumber: accountNumber.trim(),
           marketplaceRegion,
         },
-        { headers: { Authorization: `Bearer ${token}` } }
+        { headers: { Authorization: `Bearer ${token}` } },
       )
 
-      if (res.data.success) {
-        await user?.reload()
-        Alert.alert(
-          'Store Created',
-          'Your seller account is now active. Welcome to the Plazore Seller Lounge.',
-          [
-            {
-              text: 'Go to Dashboard',
-              onPress: () => router.replace('/seller' as any),
-            },
-          ]
-        )
+      if (!res.data.success) {
+        throw new Error(res.data.message || 'Registration failed')
       }
+
+      // Real upload of logo + banner to Cloudinary via PUT /seller/store
+      try {
+        await uploadStoreImages(token)
+      } catch (imgErr: any) {
+        console.warn('Store images upload:', imgErr?.message)
+        // Store still created; images can be fixed later in settings
+      }
+
+      await user?.reload()
+      Alert.alert(
+        'Store Created',
+        'Your seller account is active. Welcome to the Plazore Seller Lounge.',
+        [
+          {
+            text: 'Go to Dashboard',
+            onPress: () => router.replace('/seller' as any),
+          },
+        ],
+      )
     } catch (error: any) {
       Alert.alert(
         'Registration Failed',
-        error.response?.data?.message ||
-          error.message ||
-          'Something went wrong'
+        error.response?.data?.message || error.message || 'Something went wrong',
       )
     } finally {
       setLoading(false)
@@ -211,12 +276,72 @@ export default function SellerRegister() {
               <Text style={styles.kicker}>Seller lounge</Text>
               <Text style={styles.title}>Open your store</Text>
               <Text style={styles.lead}>
-                Create your seller profile. You receive access to the Lounge
+                Create your seller profile with logo and banner. Access the Lounge
                 after registration is complete.
               </Text>
             </View>
 
-            <Text style={styles.section}>Store</Text>
+            <Text style={styles.section}>Store identity</Text>
+
+            {/* Logo */}
+            <Text style={styles.label}>Store logo</Text>
+            <View style={styles.mediaRow}>
+              <TouchableOpacity
+                onPress={() => pickImage('logo')}
+                style={styles.logoBox}
+                activeOpacity={0.85}
+              >
+                {storeLogo ? (
+                  <Image source={{ uri: storeLogo.uri }} style={styles.logoImg} />
+                ) : (
+                  <>
+                    <Ionicons name="image-outline" size={28} color={MUTED} />
+                    <Text style={styles.mediaHint}>Add logo</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+              {storeLogo ? (
+                <TouchableOpacity
+                  onPress={() => setStoreLogo(null)}
+                  style={styles.clearBtn}
+                >
+                  <Text style={styles.clearText}>Remove</Text>
+                </TouchableOpacity>
+              ) : null}
+            </View>
+            <Text style={styles.hint}>Square image · shown on storefront cards</Text>
+
+            {/* Banner / setback */}
+            <Text style={styles.label}>Store banner (backdrop)</Text>
+            <TouchableOpacity
+              onPress={() => pickImage('banner')}
+              style={styles.bannerBox}
+              activeOpacity={0.85}
+            >
+              {storeBanner ? (
+                <Image
+                  source={{ uri: storeBanner.uri }}
+                  style={styles.bannerImg}
+                  resizeMode="cover"
+                />
+              ) : (
+                <View style={styles.bannerEmpty}>
+                  <Ionicons name="images-outline" size={28} color={MUTED} />
+                  <Text style={styles.mediaHint}>Add store banner</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+            {storeBanner ? (
+              <TouchableOpacity
+                onPress={() => setStoreBanner(null)}
+                style={[styles.clearBtn, { marginBottom: 12 }]}
+              >
+                <Text style={styles.clearText}>Remove banner</Text>
+              </TouchableOpacity>
+            ) : null}
+            <Text style={styles.hint}>Wide image · header backdrop on your store</Text>
+
+            <Text style={[styles.section, { marginTop: 8 }]}>Store</Text>
 
             <Text style={styles.label}>Business / store name *</Text>
             <View style={fieldStyle('storeName')}>
@@ -410,9 +535,9 @@ export default function SellerRegister() {
             </TouchableOpacity>
 
             <Text style={styles.footer}>
-              By continuing, your store and payout information are saved to your
-              Plazore account. You can manage details later from Seller Lounge,
-              subject to verification.
+              By continuing, your store, images, and payout information are saved
+              to your Plazore account. You can manage details later from Seller
+              Lounge, subject to verification.
             </Text>
 
             <View style={{ height: 100 }} />
@@ -426,24 +551,13 @@ export default function SellerRegister() {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#090B0F' },
   safe: { flex: 1 },
-
-  bgLayer: {
-    ...FILL,
-    width: '100%',
-    height: '100%',
-  },
-  bgMedia: {
-    ...FILL,
-    width: '100%',
-    height: '100%',
-  },
-
+  bgLayer: { ...FILL, width: '100%', height: '100%' },
+  bgMedia: { ...FILL, width: '100%', height: '100%' },
   scroll: {
     paddingHorizontal: 24,
     paddingTop: 8,
     paddingBottom: 40,
   },
-
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -460,12 +574,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.14)',
   },
-  headerTitle: {
-    color: TEXT,
-    fontSize: 17,
-    fontWeight: '700',
-  },
-
+  headerTitle: { color: TEXT, fontSize: 17, fontWeight: '700' },
   hero: { marginBottom: 28 },
   heroIconWrap: {
     width: 56,
@@ -497,7 +606,6 @@ const styles = StyleSheet.create({
     fontSize: 15,
     lineHeight: 22,
   },
-
   section: {
     color: TEXT,
     fontSize: 15,
@@ -513,7 +621,54 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     marginBottom: 8,
   },
-
+  hint: {
+    color: MUTED,
+    fontSize: 11,
+    marginTop: -8,
+    marginBottom: 14,
+  },
+  mediaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 8,
+  },
+  logoBox: {
+    width: 96,
+    height: 96,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: 'rgba(255,255,255,0.22)',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  logoImg: { width: '100%', height: '100%' },
+  bannerBox: {
+    width: '100%',
+    height: 120,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: 'rgba(255,255,255,0.22)',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    marginBottom: 8,
+    overflow: 'hidden',
+  },
+  bannerImg: { width: '100%', height: '100%' },
+  bannerEmpty: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  mediaHint: {
+    color: MUTED,
+    fontSize: 12,
+    marginTop: 6,
+    fontWeight: '600',
+  },
+  clearBtn: { paddingVertical: 6, paddingHorizontal: 4 },
+  clearText: { color: GREEN, fontSize: 13, fontWeight: '600' },
   notice: {
     flexDirection: 'row',
     gap: 10,
@@ -529,7 +684,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 19,
   },
-
   field: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -560,7 +714,6 @@ const styles = StyleSheet.create({
     minHeight: 76,
     paddingTop: 0,
   },
-
   regionBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -589,19 +742,9 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: 'rgba(255,255,255,0.08)',
   },
-  regionRowOn: {
-    backgroundColor: 'rgba(0,229,117,0.1)',
-  },
-  regionRowText: {
-    flex: 1,
-    color: TEXT,
-    fontSize: 15,
-  },
-
-  ctaOuter: {
-    marginTop: 12,
-    overflow: 'hidden',
-  },
+  regionRowOn: { backgroundColor: 'rgba(0,229,117,0.1)' },
+  regionRowText: { flex: 1, color: TEXT, fontSize: 15 },
+  ctaOuter: { marginTop: 12, overflow: 'hidden' },
   cta: {
     height: 56,
     flexDirection: 'row',
@@ -609,11 +752,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 8,
   },
-  ctaText: {
-    color: '#041412',
-    fontWeight: '800',
-    fontSize: 16,
-  },
+  ctaText: { color: '#041412', fontWeight: '800', fontSize: 16 },
   footer: {
     marginTop: 18,
     textAlign: 'center',

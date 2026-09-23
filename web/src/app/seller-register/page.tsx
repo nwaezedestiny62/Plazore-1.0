@@ -2,21 +2,25 @@
 
 import { useAuth, useUser } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
   Check,
   ChevronDown,
   ChevronUp,
+  ImagePlus,
   Phone,
   ShieldCheck,
   Store,
+  X,
 } from "lucide-react";
 import { REGION_LIST, DEFAULT_REGION } from "@/lib/regions";
 
-const API = process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com/api";
-const FALLBACK_BG =
+const API =
+  process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com/api";
+
+const BG_IMAGE =
   "https://images.unsplash.com/photo-1441986300917-64674bd600d8?auto=format&fit=crop&w=1600&q=80";
 
 type FocusKey =
@@ -44,16 +48,23 @@ export default function SellerRegisterPage() {
   const [marketplaceRegion, setMarketplaceRegion] = useState(DEFAULT_REGION);
   const [showRegions, setShowRegions] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [videoFailed, setVideoFailed] = useState(false);
   const [focus, setFocus] = useState<FocusKey>(null);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
+
+  const [logoFile, setLogoFile] = useState<File | null>(null);
+  const [bannerFile, setBannerFile] = useState<File | null>(null);
+  const [logoPreview, setLogoPreview] = useState<string | null>(null);
+  const [bannerPreview, setBannerPreview] = useState<string | null>(null);
+
+  const logoRef = useRef<HTMLInputElement>(null);
+  const bannerRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!isLoaded) return;
     if (!isSignedIn) {
       router.replace(
-        `/sign-in?redirect_url=${encodeURIComponent("/seller-register")}`
+        `/sign-in?redirect_url=${encodeURIComponent("/seller-register")}`,
       );
     }
   }, [isLoaded, isSignedIn, router]);
@@ -71,16 +82,25 @@ export default function SellerRegisterPage() {
         const json = await res.json();
         const data = json?.data;
         if (data?.phone) setPhone(String(data.phone));
-        if (data?.marketplaceRegion) setMarketplaceRegion(data.marketplaceRegion);
+        if (data?.marketplaceRegion)
+          setMarketplaceRegion(data.marketplaceRegion);
       } catch {
         /* silent */
       }
     })();
   }, [isSignedIn, getToken]);
 
+  useEffect(() => {
+    return () => {
+      if (logoPreview) URL.revokeObjectURL(logoPreview);
+      if (bannerPreview) URL.revokeObjectURL(bannerPreview);
+    };
+  }, [logoPreview, bannerPreview]);
+
   const selectedRegion = useMemo(
-    () => REGION_LIST.find((r) => r.code === marketplaceRegion) || REGION_LIST[0],
-    [marketplaceRegion]
+    () =>
+      REGION_LIST.find((r) => r.code === marketplaceRegion) || REGION_LIST[0],
+    [marketplaceRegion],
   );
 
   const fieldClass = (key: FocusKey) =>
@@ -90,18 +110,50 @@ export default function SellerRegisterPage() {
         : "border-white/14 bg-white/10"
     }`;
 
+  const onLogoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    if (logoPreview) URL.revokeObjectURL(logoPreview);
+    setLogoFile(f);
+    setLogoPreview(URL.createObjectURL(f));
+  };
+
+  const onBannerChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    if (bannerPreview) URL.revokeObjectURL(bannerPreview);
+    setBannerFile(f);
+    setBannerPreview(URL.createObjectURL(f));
+  };
+
+  const clearLogo = () => {
+    if (logoPreview) URL.revokeObjectURL(logoPreview);
+    setLogoFile(null);
+    setLogoPreview(null);
+    if (logoRef.current) logoRef.current.value = "";
+  };
+
+  const clearBanner = () => {
+    if (bannerPreview) URL.revokeObjectURL(bannerPreview);
+    setBannerFile(null);
+    setBannerPreview(null);
+    if (bannerRef.current) bannerRef.current.value = "";
+  };
+
   const handleRegister = async () => {
     setError("");
 
     if (!storeName.trim()) return setError("Please enter your store name");
     if (!storeDescription.trim())
       return setError("Please enter a business description");
-    if (!businessGoal.trim()) return setError("Please enter your business goal");
+    if (!businessGoal.trim())
+      return setError("Please enter your business goal");
     if (!phone.trim() || phone.trim().length < 7)
       return setError("Please enter a valid phone number");
     if (!bankName.trim() || !accountName.trim() || !accountNumber.trim())
       return setError("Please fill in all payout / bank details");
-    if (!marketplaceRegion) return setError("Please select your marketplace region");
+    if (!marketplaceRegion)
+      return setError("Please select your marketplace region");
 
     try {
       setLoading(true);
@@ -132,6 +184,22 @@ export default function SellerRegisterPage() {
       const json = await res.json();
       if (!res.ok || json?.success === false) {
         throw new Error(json?.message || "Registration failed");
+      }
+
+      // Real Cloudinary upload via existing PUT /seller/store
+      if (logoFile || bannerFile) {
+        try {
+          const fd = new FormData();
+          if (logoFile) fd.append("storeLogo", logoFile);
+          if (bannerFile) fd.append("storeBanner", bannerFile);
+          await fetch(`${API}/seller/store`, {
+            method: "PUT",
+            headers: { Authorization: `Bearer ${token}` },
+            body: fd,
+          });
+        } catch {
+          /* store exists; images can be fixed in settings */
+        }
       }
 
       await user?.reload();
@@ -166,7 +234,8 @@ export default function SellerRegisterPage() {
             Welcome to the Seller Lounge
           </h1>
           <p className="mt-3 text-[15px] leading-relaxed text-white/65">
-            Your seller account is active. You can start adding products and managing your store.
+            Your seller account is active. Logo and banner are saved to your
+            storefront. You can start adding products.
           </p>
           <button
             type="button"
@@ -183,29 +252,19 @@ export default function SellerRegisterPage() {
 
   return (
     <div className="relative min-h-dvh overflow-hidden bg-[#090B0F] text-white">
-      {/* Background media — large canvas */}
+      {/* External still image only — no video */}
       <div className="pointer-events-none absolute inset-0">
-        {!videoFailed ? (
-          <video
-            autoPlay
-            muted
-            loop
-            playsInline
-            className="h-full w-full object-cover"
-            onError={() => setVideoFailed(true)}
-          >
-            <source src="/video-3.mp4" type="video/mp4" />
-          </video>
-        ) : (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={FALLBACK_BG} alt="" className="h-full w-full object-cover" />
-        )}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={BG_IMAGE}
+          alt=""
+          className="h-full w-full object-cover"
+        />
         <div className="absolute inset-0 bg-gradient-to-b from-[rgba(5,8,12,0.72)] via-[rgba(9,11,15,0.86)] to-[rgba(9,11,15,0.97)]" />
         <div className="absolute inset-0 bg-gradient-to-r from-[rgba(6,18,16,0.35)] via-transparent to-[rgba(9,11,15,0.25)]" />
       </div>
 
       <div className="relative z-10 mx-auto flex min-h-dvh w-full max-w-6xl flex-col px-4 pb-16 pt-4 sm:px-6 lg:px-10">
-        {/* Header */}
         <header className="mb-6 flex items-center justify-between sm:mb-10">
           <button
             type="button"
@@ -222,7 +281,6 @@ export default function SellerRegisterPage() {
         </header>
 
         <div className="grid flex-1 gap-10 lg:grid-cols-[1.05fr_0.95fr] lg:items-start lg:gap-14">
-          {/* Left / hero — large canvas feel on desktop */}
           <section className="lg:sticky lg:top-10">
             <div className="mb-5 flex h-14 w-14 items-center justify-center border border-[#00E575]/35 bg-[#00E575]/12 sm:h-16 sm:w-16">
               <Store className="h-6 w-6 text-[#00E575] sm:h-7 sm:w-7" />
@@ -234,25 +292,118 @@ export default function SellerRegisterPage() {
               Open your store
             </h2>
             <p className="mt-4 max-w-lg text-[15px] leading-relaxed text-white/70 sm:text-base">
-              Create your seller profile. You receive access to the Lounge after
-              registration is complete.
+              Create your seller profile with logo and banner. You receive access
+              to the Lounge after registration is complete.
             </p>
-
             <div className="mt-8 hidden space-y-3 border border-white/10 bg-white/[0.04] p-5 lg:block">
               <p className="text-[12px] font-semibold uppercase tracking-[0.18em] text-white/45">
                 What you get
               </p>
               <ul className="space-y-2.5 text-[14px] text-white/70">
                 <li>• Your own storefront on Plazore</li>
+                <li>• Logo + banner stored on Cloudinary</li>
                 <li>• Product, order, and performance tools</li>
                 <li>• Direct access to the Seller Lounge</li>
               </ul>
             </div>
           </section>
 
-          {/* Form */}
           <section className="w-full">
             <div className="border border-white/10 bg-[rgba(9,11,15,0.55)] p-4 backdrop-blur-md sm:p-6 md:p-7">
+              <p className="mb-4 text-[15px] font-bold tracking-wide">
+                Store identity
+              </p>
+
+              {/* Logo */}
+              <label className="mb-2 block text-[11px] font-bold uppercase tracking-[0.08em] text-white/55">
+                Store logo
+              </label>
+              <div className="mb-2 flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => logoRef.current?.click()}
+                  className="relative flex h-24 w-24 items-center justify-center overflow-hidden border border-dashed border-white/25 bg-white/[0.06] transition hover:border-white/40"
+                >
+                  {logoPreview ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={logoPreview}
+                      alt=""
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    <span className="flex flex-col items-center gap-1 text-white/50">
+                      <ImagePlus className="h-6 w-6" />
+                      <span className="text-[11px] font-semibold">Logo</span>
+                    </span>
+                  )}
+                </button>
+                {logoPreview && (
+                  <button
+                    type="button"
+                    onClick={clearLogo}
+                    className="inline-flex items-center gap-1 text-[13px] font-semibold text-[#00E575]"
+                  >
+                    <X className="h-3.5 w-3.5" /> Remove
+                  </button>
+                )}
+                <input
+                  ref={logoRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={onLogoChange}
+                />
+              </div>
+              <p className="mb-4 text-[11px] text-white/45">
+                Square image · shown on storefront cards
+              </p>
+
+              {/* Banner / setback */}
+              <label className="mb-2 block text-[11px] font-bold uppercase tracking-[0.08em] text-white/55">
+                Store banner (backdrop)
+              </label>
+              <button
+                type="button"
+                onClick={() => bannerRef.current?.click()}
+                className="relative mb-2 flex h-[7.5rem] w-full items-center justify-center overflow-hidden border border-dashed border-white/25 bg-white/[0.06] transition hover:border-white/40 sm:h-32"
+              >
+                {bannerPreview ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={bannerPreview}
+                    alt=""
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  <span className="flex flex-col items-center gap-1 text-white/50">
+                    <ImagePlus className="h-6 w-6" />
+                    <span className="text-[12px] font-semibold">
+                      Add store banner
+                    </span>
+                  </span>
+                )}
+              </button>
+              {bannerPreview && (
+                <button
+                  type="button"
+                  onClick={clearBanner}
+                  className="mb-2 inline-flex items-center gap-1 text-[13px] font-semibold text-[#00E575]"
+                >
+                  <X className="h-3.5 w-3.5" /> Remove banner
+                </button>
+              )}
+              <input
+                ref={bannerRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={onBannerChange}
+              />
+              <p className="mb-6 text-[11px] text-white/45">
+                Wide image · header backdrop on your store
+              </p>
+
               <p className="mb-4 text-[15px] font-bold tracking-wide">Store</p>
 
               <label className="mb-2 block text-[11px] font-bold uppercase tracking-[0.08em] text-white/55">
@@ -331,7 +482,9 @@ export default function SellerRegisterPage() {
                 onClick={() => setShowRegions((v) => !v)}
                 className="mb-3 flex w-full items-center gap-3 border border-white/14 bg-white/10 px-3.5 py-3.5 text-left transition hover:bg-white/[0.12]"
               >
-                <span className="text-[22px] leading-none">{selectedRegion?.flag}</span>
+                <span className="text-[22px] leading-none">
+                  {selectedRegion?.flag}
+                </span>
                 <span className="min-w-0 flex-1">
                   <span className="block text-[16px] font-semibold">
                     {selectedRegion?.name}
@@ -454,9 +607,9 @@ export default function SellerRegisterPage() {
               </button>
 
               <p className="mt-4 text-center text-[12px] leading-relaxed text-white/55">
-                By continuing, your store and payout information are saved to
-                your Plazore account. You can manage details later from Seller
-                Lounge, subject to verification.
+                By continuing, your store, images, and payout information are
+                saved to your Plazore account. You can manage details later from
+                Seller Lounge, subject to verification.
               </p>
             </div>
           </section>

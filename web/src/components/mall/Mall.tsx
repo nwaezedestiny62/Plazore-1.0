@@ -341,27 +341,27 @@ function MallChrome({
             ) : null}
           </Link>
 
-          {isSignedIn && avatarUrl ? (
-            <div
-              className="ml-1.5 h-8 w-8 overflow-hidden rounded-full ring-1 ring-white/15"
-              aria-hidden
+          {isSignedIn ? (
+            <Link
+              href="/profile"
+              className="ml-1.5 flex h-8 w-8 items-center justify-center overflow-hidden rounded-full ring-1 ring-white/15 transition hover:ring-white/35"
+              aria-label="Profile"
               title={avatarAlt}
             >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={avatarUrl}
-                alt=""
-                className="h-full w-full object-cover"
-                draggable={false}
-              />
-            </div>
-          ) : isSignedIn ? (
-            <div
-              className="ml-1.5 flex h-8 w-8 items-center justify-center rounded-full bg-white/10 text-[11px] font-bold text-white/70 ring-1 ring-white/15"
-              aria-hidden
-            >
-              {(avatarAlt || "U").charAt(0).toUpperCase()}
-            </div>
+              {avatarUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={avatarUrl}
+                  alt=""
+                  className="h-full w-full object-cover"
+                  draggable={false}
+                />
+              ) : (
+                <span className="flex h-full w-full items-center justify-center bg-white/10 text-[11px] font-bold text-white/70">
+                  {(avatarAlt || "U").charAt(0).toUpperCase()}
+                </span>
+              )}
+            </Link>
           ) : null}
         </div>
       </header>
@@ -436,27 +436,27 @@ function MallChrome({
             ) : null}
           </Link>
 
-          {isSignedIn && avatarUrl ? (
-            <div
-              className="ml-0.5 h-7 w-7 overflow-hidden rounded-full ring-1 ring-white/15"
-              aria-hidden
+          {isSignedIn ? (
+            <Link
+              href="/profile"
+              className="ml-0.5 flex h-7 w-7 items-center justify-center overflow-hidden rounded-full ring-1 ring-white/15 transition hover:ring-white/35"
+              aria-label="Profile"
               title={avatarAlt}
             >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={avatarUrl}
-                alt=""
-                className="h-full w-full object-cover"
-                draggable={false}
-              />
-            </div>
-          ) : isSignedIn ? (
-            <div
-              className="ml-0.5 flex h-7 w-7 items-center justify-center rounded-full bg-white/10 text-[10px] font-bold text-white/70 ring-1 ring-white/15"
-              aria-hidden
-            >
-              {(avatarAlt || "U").charAt(0).toUpperCase()}
-            </div>
+              {avatarUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={avatarUrl}
+                  alt=""
+                  className="h-full w-full object-cover"
+                  draggable={false}
+                />
+              ) : (
+                <span className="flex h-full w-full items-center justify-center bg-white/10 text-[10px] font-bold text-white/70">
+                  {(avatarAlt || "U").charAt(0).toUpperCase()}
+                </span>
+              )}
+            </Link>
           ) : null}
         </div>
       </header>

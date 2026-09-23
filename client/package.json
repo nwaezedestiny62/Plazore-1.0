@@ -27,7 +27,6 @@
     "@supabase/supabase-js": "^2.112.3",
     "@types/react": "~19.2.4",
     "axios": "^1.18.1",
-    "axois": "^0.0.1-security",
     "babel-plugin-module-resolver": "^5.0.3",
     "babel-preset-expo": "~57.0.0",
     "expo": "~57.0.20",

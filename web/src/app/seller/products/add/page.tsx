@@ -11,7 +11,6 @@ import {
   Store,
   Trash2,
   Truck,
-  GripVertical,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -53,8 +52,8 @@ function TopOverlay({ state, onDismiss }: { state: Overlay; onDismiss: () => voi
   const accent =
     state.tone === "danger" ? "#EF4444" : state.tone === "success" ? "#00E575" : "#3B82F6";
   return (
-    <div className="pointer-events-none fixed inset-x-0 top-0 z-[200] px-3.5 pt-3 md:px-6">
-      <div className="pointer-events-auto mx-auto flex max-w-lg overflow-hidden border border-white/10 bg-[#11141A]">
+    <div className="pointer-events-none fixed inset-x-0 top-0 z-[200] px-3 pt-3 sm:px-4 md:px-6">
+      <div className="pointer-events-auto mx-auto flex max-w-lg overflow-hidden rounded-xl border border-white/10 bg-[#11141A] shadow-lg">
         <div className="w-[3px] shrink-0" style={{ backgroundColor: accent }} />
         <div className="flex flex-1 gap-2.5 p-3">
           <div className="min-w-0 flex-1">
@@ -63,7 +62,7 @@ function TopOverlay({ state, onDismiss }: { state: Overlay; onDismiss: () => voi
               <p className="mt-0.5 text-[12.5px] leading-[18px] text-[#A7ADB8]">{state.message}</p>
             )}
           </div>
-          <button type="button" onClick={onDismiss} className="text-[#737A86]">
+          <button type="button" onClick={onDismiss} className="shrink-0 text-[#737A86] hover:text-text">
             ×
           </button>
         </div>
@@ -84,17 +83,17 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <section className="mb-3.5 border border-line bg-surface p-4 md:p-5">
-      <div className="mb-3.5 flex items-center gap-3">
-        <div className="flex h-8 w-8 items-center justify-center bg-gradient-to-br from-green to-blue text-[12px] font-extrabold text-[#041412]">
+    <section className="mb-3 rounded-2xl border border-line bg-surface p-3.5 sm:mb-3.5 sm:p-4 md:p-5">
+      <div className="mb-3 flex items-center gap-2.5 sm:mb-3.5 sm:gap-3">
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-green to-blue text-[12px] font-extrabold text-[#041412]">
           {step}
         </div>
-        <div>
-          <p className="text-base font-bold text-text">{title}</p>
-          {subtitle && <p className="text-[11px] text-[#737A86]">{subtitle}</p>}
+        <div className="min-w-0">
+          <p className="text-[15px] font-bold text-text sm:text-base">{title}</p>
+          {subtitle && <p className="text-[11px] leading-snug text-[#737A86]">{subtitle}</p>}
         </div>
       </div>
-      <div className="mb-3.5 h-px bg-line" />
+      <div className="mb-3 h-px bg-line sm:mb-3.5" />
       {children}
     </section>
   );
@@ -112,7 +111,7 @@ const inputCls =
   "mb-3 w-full rounded-[14px] border border-line bg-[#0A121C] px-3.5 py-[13px] text-[15px] text-text outline-none placeholder:text-[#3D5268] focus:border-green/40";
 
 const pillCls = (on: boolean) =>
-  `mr-2 mb-2 inline-flex rounded-full border px-3 py-2 text-xs font-medium transition ${
+  `mr-2 mb-2 inline-flex min-h-[36px] items-center rounded-full border px-3 py-2 text-xs font-medium transition ${
     on
       ? "border-green/35 bg-green/12 font-bold text-green"
       : "border-line bg-[#0A121C] text-[#737A86]"
@@ -160,7 +159,7 @@ export default function AddProductPage() {
     (title: string, message?: string, tone: OverlayTone = "info") => {
       setOverlay({ title, message, tone });
     },
-    []
+    [],
   );
 
   useEffect(() => {
@@ -185,11 +184,11 @@ export default function AddProductPage() {
   const docTypes = useMemo(() => getDocTypes(category), [category]);
   const fulfillStates = useMemo(
     () => getStatesForCountry(fulfillCountryCode),
-    [fulfillCountryCode]
+    [fulfillCountryCode],
   );
   const fulfillCities = useMemo(
     () => getCitiesForState(fulfillCountryCode, fulfillStateCode),
-    [fulfillCountryCode, fulfillStateCode]
+    [fulfillCountryCode, fulfillStateCode],
   );
 
   const shipsFrom = useMemo(() => {
@@ -216,7 +215,7 @@ export default function AddProductPage() {
         return formatMoney(n, region);
       }
     },
-    [formatProduct, region]
+    [formatProduct, region],
   );
 
   const deliveryLabel =
@@ -293,20 +292,23 @@ export default function AddProductPage() {
     });
   };
 
+  /** FIXED: free shipping does not require method */
   const validate = () => {
-    if (!imageFiles.length) return "Add at least one product image (first one becomes the cover)";
+    if (!imageFiles.length)
+      return "Add at least one product image (first one becomes the cover)";
     if (!name.trim()) return "Product name is required";
     if (!priceN || priceN <= 0) return "Enter a valid price";
     if (!category) return "Select a category";
     if (!fulfillCountryCode || !fulfillCity) return "Set fulfillment location";
     if (!feeMode) return "Choose a delivery charge option";
-    if (feeMode !== "free") {
-      if (!shippingMethod) return "Choose self delivery or courier";
-      if (shippingMethod === "courier" && !courierCompany.trim())
-        return "Courier company is required";
-      if (feeMode === "fixed" && (!(feeN > 0) || deliveryFee === ""))
-        return "Enter a delivery fee greater than 0";
-    }
+
+    if (feeMode === "free") return null;
+
+    if (!shippingMethod) return "Choose self delivery or courier";
+    if (shippingMethod === "courier" && !courierCompany.trim())
+      return "Courier company is required";
+    if (feeMode === "fixed" && (!(feeN > 0) || deliveryFee === ""))
+      return "Enter a delivery fee greater than 0";
     return null;
   };
 
@@ -332,17 +334,29 @@ export default function AddProductPage() {
       fd.append("region", region || "NG");
       fd.append("currency", regionConfig.currency.code);
       fd.append("specifications", JSON.stringify(specs));
-      fd.append(
-        "shipping",
-        JSON.stringify({
-          feeMode,
-          method: feeMode === "free" ? undefined : shippingMethod,
-          courier: feeMode === "free" ? "" : courierCompany.trim(),
-          courierCompany: feeMode === "free" ? "" : courierCompany.trim(),
-          deliveryFee: feeMode === "fixed" ? feeN : 0,
-          deliveryNote: feeMode === "on_delivery" ? deliveryNote.trim() : "",
-        })
-      );
+
+      // FIXED: free always sends a valid method so server never complains
+      const shippingPayload =
+        feeMode === "free"
+          ? {
+              feeMode: "free" as const,
+              method: "self",
+              courier: "",
+              courierCompany: "",
+              deliveryFee: 0,
+              deliveryNote: "",
+            }
+          : {
+              feeMode: feeMode as "fixed" | "on_delivery",
+              method: shippingMethod,
+              courier: courierCompany.trim(),
+              courierCompany: courierCompany.trim(),
+              deliveryFee: feeMode === "fixed" ? feeN : 0,
+              deliveryNote: feeMode === "on_delivery" ? deliveryNote.trim() : "",
+            };
+
+      fd.append("shipping", JSON.stringify(shippingPayload));
+
       const country = FULFILLMENT_COUNTRIES.find((c) => c.code === fulfillCountryCode);
       fd.append(
         "fulfillmentLocation",
@@ -353,8 +367,8 @@ export default function AddProductPage() {
             stateCode: fulfillStateCode,
             state: fulfillStates.find((s) => s.code === fulfillStateCode)?.name || "",
             city: fulfillCity,
-          })
-        )
+          }),
+        ),
       );
 
       imageFiles.forEach((f, idx) => {
@@ -402,7 +416,10 @@ export default function AddProductPage() {
     return (
       <div className="flex min-h-[50vh] flex-col items-center justify-center bg-bg px-6 text-center">
         <p className="font-semibold text-text">Sign in to add products</p>
-        <Link href="/sign-in" className="mt-4 rounded-full bg-text px-6 py-2.5 text-sm font-bold text-bg">
+        <Link
+          href="/sign-in"
+          className="mt-4 rounded-full bg-text px-6 py-2.5 text-sm font-bold text-bg"
+        >
           Sign in
         </Link>
       </div>
@@ -417,21 +434,23 @@ export default function AddProductPage() {
             <CheckCircle2 className="h-9 w-9 text-green" />
           </div>
         </div>
-        <h1 className="text-[26px] font-extrabold tracking-tight text-text">Product published</h1>
+        <h1 className="text-[26px] font-extrabold tracking-tight text-text">
+          Product published
+        </h1>
         <p className="mt-2 max-w-sm text-sm leading-[21px] text-[#A7ADB8]">
           {name || "Your product"} is live on Plazore.
         </p>
         <div className="mt-8 w-full max-w-sm space-y-3">
           <Link
             href={publishedId ? `/product/${publishedId}` : "/seller/products"}
-            className="flex h-14 w-full items-center justify-center bg-gradient-to-r from-green to-blue text-[15px] font-extrabold text-[#041412]"
+            className="flex h-14 w-full items-center justify-center rounded-xl bg-gradient-to-r from-green to-blue text-[15px] font-extrabold text-[#041412]"
           >
             View product
           </Link>
           <button
             type="button"
             onClick={() => router.push("/seller/products")}
-            className="flex h-12 w-full items-center justify-center border border-line bg-surface text-sm font-semibold text-text"
+            className="flex h-12 w-full items-center justify-center rounded-xl border border-line bg-surface text-sm font-semibold text-text"
           >
             Back to products
           </button>
@@ -441,35 +460,44 @@ export default function AddProductPage() {
   }
 
   return (
-    <div className="min-h-screen bg-bg text-text">
+    <div className="min-h-screen w-full overflow-x-hidden bg-bg text-text">
       <TopOverlay state={overlay} onDismiss={() => setOverlay(null)} />
 
-      <div className="mx-auto max-w-6xl px-4 py-6 md:px-6 md:py-8">
-        <div className="mb-6 flex items-center gap-3">
+      <div className="mx-auto max-w-6xl px-3 py-5 sm:px-4 sm:py-6 md:px-6 md:py-8">
+        <div className="mb-5 flex items-center gap-3 sm:mb-6">
           <Link
             href="/seller/products"
-            className="flex h-10 w-10 items-center justify-center border border-line bg-surface text-[#A7ADB8] hover:text-text"
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-line bg-surface text-[#A7ADB8] hover:text-text"
           >
             <ChevronLeft className="h-5 w-5" />
           </Link>
-          <div>
-            <p className="text-[11px] font-bold uppercase tracking-[2px] text-[#737A86]">
-              Seller Lounge · {regionConfig.flag} {regionConfig.name} ({regionConfig.currency.code})
+          <div className="min-w-0">
+            <p className="text-[10px] font-bold uppercase tracking-[2px] text-[#737A86] sm:text-[11px]">
+              Seller Lounge · {regionConfig.flag} {regionConfig.name} (
+              {regionConfig.currency.code})
             </p>
-            <h1 className="text-2xl font-extrabold tracking-tight md:text-[26px]">Add product</h1>
+            <h1 className="truncate text-xl font-extrabold tracking-tight sm:text-2xl md:text-[26px]">
+              Add product
+            </h1>
           </div>
         </div>
 
-        <div className="grid gap-8 lg:grid-cols-[1fr_320px] lg:items-start">
-          <div>
+        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(280px,320px)] lg:items-start lg:gap-8">
+          <div className="min-w-0">
+            {/* 01 Images */}
             <Section
               step="01"
               title="Images"
-              subtitle={`Up to ${maxImages} photos · First photo = Cover (used everywhere)`}
+              subtitle={`Up to ${maxImages} photos · First photo = Cover`}
             >
               <div className="flex flex-wrap gap-2">
                 {imageUrls.map((url, i) => (
-                  <div key={url} className="relative h-[104px] w-[104px] overflow-hidden rounded-[14px]">
+                  <div
+                    key={url}
+                    className={`relative h-[88px] w-[88px] overflow-hidden rounded-[14px] sm:h-[104px] sm:w-[104px] ${
+                      i === 0 ? "ring-2 ring-[#00E575]" : ""
+                    }`}
+                  >
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={url} alt="" className="h-full w-full object-cover" />
                     {i === 0 && (
@@ -499,15 +527,15 @@ export default function AddProductPage() {
                   <button
                     type="button"
                     onClick={() => imageInputRef.current?.click()}
-                    className="flex h-[104px] w-[104px] flex-col items-center justify-center rounded-[14px] border border-dashed border-[#2A4560] bg-[#0A121C] text-[#737A86]"
+                    className="flex h-[88px] w-[88px] flex-col items-center justify-center rounded-[14px] border border-dashed border-[#2A4560] bg-[#0A121C] text-[#737A86] sm:h-[104px] sm:w-[104px]"
                   >
-                    <ImagePlus className="h-6 w-6" />
+                    <ImagePlus className="h-5 w-5 sm:h-6 sm:w-6" />
                     <span className="mt-1 text-[11px]">Add</span>
                   </button>
                 )}
               </div>
               <p className="mt-2 text-[11px] text-[#737A86]">
-                The first image is the cover photo shown in showroom, search, and product page.
+                First image is the cover in showroom, search, and product page.
               </p>
               <input
                 ref={imageInputRef}
@@ -519,6 +547,7 @@ export default function AddProductPage() {
               />
             </Section>
 
+            {/* 02 Basics */}
             <Section step="02" title="Basics">
               <Label>Product name *</Label>
               <input
@@ -534,7 +563,7 @@ export default function AddProductPage() {
                 onChange={(e) => setBrand(e.target.value)}
                 placeholder="Optional brand"
               />
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 gap-0 sm:grid-cols-2 sm:gap-3">
                 <div>
                   <Label>
                     Price * ({regionConfig.currency.symbol} {regionConfig.currency.code})
@@ -571,6 +600,7 @@ export default function AddProductPage() {
               />
             </Section>
 
+            {/* 03 Category */}
             <Section step="03" title="Category & specs">
               <Label>Category *</Label>
               <div className="mb-3 flex flex-wrap">
@@ -634,7 +664,9 @@ export default function AddProductPage() {
                     className="mb-2.5 rounded-[14px] border border-line bg-[#0A121C] p-3"
                   >
                     <div className="mb-2 flex items-center gap-2">
-                      <p className="min-w-0 flex-1 truncate text-[13px] text-text">{doc.name}</p>
+                      <p className="min-w-0 flex-1 truncate text-[13px] text-text">
+                        {doc.name}
+                      </p>
                       <button
                         type="button"
                         onClick={() => setDocuments((p) => p.filter((_, i) => i !== index))}
@@ -649,7 +681,7 @@ export default function AddProductPage() {
                           type="button"
                           onClick={() =>
                             setDocuments((prev) =>
-                              prev.map((d, i) => (i === index ? { ...d, type: t.id } : d))
+                              prev.map((d, i) => (i === index ? { ...d, type: t.id } : d)),
                             )
                           }
                           className={pillCls(doc.type === t.id)}
@@ -680,6 +712,7 @@ export default function AddProductPage() {
               </Section>
             )}
 
+            {/* Fulfillment */}
             <Section
               step={needsDocs ? "05" : "04"}
               title="Fulfillment location"
@@ -742,6 +775,7 @@ export default function AddProductPage() {
                 )}
             </Section>
 
+            {/* Delivery — FIXED free path */}
             <Section
               step={needsDocs ? "06" : "05"}
               title="Delivery"
@@ -774,9 +808,7 @@ export default function AddProductPage() {
                         }
                       }}
                       className={`rounded-[14px] border px-3 py-3.5 text-left ${
-                        active
-                          ? "border-green/40 bg-green/8"
-                          : "border-line bg-[#0A121C]"
+                        active ? "border-green/40 bg-green/8" : "border-line bg-[#0A121C]"
                       }`}
                     >
                       <span
@@ -802,27 +834,21 @@ export default function AddProductPage() {
                           key={m}
                           type="button"
                           onClick={() => setShippingMethod(m)}
-                          className={`flex flex-col items-center rounded-[14px] border py-4 ${
-                            active
-                              ? "border-green/40 bg-green/8"
-                              : "border-line bg-[#0A121C]"
+                          className={`flex flex-col items-center rounded-[14px] border py-3.5 sm:py-4 ${
+                            active ? "border-green/40 bg-green/8" : "border-line bg-[#0A121C]"
                           }`}
                         >
                           {m === "self" ? (
                             <Footprints
-                              className={`h-5 w-5 ${
-                                active ? "text-green" : "text-[#737A86]"
-                              }`}
+                              className={`h-5 w-5 ${active ? "text-green" : "text-[#737A86]"}`}
                             />
                           ) : (
                             <Truck
-                              className={`h-5 w-5 ${
-                                active ? "text-green" : "text-[#737A86]"
-                              }`}
+                              className={`h-5 w-5 ${active ? "text-green" : "text-[#737A86]"}`}
                             />
                           )}
                           <span
-                            className={`mt-2 text-[13px] font-semibold ${
+                            className={`mt-2 text-[12px] font-semibold sm:text-[13px] ${
                               active ? "text-text" : "text-[#737A86]"
                             }`}
                           >
@@ -847,16 +873,12 @@ export default function AddProductPage() {
 
                   {feeMode === "fixed" && (
                     <>
-                      <Label>
-                        Delivery fee * ({regionConfig.currency.symbol})
-                      </Label>
+                      <Label>Delivery fee * ({regionConfig.currency.symbol})</Label>
                       <input
                         className={inputCls}
                         value={deliveryFee}
                         onChange={(e) =>
-                          setDeliveryFee(
-                            e.target.value.replace(/[^0-9.]/g, ""),
-                          )
+                          setDeliveryFee(e.target.value.replace(/[^0-9.]/g, ""))
                         }
                         placeholder="0.00"
                         inputMode="decimal"
@@ -874,8 +896,7 @@ export default function AddProductPage() {
                         placeholder="e.g. Cash or POS on arrival"
                       />
                       <p className="mb-3 -mt-2 text-[11px] text-[#737A86]">
-                        Buyer pays delivery when the order arrives — not in
-                        checkout total.
+                        Buyer pays delivery when the order arrives — not in checkout total.
                       </p>
                     </>
                   )}
@@ -899,7 +920,8 @@ export default function AddProductPage() {
                 <span className="font-semibold text-text">{feePct}% of product price</span>
               </div>
               <p className="text-[11px] text-[#737A86]">
-                Fee applies only to product price — never delivery. Region locked to {regionConfig.name}.
+                Fee applies only to product price — never delivery. Region locked to{" "}
+                {regionConfig.name}.
               </p>
             </Section>
 
@@ -907,7 +929,7 @@ export default function AddProductPage() {
               type="button"
               onClick={handleSubmit}
               disabled={loading}
-              className="mb-8 flex h-14 w-full items-center justify-center gap-2 bg-gradient-to-r from-green to-blue text-[15px] font-extrabold text-[#041412] disabled:opacity-60"
+              className="mb-8 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-green to-blue text-[15px] font-extrabold text-[#041412] disabled:opacity-60 sm:h-14"
             >
               {loading ? (
                 <span className="h-5 w-5 animate-spin rounded-full border-2 border-[#041412]/30 border-t-[#041412]" />
@@ -920,6 +942,7 @@ export default function AddProductPage() {
             </button>
           </div>
 
+          {/* Preview sidebar — desktop only */}
           <div className="hidden lg:sticky lg:top-6 lg:block">
             <p className="mb-1 text-[11px] font-bold uppercase tracking-[2px] text-[#737A86]">
               Live preview
@@ -983,7 +1006,9 @@ export default function AddProductPage() {
                       {[category, subCategory].filter(Boolean).join(" · ")}
                     </p>
                   )}
-                  <p className="text-lg font-bold leading-6 text-text">{name || "Product name"}</p>
+                  <p className="text-lg font-bold leading-6 text-text">
+                    {name || "Product name"}
+                  </p>
                   <div className="mt-2 flex items-center justify-between gap-2">
                     <p className="text-xl font-bold text-text">{formatPreviewPrice(priceN)}</p>
                     <span
@@ -1011,7 +1036,6 @@ export default function AddProductPage() {
                       </div>
                     </>
                   )}
-
                   {(deliveryLabel || shipsFrom) && (
                     <>
                       <p className="mb-1.5 mt-3 text-xs font-semibold uppercase tracking-wide text-text">
@@ -1029,19 +1053,11 @@ export default function AddProductPage() {
                           </div>
                         )}
                         {!!shipsFrom && (
-                          <div
-                            className={
-                              deliveryLabel
-                                ? "border-t border-line pt-2.5"
-                                : ""
-                            }
-                          >
+                          <div className={deliveryLabel ? "border-t border-line pt-2.5" : ""}>
                             <p className="text-[10px] font-semibold uppercase tracking-wide text-[#737A86]">
                               Ships from
                             </p>
-                            <p className="mt-0.5 text-[13px] font-semibold text-text">
-                              {shipsFrom}
-                            </p>
+                            <p className="mt-0.5 text-[13px] font-semibold text-text">{shipsFrom}</p>
                           </div>
                         )}
                         {!!feeDisplay && (
@@ -1058,7 +1074,6 @@ export default function AddProductPage() {
                       </div>
                     </>
                   )}
-
                   <p className="mb-1.5 mt-3 text-xs font-semibold uppercase tracking-wide text-text">
                     Sold by
                   </p>

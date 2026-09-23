@@ -190,7 +190,6 @@ function sortProducts(list: Product[], sort: SortKey): Product[] {
       );
     case "views":
     case "relevance":
-      // Relevance = most viewed when searching (same as mobile)
       return arr.sort((a, b) => {
         const d = viewScore(b) - viewScore(a);
         return d !== 0 ? d : productCreated(b) - productCreated(a);
@@ -200,7 +199,6 @@ function sortProducts(list: Product[], sort: SortKey): Product[] {
   }
 }
 
-/** UI sort → GET /products?sort=  (matches mobile + server) */
 function toApiSort(sort: SortKey, hasQuery: boolean): string | undefined {
   switch (sort) {
     case "newest":
@@ -218,7 +216,6 @@ function toApiSort(sort: SortKey, hasQuery: boolean): string | undefined {
     case "views":
       return "trending";
     case "relevance":
-      // When searching → trending (views). Idle → newest.
       return hasQuery ? "trending" : "newest";
     default:
       return undefined;
@@ -259,9 +256,70 @@ function MenuLines() {
   );
 }
 
-// More breathing room between product cards
+/**
+ * HARD gap between product cards — horizontal + vertical, every breakpoint.
+ * gap-x = side-to-side, gap-y = top-to-bottom so cards never touch.
+ */
 const PRODUCT_GRID =
-  "grid grid-cols-2 gap-4 sm:gap-5 md:grid-cols-3 md:gap-5 lg:grid-cols-4 lg:gap-6 xl:grid-cols-5 xl:gap-6";
+  "grid w-full grid-cols-2 gap-x-4 gap-y-6 " +
+  "sm:grid-cols-2 sm:gap-x-5 sm:gap-y-7 " +
+  "md:grid-cols-3 md:gap-x-6 md:gap-y-8 " +
+  "lg:grid-cols-4 lg:gap-x-6 lg:gap-y-8 " +
+  "xl:grid-cols-5 xl:gap-x-7 xl:gap-y-9";
+
+/** Card cell: min-w-0 prevents overflow; no negative margins */
+function ProductCell({ product }: { product: Product }) {
+  return (
+    <div className="min-w-0 w-full max-w-full overflow-hidden">
+      <ProductCard product={product} />
+    </div>
+  );
+}
+
+function OrbLoader({
+  label,
+  compact = false,
+}: {
+  label?: string;
+  compact?: boolean;
+}) {
+  return (
+    <div
+      className={`flex flex-col items-center justify-center ${
+        compact ? "py-16 sm:py-20" : "min-h-[45vh] py-20 sm:min-h-[55vh]"
+      }`}
+    >
+      <div
+        className={`relative flex items-center justify-center ${
+          compact
+            ? "h-[72px] w-[72px] sm:h-[88px] sm:w-[88px]"
+            : "h-[90px] w-[90px] sm:h-[110px] sm:w-[110px]"
+        }`}
+      >
+        <div className="absolute inset-0 animate-spin rounded-full border-[2.4px] border-transparent border-t-[#00E575] border-r-[#3B82F6] border-l-[#00E575]" />
+        <div
+          className={`flex items-center justify-center rounded-full bg-[#00E575]/10 ${
+            compact ? "h-10 w-10 sm:h-12 sm:w-12" : "h-12 w-12 sm:h-14 sm:w-14"
+          }`}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/logo.png"
+            alt=""
+            className={`object-contain ${
+              compact ? "h-5 w-5 sm:h-6 sm:w-6" : "h-7 w-7 sm:h-8 sm:w-8"
+            }`}
+          />
+        </div>
+      </div>
+      {label ? (
+        <p className="mt-5 text-center text-[13px] text-muted sm:text-sm">
+          {label}
+        </p>
+      ) : null}
+    </div>
+  );
+}
 
 function BrowseInner() {
   const flyCart = useShowroomFlyCart();
@@ -300,14 +358,9 @@ function BrowseInner() {
   useEffect(() => {
     const el = bagRef.current;
     if (!el || !flyCart?.registerBagTarget) return;
-
-    const update = () => {
-      flyCart.registerBagTarget(el);
-    };
-
+    const update = () => flyCart.registerBagTarget(el);
     update();
     const t = window.setTimeout(update, 100);
-
     window.addEventListener("resize", update);
     window.addEventListener("scroll", update, true);
     return () => {
@@ -382,10 +435,8 @@ function BrowseInner() {
     }
     let cancelled = false;
     setSearchLoading(true);
-
     const hasQuery = debounced.length > 0;
     const apiSort = toApiSort(sortKey, hasQuery);
-
     fetchMallProducts({
       q: activeCategory ? undefined : debounced || undefined,
       category: resolveCategoryParam(activeCategory),
@@ -400,7 +451,6 @@ function BrowseInner() {
         setSearchLoading(false);
       }
     });
-
     return () => {
       cancelled = true;
     };
@@ -436,10 +486,7 @@ function BrowseInner() {
     (list: Product[]) =>
       list.filter((p) => {
         const parts = locParts(p);
-        if (
-          loc.region &&
-          parts.region.toLowerCase() !== loc.region.toLowerCase()
-        )
+        if (loc.region && parts.region.toLowerCase() !== loc.region.toLowerCase())
           return false;
         if (loc.state && parts.state.toLowerCase() !== loc.state.toLowerCase())
           return false;
@@ -469,8 +516,7 @@ function BrowseInner() {
   const filteredProducts = useMemo(() => {
     const q = debounced.toLowerCase();
     if (!q && !activeCategory) return [] as Product[];
-    let products =
-      serverProducts.length > 0 ? serverProducts : allProducts;
+    let products = serverProducts.length > 0 ? serverProducts : allProducts;
     if (activeCategory) {
       products = products.filter((p) => matchesFloor(p, activeCategory));
     } else if (q && serverProducts.length === 0) {
@@ -478,12 +524,8 @@ function BrowseInner() {
     }
     products = applyLoc(products);
     products = applyPriceStock(products);
-
-    // Always re-sort client-side so Relevance + Most viewed actually change order
     let effective: SortKey = sortKey;
-    if (sortKey === "relevance") {
-      effective = q ? "views" : "newest";
-    }
+    if (sortKey === "relevance") effective = q ? "views" : "newest";
     return sortProducts(products, effective);
   }, [
     debounced,
@@ -615,17 +657,15 @@ function BrowseInner() {
         </p>
         <div className={PRODUCT_GRID}>
           {products.map((p) => (
-            <div key={p._id} className="min-w-0">
-              <ProductCard product={p} />
-            </div>
+            <ProductCell key={p._id} product={p} />
           ))}
         </div>
         {live.totalProducts > visibleCount ? (
-          <div className="mt-10 flex justify-center">
+          <div className="mt-10 flex justify-center sm:mt-12">
             <button
               type="button"
               onClick={() => setVisibleCount((c) => c + PAGE_SIZE)}
-              className="border border-white/20 px-8 py-3 text-[11px] font-semibold tracking-[0.18em] uppercase text-white transition hover:border-white hover:bg-white/5"
+              className="border border-white/20 px-6 py-3 text-[11px] font-semibold tracking-[0.18em] uppercase text-white transition hover:border-white hover:bg-white/5 sm:px-8"
             >
               Show more
             </button>
@@ -636,18 +676,18 @@ function BrowseInner() {
 
   const renderStoresBlock = () =>
     live.stores.length > 0 ? (
-      <div className="mt-12 first:mt-0">
+      <div className="mt-10 first:mt-0 sm:mt-12">
         <p className="mb-4 text-[11px] font-bold tracking-[0.12em] text-muted">
           STOREFRONTS
         </p>
-        <div className="-mx-3 flex gap-3 overflow-x-auto px-3 pb-1 scrollbar-none sm:-mx-0 sm:px-0">
+        <div className="-mx-3 flex gap-3 overflow-x-auto px-3 pb-1 scrollbar-none sm:-mx-0 sm:gap-4 sm:px-0">
           {live.stores.map((s) => (
             <Link
               key={s._id}
               href={`/store/${s._id}`}
-              className="w-[7rem] shrink-0 border border-line bg-surface p-3 text-center"
+              className="w-[6.5rem] shrink-0 border border-line bg-surface p-3 text-center sm:w-[7rem]"
             >
-              <div className="mx-auto mb-2 flex h-14 w-14 items-center justify-center overflow-hidden bg-surface-2">
+              <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center overflow-hidden bg-surface-2 sm:h-14 sm:w-14">
                 {s.storeLogo ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
@@ -659,7 +699,7 @@ function BrowseInner() {
                   <span className="text-muted">⌂</span>
                 )}
               </div>
-              <p className="truncate text-xs font-semibold">
+              <p className="truncate text-[11px] font-semibold sm:text-xs">
                 {s.storeName || s.name || "Store"}
               </p>
             </Link>
@@ -670,7 +710,7 @@ function BrowseInner() {
 
   const renderCategoriesBlock = () =>
     live.categories.length > 0 ? (
-      <div className="mt-12 first:mt-0">
+      <div className="mt-10 first:mt-0 sm:mt-12">
         <p className="mb-4 text-[11px] font-bold tracking-[0.12em] text-muted">
           CATEGORIES
         </p>
@@ -680,7 +720,7 @@ function BrowseInner() {
               key={c}
               type="button"
               onClick={() => selectFloor(c)}
-              className="border border-line bg-surface px-3.5 py-2 text-sm font-semibold"
+              className="border border-line bg-surface px-3 py-2 text-[13px] font-semibold sm:px-3.5 sm:text-sm"
             >
               {c}
             </button>
@@ -691,7 +731,7 @@ function BrowseInner() {
 
   const renderBrandsBlock = () =>
     live.brands.length > 0 ? (
-      <div className="mt-12 first:mt-0">
+      <div className="mt-10 first:mt-0 sm:mt-12">
         <p className="mb-4 text-[11px] font-bold tracking-[0.12em] text-muted">
           BRANDS
         </p>
@@ -705,7 +745,7 @@ function BrowseInner() {
                 setDebounced(b);
                 pushRecent(b);
               }}
-              className="border border-ai-green/25 bg-ai-green/10 px-3.5 py-2 text-sm font-semibold text-ai-green"
+              className="border border-ai-green/25 bg-ai-green/10 px-3 py-2 text-[13px] font-semibold text-ai-green sm:px-3.5 sm:text-sm"
             >
               {b}
             </button>
@@ -748,24 +788,23 @@ function BrowseInner() {
   };
 
   return (
-    <div className="min-h-screen bg-bg text-text">
+    <div className="min-h-screen w-full overflow-x-hidden bg-bg text-text">
       <header className="sticky top-0 z-40 border-b border-white/5 bg-bg/90 backdrop-blur-md">
-        <div className="mx-auto flex h-14 max-w-7xl items-center gap-2 px-3 sm:gap-3 sm:px-6 lg:px-8">
+        <div className="mx-auto flex h-12 max-w-7xl items-center gap-2 px-3 sm:h-14 sm:gap-3 sm:px-6 lg:px-8">
           <div className="flex shrink-0 items-center gap-1.5">
             <Link
               href="/lounge"
-              className="flex h-10 w-10 items-center justify-center text-text md:hidden"
+              className="flex h-9 w-9 items-center justify-center text-text sm:h-10 sm:w-10 md:hidden"
               aria-label="Open Lounge"
             >
               <MenuLines />
             </Link>
-
-            <Link href="/" className="flex items-center gap-2.5">
+            <Link href="/" className="flex items-center gap-2 sm:gap-2.5">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src="/logo.png"
                 alt="Plazore"
-                className="h-7 w-7 object-contain"
+                className="h-6 w-6 object-contain sm:h-7 sm:w-7"
               />
               <span className="hidden text-sm tracking-[0.2em] uppercase sm:inline">
                 Plazore
@@ -773,7 +812,7 @@ function BrowseInner() {
             </Link>
           </div>
 
-          <nav className="ml-6 hidden flex-1 items-center gap-6 md:flex lg:ml-10 lg:gap-8">
+          <nav className="ml-4 hidden flex-1 items-center gap-5 md:flex lg:ml-10 lg:gap-8">
             <Link
               href="/"
               className="text-xs tracking-[0.16em] uppercase text-secondary transition hover:text-text"
@@ -786,7 +825,6 @@ function BrowseInner() {
             >
               Browse
             </Link>
-
             <Link
               href="/lounge"
               className="group relative inline-flex items-center gap-2.5 overflow-hidden border border-white/15 px-4 py-2 text-[11px] font-extrabold tracking-[0.22em] uppercase text-white transition duration-200 hover:brightness-110 active:translate-y-[1px]"
@@ -809,14 +847,12 @@ function BrowseInner() {
                 aria-hidden
                 className="pointer-events-none absolute right-0 top-0 h-full w-[3px] bg-[#3B82F6]"
               />
-
               <span className="relative">Lounge</span>
               <span className="relative flex h-1.5 w-1.5 shrink-0">
                 <span className="absolute inline-flex h-full w-full animate-ping bg-white/80 opacity-45" />
                 <span className="relative inline-flex h-1.5 w-1.5 bg-white shadow-[0_0_8px_rgba(255,255,255,0.8)]" />
               </span>
             </Link>
-
             <button
               type="button"
               onClick={() => setAppFeature("wishlist")}
@@ -829,13 +865,16 @@ function BrowseInner() {
           <Link
             ref={bagRef}
             href="/cart"
-            className="relative ml-auto flex h-10 w-10 shrink-0 items-center justify-center text-text transition hover:opacity-80 md:ml-24 lg:ml-40 xl:ml-56 2xl:ml-72"
+            className="relative ml-auto flex h-9 w-9 shrink-0 items-center justify-center text-text transition hover:opacity-80 sm:h-10 sm:w-10 md:ml-16 lg:ml-24 xl:ml-40"
             aria-label={`Bag${bagCount ? `, ${bagCount} items` : ""}`}
             data-plazore-cart-icon
           >
-            <ShoppingBag className="h-[22px] w-[22px]" strokeWidth={1.75} />
+            <ShoppingBag
+              className="h-5 w-5 sm:h-[22px] sm:w-[22px]"
+              strokeWidth={1.75}
+            />
             {bagCount > 0 ? (
-              <span className="absolute -right-1 -top-1 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-[#00E575] px-1 text-[10px] font-bold leading-none text-[#041412]">
+              <span className="absolute -right-0.5 -top-0.5 flex h-[16px] min-w-[16px] items-center justify-center rounded-full bg-[#00E575] px-1 text-[9px] font-bold leading-none text-[#041412] sm:h-[18px] sm:min-w-[18px] sm:text-[10px]">
                 {bagCount > 99 ? "99+" : bagCount}
               </span>
             ) : null}
@@ -843,45 +882,44 @@ function BrowseInner() {
         </div>
       </header>
 
-      <div className="mx-auto max-w-7xl px-3 pb-28 pt-6 sm:px-6 sm:pt-10 lg:px-8">
-        <h1 className="font-display text-3xl tracking-tight sm:text-4xl md:text-5xl">
+      <div className="mx-auto max-w-7xl px-3 pb-24 pt-5 sm:px-6 sm:pb-28 sm:pt-8 lg:px-8 lg:pt-10">
+        <h1 className="font-display text-2xl tracking-tight sm:text-3xl md:text-4xl lg:text-5xl">
           Browse
         </h1>
 
-        {/* Significantly taller search field */}
-        <div className="mt-6 flex flex-col gap-3 sm:mt-8 sm:flex-row sm:items-stretch">
-          <label className="flex h-10 min-w-0 flex-1 items-center gap-3 border border-line bg-surface px-4 sm:h-[5.8rem] sm:px-5">
-  <span className="text-xl text-muted sm:text-lg">⌕</span>
-  <input
-    value={query}
-    onChange={(e) => {
-      setQuery(e.target.value);
-      if (activeCategory) setActiveCategory(null);
-      setCategoryLoading(false);
-    }}
-    onKeyDown={(e) => {
-      if (e.key === "Enter" && query.trim()) pushRecent(query);
-    }}
-    placeholder="Name, brand, category, location…"
-    className="w-full bg-transparent text-base text-text outline-none placeholder:text-muted sm:text-[16px]"
-  />
-  {(query || activeCategory || locActive || priceActive) && (
-    <button
-      type="button"
-      onClick={clearAll}
-      className="text-xl leading-none text-muted hover:text-text"
-    >
-      ×
-    </button>
-  )}
-</label>
+        <div className="mt-5 flex flex-col gap-2.5 sm:mt-7 sm:flex-row sm:items-stretch sm:gap-3">
+          <label className="flex h-12 min-w-0 flex-1 items-center gap-2.5 border border-line bg-surface px-3.5 sm:h-14 sm:gap-3 sm:px-5">
+            <span className="text-lg text-muted sm:text-xl">⌕</span>
+            <input
+              value={query}
+              onChange={(e) => {
+                setQuery(e.target.value);
+                if (activeCategory) setActiveCategory(null);
+                setCategoryLoading(false);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && query.trim()) pushRecent(query);
+              }}
+              placeholder="Name, brand, category, location…"
+              className="w-full bg-transparent text-[15px] text-text outline-none placeholder:text-muted sm:text-base"
+            />
+            {(query || activeCategory || locActive || priceActive) && (
+              <button
+                type="button"
+                onClick={clearAll}
+                className="text-xl leading-none text-muted hover:text-text"
+              >
+                ×
+              </button>
+            )}
+          </label>
 
           {showFilterBar ? (
             <div className="flex flex-wrap gap-2 sm:items-stretch">
               <button
                 type="button"
                 onClick={() => setSortOpen(true)}
-                className={`h-14 shrink-0 border px-4 text-xs font-semibold tracking-wide sm:h-auto sm:min-h-[4.25rem] ${
+                className={`h-11 shrink-0 border px-3.5 text-[11px] font-semibold tracking-wide sm:h-14 sm:px-4 sm:text-xs ${
                   sortActive || structure !== "products_first"
                     ? "border-ai-green/40 bg-ai-green/10 text-ai-green"
                     : "border-line bg-surface-2 text-text"
@@ -892,7 +930,7 @@ function BrowseInner() {
               <button
                 type="button"
                 onClick={openPrice}
-                className={`h-14 shrink-0 border px-4 text-xs font-semibold tracking-wide sm:h-auto sm:min-h-[4.25rem] ${
+                className={`h-11 shrink-0 border px-3.5 text-[11px] font-semibold tracking-wide sm:h-14 sm:px-4 sm:text-xs ${
                   priceActive
                     ? "border-ai-green/40 bg-ai-green/10 text-ai-green"
                     : "border-line bg-surface-2 text-text"
@@ -903,7 +941,7 @@ function BrowseInner() {
               <button
                 type="button"
                 onClick={() => setLocOpen(true)}
-                className={`h-14 shrink-0 border px-4 text-xs font-semibold tracking-wide sm:h-auto sm:min-h-[4.25rem] ${
+                className={`h-11 shrink-0 border px-3.5 text-[11px] font-semibold tracking-wide sm:h-14 sm:px-4 sm:text-xs ${
                   locActive
                     ? "border-ai-green/40 bg-ai-green/10 text-ai-green"
                     : "border-line bg-surface-2 text-text"
@@ -916,20 +954,19 @@ function BrowseInner() {
         </div>
 
         {!isSearching ? (
-          <div className="mt-10 sm:mt-12">
-            <p className="px-0 text-[11px] font-bold tracking-[0.12em] text-muted">
+          <div className="mt-8 sm:mt-10">
+            <p className="text-[11px] font-bold tracking-[0.12em] text-muted">
               EXPLORE
             </p>
 
-            {/* Horizontal swipe rail — smaller category cards (like mobile) */}
-            <div className="-mx-3 mt-4 overflow-x-auto px-3 pb-2 scrollbar-none sm:-mx-0 sm:px-0">
+            <div className="-mx-3 mt-3.5 overflow-x-auto px-3 pb-2 scrollbar-none sm:-mx-0 sm:mt-4 sm:px-0">
               <div className="flex w-max gap-3 pr-3 sm:gap-3.5">
                 {FLOORS.map((f) => (
                   <button
                     key={f.id}
                     type="button"
                     onClick={() => selectFloor(f.id)}
-                    className="relative h-[9.5rem] w-[6.75rem] shrink-0 overflow-hidden border border-line bg-surface text-left sm:h-[10.5rem] sm:w-[7.25rem]"
+                    className="relative h-[8.75rem] w-[6.25rem] shrink-0 overflow-hidden border border-line bg-surface text-left sm:h-[10.5rem] sm:w-[7.25rem]"
                   >
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
@@ -938,11 +975,11 @@ function BrowseInner() {
                       className="absolute inset-0 h-full w-full object-cover"
                     />
                     <div className="absolute inset-0 bg-gradient-to-t from-bg via-bg/40 to-transparent" />
-                    <div className="absolute inset-x-2.5 bottom-2.5">
-                      <p className="text-[13px] font-semibold leading-tight">
+                    <div className="absolute inset-x-2 bottom-2 sm:inset-x-2.5 sm:bottom-2.5">
+                      <p className="text-[12px] font-semibold leading-tight sm:text-[13px]">
                         {f.short}
                       </p>
-                      <p className="mt-0.5 truncate text-[10px] text-white/55">
+                      <p className="mt-0.5 truncate text-[9px] text-white/55 sm:text-[10px]">
                         {f.hint}
                       </p>
                     </div>
@@ -952,14 +989,14 @@ function BrowseInner() {
             </div>
 
             {recent.length > 0 ? (
-              <div className="mt-12">
-                <div className="flex items-center justify-between">
+              <div className="mt-10 sm:mt-12">
+                <div className="flex items-center justify-between gap-3">
                   <p className="text-[11px] font-bold tracking-[0.12em] text-muted">
                     RECENT SEARCHES
                   </p>
                   <button
                     type="button"
-                    className="text-sm text-ai-green"
+                    className="text-[13px] text-ai-green sm:text-sm"
                     onClick={() => {
                       setRecent([]);
                       localStorage.removeItem(RECENT_KEY);
@@ -968,7 +1005,7 @@ function BrowseInner() {
                     Clear
                   </button>
                 </div>
-                <div className="mt-4 flex flex-wrap gap-2">
+                <div className="mt-3.5 flex flex-wrap gap-2 sm:mt-4">
                   {recent.map((r) => (
                     <button
                       key={r}
@@ -978,7 +1015,7 @@ function BrowseInner() {
                         setDebounced(r);
                         pushRecent(r);
                       }}
-                      className="border border-line bg-surface px-3.5 py-2 text-sm"
+                      className="border border-line bg-surface px-3 py-2 text-[13px] sm:px-3.5 sm:text-sm"
                     >
                       {r}
                     </button>
@@ -987,30 +1024,30 @@ function BrowseInner() {
               </div>
             ) : null}
 
-            <div className="mt-14">
+            {/* MOVING NOW — same grid gaps */}
+            <div className="mt-12 sm:mt-14">
               <p className="text-[11px] font-bold tracking-[0.12em] text-muted">
                 MOVING NOW
               </p>
-              <p className="mt-1 text-xs text-secondary">
+              <p className="mt-1 text-[12px] text-secondary sm:text-xs">
                 Highest viewed products on Plazore
               </p>
+
               {loading ? (
-                <p className="mt-10 text-center text-muted">Loading the mall…</p>
+                <OrbLoader compact label="Loading the mall…" />
               ) : movingNow.length === 0 ? (
                 <p className="mt-10 text-center text-muted">Nothing moving yet.</p>
               ) : (
                 <>
-                  <div className={`mt-6 ${PRODUCT_GRID}`}>
+                  <div className={`mt-5 sm:mt-6 ${PRODUCT_GRID}`}>
                     {movingNow.map((p) => (
-                      <div key={p._id} className="min-w-0">
-                        <ProductCard product={p} />
-                      </div>
+                      <ProductCell key={p._id} product={p} />
                     ))}
                   </div>
-                  <div className="mt-10 flex justify-center">
+                  <div className="mt-10 flex justify-center sm:mt-12">
                     <Link
                       href="/shop?mode=trending"
-                      className="border border-white/20 px-8 py-3 text-[11px] font-semibold tracking-[0.18em] uppercase text-white transition hover:border-white hover:bg-white/5"
+                      className="border border-white/20 px-6 py-3 text-[11px] font-semibold tracking-[0.18em] uppercase text-white transition hover:border-white hover:bg-white/5 sm:px-8"
                     >
                       Show more
                     </Link>
@@ -1021,13 +1058,15 @@ function BrowseInner() {
           </div>
         ) : categoryLoading ||
           (searchLoading && live.products.length === 0) ? (
-          <p className="mt-24 text-center text-muted">Looking through the mall…</p>
+          <OrbLoader label="Looking through the mall…" />
         ) : (
-          <div className="mt-10">
-            <div className="mb-8 flex items-start justify-between gap-4">
-              <div>
-                <p className="text-lg font-bold sm:text-xl">{activeLabel}</p>
-                <p className="mt-1 text-xs text-muted">
+          <div className="mt-8 sm:mt-10">
+            <div className="mb-6 flex items-start justify-between gap-3 sm:mb-8 sm:gap-4">
+              <div className="min-w-0">
+                <p className="truncate text-base font-bold sm:text-lg md:text-xl">
+                  {activeLabel}
+                </p>
+                <p className="mt-1 text-[11px] text-muted sm:text-xs">
                   {[
                     live.totalProducts
                       ? `${Math.min(visibleCount, live.totalProducts)} of ${live.totalProducts} products`
@@ -1047,16 +1086,16 @@ function BrowseInner() {
               <button
                 type="button"
                 onClick={clearAll}
-                className="text-sm text-ai-green"
+                className="shrink-0 text-[13px] text-ai-green sm:text-sm"
               >
                 Clear
               </button>
             </div>
             {structuredResults()}
             {!hasResults && !searchLoading ? (
-              <div className="pt-20 text-center">
+              <div className="pt-16 text-center sm:pt-20">
                 <p className="font-bold">Nothing found</p>
-                <p className="mt-2 text-secondary">
+                <p className="mt-2 text-sm text-secondary">
                   Try another search, sort, price, or location.
                 </p>
               </div>
@@ -1065,6 +1104,7 @@ function BrowseInner() {
         )}
       </div>
 
+      {/* Sort / Price / Location sheets — unchanged */}
       {sortOpen ? (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/65 md:items-center">
           <button
@@ -1073,7 +1113,7 @@ function BrowseInner() {
             onClick={() => setSortOpen(false)}
             aria-label="Close sort"
           />
-          <div className="relative max-h-[85vh] w-full max-w-md overflow-y-auto border-t border-line bg-surface p-6 md:border">
+          <div className="relative max-h-[85vh] w-full max-w-md overflow-y-auto border-t border-line bg-surface p-5 sm:p-6 md:border">
             <p className="text-lg font-bold">Sort & layout</p>
             <p className="mt-5 text-sm font-semibold text-secondary">Sort by</p>
             <div className="mt-2 space-y-1">
@@ -1081,9 +1121,7 @@ function BrowseInner() {
                 <button
                   key={o.key}
                   type="button"
-                  onClick={() => {
-                    setSortKey(o.key);
-                  }}
+                  onClick={() => setSortKey(o.key)}
                   className={`flex w-full items-center justify-between border px-3 py-2.5 text-left text-sm ${
                     sortKey === o.key
                       ? "border-ai-green/40 bg-ai-green/10 font-semibold text-ai-green"
@@ -1134,7 +1172,7 @@ function BrowseInner() {
             onClick={() => setPriceOpen(false)}
             aria-label="Close price"
           />
-          <div className="relative w-full max-w-md border-t border-line bg-surface p-6 md:border">
+          <div className="relative w-full max-w-md border-t border-line bg-surface p-5 sm:p-6 md:border">
             <p className="text-lg font-bold">Price filter</p>
             <p className="mt-5 text-sm font-semibold text-secondary">Price range</p>
             <div className="mt-2 flex gap-2">
@@ -1193,7 +1231,7 @@ function BrowseInner() {
             onClick={() => setLocOpen(false)}
             aria-label="Close location"
           />
-          <div className="relative max-h-[85vh] w-full max-w-md overflow-y-auto border-t border-line bg-surface p-6 md:border">
+          <div className="relative max-h-[85vh] w-full max-w-md overflow-y-auto border-t border-line bg-surface p-5 sm:p-6 md:border">
             <p className="text-lg font-bold">Location</p>
             <p className="mt-1 text-xs text-muted">
               From places already on Plazore products
@@ -1286,9 +1324,7 @@ function BrowseInner() {
             <div className="mt-8 flex gap-3">
               <button
                 type="button"
-                onClick={() =>
-                  setLoc({ region: null, state: null, city: null })
-                }
+                onClick={() => setLoc({ region: null, state: null, city: null })}
                 className="h-12 flex-1 border border-line bg-surface-2 font-semibold text-secondary"
               >
                 Reset

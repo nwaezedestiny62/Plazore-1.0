@@ -29,7 +29,6 @@ const PLAN_FEES: Record<string, number> = {
   pro: 3,
 };
 
-/** Rotating tips + external images for the banner */
 const SELLER_TIPS = [
   {
     title: "Sharp product photos",
@@ -134,8 +133,8 @@ function PerformanceBars({ data }: { data: SeriesPoint[] }) {
 
   if (!points.length) {
     return (
-      <div className="relative h-36 overflow-hidden rounded-xl border border-white/[0.06] bg-[#0A121C]">
-        <div className="absolute inset-0 flex items-end justify-between gap-1 px-3 pb-6 pt-4">
+      <div className="relative h-32 overflow-hidden rounded-xl border border-white/[0.06] bg-[#0A121C] sm:h-36">
+        <div className="absolute inset-0 flex items-end justify-between gap-1 px-2 pb-5 pt-3 sm:px-3 sm:pb-6 sm:pt-4">
           {Array.from({ length: 12 }).map((_, i) => (
             <div
               key={i}
@@ -144,7 +143,7 @@ function PerformanceBars({ data }: { data: SeriesPoint[] }) {
             />
           ))}
         </div>
-        <p className="absolute inset-x-0 bottom-2 text-center text-[11px] text-[#4A6078]">
+        <p className="absolute inset-x-0 bottom-1.5 px-2 text-center text-[10px] leading-tight text-[#4A6078] sm:bottom-2 sm:text-[11px]">
           Engagement will show here as buyers interact
         </p>
       </div>
@@ -152,25 +151,25 @@ function PerformanceBars({ data }: { data: SeriesPoint[] }) {
   }
 
   const active = hover != null ? points[hover] : null;
-  const labelEvery = Math.max(1, Math.ceil(points.length / 5));
+  const labelEvery = Math.max(1, Math.ceil(points.length / 4));
 
   return (
-    <div>
-      <div className="flex gap-2">
-        <div className="flex w-7 flex-col justify-between pb-5 pt-1 text-right text-[9px] tabular-nums text-[#4A6078]">
+    <div className="w-full min-w-0">
+      <div className="flex gap-1.5 sm:gap-2">
+        <div className="flex w-6 shrink-0 flex-col justify-between pb-4 pt-0.5 text-right text-[8px] tabular-nums text-[#4A6078] sm:w-7 sm:pb-5 sm:pt-1 sm:text-[9px]">
           <span>{max}</span>
           <span>{Math.round(max / 2)}</span>
           <span>0</span>
         </div>
 
-        <div className="relative min-w-0 flex-1">
-          <div className="pointer-events-none absolute inset-0 flex flex-col justify-between pb-5 pt-1">
+        <div className="relative min-w-0 flex-1 overflow-hidden">
+          <div className="pointer-events-none absolute inset-0 flex flex-col justify-between pb-4 pt-0.5 sm:pb-5 sm:pt-1">
             {[0, 1, 2].map((i) => (
               <div key={i} className="border-t border-white/[0.05]" />
             ))}
           </div>
 
-          <div className="relative flex h-36 items-end gap-[3px] sm:gap-1.5">
+          <div className="relative flex h-32 items-end gap-[2px] sm:h-36 sm:gap-1 md:gap-1.5">
             {points.map((d, i) => {
               const h = Math.max(4, Math.round((d.value / max) * 100));
               const isOn = hover === i;
@@ -182,12 +181,13 @@ function PerformanceBars({ data }: { data: SeriesPoint[] }) {
                   onMouseLeave={() => setHover(null)}
                   onFocus={() => setHover(i)}
                   onBlur={() => setHover(null)}
+                  onTouchStart={() => setHover(i)}
                   className="group relative flex min-w-0 flex-1 flex-col items-center justify-end"
                   style={{ height: "100%" }}
                   title={`${d.label}: ${d.value}`}
                 >
                   <span
-                    className={`w-full max-w-[28px] rounded-sm transition-all duration-150 ${
+                    className={`w-full max-w-[22px] rounded-sm transition-all duration-150 sm:max-w-[28px] ${
                       isOn ? "opacity-100 ring-1 ring-white/20" : "opacity-90"
                     }`}
                     style={{
@@ -200,7 +200,7 @@ function PerformanceBars({ data }: { data: SeriesPoint[] }) {
                     }}
                   />
                   {i % labelEvery === 0 && (
-                    <span className="mt-1.5 max-w-full truncate text-[9px] text-[#4A6078]">
+                    <span className="mt-1 max-w-full truncate text-[8px] text-[#4A6078] sm:mt-1.5 sm:text-[9px]">
                       {d.label}
                     </span>
                   )}
@@ -211,7 +211,7 @@ function PerformanceBars({ data }: { data: SeriesPoint[] }) {
         </div>
       </div>
 
-      <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border border-white/[0.06] bg-[#0A121C] px-3 py-2 text-[12px]">
+      <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-white/[0.06] bg-[#0A121C] px-2.5 py-1.5 text-[11px] sm:mt-3 sm:gap-x-4 sm:px-3 sm:py-2 sm:text-[12px]">
         {active ? (
           <>
             <span className="font-semibold text-[#F5F7FA]">{active.label}</span>
@@ -226,7 +226,7 @@ function PerformanceBars({ data }: { data: SeriesPoint[] }) {
           </>
         ) : (
           <span className="text-[#6B8299]">
-            Hover a day · score = views×1 + cart×5 + purchases×15
+            Tap a day · score = views×1 + cart×5 + purchases×15
           </span>
         )}
       </div>
@@ -236,19 +236,18 @@ function PerformanceBars({ data }: { data: SeriesPoint[] }) {
 
 function OrbLoader() {
   return (
-    <div className="flex min-h-[60vh] items-center justify-center">
-      <div className="relative flex h-[110px] w-[110px] items-center justify-center">
+    <div className="flex min-h-[50vh] items-center justify-center sm:min-h-[60vh]">
+      <div className="relative flex h-[90px] w-[90px] items-center justify-center sm:h-[110px] sm:w-[110px]">
         <div className="absolute inset-0 animate-spin rounded-full border-[2.4px] border-transparent border-t-[#00E575] border-r-[#3B82F6] border-l-[#00E575]" />
-        <div className="flex h-14 w-14 items-center justify-center rounded-full bg-[#00E575]/10">
+        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-[#00E575]/10 sm:h-14 sm:w-14">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/logo.png" alt="" className="h-8 w-8 object-contain" />
+          <img src="/logo.png" alt="" className="h-7 w-7 object-contain sm:h-8 sm:w-8" />
         </div>
       </div>
     </div>
   );
 }
 
-/** Compact on mobile (~72–88px), richer on lg */
 function SellerTipsBanner({
   tipIndex,
   onSelect,
@@ -269,18 +268,18 @@ function SellerTipsBanner({
       <div className="absolute inset-0 bg-gradient-to-r from-[#090B0F]/95 via-[#090B0F]/80 to-[#090B0F]/35" />
       <div className="absolute inset-0 bg-gradient-to-t from-[#090B0F]/50 to-transparent" />
 
-      <div className="relative flex min-h-[72px] items-center gap-3 px-3.5 py-3 sm:min-h-[88px] sm:gap-4 sm:px-5 sm:py-4 lg:min-h-[100px]">
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#00E575]/15 ring-1 ring-[#00E575]/25 sm:h-10 sm:w-10">
-          <Lightbulb className="h-4 w-4 text-[#00E575] sm:h-[18px] sm:w-[18px]" />
+      <div className="relative flex min-h-[68px] items-center gap-2.5 px-3 py-2.5 xs:gap-3 sm:min-h-[88px] sm:gap-4 sm:px-5 sm:py-4 lg:min-h-[100px]">
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#00E575]/15 ring-1 ring-[#00E575]/25 sm:h-10 sm:w-10">
+          <Lightbulb className="h-3.5 w-3.5 text-[#00E575] sm:h-[18px] sm:w-[18px]" />
         </div>
         <div className="min-w-0 flex-1">
-          <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#00E575]">
+          <p className="text-[9px] font-bold uppercase tracking-[0.14em] text-[#00E575] sm:text-[10px] sm:tracking-[0.16em]">
             Seller tip
           </p>
-          <p className="mt-0.5 truncate text-[13px] font-semibold text-[#F5F7FA] sm:text-sm">
+          <p className="mt-0.5 truncate text-[12.5px] font-semibold text-[#F5F7FA] sm:text-sm">
             {tip.title}
           </p>
-          <p className="mt-0.5 line-clamp-1 text-[11px] leading-snug text-[#A7ADB8] sm:line-clamp-2 sm:text-[12.5px]">
+          <p className="mt-0.5 line-clamp-1 text-[10.5px] leading-snug text-[#A7ADB8] sm:line-clamp-2 sm:text-[12.5px]">
             {tip.body}
           </p>
         </div>
@@ -301,8 +300,7 @@ function SellerTipsBanner({
         </div>
       </div>
 
-      {/* Mobile dots under content, no extra height waste */}
-      <div className="relative flex justify-center gap-1.5 pb-2.5 sm:hidden">
+      <div className="relative flex justify-center gap-1.5 pb-2 sm:hidden">
         {SELLER_TIPS.map((_, i) => (
           <button
             key={i}
@@ -469,47 +467,50 @@ export default function SellerDashboardPage() {
   if (loading) return <OrbLoader />;
 
   return (
-    <div className="min-h-screen">
-      {/* Header — no Exit (layout handles Exit to Mall) */}
-      <header className="sticky top-0 z-20 flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.07] bg-[#090B0F]/95 px-4 py-3 backdrop-blur sm:px-6 lg:px-8">
-        <div className="min-w-0">
-          <p className="text-[10px] font-bold uppercase tracking-[1.6px] text-[#737A86]">
+    <div className="min-h-screen w-full overflow-x-hidden">
+      {/* Header */}
+      <header className="sticky top-0 z-20 flex items-center justify-between gap-2 border-b border-white/[0.07] bg-[#090B0F]/95 px-3 py-2.5 backdrop-blur sm:gap-3 sm:px-5 sm:py-3 lg:px-8">
+        <div className="min-w-0 flex-1">
+          <p className="text-[9px] font-bold uppercase tracking-[1.4px] text-[#737A86] sm:text-[10px] sm:tracking-[1.6px]">
             Seller Lounge
           </p>
-          <h1 className="truncate text-lg font-extrabold tracking-tight sm:text-xl">
+          <h1 className="truncate text-[15px] font-extrabold tracking-tight sm:text-lg md:text-xl">
             {overview.storeName || "Your Store"}
           </h1>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
           {!overview.isVerified ? (
-            <span className="border border-amber-500/35 bg-amber-500/10 px-2 py-1 text-[10px] font-bold text-[#F0C070]">
+            <span className="hidden border border-amber-500/35 bg-amber-500/10 px-2 py-1 text-[10px] font-bold text-[#F0C070] xs:inline-block">
               Pending
             </span>
           ) : null}
           <Link
             href="/seller/store"
-            className="flex h-10 w-10 items-center justify-center border border-white/[0.07] bg-[#11141A]"
+            className="flex h-9 w-9 items-center justify-center border border-white/[0.07] bg-[#11141A] sm:h-10 sm:w-10"
             aria-label="Storefront"
           >
-            <Palette className="h-5 w-5" />
+            <Palette className="h-4 w-4 sm:h-5 sm:w-5" />
           </Link>
           <Link
             href="/seller/settings"
-            className="flex h-10 w-10 items-center justify-center border border-white/[0.07] bg-[#11141A]"
+            className="flex h-9 w-9 items-center justify-center border border-white/[0.07] bg-[#11141A] sm:h-10 sm:w-10"
             aria-label="Settings"
           >
-            <Settings className="h-5 w-5" />
+            <Settings className="h-4 w-4 sm:h-5 sm:w-5" />
           </Link>
         </div>
       </header>
 
-      <div className="mx-auto w-full max-w-6xl px-4 py-5 sm:px-6 lg:px-8 lg:py-8">
-        <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <h2 className="text-2xl font-extrabold tracking-tight sm:text-[28px]">
+      <div className="mx-auto w-full max-w-6xl px-3 py-4 sm:px-5 sm:py-5 lg:px-8 lg:py-8">
+        {/* Greeting */}
+        <div className="mb-4 flex flex-col gap-2.5 sm:mb-5 sm:flex-row sm:items-end sm:justify-between sm:gap-3">
+          <div className="min-w-0">
+            <h2 className="text-xl font-extrabold tracking-tight sm:text-2xl md:text-[28px]">
               {greeting}, {firstName}
             </h2>
-            <p className="mt-1 text-sm text-[#A7ADB8]">Your store at a glance.</p>
+            <p className="mt-0.5 text-[13px] text-[#A7ADB8] sm:mt-1 sm:text-sm">
+              Your store at a glance.
+            </p>
           </div>
           <button
             type="button"
@@ -518,50 +519,53 @@ export default function SellerDashboardPage() {
               setRefreshing(true);
               loadDashboard();
             }}
-            className="border border-white/[0.08] bg-[#11141A] px-3 py-2 text-xs font-semibold text-[#A7ADB8]"
+            className="self-start border border-white/[0.08] bg-[#11141A] px-3 py-2 text-[11px] font-semibold text-[#A7ADB8] sm:self-auto sm:text-xs"
           >
             {refreshing ? "Refreshing…" : "Refresh"}
           </button>
         </div>
 
-        {/* Tips banner — visible mobile + desktop, height-disciplined on mobile */}
-        <div className="mb-5 sm:mb-6">
+        {/* Tips banner */}
+        <div className="mb-4 sm:mb-6">
           <SellerTipsBanner tipIndex={tipIndex} onSelect={setTipIndex} />
         </div>
 
-        <div className="grid gap-4 lg:grid-cols-12 lg:gap-6">
-          <section className="space-y-4 lg:col-span-8">
-            <div className="border border-[#00E575]/22 bg-gradient-to-br from-[#00E575]/[0.14] to-[#3B82F6]/10 p-[18px]">
-              <div className="flex items-center justify-between">
-                <p className="text-[11px] font-bold uppercase tracking-[1.2px] text-[#737A86]">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-12 lg:gap-6">
+          {/* Main column */}
+          <section className="min-w-0 space-y-4 lg:col-span-8">
+            {/* Revenue */}
+            <div className="border border-[#00E575]/22 bg-gradient-to-br from-[#00E575]/[0.14] to-[#3B82F6]/10 p-4 sm:p-[18px]">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-[10px] font-bold uppercase tracking-[1.1px] text-[#737A86] sm:text-[11px] sm:tracking-[1.2px]">
                   Revenue
                 </p>
-                <span className="bg-white/[0.06] px-2 py-0.5 text-[10px] font-extrabold tracking-wide text-[#A7ADB8]">
+                <span className="bg-white/[0.06] px-2 py-0.5 text-[9px] font-extrabold tracking-wide text-[#A7ADB8] sm:text-[10px]">
                   {(overview.plan || "free").toUpperCase()}
                 </span>
               </div>
-              <p className="mt-2.5 text-4xl font-extrabold tracking-tight sm:text-5xl">
+              <p className="mt-2 text-3xl font-extrabold tracking-tight sm:mt-2.5 sm:text-4xl md:text-5xl">
                 {revenueLabel}
               </p>
-              <p className="mt-1.5 text-[12.5px] leading-[18px] text-[#A7ADB8]">
+              <p className="mt-1 text-[11.5px] leading-relaxed text-[#A7ADB8] sm:mt-1.5 sm:text-[12.5px] sm:leading-[18px]">
                 {overview.revenue && overview.revenue > 0
                   ? "Revenue from completed orders on Plazore."
                   : "Payouts and live totals appear here when payments are enabled."}
               </p>
-              <div className="mt-3.5 flex items-center justify-between text-xs">
+              <div className="mt-3 flex items-center justify-between gap-2 text-[11px] sm:mt-3.5 sm:text-xs">
                 <span className="text-[#737A86]">
                   Fee · {feePct}% of product price
                 </span>
                 <Link
                   href="/seller/subscription"
-                  className="font-bold text-[#00E575]"
+                  className="shrink-0 font-bold text-[#00E575]"
                 >
                   Plan
                 </Link>
               </div>
             </div>
 
-            <div className="grid grid-cols-3 gap-2 sm:gap-3">
+            {/* Stats */}
+            <div className="grid grid-cols-3 gap-1.5 sm:gap-3">
               {[
                 {
                   label: "Products",
@@ -581,33 +585,38 @@ export default function SellerDashboardPage() {
               ].map((s) => (
                 <div
                   key={s.label}
-                  className="border border-white/[0.07] bg-[#11141A] p-3 sm:p-4"
+                  className="min-w-0 border border-white/[0.07] bg-[#11141A] p-2.5 sm:p-4"
                 >
-                  <div className="mb-2 flex h-7 w-7 items-center justify-center bg-[#171B22]">
-                    <s.icon className="h-4 w-4 text-[#A7ADB8]" />
+                  <div className="mb-1.5 flex h-6 w-6 items-center justify-center bg-[#171B22] sm:mb-2 sm:h-7 sm:w-7">
+                    <s.icon className="h-3.5 w-3.5 text-[#A7ADB8] sm:h-4 sm:w-4" />
                   </div>
-                  <p className="text-xl font-extrabold sm:text-2xl">{s.value}</p>
-                  <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#737A86]">
+                  <p className="truncate text-lg font-extrabold sm:text-xl md:text-2xl">
+                    {s.value}
+                  </p>
+                  <p className="mt-0.5 truncate text-[9px] font-semibold uppercase tracking-wide text-[#737A86] sm:text-[10px]">
                     {s.label}
                   </p>
                 </div>
               ))}
             </div>
 
+            {/* Performance */}
             <div>
-              <p className="mb-2.5 text-[11px] font-bold uppercase tracking-[1.4px] text-[#737A86]">
+              <p className="mb-2 text-[10px] font-bold uppercase tracking-[1.3px] text-[#737A86] sm:mb-2.5 sm:text-[11px] sm:tracking-[1.4px]">
                 Performance
               </p>
-              <div className="border border-white/[0.07] bg-[#11141A] p-4 sm:p-5">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-[15px] font-bold">Engagement</p>
-                    <p className="text-[11px] text-[#737A86]">
+              <div className="border border-white/[0.07] bg-[#11141A] p-3 sm:p-5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-[14px] font-bold sm:text-[15px]">
+                      Engagement
+                    </p>
+                    <p className="text-[10px] text-[#737A86] sm:text-[11px]">
                       Last {analytics?.rangeDays || 30} days
                     </p>
                   </div>
                   <span
-                    className="px-2.5 py-1 text-xs font-extrabold text-[#041412]"
+                    className="shrink-0 px-2 py-0.5 text-[11px] font-extrabold text-[#041412] sm:px-2.5 sm:py-1 sm:text-xs"
                     style={{
                       backgroundImage: "linear-gradient(90deg,#00E575,#3B82F6)",
                     }}
@@ -615,12 +624,14 @@ export default function SellerDashboardPage() {
                     {analytics?.totals?.score ?? 0} pts
                   </span>
                 </div>
-                <div className="mt-3">
+                <div className="mt-3 min-w-0">
                   <PerformanceBars data={safeSeries} />
                 </div>
-                <p className="mb-2 mt-4 text-[15px] font-bold">Top products</p>
+                <p className="mb-2 mt-3.5 text-[14px] font-bold sm:mt-4 sm:text-[15px]">
+                  Top products
+                </p>
                 {safeTop.length === 0 ? (
-                  <p className="text-[12.5px] text-[#737A86]">
+                  <p className="text-[12px] text-[#737A86] sm:text-[12.5px]">
                     Rankings appear as buyers view, cart, and purchase your
                     items.
                   </p>
@@ -635,18 +646,20 @@ export default function SellerDashboardPage() {
                             `/seller/products/performance/${p.productId}`
                           );
                       }}
-                      className="flex w-full items-center border-b border-white/[0.07] py-2.5 text-left last:border-0"
+                      className="flex w-full items-center gap-1 border-b border-white/[0.07] py-2 text-left last:border-0 sm:py-2.5"
                     >
-                      <span className="w-5 text-xs text-[#737A86]">{i + 1}</span>
-                      <span className="min-w-0 flex-1 truncate text-[13px]">
+                      <span className="w-4 shrink-0 text-[11px] text-[#737A86] sm:w-5 sm:text-xs">
+                        {i + 1}
+                      </span>
+                      <span className="min-w-0 flex-1 truncate text-[12.5px] sm:text-[13px]">
                         {p?.name || "Product"}
                       </span>
                       {p?.milestone200 ? (
-                        <span className="mr-2 bg-[#00E575]/12 px-1.5 py-0.5 text-[9px] font-extrabold text-[#00E575]">
+                        <span className="mr-1.5 shrink-0 bg-[#00E575]/12 px-1.5 py-0.5 text-[8px] font-extrabold text-[#00E575] sm:mr-2 sm:text-[9px]">
                           200+
                         </span>
                       ) : null}
-                      <span className="text-[13px] font-bold text-[#00E575]">
+                      <span className="shrink-0 text-[12.5px] font-bold text-[#00E575] sm:text-[13px]">
                         {p?.score ?? 0}
                       </span>
                     </button>
@@ -656,9 +669,11 @@ export default function SellerDashboardPage() {
             </div>
           </section>
 
-          <aside className="space-y-4 lg:col-span-4">
+          {/* Sidebar */}
+          <aside className="min-w-0 space-y-4 lg:col-span-4">
+            {/* Actions */}
             <div>
-              <p className="mb-2.5 text-[11px] font-bold uppercase tracking-[1.4px] text-[#737A86]">
+              <p className="mb-2 text-[10px] font-bold uppercase tracking-[1.3px] text-[#737A86] sm:mb-2.5 sm:text-[11px] sm:tracking-[1.4px]">
                 Actions
               </p>
               <div className="grid grid-cols-2 gap-2">
@@ -675,12 +690,12 @@ export default function SellerDashboardPage() {
                   <Link
                     key={a.href}
                     href={a.href}
-                    className="flex flex-col items-center border border-white/[0.07] bg-[#11141A] px-3 py-4"
+                    className="flex flex-col items-center border border-white/[0.07] bg-[#11141A] px-2 py-3.5 sm:px-3 sm:py-4"
                   >
-                    <span className="mb-2 flex h-10 w-10 items-center justify-center bg-[#171B22]">
-                      <a.icon className="h-5 w-5" />
+                    <span className="mb-1.5 flex h-9 w-9 items-center justify-center bg-[#171B22] sm:mb-2 sm:h-10 sm:w-10">
+                      <a.icon className="h-4.5 w-4.5 sm:h-5 sm:w-5" />
                     </span>
-                    <span className="text-center text-xs font-semibold text-[#A7ADB8]">
+                    <span className="text-center text-[11px] font-semibold text-[#A7ADB8] sm:text-xs">
                       {a.label}
                     </span>
                   </Link>
@@ -688,25 +703,28 @@ export default function SellerDashboardPage() {
               </div>
             </div>
 
+            {/* Recent activity */}
             <div>
-              <div className="mb-2.5 flex items-center justify-between">
-                <p className="text-[11px] font-bold uppercase tracking-[1.4px] text-[#737A86]">
+              <div className="mb-2 flex items-center justify-between gap-2 sm:mb-2.5">
+                <p className="text-[10px] font-bold uppercase tracking-[1.3px] text-[#737A86] sm:text-[11px] sm:tracking-[1.4px]">
                   Recent activity
                 </p>
                 {activity.length > 0 ? (
                   <Link
                     href="/seller/orders"
-                    className="text-[13px] font-semibold text-[#00E575]"
+                    className="text-[12px] font-semibold text-[#00E575] sm:text-[13px]"
                   >
                     View all
                   </Link>
                 ) : null}
               </div>
               {activity.length === 0 ? (
-                <div className="flex flex-col items-center border border-white/[0.07] bg-[#11141A] px-6 py-8 text-center">
-                  <ShoppingBag className="h-6 w-6 text-[#737A86]" />
-                  <p className="mt-2.5 text-[15px] font-bold">No activity yet</p>
-                  <p className="mt-1.5 text-[12.5px] text-[#737A86]">
+                <div className="flex flex-col items-center border border-white/[0.07] bg-[#11141A] px-4 py-6 text-center sm:px-6 sm:py-8">
+                  <ShoppingBag className="h-5 w-5 text-[#737A86] sm:h-6 sm:w-6" />
+                  <p className="mt-2 text-[14px] font-bold sm:mt-2.5 sm:text-[15px]">
+                    No activity yet
+                  </p>
+                  <p className="mt-1 text-[12px] text-[#737A86] sm:mt-1.5 sm:text-[12.5px]">
                     Orders and shipments will show up here.
                   </p>
                 </div>
@@ -715,22 +733,22 @@ export default function SellerDashboardPage() {
                   {activity.map((item) => (
                     <li
                       key={item.id}
-                      className="flex items-center border border-white/[0.07] bg-[#11141A] p-3"
+                      className="flex items-center border border-white/[0.07] bg-[#11141A] p-2.5 sm:p-3"
                     >
-                      <span className="mr-3 flex h-9 w-9 shrink-0 items-center justify-center bg-[#00E575]/10">
+                      <span className="mr-2.5 flex h-8 w-8 shrink-0 items-center justify-center bg-[#00E575]/10 sm:mr-3 sm:h-9 sm:w-9">
                         {item.type === "order_shipped" ? (
-                          <Plane className="h-[18px] w-[18px] text-[#00E575]" />
+                          <Plane className="h-4 w-4 text-[#00E575] sm:h-[18px] sm:w-[18px]" />
                         ) : item.type === "order_delivered" ? (
-                          <CheckCircle2 className="h-[18px] w-[18px] text-[#00E575]" />
+                          <CheckCircle2 className="h-4 w-4 text-[#00E575] sm:h-[18px] sm:w-[18px]" />
                         ) : (
-                          <ShoppingBag className="h-[18px] w-[18px] text-[#00E575]" />
+                          <ShoppingBag className="h-4 w-4 text-[#00E575] sm:h-[18px] sm:w-[18px]" />
                         )}
                       </span>
                       <span className="min-w-0">
-                        <span className="block text-sm font-semibold">
+                        <span className="block text-[13px] font-semibold sm:text-sm">
                           {item.title}
                         </span>
-                        <span className="mt-0.5 block text-xs text-[#737A86]">
+                        <span className="mt-0.5 block truncate text-[11px] text-[#737A86] sm:text-xs">
                           {item.subtitle}
                           {item.at
                             ? ` · ${new Date(item.at).toLocaleDateString()}`
@@ -743,21 +761,22 @@ export default function SellerDashboardPage() {
               )}
             </div>
 
-            <div className="flex items-center border border-white/[0.07] bg-[#11141A] p-4">
+            {/* Subscription */}
+            <div className="flex items-center gap-3 border border-white/[0.07] bg-[#11141A] p-3.5 sm:p-4">
               <div className="min-w-0 flex-1">
-                <p className="text-[10px] font-bold uppercase tracking-wide text-[#737A86]">
+                <p className="text-[9px] font-bold uppercase tracking-wide text-[#737A86] sm:text-[10px]">
                   Subscription
                 </p>
-                <p className="mt-1 text-lg font-extrabold capitalize">
+                <p className="mt-0.5 text-base font-extrabold capitalize sm:mt-1 sm:text-lg">
                   {overview.plan || "free"}
                 </p>
-                <p className="mt-0.5 text-xs text-[#A7ADB8]">
+                <p className="mt-0.5 text-[11px] text-[#A7ADB8] sm:text-xs">
                   {feePct}% product fee
                 </p>
               </div>
               <Link
                 href="/seller/subscription"
-                className="px-4 py-2.5 text-[13px] font-extrabold text-[#041412]"
+                className="shrink-0 px-3 py-2 text-[12px] font-extrabold text-[#041412] sm:px-4 sm:py-2.5 sm:text-[13px]"
                 style={{
                   backgroundImage: "linear-gradient(90deg,#00E575,#3B82F6)",
                 }}
@@ -768,7 +787,7 @@ export default function SellerDashboardPage() {
           </aside>
         </div>
 
-        <p className="mt-8 text-center text-[11px] tracking-wide text-[#737A86]">
+        <p className="mt-6 text-center text-[10px] tracking-wide text-[#737A86] sm:mt-8 sm:text-[11px]">
           Plazore · Seller Lounge
         </p>
       </div>
