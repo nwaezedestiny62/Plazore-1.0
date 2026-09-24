@@ -5,6 +5,7 @@ import { ClerkProvider } from "@clerk/nextjs";
 import { MarketplaceProvider } from "@/context/MarketplaceContext";
 import { PrivacyConsent } from "@/components/privacy/PrivacyConsent";
 import { NetworkStatusBanner } from "@/components/network/NetworkStatusBanner";
+import { AppShell } from "@/components/layout/AppShell";
 
 const manrope = Manrope({
   subsets: ["latin"],
@@ -31,16 +32,14 @@ export const metadata: Metadata = {
 
 export default function RootLayout({
   children,
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
+}: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en" className={`${manrope.variable} ${spaceGrotesk.variable}`}>
       <body className="bg-bg text-text antialiased">
         <ClerkProvider>
           <MarketplaceProvider>
             <NetworkStatusBanner />
-            {children}
+            <AppShell>{children}</AppShell>
             <PrivacyConsent />
           </MarketplaceProvider>
         </ClerkProvider>

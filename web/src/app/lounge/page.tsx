@@ -12,6 +12,7 @@ import {
   Flame,
   Heart,
   HelpCircle,
+  Home,
   Info,
   LayoutGrid,
   LogOut,
@@ -35,6 +36,13 @@ import { cartCount } from "@/lib/cart";
 
 const API =
   process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com/api";
+
+/** Local first (offline-safe if in /public), then remote — prefetched hard */
+const SELL_POSTER_LOCAL = "/auth-logo.jpg";
+const SELL_POSTER_LOCAL_2 = "/hero/welcome.jpg";
+const SELL_POSTER_REMOTE =
+  "https://images.unsplash.com/photo-1441986300917-64674bd600d8?auto=format&fit=crop&w=1200&q=80";
+const SELL_POSTER_CACHE_KEY = "plazore_lounge_sell_poster_v1";
 
 const CATEGORY_IMAGES: Record<string, string> = {
   Electronics:
@@ -183,25 +191,113 @@ const EXPLORE_CHIPS = [
   },
 ];
 
-/* ─── LOUNGE image fallback ─── */
+/** Aggressive prefetch: local → cached remote → remote (blob when possible) */
+function usePrefetchedSellPoster() {
+  const [src, setSrc] = useState(SELL_POSTER_LOCAL);
+
+  useEffect(() => {
+    let cancelled = false;
+    let objectUrl: string | null = null;
+
+    const apply = (url: string) => {
+      if (!cancelled) setSrc(url);
+    };
+
+    apply(SELL_POSTER_LOCAL);
+
+    const probe = (url: string, onOk: () => void, onFail?: () => void) => {
+      const img = new Image();
+      img.decoding = "async";
+      img.onload = onOk;
+      img.onerror = () => onFail?.();
+      img.src = url;
+    };
+
+    probe(SELL_POSTER_LOCAL, () => apply(SELL_POSTER_LOCAL), () => {
+      probe(SELL_POSTER_LOCAL_2, () => apply(SELL_POSTER_LOCAL_2));
+    });
+
+    try {
+      const cached = localStorage.getItem(SELL_POSTER_CACHE_KEY);
+      if (cached && /^https?:\/\//i.test(cached)) {
+        probe(cached, () => apply(cached));
+      }
+    } catch {
+      /* private mode */
+    }
+
+    probe(
+      SELL_POSTER_REMOTE,
+      () => {
+        apply(SELL_POSTER_REMOTE);
+        try {
+          localStorage.setItem(SELL_POSTER_CACHE_KEY, SELL_POSTER_REMOTE);
+        } catch {
+          /* ignore */
+        }
+      },
+      () => {
+        /* keep local */
+      },
+    );
+
+    (async () => {
+      try {
+        if (typeof navigator !== "undefined" && navigator.onLine === false)
+          return;
+        const res = await fetch(SELL_POSTER_REMOTE, {
+          mode: "cors",
+          cache: "force-cache",
+          credentials: "omit",
+        });
+        if (!res.ok || cancelled) return;
+        const blob = await res.blob();
+        if (cancelled || !blob.type.startsWith("image/")) return;
+        objectUrl = URL.createObjectURL(blob);
+        const img = new Image();
+        img.onload = () => {
+          if (!cancelled && objectUrl) apply(objectUrl);
+        };
+        img.onerror = () => {
+          if (objectUrl) URL.revokeObjectURL(objectUrl);
+        };
+        img.src = objectUrl;
+      } catch {
+        /* offline / CORS */
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, []);
+
+  return src;
+}
+
 function LoungeImg({
   src,
   alt = "",
   className = "h-full w-full object-cover",
   loading = "lazy" as "lazy" | "eager",
+  fallbackSrc,
 }: {
   src?: string | null;
   alt?: string;
   className?: string;
   loading?: "lazy" | "eager";
+  fallbackSrc?: string;
 }) {
-  const [failed, setFailed] = useState(!src);
+  const [current, setCurrent] = useState(src || fallbackSrc || "");
+  const [failed, setFailed] = useState(!src && !fallbackSrc);
 
   useEffect(() => {
-    setFailed(!src);
-  }, [src]);
+    setCurrent(src || fallbackSrc || "");
+    setFailed(!src && !fallbackSrc);
+  }, [src, fallbackSrc]);
 
-  if (!src || failed) {
+  if (!current || failed) {
     return (
       <div
         className={`flex items-center justify-center bg-[#12141C] ${
@@ -219,12 +315,18 @@ function LoungeImg({
   return (
     // eslint-disable-next-line @next/next/no-img-element
     <img
-      src={src}
+      src={current}
       alt={alt}
       className={className}
       loading={loading}
       decoding="async"
-      onError={() => setFailed(true)}
+      onError={() => {
+        if (fallbackSrc && current !== fallbackSrc) {
+          setCurrent(fallbackSrc);
+          return;
+        }
+        setFailed(true);
+      }}
     />
   );
 }
@@ -434,6 +536,7 @@ function TvAppIcon({
 function PosterCard({
   href,
   image,
+  imageFallback,
   kicker,
   title,
   body,
@@ -442,6 +545,7 @@ function PosterCard({
 }: {
   href?: string;
   image?: string | null;
+  imageFallback?: string;
   kicker: string;
   title: string;
   body?: string;
@@ -452,6 +556,7 @@ function PosterCard({
     <>
       <LoungeImg
         src={image}
+        fallbackSrc={imageFallback}
         loading="eager"
         className="absolute inset-0 h-full w-full object-cover"
       />
@@ -498,6 +603,20 @@ function PosterCard({
   );
 }
 
+/** Shared home control → mall */
+function HomeToMall({ className = "" }: { className?: string }) {
+  return (
+    <Link
+      href="/"
+      className={`flex h-10 w-10 shrink-0 items-center justify-center border border-white/10 bg-white/[0.06] text-white/85 transition hover:border-white/20 hover:bg-white/10 hover:text-white ${className}`}
+      aria-label="Back to mall"
+      title="Mall"
+    >
+      <Home className="h-[18px] w-[18px]" strokeWidth={1.75} />
+    </Link>
+  );
+}
+
 export default function LoungePage() {
   const pathname = usePathname();
   const router = useRouter();
@@ -506,6 +625,7 @@ export default function LoungePage() {
   const { signOut } = useClerk();
   const { region, formatProduct } = useMarketplace();
   const searchRef = useRef<HTMLInputElement>(null);
+  const sellPosterSrc = usePrefetchedSellPoster();
 
   const [query, setQuery] = useState("");
   const [debounced, setDebounced] = useState("");
@@ -605,7 +725,7 @@ export default function LoungePage() {
   const regionalProducts = useMemo(() => {
     const list = allProducts || [];
     const inRegion = list.filter(
-      (p) => (p.region || "NG").toUpperCase() === region.toUpperCase()
+      (p) => (p.region || "NG").toUpperCase() === region.toUpperCase(),
     );
     return inRegion.length > 0 ? inRegion : list;
   }, [allProducts, region]);
@@ -680,7 +800,7 @@ export default function LoungePage() {
 
   const allLoungeItems = useMemo(
     () => LOUNGE_SECTIONS.flatMap((s) => s.items),
-    []
+    [],
   );
 
   const newArrivals = useMemo(
@@ -690,10 +810,10 @@ export default function LoungePage() {
         .sort(
           (a, b) =>
             new Date(b.createdAt || 0).getTime() -
-            new Date(a.createdAt || 0).getTime()
+            new Date(a.createdAt || 0).getTime(),
         )
         .slice(0, 20),
-    [regionalProducts]
+    [regionalProducts],
   );
 
   const trendingPicks = useMemo(
@@ -701,61 +821,39 @@ export default function LoungePage() {
       [...regionalProducts]
         .filter((p) => p.images?.[0] && p.isActive !== false)
         .sort((a, b) => {
-          const aScore = Number(
-            (a as { views?: number }).views ?? a.wishlistCount ?? 0
-          );
-          const bScore = Number(
-            (b as { views?: number }).views ?? b.wishlistCount ?? 0
-          );
-          if (bScore !== aScore) return bScore - aScore;
-          return (
-            new Date(b.createdAt || 0).getTime() -
-            new Date(a.createdAt || 0).getTime()
-          );
+          const aScore = Number((a as { views?: number }).views || 0);
+          const bScore = Number((b as { views?: number }).views || 0);
+          return bScore - aScore;
         })
-        .slice(0, 16),
-    [regionalProducts]
+        .slice(0, 20),
+    [regionalProducts],
   );
+
+  const heroPoster =
+    newArrivals[0]?.images?.[0] ||
+    trendingPicks[0]?.images?.[0] ||
+    sellPosterSrc;
 
   const storePicks = useMemo(() => {
     const map = new Map<string, StorePick>();
-    regionalProducts.forEach((p) => {
-      const s = p.seller as
-        | {
-            _id?: string;
-            storeName?: string;
-            name?: string;
-            storeLogo?: string;
-          }
-        | string
-        | null
-        | undefined;
-      if (!s || typeof s === "string" || !s._id) return;
+    for (const p of regionalProducts) {
+      const s = p.seller;
+      if (!s || typeof s === "string" || !s._id) continue;
       const id = String(s._id);
-      if (map.has(id)) return;
+      if (map.has(id)) continue;
       map.set(id, {
         id,
         name: s.storeName || s.name || "Store",
         logo: s.storeLogo,
         cover: p.images?.[0],
       });
-    });
-    return Array.from(map.values()).slice(0, 12);
+      if (map.size >= 12) break;
+    }
+    return Array.from(map.values());
   }, [regionalProducts]);
 
-  const heroPoster =
-    newArrivals[0]?.images?.[0] ||
-    trendingPicks[0]?.images?.[0] ||
-    null;
-
-  /* ── mobile grid tiles from first lounge section ── */
-  const mobileTiles = useMemo(() => {
-    const items = LOUNGE_SECTIONS[0]?.items || allLoungeItems.slice(0, 8);
-    return items;
-  }, [allLoungeItems]);
-
   return (
-    <div className="min-h-dvh bg-[#090B0F] text-[#F5F7FA]">
+    <div className="min-h-dvh bg-[#0A0B10] text-white">
       <style jsx global>{`
         @keyframes loungeIn {
           from {
@@ -769,7 +867,6 @@ export default function LoungePage() {
         }
         .tv-row {
           scrollbar-width: none;
-          -ms-overflow-style: none;
         }
         .tv-row::-webkit-scrollbar {
           display: none;
@@ -778,38 +875,37 @@ export default function LoungePage() {
 
       {/* ═══════ MOBILE ═══════ */}
       <div className="lg:hidden">
-        <header className="sticky top-0 z-30 border-b border-white/[0.06] bg-[#090B0F]/90 px-4 py-3 backdrop-blur-md">
-          <div className="flex items-center gap-3">
+        <header className="sticky top-0 z-40 border-b border-white/[0.06] bg-[#0A0B10]/92 backdrop-blur-md">
+          <div className="flex items-center gap-2 px-3.5 py-3">
+            <HomeToMall />
             <div className="min-w-0 flex-1">
-              <p className="text-[11px] font-semibold tracking-[0.16em] text-white/40">
+              <p className="text-[10px] font-semibold tracking-[0.2em] text-white/40">
                 PLAZORE
               </p>
-              <p className="truncate text-[15px] font-bold">Lounge</p>
+              <p className="text-[16px] font-bold tracking-tight">Lounge</p>
             </div>
             <Link
-              href="/cart"
-              className="relative flex h-9 w-9 items-center justify-center border border-white/10 bg-[#11131C]"
+              href="/notifications"
+              className="flex h-10 w-10 items-center justify-center text-white/70"
+              aria-label="Notifications"
             >
-              <ShoppingBag className="h-4 w-4" />
-              {bag > 0 && (
-                <span className="absolute -right-1 -top-1 min-w-[16px] bg-[#00E575] px-1 text-center text-[9px] font-extrabold text-[#041412]">
-                  {bag > 99 ? "99+" : bag}
-                </span>
-              )}
+              <Bell className="h-[18px] w-[18px]" />
             </Link>
           </div>
-          <label className="mt-3 flex h-11 items-center gap-2 border border-white/10 bg-white/[0.05] px-3">
-            <Search className="h-4 w-4 shrink-0 text-white/40" />
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search the mall"
-              className="w-full bg-transparent text-[14px] outline-none placeholder:text-white/35"
-            />
-          </label>
+          <div className="px-3.5 pb-3">
+            <label className="flex h-11 items-center gap-2 border border-white/10 bg-white/[0.05] px-3">
+              <Search className="h-4 w-4 text-white/40" />
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search the mall"
+                className="w-full bg-transparent text-[14px] outline-none placeholder:text-white/35"
+              />
+            </label>
+          </div>
         </header>
 
-        <div className="px-4 pb-10 pt-4">
+        <div className="px-3.5 pb-16 pt-4">
           {searching ? (
             <SearchResults
               query={query}
@@ -820,10 +916,11 @@ export default function LoungePage() {
             />
           ) : (
             <>
-              <section className="mb-5 grid grid-cols-1 gap-3">
+              <section className="mb-5 grid gap-3">
                 <PosterCard
                   href="/shop"
                   image={heroPoster}
+                  imageFallback={sellPosterSrc}
                   kicker="FOR YOU"
                   title="Find something you actually want"
                   body="Browse the mall, save what you like, and check out when you're ready."
@@ -833,24 +930,27 @@ export default function LoungePage() {
                   <PosterCard
                     href="/seller"
                     image={storeLogo}
+                    imageFallback={sellPosterSrc}
                     kicker="YOUR STORE"
                     title={storeName || "Seller dashboard"}
-                    body="Listings, orders, messages, and payouts."
+                    body="Listings, orders, messages, and payouts — all in one place."
                     cta="Open your store"
                   />
                 ) : (
                   <PosterCard
                     onClick={handleSellerCta}
-                    kicker="SELL ON PLAZORE"
+                    image={sellPosterSrc}
+                    imageFallback={SELL_POSTER_LOCAL}
+                    kicker="SECURE A STORE"
                     title="Turn what you sell into a store"
-                    body="List products and meet buyers already shopping."
-                    cta="Start selling"
+                    body="List products and meet buyers already shopping the mall."
+                    cta="Secure a store today"
                   />
                 )}
               </section>
 
               <section className="mb-6">
-                <div className="tv-row flex gap-2 overflow-x-auto pb-1">
+                <div className="flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                   {EXPLORE_CHIPS.map((chip) => (
                     <Link
                       key={chip.id}
@@ -864,38 +964,30 @@ export default function LoungePage() {
                 </div>
               </section>
 
-              {/* Jump in — ALL lounge tiles (profile, orders, messages, etc.) */}
-<section className="mb-8">
-  <p className="mb-3 text-[13px] font-medium text-white/60">Jump in</p>
-
-  {LOUNGE_SECTIONS.map((section) => (
-    <div key={section.id || section.title} className="mb-5 last:mb-0">
-      {section.title ? (
-        <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-white/35">
-          {section.title}
-        </p>
-      ) : null}
-
-      <div className="grid grid-cols-2 gap-2.5">
-        {section.items.map((item, index) => (
-          <Tile
-            key={item.id}
-            item={item}
-            active={isTileActive(item, pathname)}
-            index={index}
-            bagCount={item.id === "cart" ? bag : undefined}
-            onAppOnly={onAppOnly}
-          />
-        ))}
-      </div>
-    </div>
-  ))}
-</section>
+              {LOUNGE_SECTIONS.map((section) => (
+                <section key={section.id} className="mb-7">
+                  <p className="mb-3 text-[12px] font-semibold tracking-[0.14em] text-white/40 uppercase">
+                    {section.title}
+                  </p>
+                  <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
+                    {section.items.map((item, index) => (
+                      <Tile
+                        key={item.id}
+                        item={item}
+                        active={isTileActive(item, pathname)}
+                        index={index}
+                        bagCount={item.id === "cart" ? bag : undefined}
+                        onAppOnly={onAppOnly}
+                      />
+                    ))}
+                  </div>
+                </section>
+              ))}
 
               {newArrivals.length > 0 && (
-                <section className="mb-8">
+                <section className="mb-7">
                   <div className="mb-3 flex items-end justify-between">
-                    <p className="text-[13px] font-medium text-white/60">
+                    <p className="text-[13px] font-medium text-white/70">
                       New to Plazore
                     </p>
                     <Link
@@ -905,23 +997,23 @@ export default function LoungePage() {
                       See all
                     </Link>
                   </div>
-                  <div className="tv-row flex gap-3 overflow-x-auto pb-1">
+                  <div className="flex gap-2.5 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                     {newArrivals.map((p) => (
                       <Link
                         key={p._id}
                         href={`/product/${p._id}`}
-                        className="group shrink-0"
+                        className="shrink-0"
                       >
-                        <div className="relative h-[140px] w-[200px] overflow-hidden bg-[#12141C]">
+                        <div className="relative h-[130px] w-[180px] overflow-hidden bg-[#12141C]">
                           <LoungeImg
                             src={p.images?.[0]}
                             className="h-full w-full object-cover"
                           />
-                          <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent px-3 pb-2.5 pt-10">
-                            <p className="truncate text-[13px] font-medium text-white">
+                          <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 to-transparent px-2.5 pb-2 pt-8">
+                            <p className="truncate text-[12px] font-medium">
                               {p.name}
                             </p>
-                            <p className="text-[12px] text-[#00E575]">
+                            <p className="text-[11px] text-[#00E575]">
                               {formatProduct(p.price, p.region)}
                             </p>
                           </div>
@@ -933,9 +1025,9 @@ export default function LoungePage() {
               )}
 
               {trendingPicks.length > 0 && (
-                <section className="mb-8">
+                <section className="mb-7">
                   <div className="mb-3 flex items-end justify-between">
-                    <p className="text-[13px] font-medium text-white/60">
+                    <p className="text-[13px] font-medium text-white/70">
                       Shoppers are looking at
                     </p>
                     <Link
@@ -945,23 +1037,23 @@ export default function LoungePage() {
                       See all
                     </Link>
                   </div>
-                  <div className="tv-row flex gap-3 overflow-x-auto pb-1">
+                  <div className="flex gap-2.5 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                     {trendingPicks.map((p) => (
                       <Link
                         key={`tr-${p._id}`}
                         href={`/product/${p._id}`}
-                        className="group shrink-0"
+                        className="shrink-0"
                       >
-                        <div className="relative h-[140px] w-[200px] overflow-hidden bg-[#12141C]">
+                        <div className="relative h-[130px] w-[180px] overflow-hidden bg-[#12141C]">
                           <LoungeImg
                             src={p.images?.[0]}
                             className="h-full w-full object-cover"
                           />
-                          <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent px-3 pb-2.5 pt-10">
-                            <p className="truncate text-[13px] font-medium text-white">
+                          <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 to-transparent px-2.5 pb-2 pt-8">
+                            <p className="truncate text-[12px] font-medium">
                               {p.name}
                             </p>
-                            <p className="text-[12px] text-[#FB7185]">
+                            <p className="text-[11px] text-[#FB7185]">
                               {formatProduct(p.price, p.region)}
                             </p>
                           </div>
@@ -972,9 +1064,9 @@ export default function LoungePage() {
                 </section>
               )}
 
-              <section className="mb-8">
+              <section className="mb-7">
                 <div className="mb-3 flex items-end justify-between">
-                  <p className="text-[13px] font-medium text-white/60">
+                  <p className="text-[13px] font-medium text-white/70">
                     Shop by category
                   </p>
                   <Link
@@ -984,20 +1076,20 @@ export default function LoungePage() {
                     See all
                   </Link>
                 </div>
-                <div className="tv-row flex gap-2.5 overflow-x-auto pb-1">
+                <div className="flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                   {CATEGORY_LIST.slice(0, 16).map((c) => (
                     <Link
                       key={c}
                       href={`/shop?mode=category&category=${encodeURIComponent(c)}`}
-                      className="group relative h-[88px] w-[160px] shrink-0 overflow-hidden"
+                      className="relative h-[80px] w-[140px] shrink-0 overflow-hidden"
                     >
                       <LoungeImg
                         src={CATEGORY_IMAGES[c] || FALLBACK_CATEGORY_IMAGE}
                         alt={c}
                         className="absolute inset-0 h-full w-full object-cover"
                       />
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/40 to-black/10" />
-                      <span className="relative z-[1] flex h-full items-end px-3.5 py-3 text-[13px] font-bold text-white">
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/40 to-transparent" />
+                      <span className="relative z-[1] flex h-full items-end px-3 py-2.5 text-[12px] font-bold">
                         {c}
                       </span>
                     </Link>
@@ -1008,7 +1100,7 @@ export default function LoungePage() {
               {storePicks.length > 0 && (
                 <section className="mb-6">
                   <div className="mb-3 flex items-end justify-between">
-                    <p className="text-[13px] font-medium text-white/60">
+                    <p className="text-[13px] font-medium text-white/70">
                       Stores to visit
                     </p>
                     <Link
@@ -1018,20 +1110,20 @@ export default function LoungePage() {
                       See all
                     </Link>
                   </div>
-                  <div className="tv-row flex gap-3 overflow-x-auto pb-1">
+                  <div className="flex gap-2.5 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                     {storePicks.map((s) => (
                       <Link
                         key={s.id}
                         href={`/store/${s.id}`}
-                        className="group shrink-0"
+                        className="shrink-0"
                       >
-                        <div className="relative h-[140px] w-[200px] overflow-hidden bg-[#12141C]">
+                        <div className="relative h-[130px] w-[170px] overflow-hidden bg-[#12141C]">
                           <LoungeImg
                             src={s.cover}
                             className="h-full w-full object-cover"
                           />
-                          <div className="absolute inset-x-0 bottom-0 flex items-center gap-2 bg-gradient-to-t from-black/85 via-black/40 to-transparent px-3 pb-2.5 pt-10">
-                            <span className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden bg-white/10">
+                          <div className="absolute inset-x-0 bottom-0 flex items-center gap-2 bg-gradient-to-t from-black/85 to-transparent px-2.5 pb-2 pt-8">
+                            <span className="flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden bg-white/10">
                               {s.logo ? (
                                 <LoungeImg
                                   src={s.logo}
@@ -1041,7 +1133,7 @@ export default function LoungePage() {
                                 <Store className="h-3.5 w-3.5 text-white/70" />
                               )}
                             </span>
-                            <p className="truncate text-[13px] font-medium text-white">
+                            <p className="truncate text-[12px] font-medium">
                               {s.name}
                             </p>
                           </div>
@@ -1064,11 +1156,12 @@ export default function LoungePage() {
         </div>
       </div>
 
-      {/* ═══════ DESKTOP / TV ═══════ */}
+      {/* ═══════ DESKTOP ═══════ */}
       <div className="hidden min-h-dvh lg:flex">
         <div className="mx-auto flex w-full max-w-[1400px] flex-1 flex-col px-6 py-6 xl:px-10">
           <header className="mb-6 flex items-center justify-between gap-4">
-            <div className="flex min-w-0 items-center gap-6">
+            <div className="flex min-w-0 items-center gap-4">
+              <HomeToMall />
               <div>
                 <p className="text-[11px] font-semibold tracking-[0.18em] text-white/40">
                   PLAZORE
@@ -1128,6 +1221,7 @@ export default function LoungePage() {
                 <PosterCard
                   href="/shop"
                   image={heroPoster}
+                  imageFallback={sellPosterSrc}
                   kicker="FOR YOU"
                   title="Find something you actually want"
                   body="Browse the mall, save what you like, and check out when you're ready."
@@ -1137,6 +1231,7 @@ export default function LoungePage() {
                   <PosterCard
                     href="/seller"
                     image={storeLogo}
+                    imageFallback={sellPosterSrc}
                     kicker="YOUR STORE"
                     title={storeName || "Seller dashboard"}
                     body="Listings, orders, messages, and payouts — all in one place."
@@ -1145,10 +1240,12 @@ export default function LoungePage() {
                 ) : (
                   <PosterCard
                     onClick={handleSellerCta}
-                    kicker="SELL ON PLAZORE"
+                    image={sellPosterSrc}
+                    imageFallback={SELL_POSTER_LOCAL}
+                    kicker="SECURE A STORE"
                     title="Turn what you sell into a store"
                     body="List products and meet buyers already shopping the mall."
-                    cta="Start selling"
+                    cta="Secure a store today"
                   />
                 )}
               </section>
@@ -1445,7 +1542,7 @@ function SearchResults({
                     </p>
                   </div>
                 </Link>
-              ) : null
+              ) : null,
             )}
           </div>
         </div>
@@ -1479,7 +1576,7 @@ function SearchResults({
                   </p>
                 </div>
               </Link>
-            ) : null
+            ) : null,
           )}
         </div>
       )}
@@ -1494,13 +1591,13 @@ function SearchResults({
                 <Link
                   key={h.label}
                   href={`/shop?mode=category&category=${encodeURIComponent(
-                    h.label
+                    h.label,
                   )}`}
                   className="border border-white/10 bg-[#0B0C12] px-3 py-2 text-sm font-semibold"
                 >
                   {h.label}
                 </Link>
-              ) : null
+              ) : null,
             )}
           </div>
         </div>
