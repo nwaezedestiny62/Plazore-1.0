@@ -2,6 +2,9 @@
  * Plazore Hero Banner personalization
  * Same behavioral foundation as Adaptive Showroom:
  * ShowroomEvent weights + recency decay. No LLM.
+ *
+ * RULE: Guests / not signed-in users NEVER receive personalized banners.
+ * Only authenticated users with enough behavioral signal get adaptive creatives.
  */
 
 import crypto from "crypto";
@@ -28,12 +31,13 @@ const STATIC_FALLBACKS: Record<
   }
 > = {
   1: {
-  imageUrl: "/hero/welcome.jpg",
-  headline: "Let the shopping come to you.",
-  subheadline: "Explore the Plazore Showroom — products, sellers, and discoveries worth seeing.",
-  ctaLabel: "Explore the Showroom",
-  kicker: "PLAZORE"
-},
+    imageUrl: "/hero/welcome.jpg",
+    headline: "Let the shopping come to you.",
+    subheadline:
+      "Explore the Plazore Showroom — products, sellers, and discoveries worth seeing.",
+    ctaLabel: "Explore the Showroom",
+    kicker: "PLAZORE",
+  },
   4: {
     imageUrl: "/hero/new-arrivals.jpg",
     headline: "Just placed",
@@ -115,6 +119,39 @@ function softCat(category: string): string {
   return c || "pieces";
 }
 
+/** Static creative for guests / cold system slots — never personalized */
+function guestStaticCreative(position: 1 | 4) {
+  const fallback = STATIC_FALLBACKS[position];
+  const now = new Date();
+  return {
+    imageUrl: fallback.imageUrl,
+    headline: fallback.headline,
+    subheadline: fallback.subheadline,
+    ctaLabel: fallback.ctaLabel,
+    ctaAction: "scroll_showroom",
+    ctaTarget: "",
+    kicker: fallback.kicker,
+    usedName: false,
+    mode: "cold_start" as const,
+    primarySignal: "Guest or unsigned — static hero only.",
+    supportingSignals: [] as string[],
+    categoryContext: "",
+    subCategoryContext: "",
+    visualSource: "static_hero",
+    productId: null as string | null,
+    signalScore: 0,
+    cycleId: "guest-static",
+    generatedAt: now,
+    expiresAt: new Date(now.getTime() + BANNER_CYCLE_MS),
+    reuse: true,
+    nextRefreshAt: new Date(now.getTime() + BANNER_CYCLE_MS),
+  };
+}
+
+/**
+ * Interest profile is ONLY built for signed-in users.
+ * Session-only / anonymous browsing must not drive banners.
+ */
 async function buildInterestProfile(
   userId: string | null,
   sessionId: string
@@ -126,15 +163,14 @@ async function buildInterestProfile(
     totalWeight: 0,
   };
 
+  // No account → empty profile (never personalize guests)
+  if (!userId) return profile;
+
   const query: any = {};
-  if (userId && sessionId) {
-    query.$or = [{ sessionId }, { user: userId }];
-  } else if (userId) {
-    query.user = userId;
-  } else if (sessionId) {
-    query.sessionId = sessionId;
+  if (sessionId) {
+    query.$or = [{ user: userId }, { sessionId }];
   } else {
-    return profile;
+    query.user = userId;
   }
 
   const events = await ShowroomEvent.find(query)
@@ -205,7 +241,7 @@ type Wording = {
 
 /**
  * Global, calm, helpful Plazore voice.
- * No surveillance tone. No sales pressure. Optional first name only.
+ * No surveillance tone. No sales pressure. Optional first name only (signed-in).
  */
 function pickWording(
   category: string,
@@ -216,7 +252,6 @@ function pickWording(
   const cat = softCat(category);
   const name = firstNameOnly(firstName);
 
-  // Name is a soft welcome — not every line
   const useName =
     !!name &&
     (intensity === "strong"
@@ -294,8 +329,7 @@ function pickWording(
   const framesWeakNamed: Wording[] = name
     ? [
         {
-          headline:
-            position === 1 ? `Welcome, ${name}` : `Hello, ${name}`,
+          headline: position === 1 ? `Welcome, ${name}` : `Hello, ${name}`,
           subheadline:
             position === 1
               ? "The mall is calm on purpose. Start anywhere."
@@ -425,7 +459,7 @@ function intensityFromScore(score: number): "strong" | "medium" | "weak" {
 
 async function generatePersonalizedCreative(opts: {
   position: 1 | 4;
-  userId: string | null;
+  userId: string;
   sessionId: string;
   region: string;
   firstName: string | null;
@@ -470,6 +504,7 @@ async function generatePersonalizedCreative(opts: {
       .map((c) => `Also active in ${c}`);
     if (topSub.key) supporting.unshift(`Sub-focus: ${topSub.key}`);
   } else {
+    // New signed-in users: static wording, optional soft first-name welcome only
     wording = pickWording("", firstName, position, "weak");
   }
 
@@ -563,20 +598,21 @@ export async function resolvePersonalizedSlot(opts: {
   forceRefresh?: boolean;
 }) {
   const position = opts.position;
-  const userId = opts.userId || null;
+  const userId = opts.userId ? String(opts.userId) : null;
   const sessionId = String(opts.sessionId || "").trim();
   const region = String(opts.region || "NG").toUpperCase();
   const force = Boolean(opts.forceRefresh);
 
-  let firstName: string | null = null;
-  if (userId) {
-    const u: any = await User.findById(userId).select("name").lean();
-    firstName = u?.name || null;
+  // ── Guests / not signed in: NEVER personalize, never write state ──
+  if (!userId) {
+    return guestStaticCreative(position);
   }
 
-  const filter: any = { position };
-  if (userId) filter.user = userId;
-  else filter.sessionId = sessionId || "anon";
+  let firstName: string | null = null;
+  const u: any = await User.findById(userId).select("name").lean();
+  firstName = u?.name || null;
+
+  const filter: any = { position, user: userId };
 
   let state: any = await PersonalizedBannerState.findOne(filter).lean();
 
@@ -588,12 +624,10 @@ export async function resolvePersonalizedSlot(opts: {
 
   if (stillValid) {
     const isCold =
-      state.mode === "cold_start" ||
-      state.mode === "weak" ||
-      !state.mode;
+      state.mode === "cold_start" || state.mode === "weak" || !state.mode;
 
     if (isCold) {
-      const probe = await buildInterestProfile(userId, sessionId || "anon");
+      const probe = await buildInterestProfile(userId, sessionId);
       const top = topKey(probe.categories);
       if (!(top.score >= MIN_BEHAVIORAL_SCORE && top.key)) {
         return {
@@ -614,14 +648,14 @@ export async function resolvePersonalizedSlot(opts: {
   const generated = await generatePersonalizedCreative({
     position,
     userId,
-    sessionId: sessionId || "anon",
+    sessionId,
     region,
     firstName,
   });
 
   const payload = {
     user: userId,
-    sessionId: userId ? "" : sessionId || "anon",
+    sessionId: "",
     position,
     region,
     ...generated,
@@ -649,6 +683,10 @@ export async function resolvePublicHero(opts: {
 }) {
   await ensureHeroSlots();
 
+  const userId = opts.userId ? String(opts.userId) : null;
+  // Ignore session for guests so nothing accidental personalizes
+  const sessionId = userId ? String(opts.sessionId || "").trim() : "";
+
   const slots = await HeroBanner.find({}).sort({ position: 1 }).lean();
   const banners = [];
 
@@ -656,8 +694,8 @@ export async function resolvePublicHero(opts: {
     if (slot.controlType === "system") {
       const pers = await resolvePersonalizedSlot({
         position: slot.position as 1 | 4,
-        userId: opts.userId,
-        sessionId: opts.sessionId,
+        userId,
+        sessionId,
         region: opts.region,
         forceRefresh: opts.forceRefresh,
       });
