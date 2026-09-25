@@ -30,6 +30,7 @@ import {
   Platform,
   StatusBar,
   StyleSheet,
+  Text,
   View,
 } from 'react-native'
 import { GestureHandlerRootView } from 'react-native-gesture-handler'
@@ -38,6 +39,13 @@ const BG = '#090B0F'
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window')
 const OPENER_MS = 3300
 const EASE = Easing.bezier(0.22, 1, 0.36, 1)
+
+/**
+ * Must appear as process.env.EXPO_PUBLIC_* in app source so EAS inlines it
+ * into the release APK. Passing it only via Clerk's internal fallback is not enough.
+ */
+const CLERK_PUBLISHABLE_KEY =
+  process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY ?? ''
 
 const FILL = {
   position: 'absolute' as const,
@@ -67,7 +75,6 @@ function AppShell() {
     holdIntroGate()
   }, [holdIntroGate])
 
-  // Fullscreen opener: hide system bars so image is edge-to-edge
   useEffect(() => {
     StatusBar.setHidden(true, 'fade')
     if (Platform.OS === 'android') {
@@ -100,7 +107,6 @@ function AppShell() {
 
   return (
     <>
-      {/* During opener: fully hidden. After: normal light content bar */}
       <ExpoStatusBar
         style="light"
         hidden={showOpener}
@@ -127,7 +133,6 @@ function AppShell() {
         }}
       />
 
-      {/* Network banner only after opener — never covers the splash */}
       {!showOpener ? <NetworkStatusBanner /> : null}
 
       {showOpener ? (
@@ -146,6 +151,24 @@ function AppShell() {
   )
 }
 
+function MissingClerkKeyScreen() {
+  return (
+    <View style={styles.missingKey}>
+      <StatusBar
+        barStyle="light-content"
+        backgroundColor={BG}
+        translucent={false}
+      />
+      <ExpoStatusBar style="light" backgroundColor={BG} />
+      <Text style={styles.missingTitle}>Plazore</Text>
+      <Text style={styles.missingBody}>
+        Missing Clerk key in this build. Rebuild after setting
+        EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY on EAS (preview + production).
+      </Text>
+    </View>
+  )
+}
+
 export default function RootLayout() {
   const [fontsLoaded] = useFonts({
     Manrope_300Light,
@@ -160,14 +183,7 @@ export default function RootLayout() {
 
   if (!fontsLoaded) {
     return (
-      <View
-        style={{
-          flex: 1,
-          backgroundColor: BG,
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
-      >
+      <View style={styles.boot}>
         <StatusBar
           barStyle="light-content"
           backgroundColor={BG}
@@ -179,10 +195,18 @@ export default function RootLayout() {
     )
   }
 
+  // Visible error instead of native crash when key was not inlined
+  if (!CLERK_PUBLISHABLE_KEY) {
+    return <MissingClerkKeyScreen />
+  }
+
   return (
     <GestureHandlerRootView style={{ flex: 1, backgroundColor: BG }}>
       <ThemeProvider>
-        <ClerkProvider tokenCache={tokenCache}>
+        <ClerkProvider
+          publishableKey={CLERK_PUBLISHABLE_KEY}
+          tokenCache={tokenCache}
+        >
           <MarketplaceProvider>
             <CartProvider>
               <WishlistProvider>
@@ -201,13 +225,38 @@ export default function RootLayout() {
 }
 
 const styles = StyleSheet.create({
+  boot: {
+    flex: 1,
+    backgroundColor: BG,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  missingKey: {
+    flex: 1,
+    backgroundColor: BG,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 28,
+  },
+  missingTitle: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '800',
+    letterSpacing: 2,
+    marginBottom: 12,
+  },
+  missingBody: {
+    color: 'rgba(255,255,255,0.55)',
+    fontSize: 14,
+    lineHeight: 21,
+    textAlign: 'center',
+  },
   opener: {
     ...FILL,
     zIndex: 9999,
     backgroundColor: '#000',
   },
   openerImage: {
-    // Absolute fill — under status bar / notch when bar is hidden
     position: 'absolute',
     top: 0,
     left: 0,

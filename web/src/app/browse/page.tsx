@@ -257,20 +257,31 @@ function MenuLines() {
 }
 
 /**
- * HARD gap between product cards — horizontal + vertical, every breakpoint.
- * gap-x = side-to-side, gap-y = top-to-bottom so cards never touch.
+ * Full-bleed grid: columns fill the row; gap-y is always larger than gap-x
+ * so rows never look glued together on mobile or desktop.
  */
 const PRODUCT_GRID =
-  "grid w-full grid-cols-2 gap-x-4 gap-y-6 " +
-  "sm:grid-cols-2 sm:gap-x-5 sm:gap-y-7 " +
-  "md:grid-cols-3 md:gap-x-6 md:gap-y-8 " +
-  "lg:grid-cols-4 lg:gap-x-6 lg:gap-y-8 " +
-  "xl:grid-cols-5 xl:gap-x-7 xl:gap-y-9";
+  "grid w-full grid-cols-2 " +
+  "gap-x-3 gap-y-8 " +
+  "sm:grid-cols-2 sm:gap-x-5 sm:gap-y-10 " +
+  "md:grid-cols-3 md:gap-x-6 md:gap-y-11 " +
+  "lg:grid-cols-4 lg:gap-x-6 lg:gap-y-12 " +
+  "xl:grid-cols-5 xl:gap-x-7 xl:gap-y-12";
 
-/** Card cell: min-w-0 prevents overflow; no negative margins */
+/**
+ * Force ProductCard (and any fixed-width inner link) to use 100% of the cell.
+ * min-w-0 stops grid blowout; width 100% + max-width none overrides card shrink.
+ */
 function ProductCell({ product }: { product: Product }) {
   return (
-    <div className="min-w-0 w-full max-w-full overflow-hidden">
+    <div
+      className={
+        "plazore-product-cell min-w-0 w-full max-w-full " +
+        "[&>*]:!block [&>*]:!h-full [&>*]:!w-full [&>*]:!max-w-none " +
+        "[&_a]:!block [&_a]:!w-full [&_a]:!max-w-none " +
+        "[&_img]:!w-full"
+      }
+    >
       <ProductCard product={product} />
     </div>
   );
@@ -651,8 +662,8 @@ function BrowseInner() {
 
   const renderProductsBlock = (products: Product[]) =>
     products.length > 0 ? (
-      <div>
-        <p className="mb-4 text-[11px] font-bold tracking-[0.12em] text-muted">
+      <div className="w-full">
+        <p className="mb-5 text-[11px] font-bold tracking-[0.12em] text-muted sm:mb-6">
           PRODUCTS
         </p>
         <div className={PRODUCT_GRID}>
@@ -661,7 +672,7 @@ function BrowseInner() {
           ))}
         </div>
         {live.totalProducts > visibleCount ? (
-          <div className="mt-10 flex justify-center sm:mt-12">
+          <div className="mt-12 flex justify-center sm:mt-14">
             <button
               type="button"
               onClick={() => setVisibleCount((c) => c + PAGE_SIZE)}
@@ -676,7 +687,7 @@ function BrowseInner() {
 
   const renderStoresBlock = () =>
     live.stores.length > 0 ? (
-      <div className="mt-10 first:mt-0 sm:mt-12">
+      <div className="mt-12 first:mt-0 sm:mt-14">
         <p className="mb-4 text-[11px] font-bold tracking-[0.12em] text-muted">
           STOREFRONTS
         </p>
@@ -710,7 +721,7 @@ function BrowseInner() {
 
   const renderCategoriesBlock = () =>
     live.categories.length > 0 ? (
-      <div className="mt-10 first:mt-0 sm:mt-12">
+      <div className="mt-12 first:mt-0 sm:mt-14">
         <p className="mb-4 text-[11px] font-bold tracking-[0.12em] text-muted">
           CATEGORIES
         </p>
@@ -731,7 +742,7 @@ function BrowseInner() {
 
   const renderBrandsBlock = () =>
     live.brands.length > 0 ? (
-      <div className="mt-10 first:mt-0 sm:mt-12">
+      <div className="mt-12 first:mt-0 sm:mt-14">
         <p className="mb-4 text-[11px] font-bold tracking-[0.12em] text-muted">
           BRANDS
         </p>
@@ -789,6 +800,20 @@ function BrowseInner() {
 
   return (
     <div className="min-h-screen w-full overflow-x-hidden bg-bg text-text">
+      <style jsx global>{`
+        /* Kill fixed widths inside ProductCard so grid cells fill edge-to-edge */
+        .plazore-product-cell,
+        .plazore-product-cell > *,
+        .plazore-product-cell a {
+          width: 100% !important;
+          max-width: 100% !important;
+          min-width: 0 !important;
+        }
+        .plazore-product-cell img {
+          width: 100%;
+        }
+      `}</style>
+
       <header className="sticky top-0 z-40 border-b border-white/5 bg-bg/90 backdrop-blur-md">
         <div className="mx-auto flex h-12 max-w-7xl items-center gap-2 px-3 sm:h-14 sm:gap-3 sm:px-6 lg:px-8">
           <div className="flex shrink-0 items-center gap-1.5">
@@ -882,7 +907,7 @@ function BrowseInner() {
         </div>
       </header>
 
-      <div className="mx-auto max-w-7xl px-3 pb-24 pt-5 sm:px-6 sm:pb-28 sm:pt-8 lg:px-8 lg:pt-10">
+      <div className="mx-auto w-full max-w-7xl px-3 pb-24 pt-5 sm:px-6 sm:pb-28 sm:pt-8 lg:px-8 lg:pt-10">
         <h1 className="font-display text-2xl tracking-tight sm:text-3xl md:text-4xl lg:text-5xl">
           Browse
         </h1>
@@ -954,7 +979,7 @@ function BrowseInner() {
         </div>
 
         {!isSearching ? (
-          <div className="mt-8 sm:mt-10">
+          <div className="mt-8 w-full sm:mt-10">
             <p className="text-[11px] font-bold tracking-[0.12em] text-muted">
               EXPLORE
             </p>
@@ -1024,8 +1049,8 @@ function BrowseInner() {
               </div>
             ) : null}
 
-            {/* MOVING NOW — same grid gaps */}
-            <div className="mt-12 sm:mt-14">
+            {/* MOVING NOW */}
+            <div className="mt-12 w-full sm:mt-14">
               <p className="text-[11px] font-bold tracking-[0.12em] text-muted">
                 MOVING NOW
               </p>
@@ -1039,12 +1064,12 @@ function BrowseInner() {
                 <p className="mt-10 text-center text-muted">Nothing moving yet.</p>
               ) : (
                 <>
-                  <div className={`mt-5 sm:mt-6 ${PRODUCT_GRID}`}>
+                  <div className={`mt-6 w-full sm:mt-7 ${PRODUCT_GRID}`}>
                     {movingNow.map((p) => (
                       <ProductCell key={p._id} product={p} />
                     ))}
                   </div>
-                  <div className="mt-10 flex justify-center sm:mt-12">
+                  <div className="mt-12 flex justify-center sm:mt-14">
                     <Link
                       href="/shop?mode=trending"
                       className="border border-white/20 px-6 py-3 text-[11px] font-semibold tracking-[0.18em] uppercase text-white transition hover:border-white hover:bg-white/5 sm:px-8"
@@ -1060,8 +1085,8 @@ function BrowseInner() {
           (searchLoading && live.products.length === 0) ? (
           <OrbLoader label="Looking through the mall…" />
         ) : (
-          <div className="mt-8 sm:mt-10">
-            <div className="mb-6 flex items-start justify-between gap-3 sm:mb-8 sm:gap-4">
+          <div className="mt-8 w-full sm:mt-10">
+            <div className="mb-7 flex items-start justify-between gap-3 sm:mb-9 sm:gap-4">
               <div className="min-w-0">
                 <p className="truncate text-base font-bold sm:text-lg md:text-xl">
                   {activeLabel}
@@ -1104,7 +1129,6 @@ function BrowseInner() {
         )}
       </div>
 
-      {/* Sort / Price / Location sheets — unchanged */}
       {sortOpen ? (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/65 md:items-center">
           <button
@@ -1324,7 +1348,9 @@ function BrowseInner() {
             <div className="mt-8 flex gap-3">
               <button
                 type="button"
-                onClick={() => setLoc({ region: null, state: null, city: null })}
+                onClick={() =>
+                  setLoc({ region: null, state: null, city: null })
+                }
                 className="h-12 flex-1 border border-line bg-surface-2 font-semibold text-secondary"
               >
                 Reset

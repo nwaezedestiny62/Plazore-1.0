@@ -1,25 +1,45 @@
-node_modules/
+# deps & caches
 **/node_modules/
+node_modules/
 .expo/
 **/.expo/
 .git/
+dist/
+web-build/
+coverage/
+.turbo/
+.next/
+**/.next/
+
+# other apps in the monorepo (keep only what the mobile app needs)
+web/
+server/
+admin/
+
+# native folders if present
 android/
 ios/
 **/android/
 **/ios/
-dist/
-web-build/
 
-/admin
-/web
-/server
-
+# heavy / useless for build
 **/*.mp4
 **/*.mov
 **/*.zip
 **/*.apk
 **/*.aab
+**/*.psd
+**/*.ai
+**/*.{log,map}
 
+# local / editor
+.env*.local
 .DS_Store
-coverage/
 .vscode/
+.idea/
+
+# client junk
+client/node_modules/
+client/.expo/
+client/android/
+client/ios/
