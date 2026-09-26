@@ -7,7 +7,7 @@
     "icon": "./assets/logo-0.png",
     "scheme": "plazore",
     "userInterfaceStyle": "dark",
-    "newArchEnabled": true,
+    "newArchEnabled": false,
     "androidStatusBar": {
       "barStyle": "light-content",
       "backgroundColor": "#090B0F",

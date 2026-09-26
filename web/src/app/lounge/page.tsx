@@ -37,7 +37,6 @@ import { cartCount } from "@/lib/cart";
 const API =
   process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com/api";
 
-/** Local first (offline-safe if in /public), then remote — prefetched hard */
 const SELL_POSTER_LOCAL = "/auth-logo.jpg";
 const SELL_POSTER_LOCAL_2 = "/hero/welcome.jpg";
 const SELL_POSTER_REMOTE =
@@ -191,7 +190,70 @@ const EXPLORE_CHIPS = [
   },
 ];
 
-/** Aggressive prefetch: local → cached remote → remote (blob when possible) */
+const RAIL_LIMIT = 14;
+
+/* ── product helpers ─────────────────────────────────────────── */
+
+function productCreated(p: Product) {
+  const t = new Date((p as any).createdAt || 0).getTime();
+  return Number.isFinite(t) ? t : 0;
+}
+
+function viewScore(p: Product): number {
+  const x = p as any;
+  for (const c of [
+    x.viewCount,
+    x.views,
+    x.viewsCount,
+    x.impressionCount,
+    x.impressions,
+    x.openCount,
+    x.wishlistCount,
+    x.stats?.views,
+    x.stats?.impressions,
+    x.analytics?.views,
+    x.metrics?.views,
+  ]) {
+    const n = Number(c);
+    if (Number.isFinite(n) && n >= 0) return n;
+  }
+  return 0;
+}
+
+function getSellerId(p: Product): string | null {
+  const s = (p as any).seller;
+  if (!s) return null;
+  if (typeof s === "string") return s;
+  return s._id ? String(s._id) : null;
+}
+
+function getSellerName(p: Product): string {
+  const s = (p as any).seller;
+  if (!s || typeof s === "string") return "";
+  return String(s.storeName || s.name || "").trim();
+}
+
+function getSellerLogo(p: Product): string | undefined {
+  const s = (p as any).seller;
+  if (!s || typeof s === "string") return undefined;
+  return s.storeLogo || undefined;
+}
+
+/** Newest products on Plazore */
+function sortNewest(list: Product[]): Product[] {
+  return [...list].sort((a, b) => productCreated(b) - productCreated(a));
+}
+
+/** Most viewed products on Plazore */
+function sortMostViewed(list: Product[]): Product[] {
+  return [...list].sort((a, b) => {
+    const d = viewScore(b) - viewScore(a);
+    return d !== 0 ? d : productCreated(b) - productCreated(a);
+  });
+}
+
+/* ── sell poster prefetch ────────────────────────────────────── */
+
 function usePrefetchedSellPoster() {
   const [src, setSrc] = useState(SELL_POSTER_LOCAL);
 
@@ -213,9 +275,13 @@ function usePrefetchedSellPoster() {
       img.src = url;
     };
 
-    probe(SELL_POSTER_LOCAL, () => apply(SELL_POSTER_LOCAL), () => {
-      probe(SELL_POSTER_LOCAL_2, () => apply(SELL_POSTER_LOCAL_2));
-    });
+    probe(
+      SELL_POSTER_LOCAL,
+      () => apply(SELL_POSTER_LOCAL),
+      () => {
+        probe(SELL_POSTER_LOCAL_2, () => apply(SELL_POSTER_LOCAL_2));
+      },
+    );
 
     try {
       const cached = localStorage.getItem(SELL_POSTER_CACHE_KEY);
@@ -275,6 +341,8 @@ function usePrefetchedSellPoster() {
 
   return src;
 }
+
+/* ── shared UI ───────────────────────────────────────────────── */
 
 function LoungeImg({
   src,
@@ -603,7 +671,6 @@ function PosterCard({
   );
 }
 
-/** Shared home control → mall */
 function HomeToMall({ className = "" }: { className?: string }) {
   return (
     <Link
@@ -617,13 +684,70 @@ function HomeToMall({ className = "" }: { className?: string }) {
   );
 }
 
+/** Horizontal product rail — same look on mobile + desktop */
+function ProductRail({
+  title,
+  href,
+  products,
+  formatProduct,
+  priceClass = "text-[#00E575]",
+}: {
+  title: string;
+  href: string;
+  products: Product[];
+  formatProduct: (amount: number, productRegion?: string | null) => string;
+  priceClass?: string;
+}) {
+  if (products.length === 0) return null;
+
+  return (
+    <section className="mb-8 sm:mb-9">
+      <div className="mb-3 flex items-end justify-between gap-3">
+        <p className="text-[14px] font-medium text-white/70">{title}</p>
+        <Link
+          href={href}
+          className="shrink-0 text-[12px] font-semibold text-white/40 hover:text-white/70"
+        >
+          See all
+        </Link>
+      </div>
+      <div className="tv-row -mx-1 flex gap-3 overflow-x-auto px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        {products.map((p) => (
+          <Link
+            key={p._id}
+            href={`/product/${p._id}`}
+            className="group shrink-0"
+          >
+            <div className="relative h-[132px] w-[200px] overflow-hidden bg-[#12141C] transition duration-200 group-hover:brightness-110 sm:h-[148px] sm:w-[240px]">
+              <LoungeImg
+                src={p.images?.[0]}
+                className="h-full w-full object-cover"
+              />
+              <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent px-3 pb-2.5 pt-10">
+                <p className="truncate text-[13px] font-medium text-white">
+                  {p.name}
+                </p>
+                <p className={`text-[12px] ${priceClass}`}>
+                  {formatProduct(Number(p.price) || 0, (p as any).region)}
+                </p>
+              </div>
+            </div>
+          </Link>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+/* ── page ────────────────────────────────────────────────────── */
+
 export default function LoungePage() {
   const pathname = usePathname();
   const router = useRouter();
   const { isSignedIn, isLoaded, getToken } = useAuth();
   const { user } = useUser();
   const { signOut } = useClerk();
-  const { region, formatProduct } = useMarketplace();
+  const { formatProduct } = useMarketplace();
   const searchRef = useRef<HTMLInputElement>(null);
   const sellPosterSrc = usePrefetchedSellPoster();
 
@@ -640,18 +764,48 @@ export default function LoungePage() {
   const role = (user?.publicMetadata?.role as string) || "buyer";
   const isSeller = role === "seller" || role === "admin";
 
+  const displayName =
+    user?.fullName ||
+    user?.firstName ||
+    user?.username ||
+    user?.primaryEmailAddress?.emailAddress ||
+    "You";
+
   useEffect(() => {
     const sync = () => setBag(cartCount());
     sync();
     window.addEventListener("plazore-cart", sync);
-    return () => window.removeEventListener("plazore-cart", sync);
+    window.addEventListener("plazore-cart-change", sync);
+    return () => {
+      window.removeEventListener("plazore-cart", sync);
+      window.removeEventListener("plazore-cart-change", sync);
+    };
   }, []);
 
+  /** Load a solid product pool for rails + search */
   useEffect(() => {
     let cancelled = false;
-    fetchMallProducts().then((list) => {
-      if (!cancelled) setAllProducts(list || []);
-    });
+    (async () => {
+      try {
+        const [trending, newest] = await Promise.all([
+          fetchMallProducts({ limit: 40, sort: "trending" }),
+          fetchMallProducts({ limit: 40, sort: "newest" }),
+        ]);
+        if (cancelled) return;
+        const map = new Map<string, Product>();
+        for (const p of [...(newest || []), ...(trending || [])]) {
+          if (p?._id) map.set(String(p._id), p);
+        }
+        setAllProducts(Array.from(map.values()));
+      } catch {
+        try {
+          const list = await fetchMallProducts({ limit: 50 });
+          if (!cancelled) setAllProducts(list || []);
+        } catch {
+          if (!cancelled) setAllProducts([]);
+        }
+      }
+    })();
     return () => {
       cancelled = true;
     };
@@ -699,7 +853,7 @@ export default function LoungePage() {
   }, [isSignedIn, isSeller, getToken]);
 
   useEffect(() => {
-    const t = setTimeout(() => setDebounced(query.trim()), 280);
+    const t = setTimeout(() => setDebounced(query.trim()), 220);
     return () => clearTimeout(t);
   }, [query]);
 
@@ -711,201 +865,207 @@ export default function LoungePage() {
     }
     let cancelled = false;
     setSearchLoading(true);
-    searchSuggest(debounced).then((products) => {
-      if (!cancelled) {
-        setServerProducts(products || []);
-        setSearchLoading(false);
+    (async () => {
+      try {
+        const list = await fetchMallProducts({
+          q: debounced,
+          limit: 30,
+          sort: "trending",
+        });
+        if (!cancelled) setServerProducts(list || []);
+      } catch {
+        if (!cancelled) setServerProducts([]);
+      } finally {
+        if (!cancelled) setSearchLoading(false);
       }
-    });
+    })();
     return () => {
       cancelled = true;
     };
   }, [debounced]);
 
-  const regionalProducts = useMemo(() => {
-    const list = allProducts || [];
-    const inRegion = list.filter(
-      (p) => (p.region || "NG").toUpperCase() === region.toUpperCase(),
-    );
-    return inRegion.length > 0 ? inRegion : list;
-  }, [allProducts, region]);
+  const searching = debounced.length > 0;
 
-  const hits = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q)
-      return {
-        products: [] as Hit[],
-        stores: [] as Hit[],
-        categories: [] as Hit[],
-      };
-
-    const products: Hit[] = (serverProducts || []).slice(0, 8).map((p) => ({
-      type: "product" as const,
-      id: p._id,
-      label: p.name,
-      image: p.images?.[0],
-      price: p.price,
-      region: p.region,
-    }));
-
-    const storesMap = new Map<string, Hit>();
-    regionalProducts.forEach((p) => {
-      const s = p.seller;
-      if (!s || typeof s === "string" || !s._id) return;
-      const name = (s.storeName || s.name || "").toLowerCase();
-      if (name && name.includes(q)) {
-        storesMap.set(String(s._id), {
-          type: "store",
-          id: String(s._id),
-          label: s.storeName || s.name || "Store",
-          logo: s.storeLogo,
-        });
-      }
-    });
-
-    const categories: Hit[] = [];
-    CATEGORY_LIST.forEach((c) => {
-      if (c.toLowerCase().includes(q) && categories.length < 6) {
-        categories.push({ type: "category", label: c });
-      }
-    });
-
-    return {
-      products,
-      stores: Array.from(storesMap.values()).slice(0, 4),
-      categories,
-    };
-  }, [query, serverProducts, regionalProducts]);
-
-  const searching = query.trim().length >= 1;
-  const totalHits =
-    hits.products.length + hits.stores.length + hits.categories.length;
-
-  const displayName =
-    user?.fullName ||
-    user?.firstName ||
-    user?.primaryEmailAddress?.emailAddress ||
-    "Guest";
-
-  const onAppOnly = useCallback((id: string) => {
-    if (id === "wishlist") setPrompt("wishlist" as AppFeature);
-    else if (id === "saved_stores") setPrompt("saved_stores" as AppFeature);
-    else setPrompt(id as AppFeature);
-  }, []);
-
-  const handleSellerCta = () => {
-    if (isSeller) router.push("/seller");
-    else router.push("/seller-register");
-  };
-
-  const allLoungeItems = useMemo(
-    () => LOUNGE_SECTIONS.flatMap((s) => s.items),
-    [],
-  );
-
+  /** NEW TO PLAZORE — newest by createdAt */
   const newArrivals = useMemo(
-    () =>
-      [...regionalProducts]
-        .filter((p) => p.images?.[0] && p.isActive !== false)
-        .sort(
-          (a, b) =>
-            new Date(b.createdAt || 0).getTime() -
-            new Date(a.createdAt || 0).getTime(),
-        )
-        .slice(0, 20),
-    [regionalProducts],
+    () => sortNewest(allProducts).slice(0, RAIL_LIMIT),
+    [allProducts],
   );
 
+  /** SHOPPERS ARE LOOKING AT — most viewed */
   const trendingPicks = useMemo(
-    () =>
-      [...regionalProducts]
-        .filter((p) => p.images?.[0] && p.isActive !== false)
-        .sort((a, b) => {
-          const aScore = Number((a as { views?: number }).views || 0);
-          const bScore = Number((b as { views?: number }).views || 0);
-          return bScore - aScore;
-        })
-        .slice(0, 20),
-    [regionalProducts],
+    () => sortMostViewed(allProducts).slice(0, RAIL_LIMIT),
+    [allProducts],
   );
 
-  const heroPoster =
-    newArrivals[0]?.images?.[0] ||
-    trendingPicks[0]?.images?.[0] ||
-    sellPosterSrc;
+  const heroPoster = useMemo(() => {
+    const first = newArrivals[0] || trendingPicks[0];
+    return first?.images?.[0] || sellPosterSrc;
+  }, [newArrivals, trendingPicks, sellPosterSrc]);
 
   const storePicks = useMemo(() => {
     const map = new Map<string, StorePick>();
-    for (const p of regionalProducts) {
-      const s = p.seller;
-      if (!s || typeof s === "string" || !s._id) continue;
-      const id = String(s._id);
-      if (map.has(id)) continue;
+    for (const p of allProducts) {
+      const id = getSellerId(p);
+      if (!id || map.has(id)) continue;
+      const name = getSellerName(p);
+      if (!name) continue;
       map.set(id, {
         id,
-        name: s.storeName || s.name || "Store",
-        logo: s.storeLogo,
+        name,
+        logo: getSellerLogo(p),
         cover: p.images?.[0],
       });
       if (map.size >= 12) break;
     }
     return Array.from(map.values());
-  }, [regionalProducts]);
+  }, [allProducts]);
+
+  const allLoungeItems = useMemo(() => {
+    const items: LoungeItem[] = [];
+    for (const section of LOUNGE_SECTIONS) {
+      for (const item of section.items) items.push(item);
+    }
+    return items;
+  }, []);
+
+  const hits = useMemo(() => {
+    const q = debounced.toLowerCase();
+    const pool =
+      serverProducts.length > 0 ? serverProducts : allProducts;
+
+    const products: Hit[] = pool
+      .filter((p) => (p.name || "").toLowerCase().includes(q))
+      .slice(0, 16)
+      .map((p) => ({
+        type: "product" as const,
+        id: String(p._id),
+        label: p.name || "Product",
+        image: p.images?.[0],
+        price: Number(p.price) || 0,
+        region: (p as any).region,
+      }));
+
+    const storesMap = new Map<string, Hit>();
+    for (const p of allProducts) {
+      const id = getSellerId(p);
+      const name = getSellerName(p);
+      if (!id || !name) continue;
+      if (!name.toLowerCase().includes(q)) continue;
+      if (!storesMap.has(id)) {
+        storesMap.set(id, {
+          type: "store",
+          id,
+          label: name,
+          logo: getSellerLogo(p),
+        });
+      }
+    }
+
+    const categories: Hit[] = CATEGORY_LIST.filter((c) =>
+      c.toLowerCase().includes(q),
+    )
+      .slice(0, 10)
+      .map((label) => ({ type: "category" as const, label }));
+
+    return {
+      products,
+      stores: Array.from(storesMap.values()).slice(0, 10),
+      categories,
+    };
+  }, [debounced, serverProducts, allProducts]);
+
+  const totalHits =
+    hits.products.length + hits.stores.length + hits.categories.length;
+
+  const handleSellerCta = useCallback(() => {
+    if (!isLoaded) return;
+    if (!isSignedIn) {
+      router.push("/sign-in?redirect_url=/seller-register");
+      return;
+    }
+    router.push(isSeller ? "/seller" : "/seller-register");
+  }, [isLoaded, isSignedIn, isSeller, router]);
+
+  const onAppOnly = useCallback((id: string) => {
+    if (id === "wishlist") setPrompt("wishlist");
+    else if (id === "saved_stores") setPrompt("saved_stores");
+  }, []);
 
   return (
-    <div className="min-h-dvh bg-[#0A0B10] text-white">
+    <div className="min-h-dvh bg-[#07080C] text-white">
       <style jsx global>{`
         @keyframes loungeIn {
           from {
             opacity: 0;
-            transform: translateY(10px);
+            transform: translate3d(0, 10px, 0);
           }
           to {
             opacity: 1;
-            transform: translateY(0);
+            transform: translate3d(0, 0, 0);
           }
         }
-        .tv-row {
-          scrollbar-width: none;
-        }
-        .tv-row::-webkit-scrollbar {
-          display: none;
+        @media (prefers-reduced-motion: reduce) {
+          * {
+            animation: none !important;
+          }
         }
       `}</style>
 
       {/* ═══════ MOBILE ═══════ */}
       <div className="lg:hidden">
-        <header className="sticky top-0 z-40 border-b border-white/[0.06] bg-[#0A0B10]/92 backdrop-blur-md">
-          <div className="flex items-center gap-2 px-3.5 py-3">
+        <header className="sticky top-0 z-30 border-b border-white/5 bg-[#07080C]/92 backdrop-blur-md">
+          <div className="flex h-12 items-center gap-2 px-3 sm:h-14 sm:px-4">
             <HomeToMall />
             <div className="min-w-0 flex-1">
-              <p className="text-[10px] font-semibold tracking-[0.2em] text-white/40">
+              <p className="text-[10px] font-semibold tracking-[0.18em] text-white/40">
                 PLAZORE
               </p>
-              <p className="text-[16px] font-bold tracking-tight">Lounge</p>
+              <p className="truncate text-[15px] font-bold tracking-tight">
+                Lounge
+              </p>
             </div>
             <Link
-              href="/notifications"
-              className="flex h-10 w-10 items-center justify-center text-white/70"
-              aria-label="Notifications"
+              href="/cart"
+              className="relative flex h-10 w-10 items-center justify-center text-white/85"
+              aria-label="Bag"
             >
-              <Bell className="h-[18px] w-[18px]" />
+              <ShoppingBag className="h-[18px] w-[18px]" strokeWidth={1.75} />
+              {bag > 0 && (
+                <span className="absolute -right-0.5 -top-0.5 min-w-[16px] bg-[#00E575] px-1 text-center text-[9px] font-extrabold text-[#041412]">
+                  {bag > 99 ? "99+" : bag}
+                </span>
+              )}
             </Link>
           </div>
-          <div className="px-3.5 pb-3">
-            <label className="flex h-11 items-center gap-2 border border-white/10 bg-white/[0.05] px-3">
-              <Search className="h-4 w-4 text-white/40" />
+
+          <div className="px-3 pb-3 sm:px-4">
+            <label className="flex h-11 items-center gap-2 border border-white/10 bg-white/[0.06] px-3">
+              <Search className="h-4 w-4 shrink-0 text-white/40" />
               <input
+                ref={searchRef}
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Search the mall"
                 className="w-full bg-transparent text-[14px] outline-none placeholder:text-white/35"
               />
+              {query ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setQuery("");
+                    setDebounced("");
+                  }}
+                  className="text-white/40"
+                >
+                  ×
+                </button>
+              ) : null}
             </label>
           </div>
         </header>
 
-        <div className="px-3.5 pb-16 pt-4">
+        <div className="px-3 pb-20 pt-4 sm:px-4">
           {searching ? (
             <SearchResults
               query={query}
@@ -916,7 +1076,7 @@ export default function LoungePage() {
             />
           ) : (
             <>
-              <section className="mb-5 grid gap-3">
+              <section className="mb-5 grid grid-cols-1 gap-3">
                 <PosterCard
                   href="/shop"
                   image={heroPoster}
@@ -950,12 +1110,12 @@ export default function LoungePage() {
               </section>
 
               <section className="mb-6">
-                <div className="flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                <div className="tv-row flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                   {EXPLORE_CHIPS.map((chip) => (
                     <Link
                       key={chip.id}
                       href={chip.href}
-                      className="flex h-11 shrink-0 items-center px-4 text-[13px] font-bold text-white"
+                      className="flex h-11 shrink-0 items-center px-4 text-[13px] font-bold text-white shadow-[0_8px_20px_rgba(0,0,0,0.25)]"
                       style={{ background: chip.bg }}
                     >
                       {chip.label}
@@ -964,109 +1124,43 @@ export default function LoungePage() {
                 </div>
               </section>
 
-              {LOUNGE_SECTIONS.map((section) => (
-                <section key={section.id} className="mb-7">
-                  <p className="mb-3 text-[12px] font-semibold tracking-[0.14em] text-white/40 uppercase">
-                    {section.title}
-                  </p>
-                  <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
-                    {section.items.map((item, index) => (
-                      <Tile
-                        key={item.id}
-                        item={item}
-                        active={isTileActive(item, pathname)}
-                        index={index}
-                        bagCount={item.id === "cart" ? bag : undefined}
-                        onAppOnly={onAppOnly}
-                      />
-                    ))}
-                  </div>
-                </section>
-              ))}
-
-              {newArrivals.length > 0 && (
-                <section className="mb-7">
-                  <div className="mb-3 flex items-end justify-between">
-                    <p className="text-[13px] font-medium text-white/70">
-                      New to Plazore
-                    </p>
-                    <Link
-                      href="/shop?mode=new"
-                      className="text-[12px] font-semibold text-white/40"
-                    >
-                      See all
-                    </Link>
-                  </div>
-                  <div className="flex gap-2.5 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-                    {newArrivals.map((p) => (
-                      <Link
-                        key={p._id}
-                        href={`/product/${p._id}`}
-                        className="shrink-0"
-                      >
-                        <div className="relative h-[130px] w-[180px] overflow-hidden bg-[#12141C]">
-                          <LoungeImg
-                            src={p.images?.[0]}
-                            className="h-full w-full object-cover"
-                          />
-                          <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 to-transparent px-2.5 pb-2 pt-8">
-                            <p className="truncate text-[12px] font-medium">
-                              {p.name}
-                            </p>
-                            <p className="text-[11px] text-[#00E575]">
-                              {formatProduct(p.price, p.region)}
-                            </p>
-                          </div>
-                        </div>
-                      </Link>
-                    ))}
-                  </div>
-                </section>
-              )}
-
-              {trendingPicks.length > 0 && (
-                <section className="mb-7">
-                  <div className="mb-3 flex items-end justify-between">
-                    <p className="text-[13px] font-medium text-white/70">
-                      Shoppers are looking at
-                    </p>
-                    <Link
-                      href="/shop?mode=trending"
-                      className="text-[12px] font-semibold text-white/40"
-                    >
-                      See all
-                    </Link>
-                  </div>
-                  <div className="flex gap-2.5 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-                    {trendingPicks.map((p) => (
-                      <Link
-                        key={`tr-${p._id}`}
-                        href={`/product/${p._id}`}
-                        className="shrink-0"
-                      >
-                        <div className="relative h-[130px] w-[180px] overflow-hidden bg-[#12141C]">
-                          <LoungeImg
-                            src={p.images?.[0]}
-                            className="h-full w-full object-cover"
-                          />
-                          <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 to-transparent px-2.5 pb-2 pt-8">
-                            <p className="truncate text-[12px] font-medium">
-                              {p.name}
-                            </p>
-                            <p className="text-[11px] text-[#FB7185]">
-                              {formatProduct(p.price, p.region)}
-                            </p>
-                          </div>
-                        </div>
-                      </Link>
-                    ))}
-                  </div>
-                </section>
-              )}
-
               <section className="mb-7">
+                <p className="mb-3 text-[14px] font-medium text-white/70">
+                  Jump in
+                </p>
+                <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
+                  {allLoungeItems.map((item, index) => (
+                    <Tile
+                      key={item.id}
+                      item={item}
+                      active={isTileActive(item, pathname)}
+                      index={index}
+                      bagCount={item.id === "cart" ? bag : undefined}
+                      onAppOnly={onAppOnly}
+                    />
+                  ))}
+                </div>
+              </section>
+
+              <ProductRail
+                title="New to Plazore"
+                href="/shop?mode=new"
+                products={newArrivals}
+                formatProduct={formatProduct}
+                priceClass="text-[#00E575]"
+              />
+
+              <ProductRail
+                title="Shoppers are looking at"
+                href="/shop?mode=trending"
+                products={trendingPicks}
+                formatProduct={formatProduct}
+                priceClass="text-[#FB7185]"
+              />
+
+              <section className="mb-8">
                 <div className="mb-3 flex items-end justify-between">
-                  <p className="text-[13px] font-medium text-white/70">
+                  <p className="text-[14px] font-medium text-white/70">
                     Shop by category
                   </p>
                   <Link
@@ -1076,20 +1170,20 @@ export default function LoungePage() {
                     See all
                   </Link>
                 </div>
-                <div className="flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                <div className="tv-row flex gap-2.5 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                   {CATEGORY_LIST.slice(0, 16).map((c) => (
                     <Link
                       key={c}
                       href={`/shop?mode=category&category=${encodeURIComponent(c)}`}
-                      className="relative h-[80px] w-[140px] shrink-0 overflow-hidden"
+                      className="group relative h-[88px] w-[160px] shrink-0 overflow-hidden"
                     >
                       <LoungeImg
                         src={CATEGORY_IMAGES[c] || FALLBACK_CATEGORY_IMAGE}
                         alt={c}
                         className="absolute inset-0 h-full w-full object-cover"
                       />
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/40 to-transparent" />
-                      <span className="relative z-[1] flex h-full items-end px-3 py-2.5 text-[12px] font-bold">
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/40 to-black/10" />
+                      <span className="relative z-[1] flex h-full items-end px-3.5 py-3 text-[13px] font-bold text-white">
                         {c}
                       </span>
                     </Link>
@@ -1100,7 +1194,7 @@ export default function LoungePage() {
               {storePicks.length > 0 && (
                 <section className="mb-6">
                   <div className="mb-3 flex items-end justify-between">
-                    <p className="text-[13px] font-medium text-white/70">
+                    <p className="text-[14px] font-medium text-white/70">
                       Stores to visit
                     </p>
                     <Link
@@ -1110,20 +1204,20 @@ export default function LoungePage() {
                       See all
                     </Link>
                   </div>
-                  <div className="flex gap-2.5 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                  <div className="tv-row flex gap-3 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                     {storePicks.map((s) => (
                       <Link
                         key={s.id}
                         href={`/store/${s.id}`}
-                        className="shrink-0"
+                        className="group shrink-0"
                       >
-                        <div className="relative h-[130px] w-[170px] overflow-hidden bg-[#12141C]">
+                        <div className="relative h-[132px] w-[200px] overflow-hidden bg-[#12141C] sm:h-[148px] sm:w-[220px]">
                           <LoungeImg
                             src={s.cover}
                             className="h-full w-full object-cover"
                           />
-                          <div className="absolute inset-x-0 bottom-0 flex items-center gap-2 bg-gradient-to-t from-black/85 to-transparent px-2.5 pb-2 pt-8">
-                            <span className="flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden bg-white/10">
+                          <div className="absolute inset-x-0 bottom-0 flex items-center gap-2 bg-gradient-to-t from-black/85 via-black/40 to-transparent px-3 pb-2.5 pt-10">
+                            <span className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden bg-white/10">
                               {s.logo ? (
                                 <LoungeImg
                                   src={s.logo}
@@ -1196,7 +1290,6 @@ export default function LoungePage() {
             <label className="flex h-9 w-56 shrink-0 items-center gap-2 border border-white/10 bg-white/[0.06] px-3.5">
               <Search className="h-3.5 w-3.5 text-white/40" />
               <input
-                ref={searchRef}
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Search the mall"
@@ -1251,7 +1344,7 @@ export default function LoungePage() {
               </section>
 
               <section className="mb-7">
-                <div className="tv-row flex gap-2.5 overflow-x-auto pb-1">
+                <div className="tv-row flex gap-2.5 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                   {EXPLORE_CHIPS.map((chip) => (
                     <Link
                       key={chip.id}
@@ -1280,7 +1373,7 @@ export default function LoungePage() {
                 <p className="mb-3 text-[14px] font-medium text-white/70">
                   Jump in
                 </p>
-                <div className="tv-row flex gap-3 overflow-x-auto pb-2">
+                <div className="tv-row flex gap-3 overflow-x-auto pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                   {allLoungeItems.map((item, index) => (
                     <TvAppIcon
                       key={item.id}
@@ -1293,85 +1386,21 @@ export default function LoungePage() {
                 </div>
               </section>
 
-              {newArrivals.length > 0 && (
-                <section className="mb-9">
-                  <div className="mb-3 flex items-end justify-between">
-                    <p className="text-[14px] font-medium text-white/70">
-                      New to Plazore
-                    </p>
-                    <Link
-                      href="/shop?mode=new"
-                      className="text-[12px] font-semibold text-white/40 hover:text-white/70"
-                    >
-                      See all
-                    </Link>
-                  </div>
-                  <div className="tv-row flex gap-3 overflow-x-auto pb-1">
-                    {newArrivals.map((p) => (
-                      <Link
-                        key={p._id}
-                        href={`/product/${p._id}`}
-                        className="group shrink-0"
-                      >
-                        <div className="relative h-[148px] w-[240px] overflow-hidden bg-[#12141C] transition duration-200 group-hover:brightness-110">
-                          <LoungeImg
-                            src={p.images?.[0]}
-                            className="h-full w-full object-cover"
-                          />
-                          <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent px-3 pb-2.5 pt-10">
-                            <p className="truncate text-[13px] font-medium text-white">
-                              {p.name}
-                            </p>
-                            <p className="text-[12px] text-[#00E575]">
-                              {formatProduct(p.price, p.region)}
-                            </p>
-                          </div>
-                        </div>
-                      </Link>
-                    ))}
-                  </div>
-                </section>
-              )}
+              <ProductRail
+                title="New to Plazore"
+                href="/shop?mode=new"
+                products={newArrivals}
+                formatProduct={formatProduct}
+                priceClass="text-[#00E575]"
+              />
 
-              {trendingPicks.length > 0 && (
-                <section className="mb-9">
-                  <div className="mb-3 flex items-end justify-between">
-                    <p className="text-[14px] font-medium text-white/70">
-                      Shoppers are looking at
-                    </p>
-                    <Link
-                      href="/shop?mode=trending"
-                      className="text-[12px] font-semibold text-white/40 hover:text-white/70"
-                    >
-                      See all
-                    </Link>
-                  </div>
-                  <div className="tv-row flex gap-3 overflow-x-auto pb-1">
-                    {trendingPicks.map((p) => (
-                      <Link
-                        key={`tr-${p._id}`}
-                        href={`/product/${p._id}`}
-                        className="group shrink-0"
-                      >
-                        <div className="relative h-[148px] w-[240px] overflow-hidden bg-[#12141C] transition duration-200 group-hover:brightness-110">
-                          <LoungeImg
-                            src={p.images?.[0]}
-                            className="h-full w-full object-cover"
-                          />
-                          <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent px-3 pb-2.5 pt-10">
-                            <p className="truncate text-[13px] font-medium text-white">
-                              {p.name}
-                            </p>
-                            <p className="text-[12px] text-[#FB7185]">
-                              {formatProduct(p.price, p.region)}
-                            </p>
-                          </div>
-                        </div>
-                      </Link>
-                    ))}
-                  </div>
-                </section>
-              )}
+              <ProductRail
+                title="Shoppers are looking at"
+                href="/shop?mode=trending"
+                products={trendingPicks}
+                formatProduct={formatProduct}
+                priceClass="text-[#FB7185]"
+              />
 
               <section className="mb-9">
                 <div className="mb-3 flex items-end justify-between">
@@ -1385,7 +1414,7 @@ export default function LoungePage() {
                     See all
                   </Link>
                 </div>
-                <div className="tv-row flex gap-2.5 overflow-x-auto pb-1">
+                <div className="tv-row flex gap-2.5 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                   {CATEGORY_LIST.slice(0, 16).map((c) => (
                     <Link
                       key={c}
@@ -1419,7 +1448,7 @@ export default function LoungePage() {
                       See all
                     </Link>
                   </div>
-                  <div className="tv-row flex gap-3 overflow-x-auto pb-1">
+                  <div className="tv-row flex gap-3 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                     {storePicks.map((s) => (
                       <Link
                         key={s.id}
