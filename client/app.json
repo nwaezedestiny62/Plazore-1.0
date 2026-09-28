@@ -7,16 +7,10 @@
     "icon": "./assets/logo-0.png",
     "scheme": "plazore",
     "userInterfaceStyle": "dark",
-    "newArchEnabled": false,
     "androidStatusBar": {
       "barStyle": "light-content",
       "backgroundColor": "#090B0F",
       "translucent": false
-    },
-    "splash": {
-      "image": "./assets/logo-0.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#090B0F"
     },
     "ios": {
       "supportsTablet": true,

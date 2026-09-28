@@ -46,6 +46,7 @@ export const SPEC_FIELDS_BY_CATEGORY: Record<string, SpecField[]> = {
     { key: 'color', label: 'Color', placeholder: 'e.g. Black, Navy' },
     { key: 'material', label: 'Material', placeholder: 'e.g. Cotton, Leather, Silk', optional: true },
     { key: 'brand', label: 'Brand', placeholder: 'Brand name', optional: true },
+    { key: 'ageRange', label: 'Age range', placeholder: 'e.g. 3+', optional: true },
     { key: 'gender', label: 'Gender', placeholder: 'Men / Women / Unisex / Kids', optional: true },
     { key: 'condition', label: 'Condition', placeholder: 'New / Used', optional: true },
   ],
