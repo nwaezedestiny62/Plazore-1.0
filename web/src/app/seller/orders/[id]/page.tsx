@@ -13,10 +13,17 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useMarketplace } from "@/context/MarketplaceContext";
+import {
+  DEFAULT_REGION,
+  formatMoney,
+  formatProductPrice,
+  resolveRegionCode,
+} from "@/lib/regions";
 
-const API = process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com/api";
+const API =
+  process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com/api";
 const GRAD = "linear-gradient(90deg,#00E575,#3B82F6)";
 
 const CANCEL_OPTIONS = [
@@ -50,6 +57,34 @@ function statusColor(status: string) {
   return "#F0C070";
 }
 
+function formatSelectedOptions(
+  selected?: Record<string, string> | null
+): string {
+  if (!selected || typeof selected !== "object") return "";
+  return Object.entries(selected)
+    .filter(([, v]) => v != null && String(v).trim())
+    .map(([k, v]) => `${k}: ${v}`)
+    .join(" · ");
+}
+
+/**
+ * Order money was snapshotted in the listing region at checkout.
+ * Resolve that source region the same way product/cart pages do.
+ */
+function resolveOrderSourceRegion(order: any): string {
+  if (!order) return DEFAULT_REGION;
+  if (order.region) return resolveRegionCode(order.region);
+  if (order.marketplaceRegion) return resolveRegionCode(order.marketplaceRegion);
+  if (order.currencyRegion) return resolveRegionCode(order.currencyRegion);
+  // Fallback: first item product region if populated
+  const first = order.items?.[0];
+  const prod = first?.product;
+  if (prod && typeof prod === "object" && prod.region) {
+    return resolveRegionCode(prod.region);
+  }
+  return DEFAULT_REGION;
+}
+
 async function readJson(res: Response) {
   const ct = res.headers.get("content-type") || "";
   if (!ct.includes("application/json")) {
@@ -59,7 +94,13 @@ async function readJson(res: Response) {
   return res.json();
 }
 
-function TopOverlay({ state, onDismiss }: { state: Overlay; onDismiss: () => void }) {
+function TopOverlay({
+  state,
+  onDismiss,
+}: {
+  state: Overlay;
+  onDismiss: () => void;
+}) {
   useEffect(() => {
     if (!state || state.actions?.length) return;
     const t = setTimeout(onDismiss, state.durationMs ?? 3800);
@@ -68,7 +109,11 @@ function TopOverlay({ state, onDismiss }: { state: Overlay; onDismiss: () => voi
 
   if (!state) return null;
   const accent =
-    state.tone === "danger" ? "#EF4444" : state.tone === "success" ? "#00E575" : "#3B82F6";
+    state.tone === "danger"
+      ? "#EF4444"
+      : state.tone === "success"
+        ? "#00E575"
+        : "#3B82F6";
 
   return (
     <div className="pointer-events-none fixed inset-x-0 top-0 z-[300] flex justify-center px-3.5 pt-3">
@@ -119,7 +164,13 @@ function TopOverlay({ state, onDismiss }: { state: Overlay; onDismiss: () => voi
   );
 }
 
-function DeliveredBurst({ visible, onDone }: { visible: boolean; onDone: () => void }) {
+function DeliveredBurst({
+  visible,
+  onDone,
+}: {
+  visible: boolean;
+  onDone: () => void;
+}) {
   useEffect(() => {
     if (!visible) return;
     const t = setTimeout(onDone, 1400);
@@ -130,19 +181,21 @@ function DeliveredBurst({ visible, onDone }: { visible: boolean; onDone: () => v
 
   return (
     <div className="fixed inset-0 z-[400] flex items-center justify-center bg-black/45">
-      <div className="flex flex-col items-center px-6 text-center animate-in fade-in zoom-in duration-300">
+      <div className="flex flex-col items-center px-6 text-center">
         <div
-          className="flex h-[88px] w-[88px] items-center justify-center rounded-full p-[3px]"
+          className="flex h-[88px] w-[88px] items-center justify-center p-[3px]"
           style={{ backgroundImage: GRAD }}
         >
-          <div className="flex h-full w-full items-center justify-center rounded-full bg-[#090B0F]">
+          <div className="flex h-full w-full items-center justify-center bg-[#090B0F]">
             <Check className="h-9 w-9 text-[#00E575]" strokeWidth={3} />
           </div>
         </div>
         <p className="mt-4 text-[22px] font-extrabold tracking-tight text-[#F5F7FA]">
           Delivered
         </p>
-        <p className="mt-1 text-[13px] text-[#A7ADB8]">Waiting for buyer confirmation</p>
+        <p className="mt-1 text-[13px] text-[#A7ADB8]">
+          Waiting for buyer confirmation
+        </p>
       </div>
     </div>
   );
@@ -164,7 +217,19 @@ export default function SellerOrderDetailsPage() {
   const id = String(params?.id || "");
   const { getToken, isLoaded, isSignedIn } = useAuth();
   const router = useRouter();
-  const { format } = useMarketplace();
+
+  const marketplace = useMarketplace() as {
+    region?: string;
+    formatProduct?: (amount: number, productRegion?: string | null) => string;
+    format?: (amount: number) => string;
+    ratesToNgn?: Record<string, number> | null;
+  };
+
+  const displayRegion = resolveRegionCode(
+    marketplace?.region || DEFAULT_REGION
+  );
+  const ratesToNgn = marketplace?.ratesToNgn || null;
+  const formatProductFn = marketplace?.formatProduct;
 
   const [order, setOrder] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -189,11 +254,38 @@ export default function SellerOrderDetailsPage() {
     []
   );
 
-  /** Frozen order amounts — never FX-convert with formatProduct */
-  const fmt = useCallback(
-    (amount: number) => format(Number(amount) || 0),
-    [format]
+  /**
+   * Same pipeline as product page / cart / checkout:
+   * amount is in sourceRegion currency → convert + format into seller display region.
+   */
+  const sourceRegion = useMemo(
+    () => resolveOrderSourceRegion(order),
+    [order]
   );
+
+  const fmt = useCallback(
+    (amount: number) => {
+      const n = Number(amount) || 0;
+      try {
+        if (typeof formatProductFn === "function") {
+          return formatProductFn(n, sourceRegion);
+        }
+      } catch {
+        /* fall through */
+      }
+      return formatProductPrice(n, sourceRegion, displayRegion, ratesToNgn);
+    },
+    [formatProductFn, sourceRegion, displayRegion, ratesToNgn]
+  );
+
+  /** Format without conversion — only when we know amount is already display currency */
+  const fmtLocal = useCallback(
+    (amount: number) => formatMoney(Number(amount) || 0, displayRegion),
+    [displayRegion]
+  );
+
+  // silence unused if tree-shaken
+  void fmtLocal;
 
   const loadOrder = useCallback(async () => {
     if (!id) return;
@@ -227,7 +319,6 @@ export default function SellerOrderDetailsPage() {
     order?.productShipping?.method === "self" ? "self" : "courier";
   const courierName = order?.productShipping?.courierCompany || "";
 
-  /* Buyer confirmation — same wiring as mobile seller order details */
   const confStatus =
     order?.buyerConfirmation?.status ||
     (order?.orderStatus === "Delivered" ? "pending" : "none");
@@ -240,7 +331,11 @@ export default function SellerOrderDetailsPage() {
 
   const handleShip = async () => {
     if (!estimatedDelivery.trim()) {
-      toast("Required", "Enter an estimated delivery date (YYYY-MM-DD)", "danger");
+      toast(
+        "Required",
+        "Enter an estimated delivery date (YYYY-MM-DD)",
+        "danger"
+      );
       return;
     }
     try {
@@ -266,7 +361,11 @@ export default function SellerOrderDetailsPage() {
       const json = await readJson(res);
       if (json?.success) {
         setOrder(json.data);
-        toast("Shipped", "Order marked as shipped. Buyer has been notified.", "success");
+        toast(
+          "Shipped",
+          "Order marked as shipped. Buyer has been notified.",
+          "success"
+        );
       } else {
         toast("Error", json?.message || "Failed to ship order", "danger");
       }
@@ -317,7 +416,11 @@ export default function SellerOrderDetailsPage() {
       tone: "info",
       actions: [
         { label: "Not yet", onPress: () => {} },
-        { label: "Yes, delivered", primary: true, onPress: () => performDeliver() },
+        {
+          label: "Yes, delivered",
+          primary: true,
+          onPress: () => performDeliver(),
+        },
       ],
     });
   };
@@ -375,7 +478,7 @@ export default function SellerOrderDetailsPage() {
         <p className="font-semibold text-[#F5F7FA]">Sign in to view this order</p>
         <Link
           href="/sign-in"
-          className="mt-4 rounded-full bg-[#F5F7FA] px-6 py-2.5 text-sm font-bold text-[#090B0F]"
+          className="mt-4 bg-[#F5F7FA] px-6 py-2.5 text-sm font-bold text-[#090B0F]"
         >
           Sign in
         </Link>
@@ -443,20 +546,24 @@ export default function SellerOrderDetailsPage() {
           <p className="mb-1 text-[11px] font-bold uppercase tracking-[0.8px] text-[#737A86]">
             Current status
           </p>
-          <p className="text-[26px] font-extrabold tracking-tight" style={{ color: tone }}>
+          <p
+            className="text-[26px] font-extrabold tracking-tight"
+            style={{ color: tone }}
+          >
             {isCancelled && order.cancellation?.cancelledBy === "seller"
               ? "Cancelled by Seller"
               : order.orderStatus}
           </p>
         </section>
 
-        {/* Buyer confirmation status — same as mobile */}
         {isDelivered && buyerPending && (
           <section className="border border-[#00E575]/25 bg-[#00E575]/[0.06] p-4">
             <p className="mb-1.5 text-[11px] font-bold uppercase tracking-[1.2px] text-[#00E575]">
               Buyer confirmation
             </p>
-            <p className="text-[15px] font-bold text-[#F5F7FA]">Waiting for buyer</p>
+            <p className="text-[15px] font-bold text-[#F5F7FA]">
+              Waiting for buyer
+            </p>
             <p className="mt-1.5 text-[13px] leading-5 text-[#A7ADB8]">
               You marked this as delivered. The buyer still needs to confirm
               receipt. Your payout stays pending until they confirm or an issue
@@ -467,7 +574,9 @@ export default function SellerOrderDetailsPage() {
 
         {isDelivered && buyerConfirmed && (
           <section className="border border-[#00E575]/20 bg-[#00E575]/[0.05] p-4">
-            <p className="text-sm font-bold text-[#F5F7FA]">Buyer confirmed delivery</p>
+            <p className="text-sm font-bold text-[#F5F7FA]">
+              Buyer confirmed delivery
+            </p>
             <p className="mt-1.5 text-[13px] leading-5 text-[#A7ADB8]">
               The buyer confirmed they received this order.
             </p>
@@ -536,9 +645,18 @@ export default function SellerOrderDetailsPage() {
         </p>
         {order.items?.map((item: any, index: number) => {
           const unit = Number(item.price) || 0;
+          const optionsLine =
+            formatSelectedOptions(item.selectedOptions) ||
+            (item.variantKey
+              ? String(item.variantKey)
+                  .split("|")
+                  .map((p: string) => p.replace("=", ": "))
+                  .join(" · ")
+              : "");
+
           return (
             <section
-              key={index}
+              key={item.variantId || item.product?._id || index}
               className="border border-white/[0.07] bg-[#11141A] p-4"
             >
               <div className="flex gap-3">
@@ -555,9 +673,19 @@ export default function SellerOrderDetailsPage() {
                   </div>
                 )}
                 <div className="min-w-0 flex-1">
-                  <p className="line-clamp-2 text-[15px] font-semibold">{item.name}</p>
-                  <p className="mt-0.5 text-xs text-[#737A86]">
-                    Qty: {item.quantity} · {fmt(unit)}
+                  <p className="line-clamp-2 text-[15px] font-semibold">
+                    {item.name}
+                  </p>
+                  {optionsLine ? (
+                    <p className="mt-0.5 text-[12px] leading-snug text-white/45">
+                      {optionsLine}
+                    </p>
+                  ) : null}
+                  <p className="mt-1 text-xs text-[#737A86]">
+                    Qty: {item.quantity} · {fmt(unit)} each
+                  </p>
+                  <p className="mt-0.5 text-[13px] font-semibold text-[#F5F7FA]">
+                    {fmt(unit * (Number(item.quantity) || 1))}
                   </p>
                 </div>
               </div>
@@ -587,12 +715,16 @@ export default function SellerOrderDetailsPage() {
                 className="flex flex-col items-center border border-[#EF4444]/28 bg-[#EF4444]/[0.08] py-3.5"
               >
                 <XCircle className="h-5 w-5 text-[#EF4444]" />
-                <p className="mt-1.5 text-[13px] font-bold text-[#EF4444]">Cancel</p>
+                <p className="mt-1.5 text-[13px] font-bold text-[#EF4444]">
+                  Cancel
+                </p>
               </button>
             </div>
 
             <section className="border border-white/[0.07] bg-[#11141A] p-4">
-              <h2 className="mb-1 text-[17px] font-bold tracking-tight">Ship this order</h2>
+              <h2 className="mb-1 text-[17px] font-bold tracking-tight">
+                Ship this order
+              </h2>
               <p className="mb-3.5 text-xs text-[#737A86]">
                 Delivery method was set when the product was published.
               </p>
@@ -617,7 +749,7 @@ export default function SellerOrderDetailsPage() {
                 type="date"
                 value={estimatedDelivery}
                 onChange={(e) => setEstimatedDelivery(e.target.value)}
-                className="mb-3 w-full rounded-[14px] border border-white/[0.07] bg-[#0A121C] px-3.5 py-[13px] text-[15px] text-[#F5F7FA] outline-none focus:border-[#00E575]/40"
+                className="mb-3 w-full border border-white/[0.07] bg-[#0A121C] px-3.5 py-[13px] text-[15px] text-[#F5F7FA] outline-none focus:border-[#00E575]/40"
               />
 
               {impliedMethod === "courier" && (
@@ -629,7 +761,7 @@ export default function SellerOrderDetailsPage() {
                     value={trackingNumber}
                     onChange={(e) => setTrackingNumber(e.target.value)}
                     placeholder="Optional"
-                    className="mb-3 w-full rounded-[14px] border border-white/[0.07] bg-[#0A121C] px-3.5 py-[13px] text-[15px] text-[#F5F7FA] outline-none placeholder:text-[#3D5268] focus:border-[#00E575]/40"
+                    className="mb-3 w-full border border-white/[0.07] bg-[#0A121C] px-3.5 py-[13px] text-[15px] text-[#F5F7FA] outline-none placeholder:text-[#3D5268] focus:border-[#00E575]/40"
                   />
                 </>
               )}
@@ -642,7 +774,7 @@ export default function SellerOrderDetailsPage() {
                 onChange={(e) => setSellerNote(e.target.value.slice(0, 120))}
                 placeholder="Optional note"
                 rows={3}
-                className="mb-1 w-full rounded-[14px] border border-white/[0.07] bg-[#0A121C] px-3.5 py-[13px] text-[15px] text-[#F5F7FA] outline-none placeholder:text-[#3D5268] focus:border-[#00E575]/40"
+                className="mb-1 w-full border border-white/[0.07] bg-[#0A121C] px-3.5 py-[13px] text-[15px] text-[#F5F7FA] outline-none placeholder:text-[#3D5268] focus:border-[#00E575]/40"
               />
               <p className="mb-2 text-right text-[11px] text-[#737A86]">
                 {sellerNote.length}/120
@@ -667,19 +799,25 @@ export default function SellerOrderDetailsPage() {
 
         {(isShipped || isDelivered) && order.shipping && (
           <section className="border border-white/[0.07] bg-[#11141A] p-4">
-            <h2 className="mb-3 text-[17px] font-bold tracking-tight">Shipping info</h2>
+            <h2 className="mb-3 text-[17px] font-bold tracking-tight">
+              Shipping info
+            </h2>
             <p className="mb-1 text-[11px] font-bold uppercase tracking-[0.8px] text-[#737A86]">
               Method
             </p>
             <p className="text-sm text-[#A7ADB8]">
-              {order.shipping.shippingMethod === "self" ? "Self delivery" : "Courier"}
+              {order.shipping.shippingMethod === "self"
+                ? "Self delivery"
+                : "Courier"}
             </p>
             {!!order.shipping.deliveryCompany && (
               <>
                 <p className="mb-1 mt-2.5 text-[11px] font-bold uppercase tracking-[0.8px] text-[#737A86]">
                   Courier
                 </p>
-                <p className="text-sm text-[#A7ADB8]">{order.shipping.deliveryCompany}</p>
+                <p className="text-sm text-[#A7ADB8]">
+                  {order.shipping.deliveryCompany}
+                </p>
               </>
             )}
             {!!order.shipping.trackingNumber && (
@@ -687,7 +825,9 @@ export default function SellerOrderDetailsPage() {
                 <p className="mb-1 mt-2.5 text-[11px] font-bold uppercase tracking-[0.8px] text-[#737A86]">
                   Tracking
                 </p>
-                <p className="text-sm text-[#A7ADB8]">{order.shipping.trackingNumber}</p>
+                <p className="text-sm text-[#A7ADB8]">
+                  {order.shipping.trackingNumber}
+                </p>
               </>
             )}
             {!!order.shipping.estimatedDelivery && (
@@ -705,7 +845,9 @@ export default function SellerOrderDetailsPage() {
                 <p className="mb-1 mt-2.5 text-[11px] font-bold uppercase tracking-[0.8px] text-[#737A86]">
                   Note
                 </p>
-                <p className="text-sm text-[#A7ADB8]">{order.shipping.selfDeliveryNote}</p>
+                <p className="text-sm text-[#A7ADB8]">
+                  {order.shipping.selfDeliveryNote}
+                </p>
               </>
             )}
           </section>
@@ -716,7 +858,8 @@ export default function SellerOrderDetailsPage() {
             type="button"
             onClick={requestDeliver}
             disabled={submitting}
-            className="flex h-[50px] w-full items-center justify-center bg-gradient-to-r from-[#00E575] to-teal-500 text-[15px] font-extrabold text-[#041412] disabled:opacity-60"
+            className="flex h-[50px] w-full items-center justify-center text-[15px] font-extrabold text-[#041412] disabled:opacity-60"
+            style={{ backgroundImage: GRAD }}
           >
             {submitting ? (
               <span className="h-5 w-5 animate-spin rounded-full border-2 border-[#041412]/30 border-t-[#041412]" />
@@ -729,19 +872,19 @@ export default function SellerOrderDetailsPage() {
         <section className="border border-white/[0.07] bg-[#11141A] p-4">
           <div className="mb-1.5 flex justify-between text-xs text-[#737A86]">
             <span>Subtotal</span>
-            <span className="text-sm text-[#A7ADB8]">
+            <span className="text-sm text-[#A7ADB8]" suppressHydrationWarning>
               {fmt(Number(order.subtotal) || 0)}
             </span>
           </div>
           <div className="mb-2 flex justify-between text-xs text-[#737A86]">
             <span>Delivery</span>
-            <span className="text-sm text-[#A7ADB8]">
+            <span className="text-sm text-[#A7ADB8]" suppressHydrationWarning>
               {fmt(Number(order.shippingCost) || 0)}
             </span>
           </div>
           <div className="flex justify-between">
             <span className="text-xs text-[#737A86]">Total</span>
-            <span className="text-lg font-extrabold">
+            <span className="text-lg font-extrabold" suppressHydrationWarning>
               {fmt(Number(order.totalAmount) || 0)}
             </span>
           </div>
@@ -757,7 +900,7 @@ export default function SellerOrderDetailsPage() {
             onClick={() => setShowCancel(false)}
           />
           <div className="relative z-10 max-h-[88vh] w-full max-w-md overflow-y-auto border-t border-white/[0.07] bg-[#11141A] px-[18px] pb-7 pt-2.5 sm:border">
-            <div className="mx-auto mb-3 h-1 w-9 rounded-sm bg-white/10 sm:hidden" />
+            <div className="mx-auto mb-3 h-1 w-9 bg-white/10 sm:hidden" />
             <div className="mb-1 flex items-center justify-between">
               <h2 className="text-[17px] font-bold">Cancel order</h2>
               <button type="button" onClick={() => setShowCancel(false)}>
@@ -781,12 +924,12 @@ export default function SellerOrderDetailsPage() {
                   }`}
                 >
                   <span
-                    className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 ${
+                    className={`flex h-5 w-5 shrink-0 items-center justify-center border-2 ${
                       selected ? "border-[#3B82F6]" : "border-[#737A86]"
                     }`}
                   >
                     {selected && (
-                      <span className="h-2.5 w-2.5 rounded-full bg-[#3B82F6]" />
+                      <span className="h-2.5 w-2.5 bg-[#3B82F6]" />
                     )}
                   </span>
                   <span
@@ -807,7 +950,7 @@ export default function SellerOrderDetailsPage() {
                 onChange={(e) => setCancelNote(e.target.value.slice(0, 200))}
                 placeholder="Short explanation…"
                 rows={3}
-                className="mt-2 w-full rounded-[14px] border border-white/[0.07] bg-[#0A121C] px-3.5 py-3 text-[15px] text-[#F5F7FA] outline-none placeholder:text-[#3D5268]"
+                className="mt-2 w-full border border-white/[0.07] bg-[#0A121C] px-3.5 py-3 text-[15px] text-[#F5F7FA] outline-none placeholder:text-[#3D5268]"
               />
             )}
             <button

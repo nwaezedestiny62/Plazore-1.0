@@ -12,11 +12,16 @@ import {
   generateShowroom,
   rankProductsForSearch,
 } from "../services/showroomRanker.js";
+import crypto from "crypto";
 
 const getUser = (req: Request) => (req as any).user;
 
 const SELLER_PUBLIC_FIELDS =
   "name storeName storeLogo storeDescription isSellerVerified marketplaceRegion shippingDefaults";
+
+const MAX_OPTION_GROUPS = 5;
+const MAX_VALUES_PER_OPTION = 30;
+const MAX_VARIANTS = 200;
 
 /** Parse JSON that may arrive as a string from multipart FormData */
 function parseJsonField<T = any>(raw: unknown, fallback: T): T {
@@ -33,7 +38,6 @@ function parseJsonField<T = any>(raw: unknown, fallback: T): T {
 }
 
 function parseFulfillmentLocation(body: any) {
-  // Prefer nested JSON blob from edit form
   if (body.fulfillmentLocation !== undefined) {
     const fl = parseJsonField<any>(body.fulfillmentLocation, null);
     if (fl && typeof fl === "object") {
@@ -99,6 +103,215 @@ function parseSpecifications(body: any): Record<string, string> {
   return out;
 }
 
+/** Stable combination key from option map (sorted by option name). */
+export function buildVariantKey(
+  options: Record<string, string> | Map<string, string>
+): string {
+  const entries =
+    options instanceof Map
+      ? [...options.entries()]
+      : Object.entries(options || {});
+  return entries
+    .map(([k, v]) => [
+      String(k).trim().toLowerCase(),
+      String(v).trim().toLowerCase(),
+    ])
+    .filter(([k, v]) => k && v)
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([k, v]) => `${k}=${v}`)
+    .join("|");
+}
+
+function newVariantId(): string {
+  return `var_${crypto.randomBytes(8).toString("hex")}`;
+}
+
+function newOptionId(): string {
+  return `opt_${crypto.randomBytes(6).toString("hex")}`;
+}
+
+/**
+ * Parse options + variants from body.
+ * Returns { hasVariants, options, variants } or throws with a message.
+ */
+function parseOptionsAndVariants(body: any): {
+  hasVariants: boolean;
+  options: { id: string; name: string; values: string[] }[];
+  variants: {
+    variantId: string;
+    key: string;
+    options: Record<string, string>;
+    stock: number;
+    price: number | null;
+    available: boolean;
+  }[];
+} {
+  const rawOptions = parseJsonField<any[]>(body.options, []);
+  const rawVariants = parseJsonField<any[]>(body.variants, []);
+
+  const optionsIn =
+    Array.isArray(rawOptions) && rawOptions.length > 0 ? rawOptions : [];
+  const variantsIn =
+    Array.isArray(rawVariants) && rawVariants.length > 0 ? rawVariants : [];
+
+  if (optionsIn.length === 0 && variantsIn.length === 0) {
+    return { hasVariants: false, options: [], variants: [] };
+  }
+
+  if (optionsIn.length > MAX_OPTION_GROUPS) {
+    throw new Error(
+      `A product may have at most ${MAX_OPTION_GROUPS} option groups`
+    );
+  }
+
+  const options: { id: string; name: string; values: string[] }[] = [];
+  const seenOptionNames = new Set<string>();
+
+  for (const o of optionsIn) {
+    if (!o || typeof o !== "object") continue;
+    const name = String(o.name || "").trim();
+    if (!name) continue;
+    const nameKey = name.toLowerCase();
+    if (seenOptionNames.has(nameKey)) continue;
+    seenOptionNames.add(nameKey);
+
+    let values = Array.isArray(o.values)
+      ? o.values.map((v: any) => String(v ?? "").trim()).filter(Boolean)
+      : [];
+    values = [...new Set(values)];
+    if (values.length > MAX_VALUES_PER_OPTION) {
+      throw new Error(
+        `Option "${name}" may have at most ${MAX_VALUES_PER_OPTION} values`
+      );
+    }
+    if (values.length === 0) continue;
+
+    options.push({
+      id: String(o.id || "").trim() || newOptionId(),
+      name,
+      values,
+    });
+  }
+
+  if (options.length === 0) {
+    return { hasVariants: false, options: [], variants: [] };
+  }
+
+  if (variantsIn.length > MAX_VARIANTS) {
+    throw new Error(`A product may have at most ${MAX_VARIANTS} variants`);
+  }
+
+  const variants: {
+    variantId: string;
+    key: string;
+    options: Record<string, string>;
+    stock: number;
+    price: number | null;
+    available: boolean;
+  }[] = [];
+  const seenKeys = new Set<string>();
+
+  for (const v of variantsIn) {
+    if (!v || typeof v !== "object") continue;
+
+    let optMap: Record<string, string> = {};
+    if (v.options && typeof v.options === "object" && !Array.isArray(v.options)) {
+      for (const [k, val] of Object.entries(v.options)) {
+        const nk = String(k).trim();
+        const nv = String(val ?? "").trim();
+        if (nk && nv) optMap[nk] = nv;
+      }
+    }
+
+    // Validate option names/values against defined options
+    for (const opt of options) {
+      const chosen = optMap[opt.name];
+      if (!chosen || !opt.values.includes(chosen)) {
+        // allow missing if seller disabled incomplete combos — skip invalid
+        optMap = {};
+        break;
+      }
+    }
+    if (Object.keys(optMap).length !== options.length) continue;
+
+    const key = buildVariantKey(optMap);
+    if (!key || seenKeys.has(key)) continue;
+    seenKeys.add(key);
+
+    const stockNum = Number(v.stock);
+    const stock =
+      Number.isFinite(stockNum) && stockNum >= 0 ? Math.floor(stockNum) : 0;
+
+    let price: number | null = null;
+    if (v.price !== undefined && v.price !== null && v.price !== "") {
+      const p = Number(v.price);
+      if (Number.isFinite(p) && p >= 0) price = p;
+    }
+
+    const available =
+      v.available === false || v.available === "false" || v.available === 0
+        ? false
+        : true;
+
+    variants.push({
+      variantId: String(v.variantId || "").trim() || newVariantId(),
+      key,
+      options: optMap,
+      stock,
+      price,
+      available,
+    });
+  }
+
+  if (variants.length === 0) {
+    // Options defined but no valid variants — treat as simple product
+    return { hasVariants: false, options: [], variants: [] };
+  }
+
+  return { hasVariants: true, options, variants };
+}
+
+/** Keys that only affect inventory — must NOT trigger Plazore AI */
+function isInventoryOnlyUpdate(updates: Record<string, any>): boolean {
+  const keys = Object.keys(updates);
+  if (keys.length === 0) return true;
+
+  const inventoryKeys = new Set(["stock", "variants"]);
+  // variants payload only counts as inventory-only if structure is unchanged
+  // Caller should pass contentFingerprintChanged separately for structure.
+  return keys.every((k) => inventoryKeys.has(k));
+}
+
+function serializeProductLean(product: any) {
+  if (!product) return product;
+
+  if (product.specifications instanceof Map) {
+    product.specifications = Object.fromEntries(product.specifications);
+  }
+
+  if (Array.isArray(product.variants)) {
+    product.variants = product.variants.map((v: any) => ({
+      ...v,
+      options:
+        v.options instanceof Map
+          ? Object.fromEntries(v.options)
+          : v.options || {},
+    }));
+  }
+
+  if (Array.isArray(product.verificationDocuments)) {
+    product.verificationDocuments = product.verificationDocuments.map(
+      (d: any) => ({
+        documentName: d.documentName || d.name || "Document",
+        documentType: d.documentType || d.type || "other",
+        secureUrl: d.secureUrl || d.url || "",
+      })
+    );
+  }
+
+  return product;
+}
+
 function getImageFiles(req: Request): Express.Multer.File[] {
   const f = req.files as
     | { [fieldname: string]: Express.Multer.File[] }
@@ -129,7 +342,6 @@ function uploadToCloudinary(
       {
         folder,
         resource_type: resourceType,
-        // Keep original filename accessible for docs
         use_filename: true,
         unique_filename: true,
       },
@@ -150,7 +362,6 @@ function isImageMime(m?: string) {
   return !!m && m.startsWith("image/");
 }
 
-/** Read documentTypes[i] / documentNames[i] from multipart body safely */
 function fieldAt(body: any, base: string, i: number): string {
   if (Array.isArray(body[base])) return String(body[base][i] ?? "");
   if (body[base] && typeof body[base] === "object") {
@@ -162,14 +373,12 @@ function fieldAt(body: any, base: string, i: number): string {
   return "";
 }
 
-/**
- * Upload verification docs.
- * Images → resource_type image; PDFs/other → raw so secure_url opens in browser.
- */
 async function uploadVerificationDocs(
   files: Express.Multer.File[],
   body: any
-): Promise<{ documentName: string; documentType: string; secureUrl: string }[]> {
+): Promise<
+  { documentName: string; documentType: string; secureUrl: string }[]
+> {
   if (!files || files.length === 0) return [];
 
   const results = await Promise.all(
@@ -228,7 +437,6 @@ function parseExistingDocuments(body: any, fallback: any[] = []): any[] {
   }
 }
 
-/** existingImages from FormData is almost always a JSON string — never treat the whole string as one URL */
 function parseExistingImageUrls(body: any): string[] {
   const raw =
     body.existingImages !== undefined
@@ -284,15 +492,17 @@ function dedupeUrls(urls: string[]): string[] {
   return out;
 }
 
-/** Normalize feeMode safely */
-function normalizeFeeMode(value: any, fallback: string = "fixed"): "free" | "fixed" | "on_delivery" {
+function normalizeFeeMode(
+  value: any,
+  fallback: string = "fixed"
+): "free" | "fixed" | "on_delivery" {
   const raw = String(value ?? fallback).toLowerCase().trim();
   if (raw === "free" || raw === "on_delivery") return raw;
   return "fixed";
 }
 
 // ======================================================
-// PUBLIC - Get products (search + filters + sort + region)
+// PUBLIC - Get products
 // ======================================================
 export const getProducts = async (req: Request, res: Response) => {
   try {
@@ -309,7 +519,6 @@ export const getProducts = async (req: Request, res: Response) => {
     ).toLowerCase();
     const inStockOnly = inStockRaw === "1" || inStockRaw === "true";
 
-    // ── Shared filters (no region yet) ───────────────────
     const filters: any[] = [{ isActive: true }];
 
     if (req.query.seller) {
@@ -322,7 +531,6 @@ export const getProducts = async (req: Request, res: Response) => {
       filters.push({ subCategory: String(req.query.subCategory).trim() });
     }
 
-    // Text search
     if (q) {
       const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       const rx = new RegExp(escaped, "i");
@@ -337,7 +545,6 @@ export const getProducts = async (req: Request, res: Response) => {
       });
     }
 
-    // Price range (raw product price — same currency units as stored)
     if (Number.isFinite(minPrice) && minPrice > 0) {
       filters.push({ price: { $gte: minPrice } });
     }
@@ -345,15 +552,23 @@ export const getProducts = async (req: Request, res: Response) => {
       filters.push({ price: { $lte: maxPrice } });
     }
 
-    // In stock
+    // In stock: simple stock OR any available variant with stock
     if (inStockOnly) {
-      filters.push({ stock: { $gt: 0 } });
+      filters.push({
+        $or: [
+          { hasVariants: { $ne: true }, stock: { $gt: 0 } },
+          {
+            hasVariants: true,
+            variants: {
+              $elemMatch: { available: true, stock: { $gt: 0 } },
+            },
+          },
+        ],
+      });
     }
 
-    const baseQuery =
-      filters.length === 1 ? filters[0] : { $and: filters };
+    const baseQuery = filters.length === 1 ? filters[0] : { $and: filters };
 
-    // Local region first, then others
     const localQuery = {
       $and: [
         ...filters,
@@ -368,13 +583,9 @@ export const getProducts = async (req: Request, res: Response) => {
     };
 
     const otherQuery = {
-      $and: [
-        ...filters,
-        { region: { $nin: [buyerRegion, null] } },
-      ],
+      $and: [...filters, { region: { $nin: [buyerRegion, null] } }],
     };
 
-    // Sort
     let mongoSort: any = { isFeatured: -1, createdAt: -1 };
     switch (sortParam) {
       case "newest":
@@ -426,7 +637,8 @@ export const getProducts = async (req: Request, res: Response) => {
       products = [...products, ...otherProducts];
     }
 
-    // Rank only for trending (search is already filtered in Mongo)
+    products = products.map(serializeProductLean);
+
     if (sortParam === "trending" && products.length > 0) {
       const user = getUser(req);
       products = await rankProductsForSearch({
@@ -479,22 +691,7 @@ export const getProduct = async (req: Request, res: Response) => {
         .json({ success: false, message: "Product not found" });
     }
 
-    if (product.specifications instanceof Map) {
-      (product as any).specifications = Object.fromEntries(
-        product.specifications as Map<string, string>
-      );
-    }
-
-    // Ensure docs always expose openable URLs
-    if (Array.isArray((product as any).verificationDocuments)) {
-      (product as any).verificationDocuments = (
-        product as any
-      ).verificationDocuments.map((d: any) => ({
-        documentName: d.documentName || d.name || "Document",
-        documentType: d.documentType || d.type || "other",
-        secureUrl: d.secureUrl || d.url || "",
-      }));
-    }
+    serializeProductLean(product);
 
     const actor = getUser(req);
     trackProductPerformance({
@@ -575,7 +772,6 @@ export const createProduct = async (req: Request, res: Response) => {
       });
     }
 
-    // ── Shipping: JSON blob or flat fields ──
     let shippingMethod = req.body.shippingMethod;
     let courierCompany = req.body.courierCompany || req.body.courier;
     let deliveryFee = req.body.deliveryFee;
@@ -654,6 +850,24 @@ export const createProduct = async (req: Request, res: Response) => {
 
     const specifications = parseSpecifications(req.body);
 
+    let optionsPayload: ReturnType<typeof parseOptionsAndVariants>;
+    try {
+      optionsPayload = parseOptionsAndVariants(req.body);
+    } catch (optErr: any) {
+      return res.status(400).json({
+        success: false,
+        message: optErr.message || "Invalid product options",
+      });
+    }
+
+    // When variants exist, product.stock is sum of available variant stocks (display helper)
+    let finalStock = safeStock;
+    if (optionsPayload.hasVariants) {
+      finalStock = optionsPayload.variants
+        .filter((v) => v.available)
+        .reduce((s, v) => s + v.stock, 0);
+    }
+
     const seller = await User.findById(user._id)
       .select("marketplaceRegion")
       .lean();
@@ -666,7 +880,7 @@ export const createProduct = async (req: Request, res: Response) => {
       name: String(name).trim(),
       description: String(description).trim(),
       price: numericPrice,
-      stock: safeStock,
+      stock: finalStock,
       category: String(category).trim(),
       subCategory: String(subCategory || "").trim(),
       brand: String(brand || "").trim(),
@@ -686,11 +900,17 @@ export const createProduct = async (req: Request, res: Response) => {
       fulfillmentLocation,
       specifications,
       verificationDocuments,
+      hasVariants: optionsPayload.hasVariants,
+      options: optionsPayload.options,
+      variants: optionsPayload.variants,
     });
 
     enqueueProductAI(String(product._id));
 
-    res.status(201).json({ success: true, data: product });
+    res.status(201).json({
+      success: true,
+      data: serializeProductLean(product.toObject()),
+    });
   } catch (error: any) {
     console.error("createProduct error:", error);
     res.status(500).json({
@@ -730,7 +950,6 @@ export const updateProduct = async (req: Request, res: Response) => {
       });
     }
 
-    // ── Images: parse kept URLs correctly + optional new uploads ──
     const keptUrls = parseExistingImageUrls(req.body);
     const imageFiles = getImageFiles(req);
 
@@ -834,7 +1053,51 @@ export const updateProduct = async (req: Request, res: Response) => {
         raw === true || raw === "true" || raw === 1 || raw === "1";
     }
 
-    // ── Shipping: JSON blob OR flat fields (FIXED for feeMode) ──
+    // Options / variants (structure or stock)
+    let optionsStructureChanged = false;
+    if (req.body.options !== undefined || req.body.variants !== undefined) {
+      let optionsPayload: ReturnType<typeof parseOptionsAndVariants>;
+      try {
+        optionsPayload = parseOptionsAndVariants(req.body);
+      } catch (optErr: any) {
+        return res.status(400).json({
+          success: false,
+          message: optErr.message || "Invalid product options",
+        });
+      }
+
+      const prevKey = JSON.stringify({
+        options: (product as any).options || [],
+        variants: ((product as any).variants || []).map((v: any) => ({
+          key: v.key,
+          options: v.options,
+          price: v.price,
+          available: v.available,
+        })),
+      });
+      const nextKey = JSON.stringify({
+        options: optionsPayload.options,
+        variants: optionsPayload.variants.map((v) => ({
+          key: v.key,
+          options: v.options,
+          price: v.price,
+          available: v.available,
+        })),
+      });
+      optionsStructureChanged = prevKey !== nextKey;
+
+      updates.hasVariants = optionsPayload.hasVariants;
+      updates.options = optionsPayload.options;
+      updates.variants = optionsPayload.variants;
+
+      if (optionsPayload.hasVariants) {
+        updates.stock = optionsPayload.variants
+          .filter((v) => v.available)
+          .reduce((s, v) => s + v.stock, 0);
+      }
+    }
+
+    // Shipping
     {
       let shipBody: any = null;
       if (req.body.shipping !== undefined) {
@@ -921,7 +1184,7 @@ export const updateProduct = async (req: Request, res: Response) => {
       }
     }
 
-    // ── Fulfillment ──
+    // Fulfillment
     {
       const hasFulfillmentTouch =
         req.body.fulfillmentLocation !== undefined ||
@@ -963,7 +1226,6 @@ export const updateProduct = async (req: Request, res: Response) => {
       updates.specifications = parseSpecifications(req.body);
     }
 
-    // Docs only when explicitly editing docs (not on every name-only save)
     const isDocEdit =
       req.body.existingDocuments !== undefined ||
       getDocumentFiles(req).length > 0;
@@ -998,7 +1260,24 @@ export const updateProduct = async (req: Request, res: Response) => {
       const onlyVisibility =
         Object.keys(updates).length === 1 && updates.isActive !== undefined;
 
-      if (!onlyVisibility) {
+      // Inventory-only: stock and/or variants where structure did not change
+      const onlyInventory =
+        !onlyVisibility &&
+        !optionsStructureChanged &&
+        isInventoryOnlyUpdate(updates) &&
+        updates.name === undefined &&
+        updates.description === undefined &&
+        updates.price === undefined &&
+        updates.category === undefined &&
+        updates.subCategory === undefined &&
+        updates.brand === undefined &&
+        updates.images === undefined &&
+        updates.specifications === undefined &&
+        updates.shipping === undefined &&
+        updates.fulfillmentLocation === undefined &&
+        updates.verificationDocuments === undefined;
+
+      if (!onlyVisibility && !onlyInventory) {
         const newFingerprint = generateProductFingerprint(updated);
         const existingAI = await ProductAI.findOne({ productId: updated._id });
 
@@ -1008,7 +1287,10 @@ export const updateProduct = async (req: Request, res: Response) => {
       }
     }
 
-    res.json({ success: true, data: updated });
+    res.json({
+      success: true,
+      data: updated ? serializeProductLean(updated.toObject()) : updated,
+    });
   } catch (error: any) {
     console.error("updateProduct error:", error);
     res.status(500).json({
@@ -1137,7 +1419,7 @@ export const getShowroom = async (req: Request, res: Response) => {
       const id = String(p._id);
       if (seen.has(id)) continue;
       seen.add(id);
-      data.push(p);
+      data.push(serializeProductLean(p));
     }
 
     res.json({
@@ -1146,10 +1428,10 @@ export const getShowroom = async (req: Request, res: Response) => {
       region: result.region,
       cached: result.cached,
       rooms: {
-        1: result.rooms[1],
-        2: result.rooms[2],
-        3: result.rooms[3],
-        4: result.rooms[4],
+        1: (result.rooms[1] || []).map(serializeProductLean),
+        2: (result.rooms[2] || []).map(serializeProductLean),
+        3: (result.rooms[3] || []).map(serializeProductLean),
+        4: (result.rooms[4] || []).map(serializeProductLean),
       },
       data,
       meta: (result as any).meta || {},

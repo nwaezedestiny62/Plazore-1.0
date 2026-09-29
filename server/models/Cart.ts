@@ -17,6 +17,25 @@ const cartItemSchema = new Schema<ICartItem>({
     type: Number,
     required: true,
   },
+  // Legacy optional field (kept for compatibility; prefer selectedOptions)
+  size: {
+    type: String,
+    default: "",
+  },
+  // Variant configuration (empty for simple products)
+  variantId: {
+    type: String,
+    default: "",
+  },
+  variantKey: {
+    type: String,
+    default: "",
+  },
+  selectedOptions: {
+    type: Map,
+    of: String,
+    default: {},
+  },
 });
 
 const cartSchema = new Schema<ICart>(

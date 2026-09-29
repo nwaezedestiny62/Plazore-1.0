@@ -7,6 +7,7 @@ import {
   FileUp,
   Footprints,
   ImagePlus,
+  Plus,
   Store,
   Trash2,
   Truck,
@@ -59,8 +60,81 @@ type ExistingDoc = {
 
 type LocalDoc = { file: File; name: string; type: string };
 
+type OptionDraft = { id: string; name: string; valuesText: string };
+type VariantDraft = {
+  variantId: string;
+  key: string;
+  options: Record<string, string>;
+  stock: string;
+  price: string;
+  available: boolean;
+};
+
 function uid() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+function parseValues(text: string): string[] {
+  const parts = text.split(/[,|\n]/).map((s) => s.trim()).filter(Boolean);
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const p of parts) {
+    const k = p.toLowerCase();
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(p);
+    if (out.length >= 30) break;
+  }
+  return out;
+}
+
+function cartesian(groups: { name: string; values: string[] }[]): Record<string, string>[] {
+  if (!groups.length) return [];
+  return groups.reduce<Record<string, string>[]>(
+    (acc, g) => {
+      if (!acc.length) return g.values.map((v) => ({ [g.name]: v }));
+      const next: Record<string, string>[] = [];
+      for (const row of acc) {
+        for (const v of g.values) next.push({ ...row, [g.name]: v });
+      }
+      return next;
+    },
+    [],
+  );
+}
+
+function buildVariantKey(opts: Record<string, string>): string {
+  return Object.entries(opts)
+    .map(([k, v]) => [k.trim().toLowerCase(), String(v).trim().toLowerCase()])
+    .filter(([k, v]) => k && v)
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([k, v]) => `${k}=${v}`)
+    .join("|");
+}
+
+function generateVariantsFromOptions(
+  optionDrafts: OptionDraft[],
+  prev: VariantDraft[],
+): VariantDraft[] {
+  const groups = optionDrafts
+    .map((o) => ({ name: o.name.trim(), values: parseValues(o.valuesText) }))
+    .filter((g) => g.name && g.values.length > 0)
+    .slice(0, 5);
+  if (!groups.length) return [];
+  const combos = cartesian(groups).slice(0, 200);
+  const prevByKey = new Map(prev.map((v) => [v.key, v]));
+  return combos.map((opts) => {
+    const key = buildVariantKey(opts);
+    const old = prevByKey.get(key);
+    return {
+      variantId: old?.variantId || uid(),
+      key,
+      options: opts,
+      stock: old?.stock ?? "0",
+      price: old?.price ?? "",
+      available: old?.available ?? true,
+    };
+  });
 }
 
 function normalizeImageUrl(raw: unknown): string {
@@ -115,12 +189,7 @@ function extractImageList(p: any): string[] {
   }
   if (!out.length) {
     const single = normalizeImageUrl(
-      p.coverImage ||
-        p.cover ||
-        p.image ||
-        p.thumbnail ||
-        p.mainImage ||
-        p.primaryImage,
+      p.coverImage || p.cover || p.image || p.thumbnail || p.mainImage || p.primaryImage,
     );
     if (single) out.push(single);
   }
@@ -143,9 +212,7 @@ async function readJson(res: Response) {
   const ct = res.headers.get("content-type") || "";
   if (!ct.includes("application/json")) {
     const text = await res.text();
-    throw new Error(
-      `Expected JSON, got ${res.status}. Body starts: ${text.slice(0, 80)}`,
-    );
+    throw new Error(`Expected JSON, got ${res.status}. Body starts: ${text.slice(0, 80)}`);
   }
   return res.json();
 }
@@ -165,11 +232,7 @@ function TopOverlay({
 
   if (!state) return null;
   const accent =
-    state.tone === "danger"
-      ? "#EF4444"
-      : state.tone === "success"
-        ? "#00E575"
-        : "#3B82F6";
+    state.tone === "danger" ? "#EF4444" : state.tone === "success" ? "#00E575" : "#3B82F6";
 
   return (
     <div className="pointer-events-none fixed inset-x-0 top-0 z-[200] px-3 pt-3 sm:px-4 md:px-6">
@@ -179,17 +242,10 @@ function TopOverlay({
           <div className="min-w-0 flex-1">
             <p className="text-sm font-bold text-text">{state.title}</p>
             {state.message && (
-              <p className="mt-0.5 text-[12.5px] leading-[18px] text-[#A7ADB8]">
-                {state.message}
-              </p>
+              <p className="mt-0.5 text-[12.5px] leading-[18px] text-[#A7ADB8]">{state.message}</p>
             )}
           </div>
-          <button
-            type="button"
-            onClick={onDismiss}
-            className="shrink-0 text-[#737A86] hover:text-text"
-            aria-label="Dismiss"
-          >
+          <button type="button" onClick={onDismiss} className="shrink-0 text-[#737A86] hover:text-text" aria-label="Dismiss">
             ×
           </button>
         </div>
@@ -217,9 +273,7 @@ function Section({
         </div>
         <div className="min-w-0">
           <p className="text-[15px] font-bold text-text sm:text-base">{title}</p>
-          {subtitle && (
-            <p className="text-[11px] leading-snug text-[#737A86]">{subtitle}</p>
-          )}
+          {subtitle && <p className="text-[11px] leading-snug text-[#737A86]">{subtitle}</p>}
         </div>
       </div>
       <div className="mb-3 h-px bg-line sm:mb-3.5" />
@@ -241,9 +295,7 @@ const inputCls =
 
 const pillCls = (on: boolean) =>
   `mr-2 mb-2 inline-flex min-h-[36px] items-center rounded-full border px-3 py-2 text-xs font-medium transition ${
-    on
-      ? "border-green/35 bg-green/12 font-bold text-green"
-      : "border-line bg-[#0A121C] text-[#737A86]"
+    on ? "border-green/35 bg-green/12 font-bold text-green" : "border-line bg-[#0A121C] text-[#737A86]"
   }`;
 
 function SafeImg({
@@ -262,9 +314,7 @@ function SafeImg({
 
   if (!src || failed) {
     return (
-      <div
-        className={`flex items-center justify-center bg-[#E5E7EB] ${className || ""}`}
-      >
+      <div className={`flex items-center justify-center bg-[#E5E7EB] ${className || ""}`}>
         <ImagePlus className="h-6 w-6 text-[#9CA3AF]" />
       </div>
     );
@@ -272,12 +322,7 @@ function SafeImg({
 
   return (
     // eslint-disable-next-line @next/next/no-img-element
-    <img
-      src={src}
-      alt={alt}
-      className={className}
-      onError={() => setFailed(true)}
-    />
+    <img src={src} alt={alt} className={className} onError={() => setFailed(true)} />
   );
 }
 
@@ -297,6 +342,8 @@ type BuyerPreviewProps = {
   courierCompany: string;
   deliveryFeeLabel: string;
   deliveryNote: string;
+  hasVariants?: boolean;
+  optionLabels?: string[];
 };
 
 function BuyerLivePreview({
@@ -315,11 +362,12 @@ function BuyerLivePreview({
   courierCompany,
   deliveryFeeLabel,
   deliveryNote,
+  hasVariants,
+  optionLabels,
 }: BuyerPreviewProps) {
   const cover = images[0] || "";
   const [idx, setIdx] = useState(0);
-  const shown =
-    images[Math.min(idx, Math.max(images.length - 1, 0))] || cover || "";
+  const shown = images[Math.min(idx, Math.max(images.length - 1, 0))] || cover || "";
 
   useEffect(() => {
     setIdx(0);
@@ -336,14 +384,9 @@ function BuyerLivePreview({
 
   return (
     <div>
-      <p className="mb-1 text-[11px] font-bold uppercase tracking-[2px] text-[#737A86]">
-        Live preview
-      </p>
-      <p className="mb-3 text-base font-extrabold text-text sm:text-lg">
-        What buyers will see
-      </p>
+      <p className="mb-1 text-[11px] font-bold uppercase tracking-[2px] text-[#737A86]">Live preview</p>
+      <p className="mb-3 text-base font-extrabold text-text sm:text-lg">What buyers will see</p>
 
-      {/* Showroom card — no border (matches real card) */}
       <div className="mb-4 bg-[#0A121C] p-3 sm:p-3.5">
         <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.8px] text-[#737A86]">
           Showroom card · cover = first photo
@@ -355,9 +398,7 @@ function BuyerLivePreview({
               <span className="text-[10px] font-bold text-[#111]">Cart</span>
             </div>
           </div>
-          <p className="mt-2.5 truncate text-[13.5px] font-medium text-white">
-            {name || "Product name"}
-          </p>
+          <p className="mt-2.5 truncate text-[13.5px] font-medium text-white">{name || "Product name"}</p>
           <p className="text-xs text-white/65">
             {(brand || storeName || "plazore").toLowerCase()} |{" "}
             <span className="font-medium text-white">{priceLabel}</span>
@@ -368,12 +409,13 @@ function BuyerLivePreview({
             <p className="mt-1 text-[11px] text-white/30">Ships from…</p>
           )}
           {feeMode === "free" && (
-            <p className="mt-0.5 text-[11px] font-medium text-[#00E575]/90">
-              Free delivery
-            </p>
+            <p className="mt-0.5 text-[11px] font-medium text-[#00E575]/90">Free delivery</p>
           )}
           {feeMode === "on_delivery" && (
             <p className="mt-0.5 text-[11px] text-white/50">Pay on arrival</p>
+          )}
+          {hasVariants && optionLabels && optionLabels.length > 0 && (
+            <p className="mt-1 text-[11px] text-white/45">{optionLabels.join(" · ")}</p>
           )}
         </div>
       </div>
@@ -393,9 +435,7 @@ function BuyerLivePreview({
                     key={i}
                     type="button"
                     onClick={() => setIdx(i)}
-                    className={`h-[4px] rounded-full transition ${
-                      i === idx ? "w-4 bg-white" : "w-1.5 bg-white/30"
-                    }`}
+                    className={`h-[4px] rounded-full transition ${i === idx ? "w-4 bg-white" : "w-1.5 bg-white/30"}`}
                     aria-label={`Image ${i + 1}`}
                   />
                 ))}
@@ -409,9 +449,7 @@ function BuyerLivePreview({
                 {[category, subCategory].filter(Boolean).join(" · ")}
               </p>
             )}
-            <p className="text-lg font-bold leading-6 text-text">
-              {name || "Product name"}
-            </p>
+            <p className="text-lg font-bold leading-6 text-text">{name || "Product name"}</p>
             <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
               <p className="text-xl font-bold text-text">{priceLabel}</p>
               <span
@@ -421,7 +459,13 @@ function BuyerLivePreview({
                     : "border-red-400/28 bg-red-400/10 text-red-400"
                 }`}
               >
-                {stockN > 0 ? `Available · ${stockN}` : "Unavailable"}
+                {hasVariants
+                  ? stockN > 0
+                    ? `In stock · ${stockN}`
+                    : "Select options"
+                  : stockN > 0
+                    ? `Available · ${stockN}`
+                    : "Unavailable"}
               </span>
             </div>
             {!!brand && (
@@ -432,35 +476,25 @@ function BuyerLivePreview({
 
             {!!description.trim() && (
               <>
-                <p className="mb-1.5 mt-3 text-xs font-semibold uppercase tracking-wide text-text">
-                  About
-                </p>
+                <p className="mb-1.5 mt-3 text-xs font-semibold uppercase tracking-wide text-text">About</p>
                 <div className="rounded-[14px] border border-line bg-surface p-3 text-[13px] leading-[19px] text-[#A7ADB8]">
                   {description}
                 </div>
               </>
             )}
 
-            <p className="mb-1.5 mt-3 text-xs font-semibold uppercase tracking-wide text-text">
-              Sold by
-            </p>
+            <p className="mb-1.5 mt-3 text-xs font-semibold uppercase tracking-wide text-text">Sold by</p>
             <div className="flex items-center gap-2.5 rounded-[14px] border border-line bg-surface p-3">
               <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-[#171B22]">
                 <Store className="h-4 w-4 text-[#A7ADB8]" />
               </div>
               <div className="min-w-0">
-                <p className="text-[10px] font-semibold uppercase tracking-wide text-[#737A86]">
-                  Visit storefront
-                </p>
-                <p className="truncate text-sm font-bold text-text">
-                  {storeName || brand || "Your store"}
-                </p>
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-[#737A86]">Visit storefront</p>
+                <p className="truncate text-sm font-bold text-text">{storeName || brand || "Your store"}</p>
               </div>
             </div>
 
-            <p className="mb-1.5 mt-3 text-xs font-semibold uppercase tracking-wide text-text">
-              Delivery
-            </p>
+            <p className="mb-1.5 mt-3 text-xs font-semibold uppercase tracking-wide text-text">Delivery</p>
             <div className="rounded-[14px] border border-line bg-surface p-3">
               <div className="flex flex-wrap items-center gap-2">
                 {feeMode !== "free" && shippingMethod === "courier" ? (
@@ -468,12 +502,8 @@ function BuyerLivePreview({
                 ) : (
                   <Footprints className="h-4 w-4 shrink-0 text-green" />
                 )}
-                <p className="text-[13px] font-semibold text-text">
-                  {methodLabel}
-                </p>
-                <p className="ml-auto text-[13px] font-bold text-text">
-                  {deliveryFeeLabel}
-                </p>
+                <p className="text-[13px] font-semibold text-text">{methodLabel}</p>
+                <p className="ml-auto text-[13px] font-bold text-text">{deliveryFeeLabel}</p>
               </div>
               {feeMode === "on_delivery" && !!deliveryNote.trim() && (
                 <p className="mt-1 text-[11px] text-[#A7ADB8]">{deliveryNote}</p>
@@ -531,13 +561,15 @@ export default function EditProductPage() {
   const [existingDocs, setExistingDocs] = useState<ExistingDoc[]>([]);
   const [newDocuments, setNewDocuments] = useState<LocalDoc[]>([]);
 
+  const [hasVariants, setHasVariants] = useState(false);
+  const [optionDrafts, setOptionDrafts] = useState<OptionDraft[]>([]);
+  const [variantDrafts, setVariantDrafts] = useState<VariantDraft[]>([]);
+
   const [fulfillCountryCode, setFulfillCountryCode] = useState("");
   const [fulfillStateCode, setFulfillStateCode] = useState("");
   const [fulfillCity, setFulfillCity] = useState("");
   const [feeMode, setFeeMode] = useState<FeeMode | null>(null);
-  const [shippingMethod, setShippingMethod] = useState<"self" | "courier" | null>(
-    null,
-  );
+  const [shippingMethod, setShippingMethod] = useState<"self" | "courier" | null>(null);
   const [courierCompany, setCourierCompany] = useState("");
   const [deliveryFee, setDeliveryFee] = useState("");
   const [deliveryNote, setDeliveryNote] = useState("");
@@ -546,12 +578,9 @@ export default function EditProductPage() {
   const docInputRef = useRef<HTMLInputElement>(null);
   const blobUrlsRef = useRef<Set<string>>(new Set());
 
-  const toast = useCallback(
-    (title: string, message?: string, tone: OverlayTone = "info") => {
-      setOverlay({ title, message, tone });
-    },
-    [],
-  );
+  const toast = useCallback((title: string, message?: string, tone: OverlayTone = "info") => {
+    setOverlay({ title, message, tone });
+  }, []);
 
   const revokeBlobUri = useCallback((uri: string) => {
     if (!uri?.startsWith("blob:")) return;
@@ -586,9 +615,108 @@ export default function EditProductPage() {
       setSubCategory(p.subCategory || "");
       setSpecs(normalizeSpecs(p.specifications));
 
-      const origRegion = resolveRegionCode(
-        p.region || p.marketplaceRegion || "NG",
-      );
+      // Hydrate options/variants even if hasVariants flag was lost on save
+      const rawOptions = Array.isArray(p.options) ? p.options : [];
+      const rawVariants = Array.isArray(p.variants) ? p.variants : [];
+
+      const normalizedOptions = rawOptions
+        .map((o: any) => {
+          if (!o || typeof o !== "object") return null;
+          const name = String(o.name || "").trim();
+          let values: string[] = [];
+          if (Array.isArray(o.values)) {
+            values = o.values.map((x: any) => String(x).trim()).filter(Boolean);
+          } else if (typeof o.values === "string") {
+            values = o.values.split(/[,|\n]/).map((s: string) => s.trim()).filter(Boolean);
+          }
+          if (!name || !values.length) return null;
+          return {
+            id: String(o.id || uid()),
+            name,
+            valuesText: values.join(", "),
+          };
+        })
+        .filter(Boolean) as { id: string; name: string; valuesText: string }[];
+
+      const normalizedVariants = rawVariants
+        .map((v: any) => {
+          if (!v || typeof v !== "object") return null;
+          let opts: Record<string, string> = {};
+          const rawOpts = v.options;
+          if (rawOpts instanceof Map) {
+            rawOpts.forEach((val: any, k: any) => {
+              if (val != null && String(val).trim()) opts[String(k)] = String(val);
+            });
+          } else if (rawOpts && typeof rawOpts === "object" && !Array.isArray(rawOpts)) {
+            for (const [k, val] of Object.entries(rawOpts)) {
+              if (val != null && String(val).trim()) opts[String(k)] = String(val);
+            }
+          }
+          const key =
+            String(v.key || "").trim() ||
+            Object.entries(opts)
+              .map(([k, val]) => `${k.trim().toLowerCase()}=${String(val).trim().toLowerCase()}`)
+              .sort()
+              .join("|");
+          return {
+            variantId: String(v.variantId || v._id || uid()),
+            key,
+            options: opts,
+            stock: String(v.stock ?? 0),
+            price: v.price != null && v.price !== "" ? String(v.price) : "",
+            available: v.available !== false,
+          };
+        })
+        .filter(Boolean) as {
+        variantId: string;
+        key: string;
+        options: Record<string, string>;
+        stock: string;
+        price: string;
+        available: boolean;
+      }[];
+
+      // Derive option groups from variants if options array empty
+      let finalOptions = normalizedOptions;
+      if (!finalOptions.length && normalizedVariants.length) {
+        const map = new Map<string, Set<string>>();
+        for (const v of normalizedVariants) {
+          for (const [k, val] of Object.entries(v.options || {})) {
+            if (!map.has(k)) map.set(k, new Set());
+            map.get(k)!.add(String(val));
+          }
+        }
+        finalOptions = Array.from(map.entries()).map(([name, set]) => ({
+          id: uid(),
+          name,
+          valuesText: Array.from(set).join(", "),
+        }));
+      }
+
+      const withVariants =
+        !!p.hasVariants ||
+        finalOptions.length > 0 ||
+        normalizedVariants.length > 0;
+
+      console.log("[EditProduct applyProduct]", {
+        hasVariantsFlag: p.hasVariants,
+        rawOptionsLen: rawOptions.length,
+        rawVariantsLen: rawVariants.length,
+        finalOptionsLen: finalOptions.length,
+        normalizedVariantsLen: normalizedVariants.length,
+        withVariants,
+      });
+
+      setHasVariants(withVariants);
+      if (withVariants) {
+        setOptionDrafts(finalOptions);
+        setVariantDrafts(normalizedVariants);
+      } else {
+        setOptionDrafts([]);
+        setVariantDrafts([]);
+      }
+
+      const origRegion = resolveRegionCode(p.region || p.marketplaceRegion || "NG");
       setProductRegion(origRegion);
 
       const origPrice = Number(p.price) || 0;
@@ -619,9 +747,7 @@ export default function EditProductPage() {
           .map((d: any) => ({
             documentName: d.documentName || d.name || "Document",
             documentType: d.documentType || d.type || "other",
-            secureUrl: normalizeImageUrl(
-              d.secureUrl || d.url || d.secure_url || "",
-            ),
+            secureUrl: normalizeImageUrl(d.secureUrl || d.url || d.secure_url || ""),
           }))
           .filter((d: ExistingDoc) => d.documentName),
       );
@@ -629,9 +755,7 @@ export default function EditProductPage() {
       const ship = p.shipping || {};
       const feeRaw = Number(ship.deliveryFee) || 0;
       const mode: FeeMode =
-        ship.feeMode === "free" ||
-        ship.feeMode === "fixed" ||
-        ship.feeMode === "on_delivery"
+        ship.feeMode === "free" || ship.feeMode === "fixed" || ship.feeMode === "on_delivery"
           ? ship.feeMode
           : feeRaw > 0
             ? "fixed"
@@ -640,15 +764,9 @@ export default function EditProductPage() {
 
       const method = ship.method || ship.deliveryMethod || null;
       setShippingMethod(
-        mode === "free"
-          ? null
-          : method === "self" || method === "courier"
-            ? method
-            : null,
+        mode === "free" ? null : method === "self" || method === "courier" ? method : null,
       );
-      setCourierCompany(
-        String(ship.courier || ship.courierCompany || ship.courierName || ""),
-      );
+      setCourierCompany(String(ship.courier || ship.courierCompany || ship.courierName || ""));
       setDeliveryFee(
         mode === "fixed" && feeRaw > 0
           ? String(
@@ -663,9 +781,7 @@ export default function EditProductPage() {
       const loc = p.fulfillmentLocation || p.shipsFromLocation || {};
       const countryCode =
         loc.countryCode ||
-        FULFILLMENT_COUNTRIES.find(
-          (c) => c.name === loc.country || c.code === loc.country,
-        )?.code ||
+        FULFILLMENT_COUNTRIES.find((c) => c.name === loc.country || c.code === loc.country)?.code ||
         "";
       setFulfillCountryCode(countryCode);
       setFulfillStateCode(loc.stateCode || "");
@@ -674,39 +790,70 @@ export default function EditProductPage() {
     [revokeBlobUri, sellerRegion, ratesToNgn],
   );
 
-  const fetchProduct = useCallback(
+    const fetchProduct = useCallback(
     async (token: string) => {
       let product: any = null;
+
       try {
-        const prodRaw = await fetch(`${API}/seller/products/${id}`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (prodRaw.ok) {
-          const prodRes = await readJson(prodRaw);
-          product = prodRes?.data || prodRes?.product || prodRes;
-          if (prodRes?.success === false) product = null;
+        // Prefer public product GET (serializeProductLean converts Map → object)
+        try {
+          const pubRaw = await fetch(`${API}/products/${id}`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (pubRaw.ok) {
+            const pubRes = await readJson(pubRaw);
+            product = pubRes?.data || pubRes?.product || null;
+            if (pubRes?.success === false) product = null;
+          }
+        } catch (e) {
+          console.warn("GET /products/:id failed", e);
         }
-      } catch (e) {
-        console.warn("GET /seller/products/:id failed", e);
-      }
 
-      if (!product) {
-        const listRaw = await fetch(`${API}/seller/products`, {
-          headers: { Authorization: `Bearer ${token}` },
+        if (!product) {
+          try {
+            const prodRaw = await fetch(`${API}/seller/products/${id}`, {
+              headers: { Authorization: `Bearer ${token}` },
+            });
+            if (prodRaw.ok) {
+              const prodRes = await readJson(prodRaw);
+              product = prodRes?.data || prodRes?.product || prodRes;
+              if (prodRes?.success === false) product = null;
+            }
+          } catch (e) {
+            console.warn("GET /seller/products/:id failed", e);
+          }
+        }
+
+        if (!product) {
+          const listRaw = await fetch(`${API}/seller/products`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          const listRes = await readJson(listRaw);
+          const list = Array.isArray(listRes?.data)
+            ? listRes.data
+            : Array.isArray(listRes)
+              ? listRes
+              : [];
+          product = list.find((x: any) => String(x._id) === id) || null;
+        }
+
+        if (!product) throw new Error("Product not found");
+
+        console.log("[EditProduct load]", {
+          id,
+          hasVariants: product.hasVariants,
+          options: product.options,
+          variants: product.variants,
         });
-        const listRes = await readJson(listRaw);
-        const list = Array.isArray(listRes?.data)
-          ? listRes.data
-          : Array.isArray(listRes)
-            ? listRes
-            : [];
-        product = list.find((x: any) => String(x._id) === id) || null;
-      }
 
-      if (!product) throw new Error("Product not found");
-      applyProduct(product);
+        applyProduct(product);
+      } catch (e: any) {
+        console.error("fetchProduct error:", e);
+        toast("Error", e?.message || "Could not load product", "danger");
+        throw e;
+      }
     },
-    [id, applyProduct],
+    [id, applyProduct, toast]
   );
 
   useEffect(() => {
@@ -762,8 +909,18 @@ export default function EditProductPage() {
   }, [fulfillCountryCode, fulfillStateCode, fulfillCity, fulfillStates]);
 
   const priceN = Number(price) || 0;
-  const stockN = Math.max(0, parseInt(stock || "0", 10) || 0);
   const feeN = Number(deliveryFee) || 0;
+
+  const variantTotalStock = useMemo(() => {
+    if (!hasVariants) return 0;
+    return variantDrafts
+      .filter((v) => v.available !== false)
+      .reduce((s, v) => s + (parseInt(v.stock || "0", 10) || 0), 0);
+  }, [hasVariants, variantDrafts]);
+
+  const stockN = hasVariants
+    ? variantTotalStock
+    : Math.max(0, parseInt(stock || "0", 10) || 0);
 
   const formatPreviewPrice = useCallback(
     (n: number) => {
@@ -832,16 +989,46 @@ export default function EditProductPage() {
     });
   };
 
-    const validate = () => {
-    if (!images.length)
-      return "Add at least one product image (first one becomes the cover)";
+  const addOptionGroup = () => {
+    if (optionDrafts.length >= 5) {
+      toast("Limit", "Maximum 5 option groups", "danger");
+      return;
+    }
+    setOptionDrafts((prev) => [...prev, { id: uid(), name: "", valuesText: "" }]);
+  };
+
+  const regenerateVariants = () => {
+    const next = generateVariantsFromOptions(optionDrafts, variantDrafts);
+    setVariantDrafts(next);
+    if (!next.length) {
+      toast("No variants", "Add option names and values (e.g. Size: S, M, L)", "info");
+    } else {
+      toast("Variants ready", `${next.length} combination(s)`, "success");
+    }
+  };
+
+  const validate = () => {
+    if (!images.length) return "Add at least one product image (first one becomes the cover)";
     if (!name.trim()) return "Product name is required";
     if (!priceN || priceN <= 0) return "Enter a valid price";
     if (!category) return "Select a category";
     if (!fulfillCountryCode || !fulfillCity) return "Set fulfillment location";
     if (!feeMode) return "Choose a delivery charge option";
 
-    // Free → no method required
+    if (hasVariants) {
+      const opts = optionDrafts
+        .map((o) => ({ name: o.name.trim(), values: parseValues(o.valuesText) }))
+        .filter((o) => o.name && o.values.length);
+      if (!opts.length) return "Add at least one option group with values";
+      if (!variantDrafts.length) return "Generate variants after defining options";
+      if (variantDrafts.every((v) => !v.available))
+        return "At least one variant must be available";
+      const anyStock = variantDrafts.some(
+        (v) => v.available && (parseInt(v.stock || "0", 10) || 0) > 0,
+      );
+      if (!anyStock) return "Set stock on at least one available variant";
+    }
+
     if (feeMode === "free") return null;
 
     if (!shippingMethod) return "Choose self delivery or courier";
@@ -878,13 +1065,43 @@ export default function EditProductPage() {
       fd.append("name", name.trim());
       fd.append("brand", brand.trim());
       fd.append("price", String(priceToStore));
-      fd.append("stock", String(stockN));
       fd.append("description", description.trim());
       fd.append("category", category);
       fd.append("subCategory", subCategory);
       fd.append("region", productRegion);
       fd.append("specifications", JSON.stringify(specs));
-            const shippingPayload =
+
+      fd.append("hasVariants", hasVariants ? "true" : "false");
+      if (hasVariants) {
+        const options = optionDrafts
+          .map((o) => ({
+            id: o.id,
+            name: o.name.trim(),
+            values: parseValues(o.valuesText),
+          }))
+          .filter((o) => o.name && o.values.length)
+          .slice(0, 5);
+        const variants = variantDrafts.slice(0, 200).map((v) => ({
+          variantId: v.variantId,
+          key: v.key,
+          options: v.options,
+          stock: Math.max(0, parseInt(v.stock || "0", 10) || 0),
+          price: v.price.trim() === "" ? null : Number(v.price) || null,
+          available: v.available !== false,
+        }));
+        fd.append("options", JSON.stringify(options));
+        fd.append("variants", JSON.stringify(variants));
+        const total = variants
+          .filter((v) => v.available)
+          .reduce((s, v) => s + v.stock, 0);
+        fd.append("stock", String(total));
+      } else {
+        fd.append("stock", String(stockN));
+        fd.append("options", JSON.stringify([]));
+        fd.append("variants", JSON.stringify([]));
+      }
+
+      const shippingPayload =
         feeMode === "free"
           ? {
               feeMode: "free" as const,
@@ -899,15 +1116,13 @@ export default function EditProductPage() {
               method: shippingMethod,
               courier: courierCompany.trim(),
               courierCompany: courierCompany.trim(),
-              deliveryFee: feeMode === "fixed" ? feeN : 0,
+              deliveryFee: feeMode === "fixed" ? feeToStore : 0,
               deliveryNote: feeMode === "on_delivery" ? deliveryNote.trim() : "",
             };
 
       fd.append("shipping", JSON.stringify(shippingPayload));
 
-      const country = FULFILLMENT_COUNTRIES.find(
-        (c) => c.code === fulfillCountryCode,
-      );
+      const country = FULFILLMENT_COUNTRIES.find((c) => c.code === fulfillCountryCode);
       fd.append(
         "fulfillmentLocation",
         JSON.stringify(
@@ -915,17 +1130,13 @@ export default function EditProductPage() {
             countryCode: fulfillCountryCode,
             country: country?.name || "",
             stateCode: fulfillStateCode,
-            state:
-              fulfillStates.find((s) => s.code === fulfillStateCode)?.name ||
-              "",
+            state: fulfillStates.find((s) => s.code === fulfillStateCode)?.name || "",
             city: fulfillCity,
           }),
         ),
       );
 
-      const keepUrls = images
-        .filter((x) => x.type === "remote")
-        .map((x) => x.uri);
+      const keepUrls = images.filter((x) => x.type === "remote").map((x) => x.uri);
       fd.append("existingImages", JSON.stringify(keepUrls));
 
       images.forEach((item, idx) => {
@@ -968,6 +1179,8 @@ export default function EditProductPage() {
     }
   };
 
+  const optionLabels = optionDrafts.filter((o) => o.name.trim()).map((o) => o.name.trim());
+
   const previewProps: BuyerPreviewProps = {
     images: images.map((x) => x.uri),
     name,
@@ -984,6 +1197,8 @@ export default function EditProductPage() {
     courierCompany,
     deliveryFeeLabel,
     deliveryNote,
+    hasVariants,
+    optionLabels,
   };
 
   if (!isLoaded || pageLoading) {
@@ -1003,10 +1218,7 @@ export default function EditProductPage() {
     return (
       <div className="flex min-h-[50vh] flex-col items-center justify-center bg-bg px-6 text-center">
         <p className="font-semibold text-text">Sign in to edit products</p>
-        <Link
-          href="/sign-in"
-          className="mt-4 rounded-full bg-text px-6 py-2.5 text-sm font-bold text-bg"
-        >
+        <Link href="/sign-in" className="mt-4 rounded-full bg-text px-6 py-2.5 text-sm font-bold text-bg">
           Sign in
         </Link>
       </div>
@@ -1016,12 +1228,18 @@ export default function EditProductPage() {
   const sameRegion = productRegion === sellerRegion;
   const productRegionConfig = getRegion(productRegion);
 
+  const optionsStep = "04";
+  const docsStep = needsDocs ? "05" : null;
+  const fulfillStep = needsDocs ? "06" : "05";
+  const deliveryStep = needsDocs ? "07" : "06";
+  const saveStep = needsDocs ? "08" : "07";
+
   return (
     <div className="min-h-screen bg-bg text-text">
       <TopOverlay state={overlay} onDismiss={() => setOverlay(null)} />
 
-      <div className="mx-auto max-w-6xl px-3 py-4 sm:px-4 sm:py-6 md:px-6 md:py-8">
-        <div className="mb-4 flex items-center gap-2.5 sm:mb-6 sm:gap-3">
+      <div className="mx-auto max-w-6xl px-3 py-5 sm:px-4 sm:py-6 md:px-6 md:py-8">
+        <div className="mb-5 flex items-center gap-3 sm:mb-6">
           <Link
             href="/seller/products"
             className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-line bg-surface text-[#A7ADB8] transition hover:text-text"
@@ -1041,11 +1259,7 @@ export default function EditProductPage() {
 
         <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(280px,320px)] lg:items-start lg:gap-8">
           <div className="min-w-0">
-            <Section
-              step="01"
-              title="Images"
-              subtitle={`Up to ${maxImages} · first photo is always the cover`}
-            >
+            <Section step="01" title="Images" subtitle={`Up to ${maxImages} · first photo is always the cover`}>
               <div className="flex flex-wrap gap-2">
                 {images.map((item, i) => (
                   <div
@@ -1054,10 +1268,7 @@ export default function EditProductPage() {
                       i === 0 ? "ring-2 ring-[#00E575]" : ""
                     }`}
                   >
-                    <SafeImg
-                      src={item.uri}
-                      className="h-full w-full object-cover"
-                    />
+                    <SafeImg src={item.uri} className="h-full w-full object-cover" />
                     {i === 0 ? (
                       <span className="absolute left-1 top-1 rounded bg-[#00E575] px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-[#041412]">
                         Cover
@@ -1104,49 +1315,46 @@ export default function EditProductPage() {
 
             <Section step="02" title="Basics">
               <Label>Product name *</Label>
-              <input
-                className={inputCls}
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-              />
+              <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} />
               <Label>Brand</Label>
-              <input
-                className={inputCls}
-                value={brand}
-                onChange={(e) => setBrand(e.target.value)}
-              />
+              <input className={inputCls} value={brand} onChange={(e) => setBrand(e.target.value)} />
               <div className="grid grid-cols-1 gap-0 sm:grid-cols-2 sm:gap-3">
                 <div>
                   <Label>
-                    Price * ({sellerRegionConfig.currency.symbol}{" "}
-                    {sellerRegionConfig.currency.code})
+                    Price * ({sellerRegionConfig.currency.symbol} {sellerRegionConfig.currency.code})
                   </Label>
                   <input
                     className={inputCls}
                     value={price}
-                    onChange={(e) =>
-                      setPrice(e.target.value.replace(/[^0-9.]/g, ""))
-                    }
+                    onChange={(e) => setPrice(e.target.value.replace(/[^0-9.]/g, ""))}
                     inputMode="decimal"
                   />
                   {!sameRegion && (
                     <p className="mb-3 -mt-2 text-[11px] leading-snug text-amber-400/90">
-                      Converted from original {productRegionConfig.currency.code}
-                      . On save stored in {productRegionConfig.currency.code}.
+                      Converted from original {productRegionConfig.currency.code}. On save stored in{" "}
+                      {productRegionConfig.currency.code}.
                     </p>
                   )}
                 </div>
-                <div>
-                  <Label>Stock *</Label>
-                  <input
-                    className={inputCls}
-                    value={stock}
-                    onChange={(e) =>
-                      setStock(e.target.value.replace(/[^0-9]/g, ""))
-                    }
-                    inputMode="numeric"
-                  />
-                </div>
+                {!hasVariants ? (
+                  <div>
+                    <Label>Stock *</Label>
+                    <input
+                      className={inputCls}
+                      value={stock}
+                      onChange={(e) => setStock(e.target.value.replace(/[^0-9]/g, ""))}
+                      inputMode="numeric"
+                    />
+                  </div>
+                ) : (
+                  <div>
+                    <Label>Total stock</Label>
+                    <p className="mb-3 rounded-[14px] border border-line bg-[#0A121C] px-3.5 py-[13px] text-[15px] text-white/70">
+                      {variantTotalStock}{" "}
+                      <span className="text-[12px] text-[#737A86]">(sum of variants)</span>
+                    </p>
+                  </div>
+                )}
               </div>
               <Label>Description</Label>
               <textarea
@@ -1214,33 +1422,193 @@ export default function EditProductPage() {
                 ))}
             </Section>
 
+            <Section
+              step={optionsStep}
+              title="Options & inventory"
+              subtitle="Simple stock, or buyer-selectable options"
+            >
+              <div className="mb-4 grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setHasVariants(false);
+                    setOptionDrafts([]);
+                    setVariantDrafts([]);
+                  }}
+                  className={`rounded-[14px] border px-3 py-3.5 text-left ${
+                    !hasVariants ? "border-green/40 bg-green/8" : "border-line bg-[#0A121C]"
+                  }`}
+                >
+                  <span className={`text-[13px] font-semibold ${!hasVariants ? "text-text" : "text-[#737A86]"}`}>
+                    Simple product
+                  </span>
+                  <span className="mt-1 block text-[11px] text-[#737A86]">One stock number</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setHasVariants(true)}
+                  className={`rounded-[14px] border px-3 py-3.5 text-left ${
+                    hasVariants ? "border-green/40 bg-green/8" : "border-line bg-[#0A121C]"
+                  }`}
+                >
+                  <span className={`text-[13px] font-semibold ${hasVariants ? "text-text" : "text-[#737A86]"}`}>
+                    Options & variants
+                  </span>
+                  <span className="mt-1 block text-[11px] text-[#737A86]">Size, color, storage…</span>
+                </button>
+              </div>
+
+              {hasVariants && (
+                <div className="space-y-4">
+                  <p className="text-[12px] leading-relaxed text-[#737A86]">
+                    Specs stay factual. Options are buyer choices. Max 5 groups · 30 values · 200 variants.
+                  </p>
+
+                  {optionDrafts.map((opt, idx) => (
+                    <div key={opt.id} className="rounded-[14px] border border-line bg-[#0A121C] p-3">
+                      <div className="mb-2 flex items-center justify-between">
+                        <p className="text-[12px] font-bold text-white/60">Option {idx + 1}</p>
+                        <button
+                          type="button"
+                          onClick={() => setOptionDrafts((p) => p.filter((o) => o.id !== opt.id))}
+                        >
+                          <Trash2 className="h-4 w-4 text-[#FF8A9A]" />
+                        </button>
+                      </div>
+                      <Label>Name (e.g. Size, Color)</Label>
+                      <input
+                        className={inputCls}
+                        value={opt.name}
+                        onChange={(e) =>
+                          setOptionDrafts((prev) =>
+                            prev.map((o) => (o.id === opt.id ? { ...o, name: e.target.value } : o)),
+                          )
+                        }
+                        placeholder="Size"
+                      />
+                      <Label>Values (comma-separated)</Label>
+                      <input
+                        className={inputCls}
+                        value={opt.valuesText}
+                        onChange={(e) =>
+                          setOptionDrafts((prev) =>
+                            prev.map((o) =>
+                              o.id === opt.id ? { ...o, valuesText: e.target.value } : o,
+                            ),
+                          )
+                        }
+                        placeholder="S, M, L, XL"
+                      />
+                    </div>
+                  ))}
+
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={addOptionGroup}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-line bg-[#0A121C] px-3 py-2 text-xs font-semibold text-[#A7ADB8]"
+                    >
+                      <Plus className="h-3.5 w-3.5" /> Add option
+                    </button>
+                    <button
+                      type="button"
+                      onClick={regenerateVariants}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-green/30 bg-green/10 px-3 py-2 text-xs font-bold text-green"
+                    >
+                      Generate variants
+                    </button>
+                  </div>
+
+                  {variantDrafts.length > 0 && (
+                    <div className="mt-2 overflow-x-auto">
+                      <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.8px] text-[#737A86]">
+                        Variants · {variantDrafts.length}
+                      </p>
+                      <div className="min-w-[280px] space-y-2">
+                        {variantDrafts.map((v) => {
+                          const label = Object.entries(v.options)
+                            .map(([k, val]) => `${k}: ${val}`)
+                            .join(" · ");
+                          return (
+                            <div
+                              key={v.key}
+                              className={`rounded-[12px] border p-3 ${
+                                v.available
+                                  ? "border-line bg-[#0A121C]"
+                                  : "border-white/6 bg-transparent opacity-60"
+                              }`}
+                            >
+                              <p className="mb-2 text-[13px] font-semibold text-text">{label}</p>
+                              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                                <div>
+                                  <Label>Stock</Label>
+                                  <input
+                                    className={inputCls}
+                                    value={v.stock}
+                                    onChange={(e) => {
+                                      const val = e.target.value.replace(/[^0-9]/g, "");
+                                      setVariantDrafts((prev) =>
+                                        prev.map((x) => (x.key === v.key ? { ...x, stock: val } : x)),
+                                      );
+                                    }}
+                                    inputMode="numeric"
+                                  />
+                                </div>
+                                <div>
+                                  <Label>Price override</Label>
+                                  <input
+                                    className={inputCls}
+                                    value={v.price}
+                                    onChange={(e) => {
+                                      const val = e.target.value.replace(/[^0-9.]/g, "");
+                                      setVariantDrafts((prev) =>
+                                        prev.map((x) => (x.key === v.key ? { ...x, price: val } : x)),
+                                      );
+                                    }}
+                                    placeholder="Base"
+                                    inputMode="decimal"
+                                  />
+                                </div>
+                                <div className="flex items-end pb-3">
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setVariantDrafts((prev) =>
+                                        prev.map((x) =>
+                                          x.key === v.key ? { ...x, available: !x.available } : x,
+                                        ),
+                                      )
+                                    }
+                                    className={pillCls(v.available)}
+                                  >
+                                    {v.available ? "Available" : "Off"}
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </Section>
+
             {needsDocs && (
-              <Section
-                step="04"
-                title="Documents"
-                subtitle="Required for this category"
-              >
+              <Section step={docsStep!} title="Documents" subtitle="Required for this category">
                 {existingDocs.map((doc, index) => (
-                  <div
-                    key={`ex-${index}`}
-                    className="mb-2.5 rounded-[14px] border border-line bg-[#0A121C] p-3"
-                  >
+                  <div key={`ex-${index}`} className="mb-2.5 rounded-[14px] border border-line bg-[#0A121C] p-3">
                     <div className="flex items-center gap-2">
                       <div className="min-w-0 flex-1">
-                        <p className="truncate text-[13px] text-text">
-                          {doc.documentName}
-                        </p>
+                        <p className="truncate text-[13px] text-text">{doc.documentName}</p>
                         <p className="text-[11px] capitalize text-[#737A86]">
                           {doc.documentType.replace(/_/g, " ")} · saved
                         </p>
                       </div>
                       <button
                         type="button"
-                        onClick={() =>
-                          setExistingDocs((prev) =>
-                            prev.filter((_, i) => i !== index),
-                          )
-                        }
+                        onClick={() => setExistingDocs((prev) => prev.filter((_, i) => i !== index))}
                       >
                         <Trash2 className="h-4 w-4 text-[#FF8A9A]" />
                       </button>
@@ -1248,21 +1616,12 @@ export default function EditProductPage() {
                   </div>
                 ))}
                 {newDocuments.map((doc, index) => (
-                  <div
-                    key={`new-${index}`}
-                    className="mb-2.5 rounded-[14px] border border-line bg-[#0A121C] p-3"
-                  >
+                  <div key={`new-${index}`} className="mb-2.5 rounded-[14px] border border-line bg-[#0A121C] p-3">
                     <div className="mb-2 flex items-center gap-2">
-                      <p className="min-w-0 flex-1 truncate text-[13px] text-text">
-                        {doc.name}
-                      </p>
+                      <p className="min-w-0 flex-1 truncate text-[13px] text-text">{doc.name}</p>
                       <button
                         type="button"
-                        onClick={() =>
-                          setNewDocuments((p) =>
-                            p.filter((_, i) => i !== index),
-                          )
-                        }
+                        onClick={() => setNewDocuments((p) => p.filter((_, i) => i !== index))}
                       >
                         <Trash2 className="h-4 w-4 text-[#FF8A9A]" />
                       </button>
@@ -1274,9 +1633,7 @@ export default function EditProductPage() {
                           type="button"
                           onClick={() =>
                             setNewDocuments((prev) =>
-                              prev.map((d, i) =>
-                                i === index ? { ...d, type: t.id } : d,
-                              ),
+                              prev.map((d, i) => (i === index ? { ...d, type: t.id } : d)),
                             )
                           }
                           className={pillCls(doc.type === t.id)}
@@ -1307,11 +1664,7 @@ export default function EditProductPage() {
               </Section>
             )}
 
-            <Section
-              step={needsDocs ? "05" : "04"}
-              title="Fulfillment location"
-              subtitle="Where this ships from"
-            >
+            <Section step={fulfillStep} title="Fulfillment location" subtitle="Where this ships from">
               <Label>Country *</Label>
               <div className="mb-3 flex flex-wrap">
                 {FULFILLMENT_COUNTRIES.map((c) => (
@@ -1349,31 +1702,26 @@ export default function EditProductPage() {
                   </div>
                 </>
               )}
-              {!!fulfillCountryCode &&
-                (fulfillStates.length === 0 || !!fulfillStateCode) && (
-                  <>
-                    <Label>City *</Label>
-                    <div className="mb-2 flex flex-wrap gap-2">
-                      {fulfillCities.map((city) => (
-                        <button
-                          key={city}
-                          type="button"
-                          onClick={() => setFulfillCity(city)}
-                          className={pillCls(fulfillCity === city)}
-                        >
-                          {city}
-                        </button>
-                      ))}
-                    </div>
-                  </>
-                )}
+              {!!fulfillCountryCode && (fulfillStates.length === 0 || !!fulfillStateCode) && (
+                <>
+                  <Label>City *</Label>
+                  <div className="mb-2 flex flex-wrap gap-2">
+                    {fulfillCities.map((city) => (
+                      <button
+                        key={city}
+                        type="button"
+                        onClick={() => setFulfillCity(city)}
+                        className={pillCls(fulfillCity === city)}
+                      >
+                        {city}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
             </Section>
 
-            <Section
-              step={needsDocs ? "06" : "05"}
-              title="Delivery"
-              subtitle="How buyers are charged for delivery"
-            >
+            <Section step={deliveryStep} title="Delivery" subtitle="How buyers are charged for delivery">
               <Label>Delivery charge *</Label>
               <div className="mb-3.5 grid grid-cols-1 gap-2 sm:grid-cols-3">
                 {(
@@ -1401,16 +1749,10 @@ export default function EditProductPage() {
                         }
                       }}
                       className={`rounded-[14px] border px-3 py-3.5 text-left ${
-                        active
-                          ? "border-green/40 bg-green/8"
-                          : "border-line bg-[#0A121C]"
+                        active ? "border-green/40 bg-green/8" : "border-line bg-[#0A121C]"
                       }`}
                     >
-                      <span
-                        className={`text-[13px] font-semibold ${
-                          active ? "text-text" : "text-[#737A86]"
-                        }`}
-                      >
+                      <span className={`text-[13px] font-semibold ${active ? "text-text" : "text-[#737A86]"}`}>
                         {opt.label}
                       </span>
                     </button>
@@ -1430,23 +1772,13 @@ export default function EditProductPage() {
                           type="button"
                           onClick={() => setShippingMethod(m)}
                           className={`flex flex-col items-center rounded-[14px] border py-3.5 sm:py-4 ${
-                            active
-                              ? "border-green/40 bg-green/8"
-                              : "border-line bg-[#0A121C]"
+                            active ? "border-green/40 bg-green/8" : "border-line bg-[#0A121C]"
                           }`}
                         >
                           {m === "self" ? (
-                            <Footprints
-                              className={`h-5 w-5 ${
-                                active ? "text-green" : "text-[#737A86]"
-                              }`}
-                            />
+                            <Footprints className={`h-5 w-5 ${active ? "text-green" : "text-[#737A86]"}`} />
                           ) : (
-                            <Truck
-                              className={`h-5 w-5 ${
-                                active ? "text-green" : "text-[#737A86]"
-                              }`}
-                            />
+                            <Truck className={`h-5 w-5 ${active ? "text-green" : "text-[#737A86]"}`} />
                           )}
                           <span
                             className={`mt-2 text-[12px] font-semibold sm:text-[13px] ${
@@ -1474,17 +1806,11 @@ export default function EditProductPage() {
 
                   {feeMode === "fixed" && (
                     <>
-                      <Label>
-                        Delivery fee * ({sellerRegionConfig.currency.symbol})
-                      </Label>
+                      <Label>Delivery fee * ({sellerRegionConfig.currency.symbol})</Label>
                       <input
                         className={inputCls}
                         value={deliveryFee}
-                        onChange={(e) =>
-                          setDeliveryFee(
-                            e.target.value.replace(/[^0-9.]/g, ""),
-                          )
-                        }
+                        onChange={(e) => setDeliveryFee(e.target.value.replace(/[^0-9.]/g, ""))}
                         placeholder="0.00"
                         inputMode="decimal"
                       />
@@ -1501,8 +1827,7 @@ export default function EditProductPage() {
                         placeholder="e.g. Cash or POS on arrival"
                       />
                       <p className="mb-3 -mt-2 text-[11px] text-[#737A86]">
-                        Buyer pays delivery when the order arrives — not in
-                        checkout total.
+                        Buyer pays delivery when the order arrives — not in checkout total.
                       </p>
                     </>
                   )}
@@ -1510,29 +1835,22 @@ export default function EditProductPage() {
               )}
 
               {feeMode === "free" && (
-                <p className="text-[12px] text-[#737A86]">
-                  No delivery charge. Checkout will show Free delivery.
-                </p>
+                <p className="text-[12px] text-[#737A86]">No delivery charge. Checkout will show Free delivery.</p>
               )}
             </Section>
 
-            <Section step={needsDocs ? "07" : "06"} title="Save changes">
+            <Section step={saveStep} title="Save changes">
               <div className="mb-1.5 flex justify-between text-[13px]">
                 <span className="text-[#737A86]">Plan</span>
-                <span className="font-semibold capitalize text-text">
-                  {CURRENT_PLAN}
-                </span>
+                <span className="font-semibold capitalize text-text">{CURRENT_PLAN}</span>
               </div>
               <div className="mb-1 flex justify-between text-[13px]">
                 <span className="text-[#737A86]">Transaction fee</span>
-                <span className="font-semibold text-text">
-                  {feePct}% of product price
-                </span>
+                <span className="font-semibold text-text">{feePct}% of product price</span>
               </div>
               <p className="text-[11px] leading-relaxed text-[#737A86]">
-                Fee applies only to product price — never delivery. Original
-                region stays {productRegionConfig.flag}{" "}
-                {productRegionConfig.name}.
+                Fee applies only to product price — never delivery. Original region stays{" "}
+                {productRegionConfig.flag} {productRegionConfig.name}.
               </p>
             </Section>
 

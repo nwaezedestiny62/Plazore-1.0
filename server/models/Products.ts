@@ -22,6 +22,45 @@ const verificationDocumentSchema = new Schema(
   { _id: false }
 );
 
+/** Buyer-selectable option group (e.g. Size, Color). Not the same as specifications. */
+const productOptionSchema = new Schema(
+  {
+    id: { type: String, required: true, trim: true },
+    name: { type: String, required: true, trim: true },
+    values: {
+      type: [String],
+      default: [],
+      validate: {
+        validator: (arr: string[]) => Array.isArray(arr) && arr.length <= 30,
+        message: "Each option may have at most 30 values",
+      },
+    },
+  },
+  { _id: false }
+);
+
+/**
+ * Concrete combination of option values.
+ * Inventory and optional price live here when hasVariants is true.
+ */
+const productVariantSchema = new Schema(
+  {
+    variantId: { type: String, required: true, trim: true },
+    /** Deterministic key e.g. "color=navy|size=m" (sorted option names) */
+    key: { type: String, required: true, trim: true, index: true },
+    options: {
+      type: Map,
+      of: String,
+      default: {},
+    },
+    stock: { type: Number, required: true, default: 0, min: 0 },
+    /** null / undefined = use product.price */
+    price: { type: Number, default: null, min: 0 },
+    available: { type: Boolean, default: true },
+  },
+  { _id: false }
+);
+
 const productSchema = new Schema<IProduct>(
   {
     name: { type: String, required: true, trim: true },
@@ -31,6 +70,7 @@ const productSchema = new Schema<IProduct>(
     category: { type: String, required: true, trim: true },
     subCategory: { type: String, default: "", trim: true },
     brand: { type: String, default: "", trim: true },
+    /** Simple-product inventory. When hasVariants is true, purchases use variants[].stock instead. */
     stock: { type: Number, required: true, default: 0, min: 0 },
     isFeatured: { type: Boolean, default: false },
     isActive: { type: Boolean, default: true },
@@ -72,7 +112,7 @@ const productSchema = new Schema<IProduct>(
       required: false,
     },
 
-    // Category-specific structured specs (key → value)
+    // Category-specific structured specs (key → value) — factual product info
     specifications: {
       type: Map,
       of: String,
@@ -90,6 +130,29 @@ const productSchema = new Schema<IProduct>(
       default: 0,
       min: 0,
     },
+
+    // ——— Product options & variants (optional; existing products stay simple) ———
+    hasVariants: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    options: {
+      type: [productOptionSchema],
+      default: [],
+      validate: {
+        validator: (arr: unknown[]) => Array.isArray(arr) && arr.length <= 5,
+        message: "A product may have at most 5 option groups",
+      },
+    },
+    variants: {
+      type: [productVariantSchema],
+      default: [],
+      validate: {
+        validator: (arr: unknown[]) => Array.isArray(arr) && arr.length <= 200,
+        message: "A product may have at most 200 variants",
+      },
+    },
   },
   { timestamps: true }
 );
@@ -103,6 +166,7 @@ productSchema.index({
   "fulfillmentLocation.city": 1,
   "fulfillmentLocation.countryCode": 1,
 });
+productSchema.index({ "variants.variantId": 1 });
 
 const Product = mongoose.model<IProduct>("Product", productSchema);
 export default Product;

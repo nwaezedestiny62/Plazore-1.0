@@ -7,6 +7,7 @@ import {
   FileUp,
   Footprints,
   ImagePlus,
+  Plus,
   Rocket,
   Store,
   Trash2,
@@ -35,14 +36,116 @@ import {
 } from "@/lib/productSpecs";
 import { formatMoney, getRegion } from "@/lib/regions";
 
-const API = process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com/api";
+const API =
+  process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com/api";
 const CURRENT_PLAN = "free" as keyof typeof PLAN_IMAGE_LIMITS;
 
 type OverlayTone = "info" | "success" | "danger";
 type Overlay = { title: string; message?: string; tone?: OverlayTone } | null;
 type LocalDoc = { file: File; name: string; type: string };
 
-function TopOverlay({ state, onDismiss }: { state: Overlay; onDismiss: () => void }) {
+type OptionDraft = { id: string; name: string; valuesText: string };
+type VariantDraft = {
+  variantId: string;
+  key: string;
+  options: Record<string, string>;
+  stock: string;
+  price: string;
+  available: boolean;
+};
+
+function draftUid() {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+function parseValues(text: string): string[] {
+  const parts = text
+    .split(/[,|\n]/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const p of parts) {
+    const k = p.toLowerCase();
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(p);
+    if (out.length >= 30) break;
+  }
+  return out;
+}
+
+function cartesian(
+  groups: { name: string; values: string[] }[]
+): Record<string, string>[] {
+  if (!groups.length) return [];
+  return groups.reduce<Record<string, string>[]>(
+    (acc, g) => {
+      if (!acc.length) {
+        return g.values.map((v) => ({ [g.name]: v }));
+      }
+      const next: Record<string, string>[] = [];
+      for (const row of acc) {
+        for (const v of g.values) {
+          next.push({ ...row, [g.name]: v });
+        }
+      }
+      return next;
+    },
+    []
+  );
+}
+
+function buildVariantKey(opts: Record<string, string>): string {
+  return Object.entries(opts)
+    .map(([k, v]) => [
+      k.trim().toLowerCase(),
+      String(v).trim().toLowerCase(),
+    ])
+    .filter(([k, v]) => k && v)
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([k, v]) => `${k}=${v}`)
+    .join("|");
+}
+
+function generateVariantsFromOptions(
+  optionDrafts: OptionDraft[],
+  prev: VariantDraft[]
+): VariantDraft[] {
+  const groups = optionDrafts
+    .map((o) => ({
+      name: o.name.trim(),
+      values: parseValues(o.valuesText),
+    }))
+    .filter((g) => g.name && g.values.length > 0)
+    .slice(0, 5);
+
+  if (!groups.length) return [];
+
+  const combos = cartesian(groups).slice(0, 200);
+  const prevByKey = new Map(prev.map((v) => [v.key, v]));
+
+  return combos.map((opts) => {
+    const key = buildVariantKey(opts);
+    const old = prevByKey.get(key);
+    return {
+      variantId: old?.variantId || draftUid(),
+      key,
+      options: opts,
+      stock: old?.stock ?? "0",
+      price: old?.price ?? "",
+      available: old?.available ?? true,
+    };
+  });
+}
+
+function TopOverlay({
+  state,
+  onDismiss,
+}: {
+  state: Overlay;
+  onDismiss: () => void;
+}) {
   useEffect(() => {
     if (!state) return;
     const t = setTimeout(onDismiss, 4000);
@@ -50,7 +153,11 @@ function TopOverlay({ state, onDismiss }: { state: Overlay; onDismiss: () => voi
   }, [state, onDismiss]);
   if (!state) return null;
   const accent =
-    state.tone === "danger" ? "#EF4444" : state.tone === "success" ? "#00E575" : "#3B82F6";
+    state.tone === "danger"
+      ? "#EF4444"
+      : state.tone === "success"
+        ? "#00E575"
+        : "#3B82F6";
   return (
     <div className="pointer-events-none fixed inset-x-0 top-0 z-[200] px-3 pt-3 sm:px-4 md:px-6">
       <div className="pointer-events-auto mx-auto flex max-w-lg overflow-hidden rounded-xl border border-white/10 bg-[#11141A] shadow-lg">
@@ -59,10 +166,16 @@ function TopOverlay({ state, onDismiss }: { state: Overlay; onDismiss: () => voi
           <div className="min-w-0 flex-1">
             <p className="text-sm font-bold text-text">{state.title}</p>
             {state.message && (
-              <p className="mt-0.5 text-[12.5px] leading-[18px] text-[#A7ADB8]">{state.message}</p>
+              <p className="mt-0.5 text-[12.5px] leading-[18px] text-[#A7ADB8]">
+                {state.message}
+              </p>
             )}
           </div>
-          <button type="button" onClick={onDismiss} className="shrink-0 text-[#737A86] hover:text-text">
+          <button
+            type="button"
+            onClick={onDismiss}
+            className="shrink-0 text-[#737A86] hover:text-text"
+          >
             ×
           </button>
         </div>
@@ -89,8 +202,14 @@ function Section({
           {step}
         </div>
         <div className="min-w-0">
-          <p className="text-[15px] font-bold text-text sm:text-base">{title}</p>
-          {subtitle && <p className="text-[11px] leading-snug text-[#737A86]">{subtitle}</p>}
+          <p className="text-[15px] font-bold text-text sm:text-base">
+            {title}
+          </p>
+          {subtitle && (
+            <p className="text-[11px] leading-snug text-[#737A86]">
+              {subtitle}
+            </p>
+          )}
         </div>
       </div>
       <div className="mb-3 h-px bg-line sm:mb-3.5" />
@@ -143,11 +262,19 @@ export default function AddProductPage() {
   const [specs, setSpecs] = useState<Record<string, string>>({});
   const [documents, setDocuments] = useState<LocalDoc[]>([]);
 
+  const [hasVariants, setHasVariants] = useState(false);
+  const [optionDrafts, setOptionDrafts] = useState<OptionDraft[]>([]);
+  const [variantDrafts, setVariantDrafts] = useState<VariantDraft[]>([]);
+
   const [fulfillCountryCode, setFulfillCountryCode] = useState("");
   const [fulfillStateCode, setFulfillStateCode] = useState("");
   const [fulfillCity, setFulfillCity] = useState("");
-  const [feeMode, setFeeMode] = useState<"free" | "fixed" | "on_delivery" | null>(null);
-  const [shippingMethod, setShippingMethod] = useState<"self" | "courier" | null>(null);
+  const [feeMode, setFeeMode] = useState<
+    "free" | "fixed" | "on_delivery" | null
+  >(null);
+  const [shippingMethod, setShippingMethod] = useState<
+    "self" | "courier" | null
+  >(null);
   const [courierCompany, setCourierCompany] = useState("");
   const [deliveryFee, setDeliveryFee] = useState("");
   const [deliveryNote, setDeliveryNote] = useState("");
@@ -159,7 +286,7 @@ export default function AddProductPage() {
     (title: string, message?: string, tone: OverlayTone = "info") => {
       setOverlay({ title, message, tone });
     },
-    [],
+    []
   );
 
   useEffect(() => {
@@ -171,7 +298,8 @@ export default function AddProductPage() {
           headers: { Authorization: `Bearer ${token}` },
         });
         const json = await res.json();
-        if (json?.success && json.data?.storeName) setStoreName(json.data.storeName);
+        if (json?.success && json.data?.storeName)
+          setStoreName(json.data.storeName);
       } catch {
         /* ignore */
       }
@@ -184,11 +312,11 @@ export default function AddProductPage() {
   const docTypes = useMemo(() => getDocTypes(category), [category]);
   const fulfillStates = useMemo(
     () => getStatesForCountry(fulfillCountryCode),
-    [fulfillCountryCode],
+    [fulfillCountryCode]
   );
   const fulfillCities = useMemo(
     () => getCitiesForState(fulfillCountryCode, fulfillStateCode),
-    [fulfillCountryCode, fulfillStateCode],
+    [fulfillCountryCode, fulfillStateCode]
   );
 
   const shipsFrom = useMemo(() => {
@@ -204,8 +332,18 @@ export default function AddProductPage() {
   }, [fulfillCountryCode, fulfillStateCode, fulfillCity, fulfillStates]);
 
   const priceN = Number(price) || 0;
-  const stockN = Math.max(0, parseInt(stock || "0", 10) || 0);
   const feeN = Number(deliveryFee) || 0;
+
+  const variantTotalStock = useMemo(() => {
+    if (!hasVariants) return 0;
+    return variantDrafts
+      .filter((v) => v.available !== false)
+      .reduce((s, v) => s + (parseInt(v.stock || "0", 10) || 0), 0);
+  }, [hasVariants, variantDrafts]);
+
+  const stockN = hasVariants
+    ? variantTotalStock
+    : Math.max(0, parseInt(stock || "0", 10) || 0);
 
   const formatPreviewPrice = useCallback(
     (n: number) => {
@@ -215,7 +353,7 @@ export default function AddProductPage() {
         return formatMoney(n, region);
       }
     },
-    [formatProduct, region],
+    [formatProduct, region]
   );
 
   const deliveryLabel =
@@ -292,7 +430,31 @@ export default function AddProductPage() {
     });
   };
 
-  /** FIXED: free shipping does not require method */
+  const addOptionGroup = () => {
+    if (optionDrafts.length >= 5) {
+      toast("Limit", "Maximum 5 option groups", "danger");
+      return;
+    }
+    setOptionDrafts((prev) => [
+      ...prev,
+      { id: draftUid(), name: "", valuesText: "" },
+    ]);
+  };
+
+  const regenerateVariants = () => {
+    const next = generateVariantsFromOptions(optionDrafts, variantDrafts);
+    setVariantDrafts(next);
+    if (!next.length) {
+      toast(
+        "No variants",
+        "Add option names and values (e.g. Size: S, M, L)",
+        "info"
+      );
+    } else {
+      toast("Variants ready", `${next.length} combination(s)`, "success");
+    }
+  };
+
   const validate = () => {
     if (!imageFiles.length)
       return "Add at least one product image (first one becomes the cover)";
@@ -301,6 +463,24 @@ export default function AddProductPage() {
     if (!category) return "Select a category";
     if (!fulfillCountryCode || !fulfillCity) return "Set fulfillment location";
     if (!feeMode) return "Choose a delivery charge option";
+
+    if (hasVariants) {
+      const opts = optionDrafts
+        .map((o) => ({
+          name: o.name.trim(),
+          values: parseValues(o.valuesText),
+        }))
+        .filter((o) => o.name && o.values.length);
+      if (!opts.length) return "Add at least one option group with values";
+      if (!variantDrafts.length)
+        return "Generate variants after defining options";
+      if (variantDrafts.every((v) => !v.available))
+        return "At least one variant must be available";
+      const anyStock = variantDrafts.some(
+        (v) => v.available && (parseInt(v.stock || "0", 10) || 0) > 0
+      );
+      if (!anyStock) return "Set stock on at least one available variant";
+    }
 
     if (feeMode === "free") return null;
 
@@ -327,7 +507,6 @@ export default function AddProductPage() {
       fd.append("name", name.trim());
       fd.append("brand", brand.trim());
       fd.append("price", String(priceN));
-      fd.append("stock", String(stockN));
       fd.append("description", description.trim());
       fd.append("category", category);
       fd.append("subCategory", subCategory);
@@ -335,7 +514,39 @@ export default function AddProductPage() {
       fd.append("currency", regionConfig.currency.code);
       fd.append("specifications", JSON.stringify(specs));
 
-      // FIXED: free always sends a valid method so server never complains
+      fd.append("hasVariants", hasVariants ? "true" : "false");
+
+      if (hasVariants) {
+        const options = optionDrafts
+          .map((o) => ({
+            id: o.id,
+            name: o.name.trim(),
+            values: parseValues(o.valuesText),
+          }))
+          .filter((o) => o.name && o.values.length)
+          .slice(0, 5);
+
+        const variants = variantDrafts.slice(0, 200).map((v) => ({
+          variantId: v.variantId,
+          key: v.key,
+          options: v.options,
+          stock: Math.max(0, parseInt(v.stock || "0", 10) || 0),
+          price: v.price.trim() === "" ? null : Number(v.price) || null,
+          available: v.available !== false,
+        }));
+
+        fd.append("options", JSON.stringify(options));
+        fd.append("variants", JSON.stringify(variants));
+        const total = variants
+          .filter((v) => v.available)
+          .reduce((s, v) => s + v.stock, 0);
+        fd.append("stock", String(total));
+      } else {
+        fd.append("stock", String(stockN));
+        fd.append("options", JSON.stringify([]));
+        fd.append("variants", JSON.stringify([]));
+      }
+
       const shippingPayload =
         feeMode === "free"
           ? {
@@ -352,12 +563,15 @@ export default function AddProductPage() {
               courier: courierCompany.trim(),
               courierCompany: courierCompany.trim(),
               deliveryFee: feeMode === "fixed" ? feeN : 0,
-              deliveryNote: feeMode === "on_delivery" ? deliveryNote.trim() : "",
+              deliveryNote:
+                feeMode === "on_delivery" ? deliveryNote.trim() : "",
             };
 
       fd.append("shipping", JSON.stringify(shippingPayload));
 
-      const country = FULFILLMENT_COUNTRIES.find((c) => c.code === fulfillCountryCode);
+      const country = FULFILLMENT_COUNTRIES.find(
+        (c) => c.code === fulfillCountryCode
+      );
       fd.append(
         "fulfillmentLocation",
         JSON.stringify(
@@ -365,10 +579,12 @@ export default function AddProductPage() {
             countryCode: fulfillCountryCode,
             country: country?.name || "",
             stateCode: fulfillStateCode,
-            state: fulfillStates.find((s) => s.code === fulfillStateCode)?.name || "",
+            state:
+              fulfillStates.find((s) => s.code === fulfillStateCode)?.name ||
+              "",
             city: fulfillCity,
-          }),
-        ),
+          })
+        )
       );
 
       imageFiles.forEach((f, idx) => {
@@ -459,6 +675,12 @@ export default function AddProductPage() {
     );
   }
 
+  const optionsStep = "04";
+  const docsStep = needsDocs ? "05" : null;
+  const fulfillStep = needsDocs ? "06" : "05";
+  const deliveryStep = needsDocs ? "07" : "06";
+  const publishStep = needsDocs ? "08" : "07";
+
   return (
     <div className="min-h-screen w-full overflow-x-hidden bg-bg text-text">
       <TopOverlay state={overlay} onDismiss={() => setOverlay(null)} />
@@ -484,7 +706,6 @@ export default function AddProductPage() {
 
         <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(280px,320px)] lg:items-start lg:gap-8">
           <div className="min-w-0">
-            {/* 01 Images */}
             <Section
               step="01"
               title="Images"
@@ -499,7 +720,11 @@ export default function AddProductPage() {
                     }`}
                   >
                     {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={url} alt="" className="h-full w-full object-cover" />
+                    <img
+                      src={url}
+                      alt=""
+                      className="h-full w-full object-cover"
+                    />
                     {i === 0 && (
                       <div className="absolute left-1 top-1 rounded bg-green px-1.5 py-0.5 text-[9px] font-bold text-[#041412]">
                         COVER
@@ -547,7 +772,6 @@ export default function AddProductPage() {
               />
             </Section>
 
-            {/* 02 Basics */}
             <Section step="02" title="Basics">
               <Label>Product name *</Label>
               <input
@@ -566,29 +790,47 @@ export default function AddProductPage() {
               <div className="grid grid-cols-1 gap-0 sm:grid-cols-2 sm:gap-3">
                 <div>
                   <Label>
-                    Price * ({regionConfig.currency.symbol} {regionConfig.currency.code})
+                    Price * ({regionConfig.currency.symbol}{" "}
+                    {regionConfig.currency.code})
                   </Label>
                   <input
                     className={inputCls}
                     value={price}
-                    onChange={(e) => setPrice(e.target.value.replace(/[^0-9.]/g, ""))}
+                    onChange={(e) =>
+                      setPrice(e.target.value.replace(/[^0-9.]/g, ""))
+                    }
                     placeholder="0.00"
                     inputMode="decimal"
                   />
                   <p className="mb-3 -mt-2 text-[11px] text-[#737A86]">
-                    Locked to your current marketplace region
+                    Base price · variants can override
                   </p>
                 </div>
-                <div>
-                  <Label>Stock *</Label>
-                  <input
-                    className={inputCls}
-                    value={stock}
-                    onChange={(e) => setStock(e.target.value.replace(/[^0-9]/g, ""))}
-                    placeholder="1"
-                    inputMode="numeric"
-                  />
-                </div>
+                {!hasVariants && (
+                  <div>
+                    <Label>Stock *</Label>
+                    <input
+                      className={inputCls}
+                      value={stock}
+                      onChange={(e) =>
+                        setStock(e.target.value.replace(/[^0-9]/g, ""))
+                      }
+                      placeholder="1"
+                      inputMode="numeric"
+                    />
+                  </div>
+                )}
+                {hasVariants && (
+                  <div>
+                    <Label>Total stock</Label>
+                    <p className="mb-3 rounded-[14px] border border-line bg-[#0A121C] px-3.5 py-[13px] text-[15px] text-white/70">
+                      {variantTotalStock}{" "}
+                      <span className="text-[12px] text-[#737A86]">
+                        (sum of variants)
+                      </span>
+                    </p>
+                  </div>
+                )}
               </div>
               <Label>Description</Label>
               <textarea
@@ -600,7 +842,6 @@ export default function AddProductPage() {
               />
             </Section>
 
-            {/* 03 Category */}
             <Section step="03" title="Category & specs">
               <Label>Category *</Label>
               <div className="mb-3 flex flex-wrap">
@@ -648,7 +889,10 @@ export default function AddProductPage() {
                       className={inputCls}
                       value={specs[f.key] || ""}
                       onChange={(e) =>
-                        setSpecs((prev) => ({ ...prev, [f.key]: e.target.value }))
+                        setSpecs((prev) => ({
+                          ...prev,
+                          [f.key]: e.target.value,
+                        }))
                       }
                       placeholder={f.placeholder}
                     />
@@ -656,8 +900,239 @@ export default function AddProductPage() {
                 ))}
             </Section>
 
+            {/* Options & variants */}
+            <Section
+              step={optionsStep}
+              title="Options & inventory"
+              subtitle="Simple stock, or buyer-selectable options (size, color…)"
+            >
+              <div className="mb-4 grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setHasVariants(false);
+                    setOptionDrafts([]);
+                    setVariantDrafts([]);
+                  }}
+                  className={`rounded-[14px] border px-3 py-3.5 text-left ${
+                    !hasVariants
+                      ? "border-green/40 bg-green/8"
+                      : "border-line bg-[#0A121C]"
+                  }`}
+                >
+                  <span
+                    className={`text-[13px] font-semibold ${
+                      !hasVariants ? "text-text" : "text-[#737A86]"
+                    }`}
+                  >
+                    Simple product
+                  </span>
+                  <span className="mt-1 block text-[11px] text-[#737A86]">
+                    One stock number
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setHasVariants(true)}
+                  className={`rounded-[14px] border px-3 py-3.5 text-left ${
+                    hasVariants
+                      ? "border-green/40 bg-green/8"
+                      : "border-line bg-[#0A121C]"
+                  }`}
+                >
+                  <span
+                    className={`text-[13px] font-semibold ${
+                      hasVariants ? "text-text" : "text-[#737A86]"
+                    }`}
+                  >
+                    Options & variants
+                  </span>
+                  <span className="mt-1 block text-[11px] text-[#737A86]">
+                    Size, color, storage…
+                  </span>
+                </button>
+              </div>
+
+              {hasVariants && (
+                <div className="space-y-4">
+                  <p className="text-[12px] leading-relaxed text-[#737A86]">
+                    Specs above stay factual. Options are what the buyer
+                    chooses. Max 5 groups · 30 values each · 200 variants.
+                  </p>
+
+                  {optionDrafts.map((opt, idx) => (
+                    <div
+                      key={opt.id}
+                      className="rounded-[14px] border border-line bg-[#0A121C] p-3"
+                    >
+                      <div className="mb-2 flex items-center justify-between">
+                        <p className="text-[12px] font-bold text-white/60">
+                          Option {idx + 1}
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setOptionDrafts((p) =>
+                              p.filter((o) => o.id !== opt.id)
+                            )
+                          }
+                        >
+                          <Trash2 className="h-4 w-4 text-[#FF8A9A]" />
+                        </button>
+                      </div>
+                      <Label>Name (e.g. Size, Color)</Label>
+                      <input
+                        className={inputCls}
+                        value={opt.name}
+                        onChange={(e) =>
+                          setOptionDrafts((prev) =>
+                            prev.map((o) =>
+                              o.id === opt.id
+                                ? { ...o, name: e.target.value }
+                                : o
+                            )
+                          )
+                        }
+                        placeholder="Size"
+                      />
+                      <Label>Values (comma-separated)</Label>
+                      <input
+                        className={inputCls}
+                        value={opt.valuesText}
+                        onChange={(e) =>
+                          setOptionDrafts((prev) =>
+                            prev.map((o) =>
+                              o.id === opt.id
+                                ? { ...o, valuesText: e.target.value }
+                                : o
+                            )
+                          )
+                        }
+                        placeholder="S, M, L, XL"
+                      />
+                    </div>
+                  ))}
+
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={addOptionGroup}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-line bg-[#0A121C] px-3 py-2 text-xs font-semibold text-[#A7ADB8]"
+                    >
+                      <Plus className="h-3.5 w-3.5" /> Add option
+                    </button>
+                    <button
+                      type="button"
+                      onClick={regenerateVariants}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-green/30 bg-green/10 px-3 py-2 text-xs font-bold text-green"
+                    >
+                      Generate variants
+                    </button>
+                  </div>
+
+                  {variantDrafts.length > 0 && (
+                    <div className="mt-2 overflow-x-auto">
+                      <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.8px] text-[#737A86]">
+                        Variants · {variantDrafts.length}
+                      </p>
+                      <div className="min-w-[280px] space-y-2">
+                        {variantDrafts.map((v) => {
+                          const label = Object.entries(v.options)
+                            .map(([k, val]) => `${k}: ${val}`)
+                            .join(" · ");
+                          return (
+                            <div
+                              key={v.key}
+                              className={`rounded-[12px] border p-3 ${
+                                v.available
+                                  ? "border-line bg-[#0A121C]"
+                                  : "border-white/6 bg-transparent opacity-60"
+                              }`}
+                            >
+                              <p className="mb-2 text-[13px] font-semibold text-text">
+                                {label}
+                              </p>
+                              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                                <div>
+                                  <Label>Stock</Label>
+                                  <input
+                                    className={inputCls}
+                                    value={v.stock}
+                                    onChange={(e) => {
+                                      const val = e.target.value.replace(
+                                        /[^0-9]/g,
+                                        ""
+                                      );
+                                      setVariantDrafts((prev) =>
+                                        prev.map((x) =>
+                                          x.key === v.key
+                                            ? { ...x, stock: val }
+                                            : x
+                                        )
+                                      );
+                                    }}
+                                    inputMode="numeric"
+                                  />
+                                </div>
+                                <div>
+                                  <Label>Price override</Label>
+                                  <input
+                                    className={inputCls}
+                                    value={v.price}
+                                    onChange={(e) => {
+                                      const val = e.target.value.replace(
+                                        /[^0-9.]/g,
+                                        ""
+                                      );
+                                      setVariantDrafts((prev) =>
+                                        prev.map((x) =>
+                                          x.key === v.key
+                                            ? { ...x, price: val }
+                                            : x
+                                        )
+                                      );
+                                    }}
+                                    placeholder="Base"
+                                    inputMode="decimal"
+                                  />
+                                </div>
+                                <div className="flex items-end pb-3">
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setVariantDrafts((prev) =>
+                                        prev.map((x) =>
+                                          x.key === v.key
+                                            ? {
+                                                ...x,
+                                                available: !x.available,
+                                              }
+                                            : x
+                                        )
+                                      )
+                                    }
+                                    className={pillCls(v.available)}
+                                  >
+                                    {v.available ? "Available" : "Off"}
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </Section>
+
             {needsDocs && (
-              <Section step="04" title="Documents" subtitle="Required for this category">
+              <Section
+                step={docsStep!}
+                title="Documents"
+                subtitle="Required for this category"
+              >
                 {documents.map((doc, index) => (
                   <div
                     key={`${doc.name}-${index}`}
@@ -669,7 +1144,9 @@ export default function AddProductPage() {
                       </p>
                       <button
                         type="button"
-                        onClick={() => setDocuments((p) => p.filter((_, i) => i !== index))}
+                        onClick={() =>
+                          setDocuments((p) => p.filter((_, i) => i !== index))
+                        }
                       >
                         <Trash2 className="h-4 w-4 text-[#FF8A9A]" />
                       </button>
@@ -681,7 +1158,9 @@ export default function AddProductPage() {
                           type="button"
                           onClick={() =>
                             setDocuments((prev) =>
-                              prev.map((d, i) => (i === index ? { ...d, type: t.id } : d)),
+                              prev.map((d, i) =>
+                                i === index ? { ...d, type: t.id } : d
+                              )
                             )
                           }
                           className={pillCls(doc.type === t.id)}
@@ -712,9 +1191,8 @@ export default function AddProductPage() {
               </Section>
             )}
 
-            {/* Fulfillment */}
             <Section
-              step={needsDocs ? "05" : "04"}
+              step={fulfillStep}
               title="Fulfillment location"
               subtitle="Where this ships from"
             >
@@ -775,9 +1253,8 @@ export default function AddProductPage() {
                 )}
             </Section>
 
-            {/* Delivery — FIXED free path */}
             <Section
-              step={needsDocs ? "06" : "05"}
+              step={deliveryStep}
               title="Delivery"
               subtitle="How buyers are charged for delivery"
             >
@@ -787,7 +1264,10 @@ export default function AddProductPage() {
                   [
                     { id: "free" as const, label: "Free delivery" },
                     { id: "fixed" as const, label: "Fixed fee" },
-                    { id: "on_delivery" as const, label: "Pay on delivery" },
+                    {
+                      id: "on_delivery" as const,
+                      label: "Pay on delivery",
+                    },
                   ] as const
                 ).map((opt) => {
                   const active = feeMode === opt.id;
@@ -808,7 +1288,9 @@ export default function AddProductPage() {
                         }
                       }}
                       className={`rounded-[14px] border px-3 py-3.5 text-left ${
-                        active ? "border-green/40 bg-green/8" : "border-line bg-[#0A121C]"
+                        active
+                          ? "border-green/40 bg-green/8"
+                          : "border-line bg-[#0A121C]"
                       }`}
                     >
                       <span
@@ -835,16 +1317,22 @@ export default function AddProductPage() {
                           type="button"
                           onClick={() => setShippingMethod(m)}
                           className={`flex flex-col items-center rounded-[14px] border py-3.5 sm:py-4 ${
-                            active ? "border-green/40 bg-green/8" : "border-line bg-[#0A121C]"
+                            active
+                              ? "border-green/40 bg-green/8"
+                              : "border-line bg-[#0A121C]"
                           }`}
                         >
                           {m === "self" ? (
                             <Footprints
-                              className={`h-5 w-5 ${active ? "text-green" : "text-[#737A86]"}`}
+                              className={`h-5 w-5 ${
+                                active ? "text-green" : "text-[#737A86]"
+                              }`}
                             />
                           ) : (
                             <Truck
-                              className={`h-5 w-5 ${active ? "text-green" : "text-[#737A86]"}`}
+                              className={`h-5 w-5 ${
+                                active ? "text-green" : "text-[#737A86]"
+                              }`}
                             />
                           )}
                           <span
@@ -873,12 +1361,16 @@ export default function AddProductPage() {
 
                   {feeMode === "fixed" && (
                     <>
-                      <Label>Delivery fee * ({regionConfig.currency.symbol})</Label>
+                      <Label>
+                        Delivery fee * ({regionConfig.currency.symbol})
+                      </Label>
                       <input
                         className={inputCls}
                         value={deliveryFee}
                         onChange={(e) =>
-                          setDeliveryFee(e.target.value.replace(/[^0-9.]/g, ""))
+                          setDeliveryFee(
+                            e.target.value.replace(/[^0-9.]/g, "")
+                          )
                         }
                         placeholder="0.00"
                         inputMode="decimal"
@@ -896,7 +1388,8 @@ export default function AddProductPage() {
                         placeholder="e.g. Cash or POS on arrival"
                       />
                       <p className="mb-3 -mt-2 text-[11px] text-[#737A86]">
-                        Buyer pays delivery when the order arrives — not in checkout total.
+                        Buyer pays delivery when the order arrives — not in
+                        checkout total.
                       </p>
                     </>
                   )}
@@ -910,18 +1403,22 @@ export default function AddProductPage() {
               )}
             </Section>
 
-            <Section step={needsDocs ? "07" : "06"} title="Publish">
+            <Section step={publishStep} title="Publish">
               <div className="mb-1.5 flex justify-between text-[13px]">
                 <span className="text-[#737A86]">Plan</span>
-                <span className="font-semibold capitalize text-text">{CURRENT_PLAN}</span>
+                <span className="font-semibold capitalize text-text">
+                  {CURRENT_PLAN}
+                </span>
               </div>
               <div className="mb-1 flex justify-between text-[13px]">
                 <span className="text-[#737A86]">Transaction fee</span>
-                <span className="font-semibold text-text">{feePct}% of product price</span>
+                <span className="font-semibold text-text">
+                  {feePct}% of product price
+                </span>
               </div>
               <p className="text-[11px] text-[#737A86]">
-                Fee applies only to product price — never delivery. Region locked to{" "}
-                {regionConfig.name}.
+                Fee applies only to product price — never delivery. Region
+                locked to {regionConfig.name}.
               </p>
             </Section>
 
@@ -942,12 +1439,13 @@ export default function AddProductPage() {
             </button>
           </div>
 
-          {/* Preview sidebar — desktop only */}
           <div className="hidden lg:sticky lg:top-6 lg:block">
             <p className="mb-1 text-[11px] font-bold uppercase tracking-[2px] text-[#737A86]">
               Live preview
             </p>
-            <p className="mb-3 text-lg font-extrabold text-text">What buyers will see</p>
+            <p className="mb-3 text-lg font-extrabold text-text">
+              What buyers will see
+            </p>
 
             <div className="mb-4 border border-line bg-[#0A121C] p-3.5">
               <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.8px] text-[#737A86]">
@@ -957,14 +1455,20 @@ export default function AddProductPage() {
                 <div className="relative aspect-[1/1.35] overflow-hidden bg-[#F1F1F1]">
                   {imageUrls[0] ? (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img src={imageUrls[0]} alt="" className="h-full w-full object-cover" />
+                    <img
+                      src={imageUrls[0]}
+                      alt=""
+                      className="h-full w-full object-cover"
+                    />
                   ) : (
                     <div className="flex h-full items-center justify-center bg-[#E5E7EB]">
                       <ImagePlus className="h-6 w-6 text-[#9CA3AF]" />
                     </div>
                   )}
                   <div className="absolute bottom-[11px] right-[11px] flex h-[34px] w-[34px] items-center justify-center bg-white shadow">
-                    <span className="text-[10px] font-bold text-[#111]">Bag</span>
+                    <span className="text-[10px] font-bold text-[#111]">
+                      Bag
+                    </span>
                   </div>
                 </div>
                 <p className="mt-2.5 truncate text-[13.5px] font-medium text-white">
@@ -972,18 +1476,34 @@ export default function AddProductPage() {
                 </p>
                 <p className="text-xs text-white/65">
                   {(brand || storeName || "plazore").toLowerCase()} |{" "}
-                  <span className="font-medium text-white">{formatPreviewPrice(priceN)}</span>
+                  <span className="font-medium text-white">
+                    {formatPreviewPrice(priceN)}
+                  </span>
                 </p>
                 {shipsFrom ? (
-                  <p className="mt-1 truncate text-[11px] text-white/42">{shipsFrom}</p>
+                  <p className="mt-1 truncate text-[11px] text-white/42">
+                    {shipsFrom}
+                  </p>
                 ) : (
                   <p className="mt-1 text-[11px] text-white/30">Ships from…</p>
                 )}
                 {feeMode === "free" ? (
-                  <p className="mt-1 text-[11px] font-semibold text-[#00E575]">Free delivery</p>
+                  <p className="mt-1 text-[11px] font-semibold text-[#00E575]">
+                    Free delivery
+                  </p>
                 ) : feeMode === "on_delivery" ? (
                   <p className="mt-1 text-[11px] text-white/50">Pay on arrival</p>
                 ) : null}
+                {hasVariants && (
+                  <p className="mt-1 text-[11px] text-white/45">
+                    {optionDrafts.filter((o) => o.name.trim()).length || 0}{" "}
+                    option group
+                    {optionDrafts.filter((o) => o.name.trim()).length !== 1
+                      ? "s"
+                      : ""}{" "}
+                    · {variantDrafts.length} variants
+                  </p>
+                )}
               </div>
             </div>
 
@@ -993,7 +1513,11 @@ export default function AddProductPage() {
                 <div className="aspect-[1/1.05] bg-[#07080C]">
                   {imageUrls[0] ? (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img src={imageUrls[0]} alt="" className="h-full w-full object-cover" />
+                    <img
+                      src={imageUrls[0]}
+                      alt=""
+                      className="h-full w-full object-cover"
+                    />
                   ) : (
                     <div className="flex h-full items-center justify-center">
                       <ImagePlus className="h-8 w-8 text-[#3A3F4A]" />
@@ -1010,7 +1534,9 @@ export default function AddProductPage() {
                     {name || "Product name"}
                   </p>
                   <div className="mt-2 flex items-center justify-between gap-2">
-                    <p className="text-xl font-bold text-text">{formatPreviewPrice(priceN)}</p>
+                    <p className="text-xl font-bold text-text">
+                      {formatPreviewPrice(priceN)}
+                    </p>
                     <span
                       className={`rounded-full border px-2 py-1 text-[11px] font-semibold ${
                         stockN > 0
@@ -1018,7 +1544,13 @@ export default function AddProductPage() {
                           : "border-red-400/28 bg-red-400/10 text-red-400"
                       }`}
                     >
-                      {stockN > 0 ? `Available · ${stockN}` : "Unavailable"}
+                      {hasVariants
+                        ? stockN > 0
+                          ? `In stock · ${stockN}`
+                          : "Select options"
+                        : stockN > 0
+                          ? `Available · ${stockN}`
+                          : "Unavailable"}
                     </span>
                   </div>
                   {!!brand && (
@@ -1026,6 +1558,24 @@ export default function AddProductPage() {
                       {brand}
                     </span>
                   )}
+                  {hasVariants &&
+                    optionDrafts.filter((o) => o.name.trim()).map((o) => (
+                      <div key={o.id} className="mt-2">
+                        <p className="text-[10px] font-semibold uppercase text-[#737A86]">
+                          {o.name}
+                        </p>
+                        <div className="mt-1 flex flex-wrap gap-1">
+                          {parseValues(o.valuesText).map((val) => (
+                            <span
+                              key={val}
+                              className="border border-white/12 px-2 py-1 text-[11px] text-white/70"
+                            >
+                              {val}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
                   {!!description.trim() && (
                     <>
                       <p className="mb-1.5 mt-3 text-xs font-semibold uppercase tracking-wide text-text">
@@ -1053,24 +1603,29 @@ export default function AddProductPage() {
                           </div>
                         )}
                         {!!shipsFrom && (
-                          <div className={deliveryLabel ? "border-t border-line pt-2.5" : ""}>
+                          <div
+                            className={
+                              deliveryLabel ? "border-t border-line pt-2.5" : ""
+                            }
+                          >
                             <p className="text-[10px] font-semibold uppercase tracking-wide text-[#737A86]">
                               Ships from
                             </p>
-                            <p className="mt-0.5 text-[13px] font-semibold text-text">{shipsFrom}</p>
+                            <p className="mt-0.5 text-[13px] font-semibold text-text">
+                              {shipsFrom}
+                            </p>
                           </div>
                         )}
                         {!!feeDisplay && (
                           <div className="mt-2.5 flex items-center justify-between border-t border-line pt-2.5">
-                            <span className="text-[13px] text-[#A7ADB8]">Delivery</span>
-                            <span className="text-sm font-semibold text-text">{feeDisplay}</span>
+                            <span className="text-[13px] text-[#A7ADB8]">
+                              Delivery
+                            </span>
+                            <span className="text-sm font-semibold text-text">
+                              {feeDisplay}
+                            </span>
                           </div>
                         )}
-                        {feeMode === "on_delivery" && !!deliveryNote.trim() ? (
-                          <p className="mt-2 text-[12px] leading-[17px] text-[#A7ADB8]">
-                            {deliveryNote}
-                          </p>
-                        ) : null}
                       </div>
                     </>
                   )}

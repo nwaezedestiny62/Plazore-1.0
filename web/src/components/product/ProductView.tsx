@@ -33,7 +33,12 @@ import {
   formatProductPrice,
   getRegion,
 } from "@/lib/regions";
-import type { Product } from "@/lib/types";
+import type { Product, ProductVariant } from "@/lib/types";
+import {
+  getAvailableStock,
+  getVariantUnitPrice,
+  productHasVariants,
+} from "@/lib/types";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com/api";
 const GRAD = "linear-gradient(90deg,#10B981,#14B8A6,#3B82F6)";
@@ -120,6 +125,144 @@ function productKey(product: Product) {
       ""
   );
 }
+
+
+/** Normalize options/variants from API (array, Map, or plain object). */
+function normalizeOptions(raw: unknown): { id?: string; name: string; values: string[] }[] {
+  console.log("[normalizeOptions] raw input:", raw);
+  console.log(
+    "[normalizeOptions] type:",
+    raw === null ? "null" : Array.isArray(raw) ? "array" : typeof raw
+  );
+  if (!raw) {
+    console.log("[normalizeOptions] empty/null → []");
+    return [];
+  }
+  let list: any[] = [];
+  if (Array.isArray(raw)) {
+    list = raw;
+    console.log("[normalizeOptions] from array, length:", list.length);
+  } else if (typeof raw === "object") {
+    // Mongoose Map serialized as object of id -> option
+    list = Object.values(raw as Record<string, unknown>);
+    console.log(
+      "[normalizeOptions] from object keys:",
+      Object.keys(raw as object),
+      "values length:",
+      list.length
+    );
+  }
+  const out: { id?: string; name: string; values: string[] }[] = [];
+  for (const o of list) {
+    console.log("[normalizeOptions] item:", o);
+    if (!o || typeof o !== "object") {
+      console.log("[normalizeOptions] skip non-object item");
+      continue;
+    }
+    const name = String((o as any).name || "").trim();
+    if (!name) {
+      console.log("[normalizeOptions] skip item with no name");
+      continue;
+    }
+    let values: string[] = [];
+    const v = (o as any).values;
+    if (Array.isArray(v)) values = v.map((x) => String(x).trim()).filter(Boolean);
+    else if (typeof v === "string")
+      values = v.split(/[,|]/).map((s) => s.trim()).filter(Boolean);
+    console.log("[normalizeOptions] name:", name, "values:", values, "raw values field:", v);
+    if (!values.length) {
+      console.log("[normalizeOptions] skip — no values for", name);
+      continue;
+    }
+    out.push({
+      id: (o as any).id ? String((o as any).id) : undefined,
+      name,
+      values,
+    });
+  }
+  console.log("[normalizeOptions] result:", out);
+  return out;
+}
+
+function normalizeVariantOptions(raw: unknown): Record<string, string> {
+  if (!raw) return {};
+  if (raw instanceof Map) {
+    const o: Record<string, string> = {};
+    raw.forEach((v, k) => {
+      if (v != null && String(v).trim()) o[String(k)] = String(v);
+    });
+    return o;
+  }
+  if (typeof raw === "object" && !Array.isArray(raw)) {
+    const o: Record<string, string> = {};
+    for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+      if (v != null && String(v).trim()) o[String(k)] = String(v);
+    }
+    return o;
+  }
+  return {};
+}
+
+function normalizeVariants(raw: unknown): ProductVariant[] {
+  console.log("[normalizeVariants] raw input:", raw);
+  console.log(
+    "[normalizeVariants] type:",
+    raw === null ? "null" : Array.isArray(raw) ? "array" : typeof raw
+  );
+  if (!raw) {
+    console.log("[normalizeVariants] empty/null → []");
+    return [];
+  }
+  let list: any[] = [];
+  if (Array.isArray(raw)) list = raw;
+  else if (typeof raw === "object") list = Object.values(raw as Record<string, unknown>);
+  console.log("[normalizeVariants] list length:", list.length);
+  const out: ProductVariant[] = [];
+  for (const v of list) {
+    if (!v || typeof v !== "object") continue;
+    const options = normalizeVariantOptions((v as any).options);
+    const key =
+      String((v as any).key || "").trim() ||
+      Object.entries(options)
+        .map(([k, val]) => `${k.trim().toLowerCase()}=${String(val).trim().toLowerCase()}`)
+        .sort()
+        .join("|");
+    out.push({
+      variantId: String((v as any).variantId || (v as any)._id || key || ""),
+      key,
+      options,
+      stock: Math.max(0, Number((v as any).stock) || 0),
+      price:
+        (v as any).price === null || (v as any).price === undefined || (v as any).price === ""
+          ? null
+          : Number((v as any).price),
+      available: (v as any).available !== false,
+      sku: (v as any).sku ? String((v as any).sku) : undefined,
+      image: (v as any).image ? String((v as any).image) : undefined,
+    } as ProductVariant);
+  }
+  console.log("[normalizeVariants] result count:", out.length, out);
+  return out;
+}
+
+/** Build option groups from variants when options[] is missing. */
+function optionsFromVariants(variants: ProductVariant[]): { name: string; values: string[] }[] {
+  console.log("[optionsFromVariants] variants count:", variants.length);
+  const map = new Map<string, Set<string>>();
+  for (const v of variants) {
+    for (const [k, val] of Object.entries(v.options || {})) {
+      if (!map.has(k)) map.set(k, new Set());
+      map.get(k)!.add(String(val));
+    }
+  }
+  const derived = Array.from(map.entries()).map(([name, set]) => ({
+    name,
+    values: Array.from(set),
+  }));
+  console.log("[optionsFromVariants] derived options:", derived);
+  return derived;
+}
+
 
 function stashReturnTo(path: string) {
   try {
@@ -366,7 +509,6 @@ function Gallery({ images, name }: { images: string[]; name: string }) {
   }, [go, hasMany]);
 
   const onPointerDown = (e: React.PointerEvent) => {
-    // Only track primary button / touch
     if (e.button !== 0 && e.pointerType === "mouse") return;
     dragging.current = true;
     startX.current = e.clientX;
@@ -388,9 +530,7 @@ function Gallery({ images, name }: { images: string[]; name: string }) {
 
   return (
     <div className="flex h-full min-h-0 w-full min-w-0 flex-col bg-[#050608]">
-      {/* Stage */}
       <div className="relative min-h-0 min-w-0 flex-1">
-        {/* Swipe surface — behind controls */}
         <div
           className="absolute inset-0 z-0 select-none"
           onPointerDown={onPointerDown}
@@ -414,7 +554,6 @@ function Gallery({ images, name }: { images: string[]; name: string }) {
                 }`}
                 aria-hidden={i !== slide}
               >
-                {/* FULL image — no crop */}
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={src}
@@ -430,13 +569,11 @@ function Gallery({ images, name }: { images: string[]; name: string }) {
 
         {hasMany ? (
           <>
-            {/* Counter */}
             <p className="pointer-events-none absolute right-3 top-3 z-20 rounded-full border border-white/12 bg-black/55 px-2.5 py-1 text-[10px] font-bold tracking-wide text-white backdrop-blur-md">
               {String(slide + 1).padStart(2, "0")} /{" "}
               {String(count).padStart(2, "0")}
             </p>
 
-            {/* Arrows — always on top, work on all breakpoints */}
             <button
               type="button"
               onClick={(e) => {
@@ -464,7 +601,6 @@ function Gallery({ images, name }: { images: string[]; name: string }) {
               <ChevronRight className="h-5 w-5" strokeWidth={2.5} />
             </button>
 
-            {/* Dots (mobile) */}
             <div className="absolute bottom-3 left-0 right-0 z-20 flex justify-center gap-1.5 lg:hidden">
               {images.map((_, i) => (
                 <button
@@ -488,7 +624,6 @@ function Gallery({ images, name }: { images: string[]; name: string }) {
         ) : null}
       </div>
 
-      {/* Filmstrip */}
       {hasMany ? (
         <div className="relative z-10 shrink-0 border-t border-white/8 bg-[#07080C] px-3 py-2.5">
           <div className="flex gap-2 overflow-x-auto scrollbar-none">
@@ -549,9 +684,17 @@ export function ProductView({ product }: { product: Product }) {
   const [googleBusy, setGoogleBusy] = useState(false);
   const ranPending = useRef(false);
 
+  /** Buyer option picks: optionName → value */
+  const [selected, setSelected] = useState<Record<string, string>>({});
+
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  // Reset selection when product changes
+  useEffect(() => {
+    setSelected({});
+  }, [product._id]);
 
   const images = product.images?.length ? product.images : [];
   const seller = typeof product.seller === "object" ? product.seller : null;
@@ -590,7 +733,66 @@ export function ProductView({ product }: { product: Product }) {
     typeof product.category === "string"
       ? product.category
       : product.category?.name;
-  const inStock = Number(product.stock) > 0;
+
+  const variants = useMemo(
+    () => normalizeVariants((product as any).variants),
+    [product]
+  );
+  const options = useMemo(() => {
+    let opts = normalizeOptions((product as any).options);
+    if (!opts.length && variants.length) {
+      opts = optionsFromVariants(variants);
+    }
+    return opts;
+  }, [product, variants]);
+
+  const hasVariants =
+    productHasVariants(product) ||
+    options.length > 0 ||
+    variants.length > 0 ||
+    !!(product as any).hasVariants;
+
+  const selectedVariant: ProductVariant | null = useMemo(() => {
+    if (!hasVariants) return null;
+    if (!options.length) return null;
+    const names = options.map((o) => o.name);
+    if (names.some((n) => !selected[n])) return null;
+    return (
+      variants.find((v) => {
+        if (v.available === false) return false;
+        const opts = v.options || {};
+        return names.every(
+          (n) =>
+            String(opts[n] || "").toLowerCase() ===
+            String(selected[n] || "").toLowerCase()
+        );
+      }) || null
+    );
+  }, [hasVariants, options, variants, selected]);
+
+  const unitPrice = getVariantUnitPrice(product, selectedVariant);
+  const availableStock = getAvailableStock(product, selectedVariant);
+  const inStock = availableStock > 0;
+  const selectionComplete =
+    !hasVariants ||
+    (options.length > 0 &&
+      options.every((o) => !!selected[o.name]) &&
+      !!selectedVariant);
+
+  const stockLabel = !hasVariants
+    ? inStock
+      ? availableStock <= 5
+        ? `Only ${availableStock} left`
+        : `In stock · ${availableStock}`
+      : "Out of stock"
+    : !selectionComplete
+      ? "Select options"
+      : inStock
+        ? availableStock <= 5
+          ? `Only ${availableStock} left`
+          : `In stock · ${availableStock}`
+        : "Out of stock";
+
   const wishlistCount = Number(
     (product as { wishlistCount?: number; saves?: number }).wishlistCount ??
       (product as { saves?: number }).saves ??
@@ -623,7 +825,7 @@ export function ProductView({ product }: { product: Product }) {
   const shareText = `Found this on Plazore 🛒🛍️ — ${product.name}. Clean listing, clear details. Take a look:`;
 
   const priceLabel = useMemo(() => {
-    const amount = Number(product.price) || 0;
+    const amount = unitPrice;
     const productRegion = product.region || DEFAULT_REGION;
     if (!mounted) {
       return formatMoneyFixed(amount, productRegion);
@@ -637,7 +839,7 @@ export function ProductView({ product }: { product: Product }) {
       displayRegion,
       marketplace.ratesToNgn || undefined
     );
-  }, [mounted, product.price, product.region, displayRegion, marketplace]);
+  }, [mounted, unitPrice, product.region, displayRegion, marketplace]);
 
   const feeDisplay = useMemo(() => {
     if (feeMode === "free") {
@@ -675,15 +877,51 @@ export function ProductView({ product }: { product: Product }) {
   ]);
 
   const doBag = useCallback(() => {
-    addToCart(product);
-    setBagCount(cartCount());
-  }, [product]);
+    if (hasVariants && !selectionComplete) {
+      setMsgError("Select all options before adding to bag");
+      return;
+    }
+    if (!inStock) {
+      setMsgError("This selection is out of stock");
+      return;
+    }
+    try {
+      addToCart(product, 1, {
+        variantId: selectedVariant?.variantId,
+        variantKey: selectedVariant?.key,
+        selectedOptions: selectedVariant
+          ? { ...(selectedVariant.options || {}) }
+          : { ...selected },
+        variant: selectedVariant,
+      });
+      setBagCount(cartCount());
+      setMsgError(null);
+    } catch (e: unknown) {
+      setMsgError(e instanceof Error ? e.message : "Could not add to bag");
+    }
+  }, [
+    product,
+    hasVariants,
+    selectionComplete,
+    inStock,
+    selectedVariant,
+    selected,
+  ]);
 
   const doBuy = useCallback(() => {
-    addToCart(product);
-    setBagCount(cartCount());
+    if (hasVariants && !selectionComplete) {
+      setMsgError("Select all options before buying");
+      return;
+    }
+    if (!inStock) {
+      setMsgError("This selection is out of stock");
+      return;
+    }
+    doBag();
+    if (hasVariants && !selectionComplete) return;
+    if (!inStock) return;
     router.push("/cart");
-  }, [product, router]);
+  }, [doBag, hasVariants, selectionComplete, inStock, router]);
 
   const doWishlist = useCallback(() => {
     setPrompt("wishlist");
@@ -747,6 +985,16 @@ export function ProductView({ product }: { product: Product }) {
 
   const requireAccount = (action: PendingAction) => {
     if (!isLoaded) return;
+    if (action === "bag" || action === "buy") {
+      if (hasVariants && !selectionComplete) {
+        setMsgError("Select all options first");
+        return;
+      }
+      if (!inStock) {
+        setMsgError("Out of stock");
+        return;
+      }
+    }
     if (isSignedIn) {
       runAction(action);
       return;
@@ -919,6 +1167,8 @@ export function ProductView({ product }: { product: Product }) {
   };
   const gate = authCopy[pending || "bag"];
 
+  const canPurchase = selectionComplete && inStock;
+
   return (
     <div className="flex h-[100dvh] min-h-0 flex-col overflow-hidden bg-bg text-text">
       <header className="z-40 flex h-12 shrink-0 items-center justify-between border-b border-white/8 bg-bg/95 px-3 pt-[env(safe-area-inset-top)] backdrop-blur sm:px-4 lg:h-14 lg:px-6">
@@ -952,7 +1202,6 @@ export function ProductView({ product }: { product: Product }) {
         </section>
 
         <section className="min-h-0 min-w-0 overflow-y-auto overscroll-contain px-4 pb-6 pt-4 sm:px-6 lg:px-8 lg:pt-6">
-          {/* … rest of listing content unchanged from your file … */}
           {(product.brand || categoryLabel) && (
             <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">
               {product.brand || categoryLabel}
@@ -971,20 +1220,26 @@ export function ProductView({ product }: { product: Product }) {
             </p>
             <span
               className={`inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-xs font-semibold ${
-                inStock
+                selectionComplete && inStock
                   ? "border-ai-blue/30 bg-ai-green/10"
-                  : "border-error/30 bg-error/10 text-error"
+                  : selectionComplete && !inStock
+                    ? "border-error/30 bg-error/10 text-error"
+                    : "border-white/12 bg-white/[0.04] text-white/55"
               }`}
             >
               <span
                 className={`h-1.5 w-1.5 rounded-full ${
-                  inStock ? "bg-ai-green" : "bg-error"
+                  selectionComplete && inStock
+                    ? "bg-ai-green"
+                    : selectionComplete && !inStock
+                      ? "bg-error"
+                      : "bg-white/35"
                 }`}
               />
-              {inStock ? (
-                <GradientLabel>{`Available · ${product.stock}`}</GradientLabel>
+              {selectionComplete && inStock ? (
+                <GradientLabel>{stockLabel}</GradientLabel>
               ) : (
-                "Unavailable"
+                stockLabel
               )}
             </span>
           </div>
@@ -1004,12 +1259,79 @@ export function ProductView({ product }: { product: Product }) {
             </div>
           )}
 
-          {/* Keep the rest of your sections exactly as in your pasted file:
-              Plazore AI, Buyer Confidence, Description, Specs, Docs,
-              Shipping, Ships from, Sold By, Support */}
-          {/* For brevity in this message I'm pointing you to keep those blocks —
-              if you need the complete single-file paste including every section
-              word-for-word, say so and I'll output the entire remaining body. */}
+          {/* ——— Options (cinematic, restrained) ——— */}
+          {hasVariants && options.length > 0 && (
+            <div className="mt-6 space-y-5 border-t border-white/8 pt-5">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-muted">
+                Configuration
+              </p>
+              {options.map((opt) => (
+                <div key={opt.id || opt.name}>
+                  <div className="mb-2.5 flex items-baseline justify-between gap-2">
+                    <p className="text-[13px] font-semibold text-white/90">
+                      {opt.name}
+                    </p>
+                    {selected[opt.name] ? (
+                      <p className="text-[12px] font-medium text-white/45">
+                        {selected[opt.name]}
+                      </p>
+                    ) : (
+                      <p className="text-[12px] text-white/28">Required</p>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {opt.values.map((val) => {
+                      const on = selected[opt.name] === val;
+                      const trial = { ...selected, [opt.name]: val };
+                      const possible = variants.some((v) => {
+                        if (v.available === false) return false;
+                        const o = v.options || {};
+                        return options.every((op) => {
+                          const pick = trial[op.name];
+                          if (!pick) return true;
+                          return (
+                            String(o[op.name] || "").toLowerCase() ===
+                            String(pick).toLowerCase()
+                          );
+                        });
+                      });
+                      return (
+                        <button
+                          key={val}
+                          type="button"
+                          disabled={!possible}
+                          onClick={() =>
+                            setSelected((prev) => ({
+                              ...prev,
+                              [opt.name]: val,
+                            }))
+                          }
+                          className={`min-h-10 min-w-[2.75rem] px-3.5 py-2 text-[13px] font-semibold transition duration-200 ${
+                            on
+                              ? "border border-transparent text-[#041412]"
+                              : possible
+                                ? "border border-white/12 bg-white/[0.04] text-white/85 hover:border-white/22 hover:bg-white/[0.07]"
+                                : "cursor-not-allowed border border-white/6 bg-transparent text-white/22 line-through"
+                          }`}
+                          style={
+                            on
+                              ? { backgroundImage: GRAD }
+                              : undefined
+                          }
+                        >
+                          {val}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {msgError && (
+            <p className="mt-3 text-center text-[12px] text-error">{msgError}</p>
+          )}
 
           <div className="relative mt-5 overflow-hidden rounded-[20px] border border-ai-green/20 bg-[#11141A]/80">
             <div
@@ -1280,11 +1602,6 @@ export function ProductView({ product }: { product: Product }) {
                   <MessageCircle className="h-4 w-4 text-ai-green" />
                   {messaging ? "Opening chat…" : "Message seller"}
                 </button>
-                {msgError ? (
-                  <p className="mt-2 text-center text-[12px] text-error">
-                    {msgError}
-                  </p>
-                ) : null}
               </div>
             ) : (
               <div className="border-t border-line px-4 py-3 sm:px-[18px]">
@@ -1363,14 +1680,20 @@ export function ProductView({ product }: { product: Product }) {
           <button
             type="button"
             onClick={() => requireAccount("bag")}
-            className="h-11 min-w-0 flex-1 whitespace-nowrap rounded-full border border-white/12 bg-surface-2 px-2 text-[12px] font-bold sm:h-12 sm:text-sm"
+            disabled={!canPurchase && hasVariants}
+            className="h-11 min-w-0 flex-1 whitespace-nowrap rounded-full border border-white/12 bg-surface-2 px-2 text-[12px] font-bold disabled:opacity-40 sm:h-12 sm:text-sm"
           >
-            Add to Bag
+            {!selectionComplete && hasVariants
+              ? "Select options"
+              : !inStock
+                ? "Out of stock"
+                : "Add to Bag"}
           </button>
           <button
             type="button"
             onClick={() => requireAccount("buy")}
-            className="h-11 min-w-0 flex-1 whitespace-nowrap rounded-full bg-white px-2 text-[12px] font-extrabold text-bg sm:h-12 sm:text-sm"
+            disabled={!canPurchase}
+            className="h-11 min-w-0 flex-1 whitespace-nowrap rounded-full bg-white px-2 text-[12px] font-extrabold text-bg disabled:opacity-40 sm:h-12 sm:text-sm"
           >
             Buy Now
           </button>

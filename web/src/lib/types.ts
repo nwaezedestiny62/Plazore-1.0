@@ -30,6 +30,24 @@ export interface VerificationDocument {
   secureUrl: string
 }
 
+/** Buyer-selectable option group (not the same as specifications) */
+export interface ProductOption {
+  id: string
+  name: string
+  values: string[]
+}
+
+/** Concrete combination with its own stock / optional price */
+export interface ProductVariant {
+  variantId: string
+  key: string
+  options: Record<string, string>
+  stock: number
+  /** null/undefined = use product.price */
+  price?: number | null
+  available: boolean
+}
+
 export interface Product {
   _id: string
   name: string
@@ -37,6 +55,7 @@ export interface Product {
   price: number
   comparePrice?: number
   images: string[]
+  /** @deprecated Prefer options/variants */
   sizes?: string[]
   category:
     | {
@@ -46,6 +65,7 @@ export interface Product {
     | string
   subCategory?: string
   brand?: string
+  /** Simple inventory when hasVariants is false */
   stock: number
   ratings?: {
     average: number
@@ -65,16 +85,23 @@ export interface Product {
         marketplaceRegion?: string
       }
   shipping?: {
+    feeMode?: 'free' | 'fixed' | 'on_delivery'
     method: 'self' | 'courier'
     courierCompany?: string
     deliveryFee: number
+    deliveryNote?: string
   }
   fulfillmentLocation?: FulfillmentLocation
-  /** Category-specific structured specs */
+  /** Category-specific structured specs (factual) */
   specifications?: Record<string, string>
-  /** Cloudinary metadata only */
   verificationDocuments?: VerificationDocument[]
   wishlistCount?: number
+
+  /** true when options/variants drive inventory */
+  hasVariants?: boolean
+  options?: ProductOption[]
+  variants?: ProductVariant[]
+
   createdAt: string
 }
 
@@ -82,10 +109,18 @@ export type ProductCardProps = {
   product: Product
 }
 
+/** Local web cart line (localStorage) */
 export interface CartItem {
+  /** Stable line id: productId or productId::variantKey */
+  id: string
   product: Product
   quantity: number
-  size: string
+  note: string
+  /** Unit price at add time (variant override if any) */
+  price: number
+  variantId?: string
+  variantKey?: string
+  selectedOptions?: Record<string, string>
 }
 
 export type CartItemProps = {
@@ -93,7 +128,8 @@ export type CartItemProps = {
     id: string
     product: { name: string; price: number; images: string[] }
     quantity: number
-    size: string
+    selectedOptions?: Record<string, string>
+    variantKey?: string
   }
   onRemove?: () => void
   onUpdateQuantity?: (newQty: number) => void
@@ -132,13 +168,24 @@ export interface OrderItem {
   quantity: number
   price: number
   image?: string
-  size?: string
   note?: string
+  variantId?: string
+  variantKey?: string
+  selectedOptions?: Record<string, string>
 }
 
 export interface Order {
   _id: string
-  user: User | string
+  user?: User | string
+  buyer?: User | string
+  seller?:
+    | string
+    | {
+        _id: string
+        name?: string
+        storeName?: string
+        storeLogo?: string
+      }
   orderNumber: string
   items: OrderItem[]
   shippingAddress: {
@@ -165,6 +212,7 @@ export interface Order {
   tax?: number
   totalAmount: number
   notes?: string
+  buyerNote?: string
   deliveredAt?: string
   createdAt: string
 }
@@ -174,4 +222,43 @@ export type WishlistContextType = {
   toggleWishlist: (product: Product) => void
   isInWishlist: (productId: string) => boolean
   loading: boolean
+}
+
+/** Helpers for UI */
+export function productHasVariants(p: Product | null | undefined): boolean {
+  return !!(p?.hasVariants && Array.isArray(p.variants) && p.variants.length > 0)
+}
+
+export function getVariantUnitPrice(
+  product: Product,
+  variant?: ProductVariant | null
+): number {
+  if (
+    variant &&
+    variant.price != null &&
+    Number.isFinite(Number(variant.price))
+  ) {
+    return Number(variant.price)
+  }
+  return Number(product.price) || 0
+}
+
+export function getAvailableStock(
+  product: Product,
+  variant?: ProductVariant | null
+): number {
+  if (productHasVariants(product)) {
+    if (!variant || variant.available === false) return 0
+    return Math.max(0, Number(variant.stock) || 0)
+  }
+  return Math.max(0, Number(product.stock) || 0)
+}
+
+export function formatSelectedOptions(
+  opts?: Record<string, string> | null
+): string {
+  if (!opts) return ''
+  return Object.entries(opts)
+    .map(([k, v]) => `${k}: ${v}`)
+    .join(' · ')
 }

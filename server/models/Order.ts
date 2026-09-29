@@ -15,6 +15,15 @@ const orderItemSchema = new mongoose.Schema({
     maxlength: 120,
     default: "",
   },
+
+  // Snapshot of selected configuration at purchase time (immutable history)
+  variantId: { type: String, default: "" },
+  variantKey: { type: String, default: "" },
+  selectedOptions: {
+    type: Map,
+    of: String,
+    default: {},
+  },
 });
 
 const orderSchema = new mongoose.Schema(

@@ -23,6 +23,7 @@ import {
   X,
 } from "lucide-react";
 import { clearCart, getCart, type CartItem } from "@/lib/cart";
+import { formatSelectedOptions } from "@/lib/types";
 import {
   convertPrice,
   DEFAULT_REGION,
@@ -30,7 +31,8 @@ import {
   formatProductPrice,
 } from "@/lib/regions";
 
-const BASE = process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com/api";
+const BASE =
+  process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com/api";
 const GRAD = "linear-gradient(90deg,#00E575,#14B8A6,#2563EB)";
 
 type Address = {
@@ -152,7 +154,7 @@ function addressComplete(a: Address | null): boolean {
 async function apiAuth<T>(
   path: string,
   token: string,
-  init?: RequestInit,
+  init?: RequestInit
 ): Promise<{ ok: boolean; status: number; body: T }> {
   const res = await fetch(`${BASE}${path}`, {
     ...init,
@@ -201,14 +203,12 @@ export default function CheckoutPage() {
     try {
       const addr = await apiAuth<{ success?: boolean; data?: Address[] }>(
         "/addresses",
-        token,
+        token
       );
       if (addr.body?.success && Array.isArray(addr.body.data)) {
         const list = addr.body.data;
         setAddresses(list);
-        setSelectedAddress(
-          list.find((a) => a.isDefault) || list[0] || null,
-        );
+        setSelectedAddress(list.find((a) => a.isDefault) || list[0] || null);
       }
     } catch {
       /* keep empty */
@@ -216,7 +216,7 @@ export default function CheckoutPage() {
     try {
       const pay = await apiAuth<{ success?: boolean; data?: Card[] }>(
         "/payment-methods",
-        token,
+        token
       );
       if (pay.body?.success && Array.isArray(pay.body.data)) {
         const list = pay.body.data;
@@ -250,11 +250,10 @@ export default function CheckoutPage() {
       const unit = Number(item.price ?? product.price) || 0;
       const qty = Math.max(1, Number(item.quantity) || 1);
       const lineDisplay = convertPrice(unit * qty, region, displayRegion);
-            const feeRaw = Number(product.shipping?.deliveryFee) || 0;
+      const feeRaw = Number(product.shipping?.deliveryFee) || 0;
       const feeMode =
         (product.shipping as { feeMode?: string } | undefined)?.feeMode ||
         (feeRaw > 0 ? "fixed" : "free");
-      // Only fixed (or legacy fee > 0) is prepaid; free + COD = 0 on total
       const feeDisplay =
         feeMode === "fixed"
           ? convertPrice(feeRaw, region, displayRegion)
@@ -264,6 +263,16 @@ export default function CheckoutPage() {
       if (!product._id) invalid.push("Missing product id");
       if (!(unit > 0)) invalid.push("Invalid price");
       if (!ship.hasShipFrom) invalid.push("No ship-from location");
+      // Variant products must carry a resolved selection into checkout
+      if (
+        product.hasVariants &&
+        Array.isArray(product.variants) &&
+        product.variants.length > 0 &&
+        !item.variantKey &&
+        !item.variantId
+      ) {
+        invalid.push("Missing variant selection");
+      }
 
       const existing = map.get(key);
       if (!existing) {
@@ -280,10 +289,9 @@ export default function CheckoutPage() {
       } else {
         existing.items.push(item);
         existing.productSubtotalDisplay += lineDisplay;
-        // One delivery fee per seller route (max listed fee on their lines)
         existing.deliveryFeeDisplay = Math.max(
           existing.deliveryFeeDisplay,
-          feeDisplay,
+          feeDisplay
         );
         existing.missingShipFrom =
           existing.missingShipFrom || !ship.hasShipFrom;
@@ -334,7 +342,6 @@ export default function CheckoutPage() {
   const hasInternational = internationalRoutes.length > 0;
   const incompleteSellers = routeGroups.filter((g) => g.missingShipFrom);
 
-  /** Hard gate: nothing places without a real bag + valid routes + address + card + auth */
   const canPlaceOrder =
     hasItems &&
     allRoutesShipReady &&
@@ -349,8 +356,9 @@ export default function CheckoutPage() {
     if (!allRoutesShipReady)
       return "One or more sellers have not set a shipping origin. Checkout is blocked until they complete it.";
     if (!noInvalidLines)
-      return "One or more items have invalid price or product data. Remove them or try again later.";
-    if (!addressOk) return "Select a complete delivery address (street, city, country).";
+      return "One or more items have invalid price, product data, or missing options. Remove them or re-add from the product page.";
+    if (!addressOk)
+      return "Select a complete delivery address (street, city, country).";
     if (!cardOk) return "Select a payment card.";
     return null;
   }, [
@@ -408,6 +416,9 @@ export default function CheckoutPage() {
             quantity: qty,
             price,
             note: (item.note || "").trim().slice(0, 120),
+            variantId: item.variantId || "",
+            variantKey: item.variantKey || "",
+            selectedOptions: item.selectedOptions || {},
           };
         })
         .filter((i) => i.productId && i.price > 0 && i.quantity > 0);
@@ -439,7 +450,7 @@ export default function CheckoutPage() {
               : "",
             items: payloadItems,
           }),
-        },
+        }
       );
 
       if (res.ok && res.body?.success) {
@@ -454,13 +465,15 @@ export default function CheckoutPage() {
               ? "Session expired. Sign in again."
               : res.status >= 500
                 ? "Server error. Please try again in a moment."
-                : "Could not place order. Please review your bag and try again."),
+                : "Could not place order. Please review your bag and try again.")
         );
       }
     } catch (e: unknown) {
       setPhase("error");
       setOrderError(
-        e instanceof Error ? e.message : "Something went wrong. Please try again.",
+        e instanceof Error
+          ? e.message
+          : "Something went wrong. Please try again."
       );
     } finally {
       placingLock.current = false;
@@ -469,7 +482,6 @@ export default function CheckoutPage() {
 
   const placing = phase === "processing";
 
-  /* ── Empty bag: hard stop UI ── */
   if (cartReady && !hasItems && phase === "idle") {
     return (
       <div className="min-h-screen bg-bg text-text">
@@ -602,28 +614,30 @@ export default function CheckoutPage() {
                   <p className="mb-2.5 text-[10px] font-extrabold tracking-[0.14em] text-white/38">
                     HOW YOUR ORDER WORKS
                   </p>
-                  {[
+                  {(
                     [
-                      "1",
-                      "Confirmed",
-                      "Your bag is locked and each seller is notified for their items.",
-                    ],
-                    [
-                      "2",
-                      "Seller prepares",
-                      "Items are packed. International routes may need a short seller review first.",
-                    ],
-                    [
-                      "3",
-                      "Shipped",
-                      "Tracking updates appear in Orders as each package moves.",
-                    ],
-                    [
-                      "4",
-                      "Delivered",
-                      "You receive your order at the address you selected.",
-                    ],
-                  ].map(([n, t, d]) => (
+                      [
+                        "1",
+                        "Confirmed",
+                        "Your bag is locked and each seller is notified for their items.",
+                      ],
+                      [
+                        "2",
+                        "Seller prepares",
+                        "Items are packed. International routes may need a short seller review first.",
+                      ],
+                      [
+                        "3",
+                        "Shipped",
+                        "Tracking updates appear in Orders as each package moves.",
+                      ],
+                      [
+                        "4",
+                        "Delivered",
+                        "You receive your order at the address you selected.",
+                      ],
+                    ] as const
+                  ).map(([n, t, d]) => (
                     <div key={n} className="mb-3 flex gap-3">
                       <span
                         className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center text-[11px] font-extrabold text-[#041412]"
@@ -687,7 +701,6 @@ export default function CheckoutPage() {
             REVIEW · DELIVER · PAY
           </p>
 
-          {/* ── Bag grouped by seller ── */}
           <section className="mb-3 overflow-hidden border border-white/8 bg-[#0E1116]">
             <div className="flex items-center justify-between border-b border-white/8 bg-[#14181F] px-3.5 py-3">
               <div className="flex items-center gap-2.5">
@@ -731,6 +744,7 @@ export default function CheckoutPage() {
                   const unit =
                     Number(item.price ?? item.product?.price) || 0;
                   const qty = Number(item.quantity) || 1;
+                  const config = formatSelectedOptions(item.selectedOptions);
                   return (
                     <div
                       key={item.id || `${group.key}-${i}`}
@@ -750,6 +764,11 @@ export default function CheckoutPage() {
                         <p className="text-[13px] font-semibold leading-[18px]">
                           {item.product?.name || "Product"}
                         </p>
+                        {config ? (
+                          <p className="mt-0.5 text-[11px] font-medium tracking-wide text-white/50">
+                            {config}
+                          </p>
+                        ) : null}
                         <p className="mt-0.5 text-[11px] text-white/55">
                           Qty {qty} · {fmtProduct(unit, region)} each
                         </p>
@@ -766,12 +785,11 @@ export default function CheckoutPage() {
                 })}
                 <div className="flex justify-between border-t border-white/[0.06] bg-[#0A0C10] px-3.5 py-2 text-[11px]">
                   <span className="text-white/40">
-                    Route subtotal · delivery{" "}
-                    {fmt(group.deliveryFeeDisplay)}
+                    Route subtotal · delivery {fmt(group.deliveryFeeDisplay)}
                   </span>
                   <span className="font-bold text-white/70">
                     {fmt(
-                      group.productSubtotalDisplay + group.deliveryFeeDisplay,
+                      group.productSubtotalDisplay + group.deliveryFeeDisplay
                     )}
                   </span>
                 </div>
@@ -779,7 +797,6 @@ export default function CheckoutPage() {
             ))}
           </section>
 
-          {/* ── Address ── */}
           <section className="mb-3 overflow-hidden border border-white/8 bg-[#0E1116]">
             <div className="flex items-center justify-between border-b border-white/8 bg-[#14181F] px-3.5 py-3">
               <div className="flex items-center gap-2.5">
@@ -859,7 +876,6 @@ export default function CheckoutPage() {
             )}
           </section>
 
-          {/* ── Payment ── */}
           <section className="mb-3 overflow-hidden border border-white/8 bg-[#0E1116]">
             <div className="flex items-center justify-between border-b border-white/8 bg-[#14181F] px-3.5 py-3">
               <div className="flex items-center gap-2.5">
@@ -928,7 +944,6 @@ export default function CheckoutPage() {
             )}
           </section>
 
-          {/* ── Shipping routes (per seller) ── */}
           <section className="mb-3 overflow-hidden border border-white/8 bg-[#0E1116]">
             <div className="flex items-center gap-2.5 border-b border-white/8 bg-[#14181F] px-3.5 py-3">
               <span className="flex h-[30px] w-[30px] items-center justify-center border border-white/8 bg-[#0E1116]">
@@ -955,9 +970,7 @@ export default function CheckoutPage() {
                     Shipping incomplete
                   </p>
                   <p className="mt-1 text-xs leading-[18px] text-white/55">
-                    {incompleteSellers
-                      .map((g) => g.ship.storeName)
-                      .join(", ")}{" "}
+                    {incompleteSellers.map((g) => g.ship.storeName).join(", ")}{" "}
                     {incompleteSellers.length === 1 ? "has" : "have"} not set a
                     ship-from location. Checkout stays locked until every seller
                     on this order has a complete origin.
@@ -1032,12 +1045,8 @@ export default function CheckoutPage() {
                   )}
 
                   <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 border-t border-white/[0.06] pt-2 text-[11px] text-white/45">
-                    <span>
-                      Products {fmt(group.productSubtotalDisplay)}
-                    </span>
-                    <span>
-                      Delivery {fmt(group.deliveryFeeDisplay)}
-                    </span>
+                    <span>Products {fmt(group.productSubtotalDisplay)}</span>
+                    <span>Delivery {fmt(group.deliveryFeeDisplay)}</span>
                   </div>
 
                   {group.isInternational && (
@@ -1052,7 +1061,6 @@ export default function CheckoutPage() {
             </div>
           </section>
 
-          {/* ── International summary ── */}
           {hasInternational && selectedAddress && (
             <div className="mb-3 border border-blue/25 bg-blue/8 p-3.5">
               <div className="flex items-start gap-2.5">
@@ -1091,7 +1099,6 @@ export default function CheckoutPage() {
           )}
         </div>
 
-        {/* ── Receipt ── */}
         <aside className="h-fit border border-white/8 bg-[#0E1116] md:sticky md:top-6">
           <div className="flex items-center gap-2.5 border-b border-white/8 bg-[#14181F] px-3.5 py-3">
             <span className="flex h-[30px] w-[30px] items-center justify-center border border-white/8 bg-[#0E1116]">
@@ -1159,8 +1166,7 @@ export default function CheckoutPage() {
                   placing || !canPlaceOrder ? undefined : GRAD,
                 backgroundColor:
                   placing || !canPlaceOrder ? "#2A2F38" : undefined,
-                color:
-                  placing || !canPlaceOrder ? undefined : "#041412",
+                color: placing || !canPlaceOrder ? undefined : "#041412",
               }}
             >
               {!hasItems

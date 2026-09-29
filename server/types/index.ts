@@ -12,11 +12,32 @@ export interface IAddress extends Document {
   createdAt: Date;
 }
 
+/** One option group on a product (e.g. Size → S/M/L). */
+export interface IProductOption {
+  id: string;
+  name: string;
+  values: string[];
+}
+
+/** One sellable combination with its own stock and optional price. */
+export interface IProductVariant {
+  variantId: string;
+  key: string;
+  options: Map<string, string> | Record<string, string>;
+  stock: number;
+  price?: number | null;
+  available: boolean;
+}
+
 export interface ICartItem {
   product: Types.ObjectId;
   quantity: number;
   price: number;
+  /** @deprecated Prefer selectedOptions; kept for older clients */
   size?: string;
+  variantId?: string;
+  variantKey?: string;
+  selectedOptions?: Map<string, string> | Record<string, string>;
 }
 
 export interface ICart extends Document {
@@ -35,6 +56,10 @@ export interface IOrderItem {
   price: number;
   image?: string;
   note?: string;
+  /** Snapshot at purchase — never rewrite after order is created */
+  variantId?: string;
+  variantKey?: string;
+  selectedOptions?: Map<string, string> | Record<string, string>;
 }
 
 export interface IOrder extends Document {
@@ -97,6 +122,7 @@ export interface IProduct extends Document {
   category: string;
   subCategory?: string;
   brand?: string;
+  /** Simple inventory when hasVariants is false */
   stock: number;
   isFeatured: boolean;
   isActive: boolean;
@@ -110,9 +136,16 @@ export interface IProduct extends Document {
     deliveryNote?: string;
   };
   fulfillmentLocation?: IFulfillmentLocation;
+  /** Factual category specs — not buyer choices */
   specifications?: Map<string, string> | Record<string, string>;
   verificationDocuments?: IVerificationDocument[];
   wishlistCount?: number;
+
+  /** true when options/variants are used for inventory */
+  hasVariants?: boolean;
+  options?: IProductOption[];
+  variants?: IProductVariant[];
+
   createdAt: Date;
   updatedAt: Date;
 }
