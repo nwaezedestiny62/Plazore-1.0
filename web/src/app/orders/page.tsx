@@ -6,8 +6,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useMarketplace } from "@/context/MarketplaceContext";
 import {
   DEFAULT_REGION,
-  formatMoney as formatMoneyRegion,
+  formatMoney,
   formatProductPrice,
+  resolveRegionCode,
 } from "@/lib/regions";
 import {
   ArrowDown,
@@ -24,7 +25,8 @@ import {
   X,
 } from "lucide-react";
 
-const API = process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com/api";
+const API =
+  process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com/api";
 const HIDDEN_KEY = "@plazore_hidden_completed_orders";
 
 const statusColor: Record<string, string> = {
@@ -45,14 +47,25 @@ type Order = {
   totalAmount?: number;
   createdAt?: string;
   region?: string;
-  items?: unknown[];
-  seller?: { storeName?: string; name?: string; marketplaceRegion?: string };
+  marketplaceRegion?: string;
+  currencyRegion?: string;
+  items?: Array<{
+    region?: string;
+    product?: { region?: string } | string;
+  }>;
+  seller?: {
+    storeName?: string;
+    name?: string;
+    marketplaceRegion?: string;
+  };
   buyerConfirmation?: {
     status?: "none" | "pending" | "confirmed" | "issue_reported" | string;
   };
 };
 
-function confirmationHint(order: Order): { label: string; color: string } | null {
+function confirmationHint(
+  order: Order
+): { label: string; color: string } | null {
   if (order.orderStatus !== "Delivered") return null;
   const status =
     order.buyerConfirmation?.status ||
@@ -65,6 +78,25 @@ function confirmationHint(order: Order): { label: string; color: string } | null
     return { label: "Delivery confirmed", color: "#00E575" };
   }
   return { label: "Confirm delivery", color: "#00E575" };
+}
+
+/** Frozen checkout amount lives in listing region currency. */
+function orderSourceRegion(order: Order | null | undefined): string {
+  if (!order) return DEFAULT_REGION;
+  if (order.region) return resolveRegionCode(order.region);
+  if (order.marketplaceRegion)
+    return resolveRegionCode(order.marketplaceRegion);
+  if (order.currencyRegion) return resolveRegionCode(order.currencyRegion);
+  if (order.seller?.marketplaceRegion) {
+    return resolveRegionCode(order.seller.marketplaceRegion);
+  }
+  const first = order.items?.[0];
+  if (first?.region) return resolveRegionCode(first.region);
+  const prod = first?.product;
+  if (prod && typeof prod === "object" && prod.region) {
+    return resolveRegionCode(prod.region);
+  }
+  return DEFAULT_REGION;
 }
 
 function OrbLoader() {
@@ -84,9 +116,19 @@ function OrbLoader() {
 export default function OrdersPage() {
   const { getToken, isSignedIn, isLoaded } = useAuth();
   const router = useRouter();
-  const { region: marketplaceRegion } = useMarketplace();
-  const displayRegion = marketplaceRegion || DEFAULT_REGION;
+  const marketplace = useMarketplace() as {
+    region?: string;
+    formatProduct?: (amount: number, productRegion?: string | null) => string;
+    ratesToNgn?: Record<string, number> | null;
+  };
 
+  const displayRegion = resolveRegionCode(
+    marketplace?.region || DEFAULT_REGION
+  );
+  const ratesToNgn = marketplace?.ratesToNgn || null;
+  const formatProductFn = marketplace?.formatProduct;
+
+  const [mounted, setMounted] = useState(false);
   const [orders, setOrders] = useState<Order[]>([]);
   const [hiddenIds, setHiddenIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
@@ -94,6 +136,31 @@ export default function OrdersPage() {
   const [configOpen, setConfigOpen] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  /**
+   * Product-page pipeline:
+   * listing-region amount → after mount convert into buyer marketplace region.
+   */
+  const fmtFrom = useCallback(
+    (amount: number, sourceRegion?: string | null) => {
+      const n = Number(amount) || 0;
+      const from = resolveRegionCode(sourceRegion || DEFAULT_REGION);
+      if (!mounted) return formatMoney(n, from);
+      try {
+        if (typeof formatProductFn === "function") {
+          return formatProductFn(n, from);
+        }
+      } catch {
+        /* fall through */
+      }
+      return formatProductPrice(n, from, displayRegion, ratesToNgn);
+    },
+    [mounted, formatProductFn, displayRegion, ratesToNgn]
+  );
 
   const loadHidden = useCallback(() => {
     try {
@@ -105,20 +172,6 @@ export default function OrdersPage() {
       /* ignore */
     }
   }, []);
-
-  const formatOrderTotal = useCallback(
-    (amount: number, order?: Order) => {
-      const from =
-        order?.region ||
-        order?.seller?.marketplaceRegion ||
-        displayRegion;
-      if (from && from !== displayRegion) {
-        return formatProductPrice(Number(amount) || 0, from, displayRegion);
-      }
-      return formatMoneyRegion(Number(amount) || 0, displayRegion);
-    },
-    [displayRegion]
-  );
 
   const fetchOrders = useCallback(async () => {
     try {
@@ -189,7 +242,6 @@ export default function OrdersPage() {
     return list;
   }, [visibleOrders, sort]);
 
-  /** Only Cancelled or Delivered + confirmed — not pending confirmation / open issue */
   const completed = useMemo(
     () =>
       orders.filter((o) => {
@@ -274,9 +326,9 @@ export default function OrdersPage() {
           <ul className="grid grid-cols-1 gap-3 md:grid-cols-2">
             {sorted.map((item) => {
               const count = item.items?.length || 0;
-              const color =
-                statusColor[item.orderStatus || ""] || "#6B7280";
+              const color = statusColor[item.orderStatus || ""] || "#6B7280";
               const hint = confirmationHint(item);
+              const src = orderSourceRegion(item);
 
               return (
                 <li key={item._id}>
@@ -331,12 +383,12 @@ export default function OrdersPage() {
                     ) : null}
 
                     <div className="flex items-center justify-between">
-                      <p className="text-[13px] font-semibold">
+                      <p
+                        className="text-[13px] font-semibold"
+                        suppressHydrationWarning
+                      >
                         {count} item{count !== 1 ? "s" : ""} ·{" "}
-                        {formatOrderTotal(
-                          Number(item.totalAmount) || 0,
-                          item
-                        )}
+                        {fmtFrom(Number(item.totalAmount) || 0, src)}
                       </p>
                       <p className="text-[11px] text-[#6B7280]">
                         {item.createdAt

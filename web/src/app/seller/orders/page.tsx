@@ -5,15 +5,39 @@ import { useAuth } from "@clerk/nextjs";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Check, Receipt, SlidersHorizontal, X } from "lucide-react";
 import { useMarketplace } from "@/context/MarketplaceContext";
+import {
+  DEFAULT_REGION,
+  formatMoney,
+  formatProductPrice,
+  resolveRegionCode,
+} from "@/lib/regions";
 
-const API = process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com/api";
+const API =
+  process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com/api";
 
-const STATUS_META: Record<string, { color: string; bg: string; label: string }> = {
-  Preparing: { color: "#F0C070", bg: "rgba(240,192,112,0.12)", label: "Preparing" },
-  Shipped: { color: "#3B82F6", bg: "rgba(59,130,246,0.12)", label: "Shipped" },
-  Delivered: { color: "#00E575", bg: "rgba(0,229,117,0.12)", label: "Delivered" },
-  Cancelled: { color: "#EF4444", bg: "rgba(239,68,68,0.12)", label: "Cancelled" },
-};
+const STATUS_META: Record<string, { color: string; bg: string; label: string }> =
+  {
+    Preparing: {
+      color: "#F0C070",
+      bg: "rgba(240,192,112,0.12)",
+      label: "Preparing",
+    },
+    Shipped: {
+      color: "#3B82F6",
+      bg: "rgba(59,130,246,0.12)",
+      label: "Shipped",
+    },
+    Delivered: {
+      color: "#00E575",
+      bg: "rgba(0,229,117,0.12)",
+      label: "Delivered",
+    },
+    Cancelled: {
+      color: "#EF4444",
+      bg: "rgba(239,68,68,0.12)",
+      label: "Cancelled",
+    },
+  };
 
 const STATUS_ORDER = ["Preparing", "Shipped", "Delivered", "Cancelled"];
 type OrderSort = "newest" | "oldest" | "status" | "delivery";
@@ -37,12 +61,42 @@ type SellerOrder = {
   orderNumber?: string;
   orderStatus?: string;
   totalAmount?: number;
+  subtotal?: number;
+  shippingCost?: number;
+  region?: string;
+  marketplaceRegion?: string;
+  currencyRegion?: string;
+  currency?: string;
   createdAt?: string;
   buyer?: { name?: string };
   user?: { name?: string };
-  items?: unknown[];
+  items?: Array<{
+    price?: number;
+    quantity?: number;
+    region?: string;
+    product?: { region?: string } | string;
+  }>;
   shipping?: { estimatedDelivery?: string };
 };
+
+/**
+ * Checkout frozen the number in the listing region's currency.
+ * Prefer order.region → item/product region → default.
+ */
+function orderSourceRegion(order: SellerOrder | null | undefined): string {
+  if (!order) return DEFAULT_REGION;
+  if (order.region) return resolveRegionCode(order.region);
+  if (order.marketplaceRegion)
+    return resolveRegionCode(order.marketplaceRegion);
+  if (order.currencyRegion) return resolveRegionCode(order.currencyRegion);
+  const first = order.items?.[0];
+  if (first?.region) return resolveRegionCode(first.region);
+  const prod = first?.product;
+  if (prod && typeof prod === "object" && prod.region) {
+    return resolveRegionCode(prod.region);
+  }
+  return DEFAULT_REGION;
+}
 
 function OrbLoader() {
   return (
@@ -55,7 +109,13 @@ function OrbLoader() {
   );
 }
 
-function TopOverlay({ state, onDismiss }: { state: OverlayState; onDismiss: () => void }) {
+function TopOverlay({
+  state,
+  onDismiss,
+}: {
+  state: OverlayState;
+  onDismiss: () => void;
+}) {
   useEffect(() => {
     if (!state || state.actions?.length) return;
     const t = setTimeout(onDismiss, state.durationMs ?? 5000);
@@ -63,7 +123,11 @@ function TopOverlay({ state, onDismiss }: { state: OverlayState; onDismiss: () =
   }, [state, onDismiss]);
   if (!state) return null;
   const accent =
-    state.tone === "danger" ? "bg-[#EF4444]" : state.tone === "success" ? "bg-[#00E575]" : "bg-[#3B82F6]";
+    state.tone === "danger"
+      ? "bg-[#EF4444]"
+      : state.tone === "success"
+        ? "bg-[#00E575]"
+        : "bg-[#3B82F6]";
   return (
     <div className="pointer-events-none fixed inset-x-0 top-0 z-[100] flex justify-center px-3.5 pt-3">
       <div className="pointer-events-auto flex w-full max-w-lg overflow-hidden border border-white/10 bg-[#11141A]">
@@ -72,7 +136,11 @@ function TopOverlay({ state, onDismiss }: { state: OverlayState; onDismiss: () =
           <div className="flex items-start gap-2">
             <div className="min-w-0 flex-1">
               <p className="text-sm font-bold">{state.title}</p>
-              {state.message ? <p className="mt-1 text-[12.5px] text-[#A7ADB8]">{state.message}</p> : null}
+              {state.message ? (
+                <p className="mt-1 text-[12.5px] text-[#A7ADB8]">
+                  {state.message}
+                </p>
+              ) : null}
             </div>
             {!state.actions?.length ? (
               <button type="button" onClick={onDismiss} aria-label="Dismiss">
@@ -91,7 +159,9 @@ function TopOverlay({ state, onDismiss }: { state: OverlayState; onDismiss: () =
                     requestAnimationFrame(() => a.onPress());
                   }}
                   className={`min-w-[72px] px-3.5 py-2 text-[13px] font-bold ${
-                    a.primary ? "bg-[#F5F7FA] text-[#090B0F]" : "border border-white/[0.07] bg-[#171B22]"
+                    a.primary
+                      ? "bg-[#F5F7FA] text-[#090B0F]"
+                      : "border border-white/[0.07] bg-[#171B22]"
                   }`}
                 >
                   {a.label}
@@ -108,8 +178,19 @@ function TopOverlay({ state, onDismiss }: { state: OverlayState; onDismiss: () =
 export default function SellerOrdersPage() {
   const { getToken } = useAuth();
   const router = useRouter();
-  const { format } = useMarketplace();
+  const marketplace = useMarketplace() as {
+    region?: string;
+    formatProduct?: (amount: number, productRegion?: string | null) => string;
+    ratesToNgn?: Record<string, number> | null;
+  };
 
+  const displayRegion = resolveRegionCode(
+    marketplace?.region || DEFAULT_REGION
+  );
+  const ratesToNgn = marketplace?.ratesToNgn || null;
+  const formatProductFn = marketplace?.formatProduct;
+
+  const [mounted, setMounted] = useState(false);
   const [orders, setOrders] = useState<SellerOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -117,6 +198,31 @@ export default function SellerOrdersPage() {
   const [configOpen, setConfigOpen] = useState(false);
   const [hideCompleted, setHideCompleted] = useState(false);
   const [overlay, setOverlay] = useState<OverlayState>(null);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  /**
+   * Same as product page:
+   * amount is listing-region currency → after mount convert into seller region.
+   */
+  const fmtFrom = useCallback(
+    (amount: number, sourceRegion?: string | null) => {
+      const n = Number(amount) || 0;
+      const from = resolveRegionCode(sourceRegion || DEFAULT_REGION);
+      if (!mounted) return formatMoney(n, from);
+      try {
+        if (typeof formatProductFn === "function") {
+          return formatProductFn(n, from);
+        }
+      } catch {
+        /* fall through */
+      }
+      return formatProductPrice(n, from, displayRegion, ratesToNgn);
+    },
+    [mounted, formatProductFn, displayRegion, ratesToNgn]
+  );
 
   const fetchOrders = useCallback(async () => {
     try {
@@ -141,19 +247,26 @@ export default function SellerOrdersPage() {
 
   const visible = useMemo(() => {
     if (!hideCompleted) return orders;
-    return orders.filter((o) => o.orderStatus !== "Delivered" && o.orderStatus !== "Cancelled");
+    return orders.filter(
+      (o) => o.orderStatus !== "Delivered" && o.orderStatus !== "Cancelled"
+    );
   }, [orders, hideCompleted]);
 
   const sorted = useMemo(() => {
     const list = [...visible];
     switch (sort) {
       case "oldest":
-        list.sort((a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime());
+        list.sort(
+          (a, b) =>
+            new Date(a.createdAt || 0).getTime() -
+            new Date(b.createdAt || 0).getTime()
+        );
         break;
       case "status":
         list.sort(
           (a, b) =>
-            STATUS_ORDER.indexOf(String(a.orderStatus)) - STATUS_ORDER.indexOf(String(b.orderStatus)),
+            STATUS_ORDER.indexOf(String(a.orderStatus)) -
+            STATUS_ORDER.indexOf(String(b.orderStatus))
         );
         break;
       case "delivery":
@@ -168,7 +281,11 @@ export default function SellerOrdersPage() {
         });
         break;
       default:
-        list.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+        list.sort(
+          (a, b) =>
+            new Date(b.createdAt || 0).getTime() -
+            new Date(a.createdAt || 0).getTime()
+        );
     }
     return list;
   }, [visible, sort]);
@@ -185,7 +302,11 @@ export default function SellerOrdersPage() {
   const applySort = (key: OrderSort) => {
     setSort(key);
     setConfigOpen(false);
-    setOverlay({ title: `Sorted by ${SORT_LABEL[key]}`, tone: "success", durationMs: 2200 });
+    setOverlay({
+      title: `Sorted by ${SORT_LABEL[key]}`,
+      tone: "success",
+      durationMs: 2200,
+    });
   };
 
   const confirmArchive = () => {
@@ -204,7 +325,9 @@ export default function SellerOrdersPage() {
           onPress: () => {
             setHideCompleted((v) => !v);
             setOverlay({
-              title: hideCompleted ? "Showing all orders" : "Completed orders hidden",
+              title: hideCompleted
+                ? "Showing all orders"
+                : "Completed orders hidden",
               tone: "success",
               durationMs: 2500,
             });
@@ -222,7 +345,9 @@ export default function SellerOrdersPage() {
 
       <header className="sticky top-0 z-20 flex items-center justify-between border-b border-white/[0.07] bg-[#090B0F]/95 px-4 py-3 backdrop-blur sm:px-6 lg:px-8">
         <div className="min-w-0">
-          <h1 className="text-xl font-extrabold tracking-tight">Incoming Orders</h1>
+          <h1 className="text-xl font-extrabold tracking-tight">
+            Incoming Orders
+          </h1>
           <p className="mt-0.5 text-xs text-[#737A86]">
             {sorted.length} shown
             {hideCompleted ? " · completed hidden" : ""} · {SORT_LABEL[sort]}
@@ -257,7 +382,10 @@ export default function SellerOrdersPage() {
             <span
               key={s}
               className="px-2.5 py-1.5 text-[11px] font-bold"
-              style={{ backgroundColor: STATUS_META[s].bg, color: STATUS_META[s].color }}
+              style={{
+                backgroundColor: STATUS_META[s].bg,
+                color: STATUS_META[s].color,
+              }}
             >
               {counts[s]} {STATUS_META[s].label}
             </span>
@@ -270,7 +398,9 @@ export default function SellerOrdersPage() {
               <Receipt className="h-8 w-8 text-[#737A86]" />
             </div>
             <h2 className="text-[17px] font-bold">No orders yet</h2>
-            <p className="mt-1.5 text-[13px] text-[#737A86]">When buyers place orders, they land here.</p>
+            <p className="mt-1.5 text-[13px] text-[#737A86]">
+              When buyers place orders, they land here.
+            </p>
           </div>
         ) : (
           <>
@@ -292,30 +422,44 @@ export default function SellerOrdersPage() {
                       bg: "#171B22",
                       label: item.orderStatus || "Order",
                     };
+                    const src = orderSourceRegion(item);
                     return (
                       <tr
                         key={item._id}
-                        onClick={() => router.push(`/seller/orders/${item._id}`)}
+                        onClick={() =>
+                          router.push(`/seller/orders/${item._id}`)
+                        }
                         className="cursor-pointer border-b border-white/[0.07] last:border-0 hover:bg-white/[0.03]"
                       >
-                        <td className="px-4 py-3.5 font-bold">{item.orderNumber || "Order"}</td>
+                        <td className="px-4 py-3.5 font-bold">
+                          {item.orderNumber || "Order"}
+                        </td>
                         <td className="px-4 py-3.5 text-[#A7ADB8]">
-                          {item.buyer?.name || item.user?.name || "Buyer"} · {item.items?.length || 0} item
+                          {item.buyer?.name || item.user?.name || "Buyer"} ·{" "}
+                          {item.items?.length || 0} item
                           {(item.items?.length || 0) !== 1 ? "s" : ""}
                         </td>
                         <td className="px-4 py-3.5">
                           <span
                             className="px-2 py-1 text-[10px] font-extrabold uppercase tracking-wide"
-                            style={{ backgroundColor: meta.bg, color: meta.color }}
+                            style={{
+                              backgroundColor: meta.bg,
+                              color: meta.color,
+                            }}
                           >
                             {meta.label}
                           </span>
                         </td>
-                        <td className="px-4 py-3.5 font-bold text-[#00E575]">
-                          {format(Number(item.totalAmount) || 0)}
+                        <td
+                          className="px-4 py-3.5 font-bold text-[#00E575]"
+                          suppressHydrationWarning
+                        >
+                          {fmtFrom(Number(item.totalAmount) || 0, src)}
                         </td>
                         <td className="px-4 py-3.5 text-[#737A86]">
-                          {item.createdAt ? new Date(item.createdAt).toLocaleDateString() : ""}
+                          {item.createdAt
+                            ? new Date(item.createdAt).toLocaleDateString()
+                            : ""}
                         </td>
                       </tr>
                     );
@@ -331,11 +475,14 @@ export default function SellerOrdersPage() {
                   bg: "#171B22",
                   label: item.orderStatus || "Order",
                 };
+                const src = orderSourceRegion(item);
                 return (
                   <li key={item._id}>
                     <button
                       type="button"
-                      onClick={() => router.push(`/seller/orders/${item._id}`)}
+                      onClick={() =>
+                        router.push(`/seller/orders/${item._id}`)
+                      }
                       className="w-full border border-white/[0.07] bg-[#11141A] p-3.5 text-left"
                     >
                       <div className="flex items-center justify-between gap-2.5">
@@ -344,21 +491,30 @@ export default function SellerOrdersPage() {
                         </span>
                         <span
                           className="shrink-0 px-2 py-1 text-[10px] font-extrabold uppercase tracking-wide"
-                          style={{ backgroundColor: meta.bg, color: meta.color }}
+                          style={{
+                            backgroundColor: meta.bg,
+                            color: meta.color,
+                          }}
                         >
                           {meta.label}
                         </span>
                       </div>
                       <p className="mt-2 text-[13px] text-[#A7ADB8]">
-                        {item.buyer?.name || item.user?.name || "Buyer"} · {item.items?.length || 0} item
+                        {item.buyer?.name || item.user?.name || "Buyer"} ·{" "}
+                        {item.items?.length || 0} item
                         {(item.items?.length || 0) !== 1 ? "s" : ""}
                       </p>
                       <div className="mt-2.5 flex items-center justify-between">
-                        <span className="text-[15px] font-bold text-[#00E575]">
-                          {format(Number(item.totalAmount) || 0)}
+                        <span
+                          className="text-[15px] font-bold text-[#00E575]"
+                          suppressHydrationWarning
+                        >
+                          {fmtFrom(Number(item.totalAmount) || 0, src)}
                         </span>
                         <span className="text-xs text-[#737A86]">
-                          {item.createdAt ? new Date(item.createdAt).toLocaleDateString() : ""}
+                          {item.createdAt
+                            ? new Date(item.createdAt).toLocaleDateString()
+                            : ""}
                         </span>
                       </div>
                     </button>
@@ -375,7 +531,11 @@ export default function SellerOrdersPage() {
           <div className="w-full max-w-sm border-t border-white/[0.07] bg-[#11141A] sm:border">
             <div className="flex items-center justify-between px-5 py-4">
               <h2 className="text-base font-bold">Order options</h2>
-              <button type="button" onClick={() => setConfigOpen(false)} aria-label="Close">
+              <button
+                type="button"
+                onClick={() => setConfigOpen(false)}
+                aria-label="Close"
+              >
                 <X className="h-4 w-4 text-[#A7ADB8]" />
               </button>
             </div>
@@ -387,7 +547,9 @@ export default function SellerOrdersPage() {
                 className="flex w-full items-center justify-between border-t border-white/[0.07] px-5 py-3.5 text-left text-sm font-semibold"
               >
                 Sort by {SORT_LABEL[key]}
-                {sort === key ? <Check className="h-4 w-4 text-[#00E575]" /> : null}
+                {sort === key ? (
+                  <Check className="h-4 w-4 text-[#00E575]" />
+                ) : null}
               </button>
             ))}
             <button
@@ -395,7 +557,9 @@ export default function SellerOrdersPage() {
               onClick={confirmArchive}
               className="flex w-full border-t border-white/[0.07] px-5 py-3.5 text-left text-sm font-semibold"
             >
-              {hideCompleted ? "Show completed orders" : "Hide completed orders"}
+              {hideCompleted
+                ? "Show completed orders"
+                : "Hide completed orders"}
             </button>
           </div>
         </div>

@@ -1,5 +1,13 @@
+"use client";
+
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useAuth } from "@clerk/nextjs";
 import { ShoppingCart, X } from "lucide-react";
 import { useShowroomFlyCart } from "./ShowroomFlyCart";
@@ -9,12 +17,14 @@ import {
   formatMoney,
   formatProductPrice,
 } from "@/lib/regions";
-import type { Product } from "@/lib/types";
+import type { Product, ProductVariant } from "@/lib/types";
 import { trackShowroomEvent } from "@/lib/showroomEvents";
+import { addToCart } from "@/lib/cart";
 
 const PENDING_KEY = "plazore_pending_action";
 const GOOGLE_G =
   "https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg";
+const GRAD = "linear-gradient(90deg,#00E575,#14B8A6,#2563EB)";
 
 function storeName(product: Product) {
   if (typeof product.seller === "object" && product.seller?.storeName) {
@@ -23,7 +33,6 @@ function storeName(product: Product) {
   return product.brand || "plazore";
 }
 
-/** Location line under brand — matches mobile showroom card. */
 function productLocation(product: Product): string {
   const p = product as Product & {
     shipsFrom?: string;
@@ -57,15 +66,80 @@ function productHasVariants(product: Product): boolean {
   const p = product as Product & {
     hasVariants?: boolean;
     variants?: unknown[];
+    options?: unknown[];
   };
   if (p.hasVariants === true) return true;
-  return Array.isArray(p.variants) && p.variants.length > 0;
+  return (
+    (Array.isArray(p.variants) && p.variants.length > 0) ||
+    (Array.isArray(p.options) && p.options.length > 0)
+  );
 }
 
 function freeDelivery(product: Product): boolean {
   const ship = (product as Product & { shipping?: { feeMode?: string } })
     .shipping;
   return ship?.feeMode === "free";
+}
+
+function mapToRecord(raw: unknown): Record<string, string> {
+  if (!raw) return {};
+  if (raw instanceof Map) {
+    const o: Record<string, string> = {};
+    raw.forEach((v, k) => {
+      if (v != null && String(v).trim()) o[String(k)] = String(v);
+    });
+    return o;
+  }
+  if (typeof raw === "object" && !Array.isArray(raw)) {
+    const o: Record<string, string> = {};
+    for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+      if (v != null && String(v).trim()) o[String(k)] = String(v);
+    }
+    return o;
+  }
+  return {};
+}
+
+type OptionGroup = { name: string; values: string[] };
+
+function getOptionGroups(product: Product): OptionGroup[] {
+  const p = product as Product & {
+    options?: { name?: string; values?: unknown }[];
+    variants?: ProductVariant[];
+  };
+  const fromOpts: OptionGroup[] = [];
+  if (Array.isArray(p.options)) {
+    for (const o of p.options) {
+      const name = String(o?.name || "").trim();
+      const values = Array.isArray(o?.values)
+        ? o.values.map((x) => String(x).trim()).filter(Boolean)
+        : [];
+      if (name && values.length) fromOpts.push({ name, values });
+    }
+  }
+  if (fromOpts.length) return fromOpts;
+
+  const map = new Map<string, Set<string>>();
+  for (const v of p.variants || []) {
+    const opts = mapToRecord(v.options);
+    for (const [k, val] of Object.entries(opts)) {
+      if (!map.has(k)) map.set(k, new Set());
+      map.get(k)!.add(val);
+    }
+  }
+  return Array.from(map.entries()).map(([name, set]) => ({
+    name,
+    values: Array.from(set),
+  }));
+}
+
+function getVariants(product: Product): ProductVariant[] {
+  const list = (product as Product & { variants?: ProductVariant[] }).variants;
+  if (!Array.isArray(list)) return [];
+  return list.map((v) => ({
+    ...v,
+    options: mapToRecord(v.options),
+  }));
 }
 
 function stashReturn(productId: string) {
@@ -112,20 +186,64 @@ export function ProductCard({
   const [mounted, setMounted] = useState(false);
 
   const btnRef = useRef<HTMLButtonElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
   const impressed = useRef(false);
   const [authOpen, setAuthOpen] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerIn, setPickerIn] = useState(false);
   const [imgIdx, setImgIdx] = useState(0);
   const [pressed, setPressed] = useState(false);
-  const images = product.images?.length ? product.images : [];
+  const [selected, setSelected] = useState<Record<string, string>>({});
 
+  const images = product.images?.length ? product.images : [];
   const brand = storeName(product);
   const location = productLocation(product);
-  const variants = productHasVariants(product);
+  const hasVariants = productHasVariants(product);
   const isFreeShip = freeDelivery(product);
-  const inStock =
-    productHasVariants(product)
+  const optionGroups = useMemo(
+    () => (hasVariants ? getOptionGroups(product) : []),
+    [hasVariants, product]
+  );
+  const variantsList = useMemo(
+    () => (hasVariants ? getVariants(product) : []),
+    [hasVariants, product]
+  );
+
+  const selectedVariant = useMemo(() => {
+    if (!hasVariants || !optionGroups.length) return null;
+    if (optionGroups.some((g) => !selected[g.name])) return null;
+    return (
+      variantsList.find((v) => {
+        if (v.available === false) return false;
+        const opts = mapToRecord(v.options);
+        return optionGroups.every(
+          (g) =>
+            String(opts[g.name] || "").toLowerCase() ===
+            String(selected[g.name] || "").toLowerCase()
+        );
+      }) || null
+    );
+  }, [hasVariants, optionGroups, variantsList, selected]);
+
+  const selectionComplete =
+    !hasVariants ||
+    (optionGroups.length > 0 &&
+      optionGroups.every((g) => !!selected[g.name]) &&
+      !!selectedVariant);
+
+  const unitAmount = selectedVariant
+    ? Number(selectedVariant.price ?? product.price) || 0
+    : Number(product.price) || 0;
+
+  const variantStock = selectedVariant
+    ? Math.max(0, Number(selectedVariant.stock) || 0)
+    : 0;
+
+  const inStock = hasVariants
+    ? !selectionComplete
       ? true
-      : Math.max(0, Number(product.stock) || 0) > 0;
+      : variantStock > 0
+    : Math.max(0, Number(product.stock) || 0) > 0;
 
   useEffect(() => {
     setMounted(true);
@@ -143,14 +261,22 @@ export function ProductCard({
     });
   }, [product?._id, product?.region, room, position, displayRegion]);
 
-  // Soft crossfade — long ease, low frequency
   useEffect(() => {
-    if (images.length < 2) return;
+    if (images.length < 2 || pickerOpen) return;
     const id = window.setInterval(() => {
       setImgIdx((i) => (i + 1) % images.length);
     }, 4800);
     return () => clearInterval(id);
-  }, [images.length]);
+  }, [images.length, pickerOpen]);
+
+  useEffect(() => {
+    if (!pickerOpen) {
+      setPickerIn(false);
+      return;
+    }
+    const id = requestAnimationFrame(() => setPickerIn(true));
+    return () => cancelAnimationFrame(id);
+  }, [pickerOpen]);
 
   const light = tone === "light";
 
@@ -158,26 +284,21 @@ export function ProductCard({
     ? "min-w-[160px] w-[42vw] max-w-[200px] sm:min-w-[180px] sm:w-[200px]"
     : "min-w-[180px] w-[48vw] max-w-[240px] sm:min-w-[220px] sm:w-[240px] md:max-w-[280px]";
 
-  /**
-   * SSR + first client paint: product-region only (stable).
-   * After mount: buyer-region conversion (FR → €, etc.).
-   */
   const priceLabel = useMemo(() => {
-    const amount = Number(product.price) || 0;
     const productRegion = product.region || DEFAULT_REGION;
     if (!mounted) {
-      return formatMoney(amount, productRegion);
+      return formatMoney(unitAmount, productRegion);
     }
     if (typeof marketplace?.formatProduct === "function") {
-      return marketplace.formatProduct(amount, productRegion);
+      return marketplace.formatProduct(unitAmount, productRegion);
     }
     return formatProductPrice(
-      amount,
+      unitAmount,
       productRegion,
       displayRegion,
       marketplace?.ratesToNgn || undefined
     );
-  }, [mounted, product.price, product.region, displayRegion, marketplace]);
+  }, [mounted, unitAmount, product.region, displayRegion, marketplace]);
 
   const trackOpen = () => {
     if (!product?._id) return;
@@ -190,30 +311,63 @@ export function ProductCard({
     });
   };
 
-  const doAdd = () => {
-    void trackShowroomEvent({
-      productId: String(product._id),
-      type: "cart",
-      room,
-      position,
-      region: product.region || displayRegion || "NG",
-    });
+  const closePicker = useCallback(() => {
+    setPickerIn(false);
+    window.setTimeout(() => {
+      setPickerOpen(false);
+      setSelected({});
+    }, 240);
+  }, []);
 
-    const el = btnRef.current;
-    if (el && fly) {
-      const r = el.getBoundingClientRect();
-      fly.flyAdd(product, {
-        x: r.left,
-        y: r.top,
-        width: r.width,
-        height: r.height,
+  const doAdd = useCallback(
+    (variant?: ProductVariant | null) => {
+      void trackShowroomEvent({
+        productId: String(product._id),
+        type: "cart",
+        room,
+        position,
+        region: product.region || displayRegion || "NG",
       });
-      return;
-    }
-    if (fly) {
-      fly.flyAdd(product, { x: 0, y: 0, width: 36, height: 36 });
-    }
-  };
+
+      const payload = variant
+        ? {
+            ...product,
+            price: Number(variant.price ?? product.price) || product.price,
+            selectedVariant: variant,
+            variantId: variant.variantId,
+            variantKey: variant.key,
+            selectedOptions: mapToRecord(variant.options),
+          }
+        : product;
+
+      try {
+        addToCart(product, 1, {
+          variantId: variant?.variantId,
+          variantKey: variant?.key,
+          selectedOptions: variant ? mapToRecord(variant.options) : undefined,
+          variant: variant || undefined,
+        });
+      } catch {
+        /* flyAdd is the showroom path */
+      }
+
+      const el = btnRef.current;
+      if (el && fly) {
+        const r = el.getBoundingClientRect();
+        fly.flyAdd(payload as Product, {
+          x: r.left,
+          y: r.top,
+          width: r.width,
+          height: r.height,
+        });
+        return;
+      }
+      if (fly) {
+        fly.flyAdd(payload as Product, { x: 0, y: 0, width: 36, height: 36 });
+      }
+    },
+    [product, room, position, displayRegion, fly]
+  );
 
   const onCart = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -224,7 +378,19 @@ export function ProductCard({
       setAuthOpen(true);
       return;
     }
-    doAdd();
+    if (hasVariants && optionGroups.length > 0) {
+      setPickerOpen(true);
+      return;
+    }
+    doAdd(null);
+  };
+
+  const confirmVariant = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!selectionComplete || !selectedVariant || !inStock) return;
+    doAdd(selectedVariant);
+    closePicker();
   };
 
   const goAuth = (path: "/sign-in" | "/sign-up") => {
@@ -233,6 +399,35 @@ export function ProductCard({
       typeof window !== "undefined" ? window.location.pathname : "/";
     window.location.href = `${path}?redirect_url=${encodeURIComponent(returnPath)}`;
   };
+
+  const pickValue = (name: string, val: string) => {
+    setSelected((prev) => {
+      if (prev[name] === val) {
+        const next = { ...prev };
+        delete next[name];
+        return next;
+      }
+      return { ...prev, [name]: val };
+    });
+  };
+
+  const valuePossible = (name: string, val: string) => {
+    const trial = { ...selected, [name]: val };
+    return variantsList.some((v) => {
+      if (v.available === false) return false;
+      if ((Number(v.stock) || 0) <= 0) return false;
+      const opts = mapToRecord(v.options);
+      return optionGroups.every((g) => {
+        const pick = trial[g.name];
+        if (!pick) return true;
+        return (
+          String(opts[g.name] || "").toLowerCase() === pick.toLowerCase()
+        );
+      });
+    });
+  };
+
+  const pickedCount = optionGroups.filter((g) => selected[g.name]).length;
 
   return (
     <>
@@ -246,7 +441,6 @@ export function ProductCard({
           className="block focus:outline-none focus-visible:ring-1 focus-visible:ring-white/30"
           onClick={trackOpen}
         >
-          {/* Image — sharp frame, soft crossfade */}
           <div className="relative aspect-[3/3.55] overflow-hidden bg-[#0A0C10] sm:aspect-[3/3.5]">
             {images.length > 0 ? (
               images.map((src, i) => {
@@ -264,10 +458,13 @@ export function ProductCard({
                     alt={product.name}
                     loading={i === 0 ? "eager" : "lazy"}
                     decoding="async"
-                    className="absolute inset-0 h-full w-full object-cover will-change-[opacity]"
+                    className="absolute inset-0 h-full w-full object-cover"
                     style={{
                       opacity: active ? 1 : 0,
-                      transition: "opacity 1.25s cubic-bezier(0.4, 0, 0.2, 1)",
+                      transform: pickerOpen ? "scale(1.04)" : "scale(1)",
+                      filter: pickerOpen ? "saturate(0.85)" : "none",
+                      transition:
+                        "opacity 1.25s cubic-bezier(0.4, 0, 0.2, 1), transform 0.5s cubic-bezier(0.22, 1, 0.36, 1), filter 0.4s ease",
                     }}
                   />
                 );
@@ -276,41 +473,238 @@ export function ProductCard({
               <div className="h-full w-full bg-surface" />
             )}
 
-            {/* Subtle bottom fade for text legibility over edge cases */}
-            <div
-              className="pointer-events-none absolute inset-x-0 bottom-0 h-8 opacity-0 transition-opacity duration-500 group-hover:opacity-100"
-              style={{
-                background:
-                  "linear-gradient(to top, rgba(0,0,0,0.18), transparent)",
-              }}
-            />
-
-            {/* Dot indicators — only when multi-image */}
-            {images.length > 1 && (
+            {images.length > 1 && !pickerOpen && (
               <div className="pointer-events-none absolute bottom-2 left-0 right-0 flex justify-center gap-1">
                 {images.slice(0, 5).map((_, i) => (
                   <span
                     key={i}
-                    className="block h-[2px] transition-all duration-500 ease-out"
+                    className="block h-[2px]"
                     style={{
                       width: i === imgIdx ? 14 : 6,
                       backgroundColor:
                         i === imgIdx
                           ? "rgba(255,255,255,0.95)"
                           : "rgba(255,255,255,0.28)",
+                      transition:
+                        "width 0.45s cubic-bezier(0.22, 1, 0.36, 1), background-color 0.45s ease",
                     }}
                   />
                 ))}
               </div>
             )}
+
+            {pickerOpen ? (
+              <div
+                className="absolute inset-0 z-20 flex flex-col"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                }}
+              >
+                {/* Atmosphere */}
+                <div
+                  className="absolute inset-0"
+                  style={{
+                    background:
+                      "radial-gradient(120% 80% at 50% 100%, rgba(0,229,117,0.08), transparent 55%), linear-gradient(180deg, rgba(4,6,10,0.28) 0%, rgba(4,6,10,0.62) 100%)",
+                    opacity: pickerIn ? 1 : 0,
+                    transition: "opacity 0.32s cubic-bezier(0.22, 1, 0.36, 1)",
+                  }}
+                  onClick={closePicker}
+                />
+
+                {/* Glass sheet */}
+                <div
+                  className="relative z-10 mt-auto flex min-h-0 max-h-full flex-1 flex-col"
+                  style={{
+                    transform: pickerIn ? "translateY(0)" : "translateY(18px)",
+                    opacity: pickerIn ? 1 : 0,
+                    transition:
+                      "transform 0.42s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.3s ease",
+                  }}
+                >
+                  <div
+                    className="flex min-h-0 flex-1 flex-col overflow-hidden border-t"
+                    style={{
+                      borderColor: "rgba(255,255,255,0.16)",
+                      background:
+                        "linear-gradient(180deg, rgba(18,22,30,0.55) 0%, rgba(10,12,18,0.78) 100%)",
+                      backdropFilter: "blur(22px) saturate(1.55)",
+                      WebkitBackdropFilter: "blur(22px) saturate(1.55)",
+                      boxShadow:
+                        "inset 0 1px 0 rgba(255,255,255,0.12), 0 -24px 48px rgba(0,0,0,0.38)",
+                    }}
+                  >
+                    {/* Gradient hairline */}
+                    <div
+                      className="h-[2px] w-full shrink-0"
+                      style={{ backgroundImage: GRAD }}
+                    />
+
+                    {/* Header */}
+                    <div className="flex shrink-0 items-center justify-between gap-2 px-2.5 py-2 sm:px-3">
+                      <div className="min-w-0">
+                        <p className="text-[9px] font-bold uppercase tracking-[0.2em] text-white/38 sm:text-[10px]">
+                          Configure
+                        </p>
+                        <p className="mt-0.5 truncate text-[11px] font-semibold text-white/82 sm:text-[12px]">
+                          {pickedCount}/{optionGroups.length} selected
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={closePicker}
+                        aria-label="Close"
+                        className="flex h-8 w-8 shrink-0 items-center justify-center border border-white/12 bg-white/[0.06] text-white/70 hover:bg-white/[0.12] hover:text-white"
+                      >
+                        <X className="h-3.5 w-3.5" strokeWidth={2.2} />
+                      </button>
+                    </div>
+
+                    {/* Scrollable options */}
+                    <div
+                      ref={scrollRef}
+                      className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2.5 pb-1 sm:px-3"
+                      style={{
+                        WebkitOverflowScrolling: "touch",
+                        scrollbarWidth: "thin",
+                        scrollbarColor: "rgba(255,255,255,0.18) transparent",
+                      }}
+                    >
+                      {optionGroups.map((g, gi) => (
+                        <div
+                          key={g.name}
+                          className={gi === 0 ? "pt-0.5" : "pt-2.5"}
+                        >
+                          <div className="mb-1.5 flex items-baseline justify-between gap-2">
+                            <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-white/50 sm:text-[11px]">
+                              {g.name}
+                            </p>
+                            {selected[g.name] ? (
+                              <p className="max-w-[55%] truncate text-[10px] font-medium text-[#00E575]/90">
+                                {selected[g.name]}
+                              </p>
+                            ) : (
+                              <p className="text-[10px] text-white/28">
+                                choose
+                              </p>
+                            )}
+                          </div>
+                          <div className="flex flex-wrap gap-1.5">
+                            {g.values.map((val) => {
+                              const on = selected[g.name] === val;
+                              const possible = valuePossible(g.name, val);
+                              return (
+                                <button
+                                  key={val}
+                                  type="button"
+                                  disabled={!possible && !on}
+                                  onClick={() =>
+                                    possible && pickValue(g.name, val)
+                                  }
+                                  className="min-h-[28px] px-2.5 text-[11px] font-semibold sm:min-h-[30px] sm:px-3 sm:text-[12px]"
+                                  style={{
+                                    backgroundImage: on ? GRAD : undefined,
+                                    backgroundColor: on
+                                      ? undefined
+                                      : possible
+                                        ? "rgba(255,255,255,0.07)"
+                                        : "rgba(255,255,255,0.02)",
+                                    color: on
+                                      ? "#041412"
+                                      : possible
+                                        ? "rgba(255,255,255,0.9)"
+                                        : "rgba(255,255,255,0.22)",
+                                    border: on
+                                      ? "1px solid transparent"
+                                      : possible
+                                        ? "1px solid rgba(255,255,255,0.14)"
+                                        : "1px solid rgba(255,255,255,0.05)",
+                                    boxShadow: on
+                                      ? "0 0 0 1px rgba(0,229,117,0.18), 0 8px 18px rgba(0,0,0,0.25)"
+                                      : "none",
+                                    textDecoration: possible
+                                      ? "none"
+                                      : "line-through",
+                                    cursor: possible ? "pointer" : "not-allowed",
+                                    backdropFilter: on
+                                      ? undefined
+                                      : "blur(8px)",
+                                    transition:
+                                      "background-color 0.16s ease, border-color 0.16s ease, color 0.16s ease, box-shadow 0.2s ease",
+                                  }}
+                                >
+                                  {val}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Sticky add */}
+                    <div
+                      className="shrink-0 border-t px-2.5 py-2 sm:px-3 sm:py-2.5"
+                      style={{
+                        borderColor: "rgba(255,255,255,0.1)",
+                        background: "rgba(8,10,14,0.55)",
+                        backdropFilter: "blur(16px)",
+                        WebkitBackdropFilter: "blur(16px)",
+                      }}
+                    >
+                      <p
+                        className="mb-1.5 truncate text-[11px] font-semibold tracking-tight text-white/88 sm:text-[12px]"
+                        suppressHydrationWarning
+                      >
+                        {priceLabel}
+                        {selectionComplete && inStock ? (
+                          <span className="ml-1.5 text-[10px] font-medium text-white/38">
+                            ready
+                          </span>
+                        ) : null}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={confirmVariant}
+                        disabled={!selectionComplete || !inStock}
+                        className="flex h-9 w-full items-center justify-center text-[12px] font-extrabold tracking-wide disabled:opacity-45 sm:h-10 sm:text-[13px]"
+                        style={{
+                          backgroundImage:
+                            selectionComplete && inStock ? GRAD : undefined,
+                          backgroundColor:
+                            selectionComplete && inStock
+                              ? undefined
+                              : "rgba(255,255,255,0.08)",
+                          color:
+                            selectionComplete && inStock
+                              ? "#041412"
+                              : "rgba(255,255,255,0.5)",
+                          boxShadow:
+                            selectionComplete && inStock
+                              ? "0 10px 24px rgba(0,229,117,0.18)"
+                              : "none",
+                          transition:
+                            "opacity 0.18s ease, box-shadow 0.22s ease",
+                        }}
+                      >
+                        {!selectionComplete
+                          ? "Select options"
+                          : !inStock
+                            ? "Out of stock"
+                            : "Add to bag"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : null}
           </div>
 
-          {/* Name */}
           <p className="mt-2.5 line-clamp-2 text-[13px] font-medium leading-[1.35] tracking-[-0.01em] sm:text-[13.5px]">
             {product.name}
           </p>
 
-          {/* Brand | location */}
           <p
             className={`mt-1 flex items-center gap-1.5 text-[11px] leading-tight ${
               light ? "text-chamber-ink/50" : "text-white/52"
@@ -332,7 +726,6 @@ export function ProductCard({
             ) : null}
           </p>
 
-          {/* Price row */}
           <div className="mt-1.5 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
             <p
               className={`text-[13.5px] font-semibold tracking-tight ${
@@ -341,15 +734,6 @@ export function ProductCard({
               suppressHydrationWarning
             >
               {priceLabel}
-              {variants ? (
-                <span
-                  className={`ml-1 text-[10px] font-medium ${
-                    light ? "text-chamber-ink/40" : "text-white/40"
-                  }`}
-                >
-                  from
-                </span>
-              ) : null}
             </p>
             {isFreeShip && (
               <span
@@ -362,7 +746,7 @@ export function ProductCard({
             )}
           </div>
 
-          {!inStock && !variants && (
+          {!inStock && !hasVariants && (
             <p
               className={`mt-1 text-[10px] font-medium uppercase tracking-[0.08em] ${
                 light ? "text-red-600/70" : "text-red-400/70"
@@ -373,7 +757,6 @@ export function ProductCard({
           )}
         </Link>
 
-        {/* Cart — sharp square, soft press */}
         <button
           ref={btnRef}
           type="button"
@@ -381,23 +764,22 @@ export function ProductCard({
           onPointerDown={() => setPressed(true)}
           onPointerUp={() => setPressed(false)}
           onPointerLeave={() => setPressed(false)}
-          aria-label="Add to bag"
-          className="absolute right-2 top-[calc(68%-2.25rem)] z-10 flex h-9 w-9 items-center justify-center bg-white text-[#111] shadow-[0_2px_10px_rgba(0,0,0,0.16)] transition-[transform,box-shadow,opacity] duration-200 ease-out hover:shadow-[0_4px_14px_rgba(0,0,0,0.22)] focus:outline-none focus-visible:ring-1 focus-visible:ring-white/40 active:opacity-90"
+          aria-label={hasVariants ? "Choose options" : "Add to bag"}
+          className="absolute right-2 top-[calc(68%-2.25rem)] z-30 flex h-9 w-9 items-center justify-center bg-white text-[#111] shadow-[0_2px_10px_rgba(0,0,0,0.16)] transition-[transform,box-shadow,opacity] duration-200 ease-out hover:shadow-[0_4px_14px_rgba(0,0,0,0.22)] focus:outline-none focus-visible:ring-1 focus-visible:ring-white/40 active:opacity-90"
           style={{
             transform: pressed ? "scale(0.96)" : "scale(1)",
+            opacity: pickerOpen ? 0 : 1,
+            pointerEvents: pickerOpen ? "none" : "auto",
           }}
         >
           <ShoppingCart className="h-[15px] w-[15px]" strokeWidth={2.1} />
         </button>
       </div>
 
-      {/* Auth sheet — sharp edges, calm motion */}
       {authOpen ? (
         <div
           className="fixed inset-0 z-[90] flex items-end justify-center bg-black/72 sm:items-center sm:p-6"
-          style={{
-            animation: "plazore-fade-in 0.22s ease-out",
-          }}
+          style={{ animation: "plazore-fade-in 0.22s ease-out" }}
         >
           <button
             type="button"
@@ -485,3 +867,5 @@ export function ProductCard({
     </>
   );
 }
+
+export default ProductCard;

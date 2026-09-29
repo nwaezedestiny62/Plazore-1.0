@@ -615,102 +615,26 @@ export default function EditProductPage() {
       setSubCategory(p.subCategory || "");
       setSpecs(normalizeSpecs(p.specifications));
 
-      // Hydrate options/variants even if hasVariants flag was lost on save
-      const rawOptions = Array.isArray(p.options) ? p.options : [];
-      const rawVariants = Array.isArray(p.variants) ? p.variants : [];
-
-      const normalizedOptions = rawOptions
-        .map((o: any) => {
-          if (!o || typeof o !== "object") return null;
-          const name = String(o.name || "").trim();
-          let values: string[] = [];
-          if (Array.isArray(o.values)) {
-            values = o.values.map((x: any) => String(x).trim()).filter(Boolean);
-          } else if (typeof o.values === "string") {
-            values = o.values.split(/[,|\n]/).map((s: string) => s.trim()).filter(Boolean);
-          }
-          if (!name || !values.length) return null;
-          return {
-            id: String(o.id || uid()),
-            name,
-            valuesText: values.join(", "),
-          };
-        })
-        .filter(Boolean) as { id: string; name: string; valuesText: string }[];
-
-      const normalizedVariants = rawVariants
-        .map((v: any) => {
-          if (!v || typeof v !== "object") return null;
-          let opts: Record<string, string> = {};
-          const rawOpts = v.options;
-          if (rawOpts instanceof Map) {
-            rawOpts.forEach((val: any, k: any) => {
-              if (val != null && String(val).trim()) opts[String(k)] = String(val);
-            });
-          } else if (rawOpts && typeof rawOpts === "object" && !Array.isArray(rawOpts)) {
-            for (const [k, val] of Object.entries(rawOpts)) {
-              if (val != null && String(val).trim()) opts[String(k)] = String(val);
-            }
-          }
-          const key =
-            String(v.key || "").trim() ||
-            Object.entries(opts)
-              .map(([k, val]) => `${k.trim().toLowerCase()}=${String(val).trim().toLowerCase()}`)
-              .sort()
-              .join("|");
-          return {
-            variantId: String(v.variantId || v._id || uid()),
-            key,
-            options: opts,
+      const withVariants = !!(p.hasVariants && Array.isArray(p.options) && p.options.length);
+      setHasVariants(withVariants);
+      if (withVariants) {
+        setOptionDrafts(
+          (p.options || []).map((o: any) => ({
+            id: o.id || uid(),
+            name: o.name || "",
+            valuesText: Array.isArray(o.values) ? o.values.join(", ") : "",
+          })),
+        );
+        setVariantDrafts(
+          (p.variants || []).map((v: any) => ({
+            variantId: v.variantId || uid(),
+            key: v.key || buildVariantKey(v.options || {}),
+            options: v.options || {},
             stock: String(v.stock ?? 0),
             price: v.price != null && v.price !== "" ? String(v.price) : "",
             available: v.available !== false,
-          };
-        })
-        .filter(Boolean) as {
-        variantId: string;
-        key: string;
-        options: Record<string, string>;
-        stock: string;
-        price: string;
-        available: boolean;
-      }[];
-
-      // Derive option groups from variants if options array empty
-      let finalOptions = normalizedOptions;
-      if (!finalOptions.length && normalizedVariants.length) {
-        const map = new Map<string, Set<string>>();
-        for (const v of normalizedVariants) {
-          for (const [k, val] of Object.entries(v.options || {})) {
-            if (!map.has(k)) map.set(k, new Set());
-            map.get(k)!.add(String(val));
-          }
-        }
-        finalOptions = Array.from(map.entries()).map(([name, set]) => ({
-          id: uid(),
-          name,
-          valuesText: Array.from(set).join(", "),
-        }));
-      }
-
-      const withVariants =
-        !!p.hasVariants ||
-        finalOptions.length > 0 ||
-        normalizedVariants.length > 0;
-
-      console.log("[EditProduct applyProduct]", {
-        hasVariantsFlag: p.hasVariants,
-        rawOptionsLen: rawOptions.length,
-        rawVariantsLen: rawVariants.length,
-        finalOptionsLen: finalOptions.length,
-        normalizedVariantsLen: normalizedVariants.length,
-        withVariants,
-      });
-
-      setHasVariants(withVariants);
-      if (withVariants) {
-        setOptionDrafts(finalOptions);
-        setVariantDrafts(normalizedVariants);
+          })),
+        );
       } else {
         setOptionDrafts([]);
         setVariantDrafts([]);
@@ -790,70 +714,39 @@ export default function EditProductPage() {
     [revokeBlobUri, sellerRegion, ratesToNgn],
   );
 
-    const fetchProduct = useCallback(
+  const fetchProduct = useCallback(
     async (token: string) => {
       let product: any = null;
-
       try {
-        // Prefer public product GET (serializeProductLean converts Map → object)
-        try {
-          const pubRaw = await fetch(`${API}/products/${id}`, {
-            headers: { Authorization: `Bearer ${token}` },
-          });
-          if (pubRaw.ok) {
-            const pubRes = await readJson(pubRaw);
-            product = pubRes?.data || pubRes?.product || null;
-            if (pubRes?.success === false) product = null;
-          }
-        } catch (e) {
-          console.warn("GET /products/:id failed", e);
-        }
-
-        if (!product) {
-          try {
-            const prodRaw = await fetch(`${API}/seller/products/${id}`, {
-              headers: { Authorization: `Bearer ${token}` },
-            });
-            if (prodRaw.ok) {
-              const prodRes = await readJson(prodRaw);
-              product = prodRes?.data || prodRes?.product || prodRes;
-              if (prodRes?.success === false) product = null;
-            }
-          } catch (e) {
-            console.warn("GET /seller/products/:id failed", e);
-          }
-        }
-
-        if (!product) {
-          const listRaw = await fetch(`${API}/seller/products`, {
-            headers: { Authorization: `Bearer ${token}` },
-          });
-          const listRes = await readJson(listRaw);
-          const list = Array.isArray(listRes?.data)
-            ? listRes.data
-            : Array.isArray(listRes)
-              ? listRes
-              : [];
-          product = list.find((x: any) => String(x._id) === id) || null;
-        }
-
-        if (!product) throw new Error("Product not found");
-
-        console.log("[EditProduct load]", {
-          id,
-          hasVariants: product.hasVariants,
-          options: product.options,
-          variants: product.variants,
+        const prodRaw = await fetch(`${API}/seller/products/${id}`, {
+          headers: { Authorization: `Bearer ${token}` },
         });
-
-        applyProduct(product);
-      } catch (e: any) {
-        console.error("fetchProduct error:", e);
-        toast("Error", e?.message || "Could not load product", "danger");
-        throw e;
+        if (prodRaw.ok) {
+          const prodRes = await readJson(prodRaw);
+          product = prodRes?.data || prodRes?.product || prodRes;
+          if (prodRes?.success === false) product = null;
+        }
+      } catch (e) {
+        console.warn("GET /seller/products/:id failed", e);
       }
+
+      if (!product) {
+        const listRaw = await fetch(`${API}/seller/products`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const listRes = await readJson(listRaw);
+        const list = Array.isArray(listRes?.data)
+          ? listRes.data
+          : Array.isArray(listRes)
+            ? listRes
+            : [];
+        product = list.find((x: any) => String(x._id) === id) || null;
+      }
+
+      if (!product) throw new Error("Product not found");
+      applyProduct(product);
     },
-    [id, applyProduct, toast]
+    [id, applyProduct],
   );
 
   useEffect(() => {

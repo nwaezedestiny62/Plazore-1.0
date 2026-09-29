@@ -653,6 +653,363 @@ function Gallery({ images, name }: { images: string[]; name: string }) {
   );
 }
 
+
+
+const COLOR_SWATCH: Record<string, string> = {
+  black: "#0D0D0D",
+  white: "#F7F7F5",
+  offwhite: "#F3F1EA",
+  ivory: "#F5F0E6",
+  cream: "#F3E9D7",
+  beige: "#D8C4A8",
+  nude: "#E0C3B0",
+  blush: "#E8B4B8",
+  sand: "#C9B896",
+  stone: "#A8A29A",
+  taupe: "#8B7E74",
+  brown: "#6B4423",
+  chocolate: "#4A2C1A",
+  coffee: "#4B3621",
+  camel: "#C19A6B",
+  tan: "#C4A574",
+  khaki: "#C3B091",
+  navy: "#13243A",
+  midnight: "#0B1420",
+  blue: "#2F6FED",
+  sky: "#7EB6FF",
+  skyblue: "#7EB6FF",
+  cobalt: "#0047AB",
+  royal: "#1E4FD8",
+  indigo: "#3F3D9B",
+  teal: "#0F8F86",
+  turquoise: "#2DD4BF",
+  aqua: "#67E8F9",
+  cyan: "#22D3EE",
+  green: "#16A34A",
+  emerald: "#059669",
+  forest: "#14532D",
+  sage: "#9CA88A",
+  mint: "#A8E6CF",
+  olive: "#6B7C3A",
+  lime: "#84CC16",
+  red: "#DC2626",
+  crimson: "#B91C1C",
+  burgundy: "#6B1020",
+  wine: "#722F37",
+  maroon: "#7F1D1D",
+  coral: "#F97066",
+  pink: "#EC4899",
+  hotpink: "#F472B6",
+  fuchsia: "#D946EF",
+  rose: "#FB7185",
+  magenta: "#C026D3",
+  purple: "#7C3AED",
+  violet: "#6D28D9",
+  lilac: "#C4B5FD",
+  lavender: "#DDD6FE",
+  orange: "#F97316",
+  peach: "#FDBA8C",
+  yellow: "#EAB308",
+  mustard: "#CA8A04",
+  gold: "#C9A227",
+  champagne: "#F7E7CE",
+  bronze: "#B08D57",
+  copper: "#B87333",
+  silver: "#C0C4CC",
+  graphite: "#3A3F46",
+  charcoal: "#24282E",
+  grey: "#737A86",
+  gray: "#737A86",
+  multicolor: "linear-gradient(135deg,#00E575,#3B82F6,#EC4899)",
+  multi: "linear-gradient(135deg,#00E575,#3B82F6,#EC4899)",
+};
+
+function swatchFor(val: string): string | null {
+  const t = val.trim();
+  if (/^#([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(t)) return t;
+  const k = t.toLowerCase().replace(/[\s_-]+/g, "");
+  if (COLOR_SWATCH[k]) return COLOR_SWATCH[k];
+  for (const [name, hex] of Object.entries(COLOR_SWATCH)) {
+    if (k.includes(name) || name.includes(k)) return hex;
+  }
+  return null;
+}
+
+function hexToRgb(hex: string): string | null {
+  const h = hex.replace("#", "");
+  if (h.length !== 6) return null;
+  const n = parseInt(h, 16);
+  if (Number.isNaN(n)) return null;
+  return `${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}`;
+}
+
+function isColorGroup(opt: { name: string; values: string[] }) {
+  const n = opt.name.toLowerCase();
+  if (/(color|colour|shade|hue|finish|tone)/.test(n)) return true;
+  const hits = opt.values.filter((v) => swatchFor(v)).length;
+  return hits >= Math.ceil(opt.values.length * 0.5);
+}
+
+function isSizeGroup(opt: { name: string }) {
+  return /(size|fit|length|width|dimension)/i.test(opt.name);
+}
+
+function CinematicVariantPicker({
+  options,
+  variants,
+  selected,
+  onChange,
+}: {
+  options: { id?: string; name: string; values: string[] }[];
+  variants: ProductVariant[];
+  selected: Record<string, string>;
+  onChange: (next: Record<string, string>) => void;
+}) {
+  const picked = options.filter((o) => selected[o.name]).length;
+  const total = options.length;
+
+  const colorOpt = options.find((o) => isColorGroup(o));
+  const activeColorVal = colorOpt ? selected[colorOpt.name] : "";
+  const activeSwatch = activeColorVal ? swatchFor(activeColorVal) : null;
+  const rgb = activeSwatch && activeSwatch.startsWith("#") ? hexToRgb(activeSwatch) : null;
+
+  const valuePossible = (name: string, val: string) => {
+    const trial = { ...selected, [name]: val };
+    return variants.some((v) => {
+      if (v.available === false) return false;
+      if ((Number(v.stock) || 0) <= 0) return false;
+      const o = v.options || {};
+      return options.every((op) => {
+        const pick = trial[op.name];
+        if (!pick) return true;
+        return (
+          String(o[op.name] || "").toLowerCase() ===
+          String(pick).toLowerCase()
+        );
+      });
+    });
+  };
+
+  const pick = (name: string, val: string) => {
+    if (selected[name] === val) {
+      const n = { ...selected };
+      delete n[name];
+      onChange(n);
+      return;
+    }
+    onChange({ ...selected, [name]: val });
+  };
+
+  return (
+    <div className="relative mt-6 overflow-hidden border border-white/[0.09]">
+      <div
+        className="pointer-events-none absolute inset-0 transition-[background] duration-700 ease-out"
+        style={{
+          background: rgb
+            ? `radial-gradient(120% 90% at 8% 0%, rgba(${rgb},0.34), transparent 58%), linear-gradient(180deg, rgba(${rgb},0.12), rgba(8,10,14,0.55))`
+            : "linear-gradient(180deg, rgba(16,22,30,0.9), rgba(9,11,15,0.96))",
+        }}
+      />
+      <div
+        className="pointer-events-none absolute inset-y-0 left-0 w-[5px] sm:w-1.5"
+        style={{
+          background: activeSwatch || GRAD,
+          transition: "background 0.55s ease",
+        }}
+      />
+
+      <div className="relative px-4 py-5 sm:px-5 sm:py-6">
+        <div className="mb-5 flex items-end justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-white/36">
+              The floor
+            </p>
+            <p className="mt-1 truncate font-display text-[18px] font-semibold tracking-tight text-white sm:text-[20px]">
+              {activeColorVal || "Choose your look"}
+            </p>
+          </div>
+          <p className="shrink-0 text-[11px] tabular-nums text-white/38">
+            {picked}/{total}
+          </p>
+        </div>
+
+        <div className="space-y-7">
+          {options.map((opt, gi) => {
+            const colorMode = isColorGroup(opt);
+            const sizeMode = !colorMode && isSizeGroup(opt);
+            return (
+              <div
+                key={opt.id || opt.name}
+                style={{
+                  animation: `plazore-rise-soft 0.55s cubic-bezier(0.16,1,0.3,1) ${gi * 80}ms both`,
+                }}
+              >
+                <div className="mb-3 flex items-baseline justify-between gap-2">
+                  <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-white/48">
+                    {opt.name}
+                  </p>
+                  <p
+                    className="text-[12px] font-medium"
+                    style={{ color: selected[opt.name] ? "#00E575" : "rgba(255,255,255,0.28)" }}
+                  >
+                    {selected[opt.name] || "—"}
+                  </p>
+                </div>
+
+                {colorMode ? (
+                  <div className="-mx-1 flex gap-2.5 overflow-x-auto px-1 pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                    {opt.values.map((val) => {
+                      const on = selected[opt.name] === val;
+                      const possible = valuePossible(opt.name, val);
+                      const sw = swatchFor(val) || "#3A3F46";
+                      return (
+                        <button
+                          key={val}
+                          type="button"
+                          disabled={!possible && !on}
+                          onClick={() => possible && pick(opt.name, val)}
+                          className="group relative shrink-0 text-left"
+                          style={{
+                            width: "72px",
+                            opacity: possible || on ? 1 : 0.35,
+                            cursor: possible ? "pointer" : "not-allowed",
+                          }}
+                        >
+                          <span
+                            className="relative block aspect-[3/4] w-full overflow-hidden border"
+                            style={{
+                              background: sw,
+                              borderColor: on
+                                ? "rgba(255,255,255,0.92)"
+                                : "rgba(255,255,255,0.14)",
+                              boxShadow: on
+                                ? `0 0 0 1px #00E575, 0 16px 36px rgba(0,0,0,0.45)`
+                                : "0 8px 18px rgba(0,0,0,0.22)",
+                              transform: on ? "translateY(-4px) scale(1.04)" : "none",
+                              transition:
+                                "transform 0.4s cubic-bezier(0.16,1,0.3,1), box-shadow 0.4s ease, border-color 0.3s ease",
+                            }}
+                          >
+                            <span
+                              className="pointer-events-none absolute inset-x-0 top-0 h-1/2"
+                              style={{
+                                background:
+                                  "linear-gradient(180deg, rgba(255,255,255,0.28), transparent)",
+                              }}
+                            />
+                            {on ? (
+                              <span
+                                className="absolute bottom-0 left-0 right-0 h-[3px]"
+                                style={{ backgroundImage: GRAD }}
+                              />
+                            ) : null}
+                          </span>
+                          <span
+                            className="mt-1.5 block truncate text-center text-[10.5px] font-semibold"
+                            style={{
+                              color: on ? "#F5F7FA" : "rgba(255,255,255,0.55)",
+                              textDecoration: possible ? "none" : "line-through",
+                            }}
+                          >
+                            {val}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : sizeMode ? (
+                  <div className="flex flex-wrap gap-2">
+                    {opt.values.map((val) => {
+                      const on = selected[opt.name] === val;
+                      const possible = valuePossible(opt.name, val);
+                      return (
+                        <button
+                          key={val}
+                          type="button"
+                          disabled={!possible && !on}
+                          onClick={() => possible && pick(opt.name, val)}
+                          className="relative flex h-12 min-w-[48px] items-center justify-center px-3.5 text-[14px] font-bold tracking-wide sm:h-14 sm:min-w-[56px]"
+                          style={{
+                            backgroundImage: on ? GRAD : undefined,
+                            backgroundColor: on ? undefined : "rgba(255,255,255,0.04)",
+                            color: on ? "#041412" : possible ? "rgba(245,247,250,0.9)" : "rgba(255,255,255,0.22)",
+                            border: on
+                              ? "1px solid transparent"
+                              : "1px solid rgba(255,255,255,0.12)",
+                            boxShadow: on ? "0 12px 28px rgba(0,229,117,0.16)" : "none",
+                            textDecoration: possible ? "none" : "line-through",
+                            cursor: possible ? "pointer" : "not-allowed",
+                            transform: on ? "translateY(-2px)" : "none",
+                            transition:
+                              "transform 0.32s cubic-bezier(0.16,1,0.3,1), box-shadow 0.32s ease, background-color 0.2s ease",
+                          }}
+                        >
+                          {val}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {opt.values.map((val) => {
+                      const on = selected[opt.name] === val;
+                      const possible = valuePossible(opt.name, val);
+                      const sw = swatchFor(val);
+                      return (
+                        <button
+                          key={val}
+                          type="button"
+                          disabled={!possible && !on}
+                          onClick={() => possible && pick(opt.name, val)}
+                          className="flex min-h-[44px] items-center gap-2.5 px-3.5 text-[13px] font-semibold"
+                          style={{
+                            backgroundImage: on && !sw ? GRAD : undefined,
+                            backgroundColor: on ? undefined : "rgba(255,255,255,0.04)",
+                            color: on && !sw ? "#041412" : possible ? "#F5F7FA" : "rgba(255,255,255,0.22)",
+                            border: on
+                              ? "1px solid rgba(255,255,255,0.2)"
+                              : "1px solid rgba(255,255,255,0.12)",
+                            textDecoration: possible ? "none" : "line-through",
+                            cursor: possible ? "pointer" : "not-allowed",
+                            transition: "transform 0.28s ease, box-shadow 0.28s ease",
+                            transform: on ? "translateY(-1px)" : "none",
+                          }}
+                        >
+                          {sw ? (
+                            <span
+                              className="h-5 w-5 shrink-0 border border-white/25"
+                              style={{ background: sw }}
+                            />
+                          ) : null}
+                          {val}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <style jsx>{`
+        @keyframes plazore-rise-soft {
+          from {
+            opacity: 0;
+            transform: translateY(12px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+
 export function ProductView({ product }: { product: Product }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -1259,74 +1616,13 @@ export function ProductView({ product }: { product: Product }) {
             </div>
           )}
 
-          {/* ——— Options (cinematic, restrained) ——— */}
           {hasVariants && options.length > 0 && (
-            <div className="mt-6 space-y-5 border-t border-white/8 pt-5">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-muted">
-                Configuration
-              </p>
-              {options.map((opt) => (
-                <div key={opt.id || opt.name}>
-                  <div className="mb-2.5 flex items-baseline justify-between gap-2">
-                    <p className="text-[13px] font-semibold text-white/90">
-                      {opt.name}
-                    </p>
-                    {selected[opt.name] ? (
-                      <p className="text-[12px] font-medium text-white/45">
-                        {selected[opt.name]}
-                      </p>
-                    ) : (
-                      <p className="text-[12px] text-white/28">Required</p>
-                    )}
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {opt.values.map((val) => {
-                      const on = selected[opt.name] === val;
-                      const trial = { ...selected, [opt.name]: val };
-                      const possible = variants.some((v) => {
-                        if (v.available === false) return false;
-                        const o = v.options || {};
-                        return options.every((op) => {
-                          const pick = trial[op.name];
-                          if (!pick) return true;
-                          return (
-                            String(o[op.name] || "").toLowerCase() ===
-                            String(pick).toLowerCase()
-                          );
-                        });
-                      });
-                      return (
-                        <button
-                          key={val}
-                          type="button"
-                          disabled={!possible}
-                          onClick={() =>
-                            setSelected((prev) => ({
-                              ...prev,
-                              [opt.name]: val,
-                            }))
-                          }
-                          className={`min-h-10 min-w-[2.75rem] px-3.5 py-2 text-[13px] font-semibold transition duration-200 ${
-                            on
-                              ? "border border-transparent text-[#041412]"
-                              : possible
-                                ? "border border-white/12 bg-white/[0.04] text-white/85 hover:border-white/22 hover:bg-white/[0.07]"
-                                : "cursor-not-allowed border border-white/6 bg-transparent text-white/22 line-through"
-                          }`}
-                          style={
-                            on
-                              ? { backgroundImage: GRAD }
-                              : undefined
-                          }
-                        >
-                          {val}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              ))}
-            </div>
+            <CinematicVariantPicker
+              options={options}
+              variants={variants}
+              selected={selected}
+              onChange={setSelected}
+            />
           )}
 
           {msgError && (

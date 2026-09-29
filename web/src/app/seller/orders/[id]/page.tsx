@@ -57,32 +57,96 @@ function statusColor(status: string) {
   return "#F0C070";
 }
 
-function formatSelectedOptions(
-  selected?: Record<string, string> | null
-): string {
-  if (!selected || typeof selected !== "object") return "";
-  return Object.entries(selected)
-    .filter(([, v]) => v != null && String(v).trim())
-    .map(([k, v]) => `${k}: ${v}`)
+function toOptionRecord(raw: unknown): Record<string, string> {
+  if (!raw) return {};
+  if (raw instanceof Map) {
+    const o: Record<string, string> = {};
+    raw.forEach((v, k) => {
+      if (v != null && String(v).trim()) o[String(k)] = String(v);
+    });
+    return o;
+  }
+  if (typeof raw === "object" && !Array.isArray(raw)) {
+    const o: Record<string, string> = {};
+    for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+      if (v != null && String(v).trim()) o[String(k)] = String(v);
+    }
+    return o;
+  }
+  return {};
+}
+
+function titleCaseKey(k: string) {
+  return k
+    .replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function formatSelectedOptions(raw: unknown): string {
+  const rec = toOptionRecord(raw);
+  return Object.entries(rec)
+    .map(([k, v]) => `${titleCaseKey(k)}: ${v}`)
     .join(" · ");
 }
 
+function optionsFromVariantKey(key?: string): string {
+  if (!key || typeof key !== "string") return "";
+  return key
+    .split("|")
+    .map((part) => {
+      const [k, ...rest] = part.split("=");
+      if (!k) return "";
+      const v = rest.join("=");
+      return v ? `${titleCaseKey(k.trim())}: ${v.trim()}` : k.trim();
+    })
+    .filter(Boolean)
+    .join(" · ");
+}
+
+function itemOptionsLine(item: any): string {
+  return (
+    formatSelectedOptions(item?.selectedOptions) ||
+    formatSelectedOptions(item?.variant?.options) ||
+    formatSelectedOptions(item?.options) ||
+    optionsFromVariantKey(item?.variantKey) ||
+    optionsFromVariantKey(item?.variant?.key) ||
+    ""
+  );
+}
+
+function itemImage(item: any): string {
+  return (
+    item?.image ||
+    item?.variant?.image ||
+    item?.product?.images?.[0] ||
+    ""
+  );
+}
+
 /**
- * Order money was snapshotted in the listing region at checkout.
- * Resolve that source region the same way product/cart pages do.
+ * Listing amounts are stored in the product/listing region at checkout.
+ * Prefer item → product → order region so mixed listings stay accurate.
  */
-function resolveOrderSourceRegion(order: any): string {
+function itemSourceRegion(item: any, order: any): string {
+  const prod = item?.product;
+  const fromItem =
+    item?.region ||
+    item?.currencyRegion ||
+    (prod && typeof prod === "object" ? prod.region : "") ||
+    order?.region ||
+    order?.marketplaceRegion ||
+    order?.currencyRegion ||
+    DEFAULT_REGION;
+  return resolveRegionCode(fromItem);
+}
+
+function orderSourceRegion(order: any): string {
   if (!order) return DEFAULT_REGION;
   if (order.region) return resolveRegionCode(order.region);
   if (order.marketplaceRegion) return resolveRegionCode(order.marketplaceRegion);
   if (order.currencyRegion) return resolveRegionCode(order.currencyRegion);
-  // Fallback: first item product region if populated
   const first = order.items?.[0];
-  const prod = first?.product;
-  if (prod && typeof prod === "object" && prod.region) {
-    return resolveRegionCode(prod.region);
-  }
-  return DEFAULT_REGION;
+  return itemSourceRegion(first, order);
 }
 
 async function readJson(res: Response) {
@@ -221,7 +285,6 @@ export default function SellerOrderDetailsPage() {
   const marketplace = useMarketplace() as {
     region?: string;
     formatProduct?: (amount: number, productRegion?: string | null) => string;
-    format?: (amount: number) => string;
     ratesToNgn?: Record<string, number> | null;
   };
 
@@ -231,6 +294,7 @@ export default function SellerOrderDetailsPage() {
   const ratesToNgn = marketplace?.ratesToNgn || null;
   const formatProductFn = marketplace?.formatProduct;
 
+  const [mounted, setMounted] = useState(false);
   const [order, setOrder] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -247,6 +311,10 @@ export default function SellerOrderDetailsPage() {
   const [overlay, setOverlay] = useState<Overlay>(null);
   const [showDeliveredBurst, setShowDeliveredBurst] = useState(false);
 
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
   const toast = useCallback(
     (title: string, message?: string, tone: OverlayTone = "info") => {
       setOverlay({ title, message, tone, durationMs: 3800 });
@@ -255,37 +323,33 @@ export default function SellerOrderDetailsPage() {
   );
 
   /**
-   * Same pipeline as product page / cart / checkout:
-   * amount is in sourceRegion currency → convert + format into seller display region.
+   * Same pipeline as product page:
+   *  - amount is in listing (source) currency
+   *  - first paint: format in source region (no FX, no hydration mismatch)
+   *  - after mount: convert into seller marketplace region
    */
-  const sourceRegion = useMemo(
-    () => resolveOrderSourceRegion(order),
-    [order]
-  );
-
-  const fmt = useCallback(
-    (amount: number) => {
+  const fmtFrom = useCallback(
+    (amount: number, sourceRegion?: string | null) => {
       const n = Number(amount) || 0;
+      const from = resolveRegionCode(sourceRegion || DEFAULT_REGION);
+      if (!mounted) return formatMoney(n, from);
       try {
         if (typeof formatProductFn === "function") {
-          return formatProductFn(n, sourceRegion);
+          return formatProductFn(n, from);
         }
       } catch {
         /* fall through */
       }
-      return formatProductPrice(n, sourceRegion, displayRegion, ratesToNgn);
+      return formatProductPrice(n, from, displayRegion, ratesToNgn);
     },
-    [formatProductFn, sourceRegion, displayRegion, ratesToNgn]
+    [mounted, formatProductFn, displayRegion, ratesToNgn]
   );
 
-  /** Format without conversion — only when we know amount is already display currency */
-  const fmtLocal = useCallback(
-    (amount: number) => formatMoney(Number(amount) || 0, displayRegion),
-    [displayRegion]
+  const orderRegion = useMemo(() => orderSourceRegion(order), [order]);
+  const fmt = useCallback(
+    (amount: number) => fmtFrom(amount, orderRegion),
+    [fmtFrom, orderRegion]
   );
-
-  // silence unused if tree-shaken
-  void fmtLocal;
 
   const loadOrder = useCallback(async () => {
     if (!id) return;
@@ -644,26 +708,30 @@ export default function SellerOrderDetailsPage() {
           Products
         </p>
         {order.items?.map((item: any, index: number) => {
+          const qty = Math.max(1, Number(item.quantity) || 1);
           const unit = Number(item.price) || 0;
-          const optionsLine =
-            formatSelectedOptions(item.selectedOptions) ||
-            (item.variantKey
-              ? String(item.variantKey)
-                  .split("|")
-                  .map((p: string) => p.replace("=", ": "))
-                  .join(" · ")
-              : "");
+          const line = unit * qty;
+          const optionsLine = itemOptionsLine(item);
+          const img = itemImage(item);
+          const srcRegion = itemSourceRegion(item, order);
+          const sku = item.sku || item.variant?.sku || "";
 
           return (
             <section
-              key={item.variantId || item.product?._id || index}
+              key={
+                item.variantId ||
+                item.variantKey ||
+                item.product?._id ||
+                item._id ||
+                index
+              }
               className="border border-white/[0.07] bg-[#11141A] p-4"
             >
               <div className="flex gap-3">
-                {item.image ? (
+                {img ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
-                    src={item.image}
+                    src={img}
                     alt=""
                     className="h-16 w-16 object-cover bg-[#171B22]"
                   />
@@ -677,15 +745,24 @@ export default function SellerOrderDetailsPage() {
                     {item.name}
                   </p>
                   {optionsLine ? (
-                    <p className="mt-0.5 text-[12px] leading-snug text-white/45">
+                    <p className="mt-1 text-[12.5px] leading-snug text-white/55">
                       {optionsLine}
                     </p>
                   ) : null}
-                  <p className="mt-1 text-xs text-[#737A86]">
-                    Qty: {item.quantity} · {fmt(unit)} each
+                  {sku ? (
+                    <p className="mt-0.5 text-[11px] text-white/32">SKU {sku}</p>
+                  ) : null}
+                  <p
+                    className="mt-1.5 text-xs text-[#737A86]"
+                    suppressHydrationWarning
+                  >
+                    Qty {qty} · {fmtFrom(unit, srcRegion)} each
                   </p>
-                  <p className="mt-0.5 text-[13px] font-semibold text-[#F5F7FA]">
-                    {fmt(unit * (Number(item.quantity) || 1))}
+                  <p
+                    className="mt-0.5 text-[13px] font-semibold text-[#F5F7FA]"
+                    suppressHydrationWarning
+                  >
+                    {fmtFrom(line, srcRegion)}
                   </p>
                 </div>
               </div>
@@ -928,9 +1005,7 @@ export default function SellerOrderDetailsPage() {
                       selected ? "border-[#3B82F6]" : "border-[#737A86]"
                     }`}
                   >
-                    {selected && (
-                      <span className="h-2.5 w-2.5 bg-[#3B82F6]" />
-                    )}
+                    {selected && <span className="h-2.5 w-2.5 bg-[#3B82F6]" />}
                   </span>
                   <span
                     className={`text-sm ${
