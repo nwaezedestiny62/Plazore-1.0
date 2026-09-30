@@ -9,8 +9,12 @@ const WEIGHT: Record<PerfAction, number> = {
   purchase: 15,
 };
 
-/** true while testing; set to false later so sellers don't count on their own products */
-export const ALLOW_SELLER_SELF_TRACKING = true;
+/**
+ * Seller self-activity must never inflate independent-buyer demand metrics
+ * (purchases, popularity score driven by purchase, cart conversion signals).
+ * Views from the seller are also excluded so self-browsing cannot pad score.
+ */
+export const ALLOW_SELLER_SELF_TRACKING = false;
 
 function todayKey(): string {
   return new Date().toISOString().slice(0, 10);
@@ -31,10 +35,11 @@ export async function trackProductPerformance(opts: {
 
     const sellerId = String(product.seller);
 
+    // Backend identity check — client cannot override.
     if (
       !ALLOW_SELLER_SELF_TRACKING &&
       actorUserId &&
-      actorUserId === sellerId
+      String(actorUserId) === sellerId
     ) {
       return null;
     }
@@ -100,7 +105,6 @@ export async function trackProductPerformance(opts: {
     }
 
     // Milestones (never stop counting past them)
-        // Milestones (never stop counting past them)
     if (!doc.milestones) {
       doc.milestones = {
         p200: false,

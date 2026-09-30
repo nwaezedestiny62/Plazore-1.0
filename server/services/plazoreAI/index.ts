@@ -4,4 +4,5 @@ export {
   calculateBuyerConfidence,
   gatherCommerceEvidence,
   refreshBuyerConfidenceForProduct,
+  isSellerOwnedOrder,
 } from "./confidence.js";

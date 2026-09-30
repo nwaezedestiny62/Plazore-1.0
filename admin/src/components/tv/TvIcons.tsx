@@ -12,6 +12,7 @@ import {
   Repeat,
   Sparkles,
   Shield,
+  Store,
   Truck,
   Users,
   Coins,
@@ -34,6 +35,8 @@ const MAP = {
   percent: Percent,
   file: FileText,
   megaphone: Megaphone,
+  store: Store,
+  merchants: Store,
 } as const;
 
 export function TvIcon({

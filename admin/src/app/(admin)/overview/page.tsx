@@ -77,7 +77,6 @@ function QuoteCarousel() {
     return () => window.clearInterval(id);
   }, [index, paused, go]);
 
-  // Preload neighbors
   useEffect(() => {
     [index, (index + 1) % n, (index - 1 + n) % n].forEach((i) => {
       const img = new Image();
@@ -146,7 +145,6 @@ function QuoteCarousel() {
         })}
       </div>
 
-      {/* Progress dots */}
       <div className="absolute bottom-4 right-5 z-10 flex items-center gap-1.5 sm:bottom-6 sm:right-8">
         {TV_QUOTE_SLIDES.map((_, i) => (
           <button
@@ -204,6 +202,7 @@ export default function OverviewPage() {
     if (!raw) return {} as Record<string, number>;
     return {
       usersNew: unreadCount("usersNew", raw.usersNew),
+      sellersNew: unreadCount("sellersNew", raw.sellersNew),
       productsNew: unreadCount("productsNew", raw.productsNew),
       ordersActive: unreadCount("ordersActive", raw.ordersActive),
       reportsNew: unreadCount("reportsNew", raw.reportsNew),
@@ -216,8 +215,10 @@ export default function OverviewPage() {
     if (lock.current) return;
     lock.current = true;
     const badge = tile.countKey ? badges[tile.countKey] ?? 0 : 0;
-    if (tile.countKey && raw) {
-      markCountSeen(tile.countKey, raw[tile.countKey as keyof ActivityCounts]);
+    // Mark seen with the *raw* total so the badge does not return until the metric grows again
+    if (tile.countKey && raw && tile.countKey in raw) {
+      const baseline = Number(raw[tile.countKey as keyof ActivityCounts] ?? 0);
+      markCountSeen(tile.countKey, baseline);
     }
     bump((n) => n + 1);
     const r = el.getBoundingClientRect();

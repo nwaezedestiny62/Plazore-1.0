@@ -2,6 +2,8 @@
  * Buyer Confidence — evidence-based, not a rating.
  * Listing quality is secondary. Commerce history (seller + product) drives level.
  * Algorithm maintains after AI baseline. No invented evidence.
+ *
+ * Seller-owned purchases (buyer === seller) never contribute to confidence.
  */
 
 import mongoose from "mongoose";
@@ -206,7 +208,10 @@ function sliceScore(
   // Confirm vs issues (only when buyers have responded)
   if (decided >= 3) {
     const confirmRate = confirmed / decided;
-    if (confirmRate >= 0.92 && issues <= Math.max(1, Math.floor(decided * 0.08))) {
+    if (
+      confirmRate >= 0.92 &&
+      issues <= Math.max(1, Math.floor(decided * 0.08))
+    ) {
       points += role === "seller" ? 18 : 16;
       factors.push("Buyers consistently confirm delivery");
     } else if (confirmRate >= 0.8) {
@@ -283,10 +288,29 @@ export function calculateBuyerConfidence(
   };
 }
 
-/** Aggregate order rows into a commerce slice. */
+/**
+ * True when this order is a seller buying their own listing.
+ * Prefer the persisted flag; fall back to buyer === seller for
+ * historical orders that predate the field (never fabricate true).
+ */
+export function isSellerOwnedOrder(order: any): boolean {
+  if (!order) return false;
+  if (order.isSellerOwnedPurchase === true) return true;
+  if (order.isSellerOwnedPurchase === false) return false;
+  // Legacy orders without the field: only classify when both ids exist
+  const buyerId = order.buyer?._id ?? order.buyer;
+  const sellerId = order.seller?._id ?? order.seller;
+  if (buyerId == null || sellerId == null) return false;
+  return String(buyerId) === String(sellerId);
+}
+
+/** Aggregate order rows into a commerce slice (independent buyers only). */
 function aggregateOrders(orders: any[]): CommerceSlice {
   const slice: CommerceSlice = { ...EMPTY_SLICE };
   for (const o of orders) {
+    // HARD RULE: seller-owned purchases never feed Buyer Confidence
+    if (isSellerOwnedOrder(o)) continue;
+
     slice.orders += 1;
     if (o.orderStatus === "Delivered") {
       slice.delivered += 1;
@@ -307,6 +331,7 @@ function aggregateOrders(orders: any[]): CommerceSlice {
 /**
  * Load real commerce evidence from Order (Confirm Delivery / Issues).
  * Does not invent signals that are not in the schema.
+ * Seller-owned purchases are excluded from all slices.
  */
 export async function gatherCommerceEvidence(
   productId: string | mongoose.Types.ObjectId,
@@ -315,12 +340,15 @@ export async function gatherCommerceEvidence(
   const pid = new mongoose.Types.ObjectId(String(productId));
   const sid = new mongoose.Types.ObjectId(String(sellerId));
 
+  // Load buyer + isSellerOwnedPurchase so self-purchases can be excluded.
+  // Do not invent classifications for missing historical data beyond buyer===seller.
+  const orderSelect =
+    "orderStatus buyerConfirmation cancellation buyer seller isSellerOwnedPurchase";
+
   const [sellerOrders, productOrders] = await Promise.all([
-    Order.find({ seller: sid })
-      .select("orderStatus buyerConfirmation cancellation")
-      .lean(),
+    Order.find({ seller: sid }).select(orderSelect).lean(),
     Order.find({ seller: sid, "items.product": pid })
-      .select("orderStatus buyerConfirmation cancellation")
+      .select(orderSelect)
       .lean(),
   ]);
 

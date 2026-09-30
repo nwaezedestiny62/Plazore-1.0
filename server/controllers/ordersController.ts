@@ -28,157 +28,6 @@ function hasShipFromLocation(product: any, seller: any): boolean {
   return false;
 }
 
-function optionsToPlain(
-  opts: Map<string, string> | Record<string, string> | undefined
-): Record<string, string> {
-  if (!opts) return {};
-  if (opts instanceof Map) return Object.fromEntries(opts);
-  return { ...opts };
-}
-
-/**
- * Atomic stock decrement.
- * Simple product: product.stock
- * Variant product: matching variants.$.stock
- * Returns false if insufficient stock (no write).
- */
-async function atomicDecrementStock(params: {
-  productId: mongoose.Types.ObjectId | string;
-  quantity: number;
-  variantId?: string;
-  hasVariants?: boolean;
-}): Promise<boolean> {
-  const { productId, quantity, variantId, hasVariants } = params;
-  if (quantity <= 0) return false;
-
-  if (hasVariants && variantId) {
-    const result = await Product.findOneAndUpdate(
-      {
-        _id: productId,
-        hasVariants: true,
-        variants: {
-          $elemMatch: {
-            variantId,
-            available: true,
-            stock: { $gte: quantity },
-          },
-        },
-      },
-      {
-        $inc: {
-          "variants.$.stock": -quantity,
-          stock: -quantity,
-        },
-      },
-      { returnDocument: "after" }
-    );
-    return !!result;
-  }
-
-  const result = await Product.findOneAndUpdate(
-    {
-      _id: productId,
-      $or: [{ hasVariants: false }, { hasVariants: { $exists: false } }],
-      stock: { $gte: quantity },
-    },
-    { $inc: { stock: -quantity } },
-    { returnDocument: "after" }
-  );
-  return !!result;
-}
-
-async function atomicRestoreStock(params: {
-  productId: mongoose.Types.ObjectId | string;
-  quantity: number;
-  variantId?: string;
-  hasVariants?: boolean;
-}): Promise<void> {
-  const { productId, quantity, variantId, hasVariants } = params;
-  if (quantity <= 0) return;
-
-  if (hasVariants && variantId) {
-    await Product.findOneAndUpdate(
-      {
-        _id: productId,
-        "variants.variantId": variantId,
-      },
-      {
-        $inc: {
-          "variants.$.stock": quantity,
-          stock: quantity,
-        },
-      }
-    );
-    return;
-  }
-
-  await Product.findByIdAndUpdate(productId, {
-    $inc: { stock: quantity },
-  });
-}
-
-function resolveVariant(product: any, item: any) {
-  const hasVariants = !!(product as any).hasVariants;
-  if (!hasVariants) {
-    return {
-      hasVariants: false,
-      variantId: "",
-      variantKey: "",
-      selectedOptions: {} as Record<string, string>,
-      unitPrice: Number(item.price ?? product.price),
-      availableStock: Number(product.stock) || 0,
-    };
-  }
-
-  const variants: any[] = (product as any).variants || [];
-  let variant: any = null;
-
-  const variantId = String(item.variantId || "").trim();
-  const variantKey = String(item.variantKey || "").trim();
-  const selectedFromItem = optionsToPlain(item.selectedOptions);
-
-  if (variantId) {
-    variant = variants.find((v) => String(v.variantId) === variantId);
-  }
-  if (!variant && variantKey) {
-    variant = variants.find((v) => String(v.key) === variantKey);
-  }
-  if (!variant && Object.keys(selectedFromItem).length > 0) {
-    const keyFromOpts = Object.entries(selectedFromItem)
-      .map(([k, v]) => [
-        String(k).trim().toLowerCase(),
-        String(v).trim().toLowerCase(),
-      ])
-      .filter(([k, v]) => k && v)
-      .sort((a, b) => a[0].localeCompare(b[0]))
-      .map(([k, v]) => `${k}=${v}`)
-      .join("|");
-    variant = variants.find((v) => String(v.key) === keyFromOpts);
-  }
-
-  if (!variant || variant.available === false) {
-    return null;
-  }
-
-  const optPlain = optionsToPlain(variant.options);
-  const priceOverride =
-    variant.price != null && Number.isFinite(Number(variant.price))
-      ? Number(variant.price)
-      : null;
-
-  return {
-    hasVariants: true,
-    variantId: String(variant.variantId),
-    variantKey: String(variant.key),
-    selectedOptions: optPlain,
-    unitPrice:
-      priceOverride != null
-        ? priceOverride
-        : Number(item.price ?? product.price),
-    availableStock: Number(variant.stock) || 0,
-  };
-}
-
 // ====================== CREATE ORDER ======================
 export const createOrder = async (req: Request, res: Response) => {
   try {
@@ -216,9 +65,6 @@ export const createOrder = async (req: Request, res: Response) => {
         quantity: item.quantity,
         price: item.price,
         note: item.note || "",
-        variantId: item.variantId || "",
-        variantKey: item.variantKey || "",
-        selectedOptions: optionsToPlain(item.selectedOptions),
       }));
     }
 
@@ -235,24 +81,8 @@ export const createOrder = async (req: Request, res: Response) => {
       { method: "self" | "courier"; courierCompany: string; deliveryFee: number }
     > = {};
 
-    // Validate all items first (no stock writes yet)
-    const prepared: {
-      sellerId: string;
-      row: any;
-      product: any;
-      resolved: NonNullable<ReturnType<typeof resolveVariant>>;
-    }[] = [];
-
     for (const item of rawItems) {
       const productId = item.productId || item.product;
-      const qty = Number(item.quantity) || 0;
-      if (qty < 1) {
-        return res.status(400).json({
-          success: false,
-          message: "Invalid quantity",
-        });
-      }
-
       const product = await Product.findById(productId);
 
       if (!product || !product.isActive) {
@@ -262,15 +92,7 @@ export const createOrder = async (req: Request, res: Response) => {
         });
       }
 
-      const resolved = resolveVariant(product, item);
-      if (!resolved) {
-        return res.status(400).json({
-          success: false,
-          message: `Selected option is unavailable for ${product.name}`,
-        });
-      }
-
-      if (resolved.availableStock < qty) {
+      if (product.stock < item.quantity) {
         return res.status(400).json({
           success: false,
           message: `Insufficient stock for ${product.name}`,
@@ -291,23 +113,22 @@ export const createOrder = async (req: Request, res: Response) => {
         });
       }
 
-      prepared.push({
-        sellerId,
-        product,
-        resolved,
-        row: {
-          product: product._id,
-          name: product.name,
-          quantity: qty,
-          price: resolved.unitPrice,
-          image: product.images?.[0] || "",
-          note: String(item.note || "")
-            .trim()
-            .slice(0, 120),
-          variantId: resolved.variantId,
-          variantKey: resolved.variantKey,
-          selectedOptions: resolved.selectedOptions,
-        },
+      if (!itemsBySeller[sellerId]) itemsBySeller[sellerId] = [];
+
+      // Backend-only classification: never trust a client flag
+      const isSellerOwnedPurchase =
+        user._id.toString() === sellerId;
+
+      itemsBySeller[sellerId].push({
+        product: product._id,
+        name: product.name,
+        quantity: item.quantity,
+        price: item.price ?? product.price,
+        image: product.images?.[0] || "",
+        note: String(item.note || "")
+          .trim()
+          .slice(0, 120),
+        isSellerOwnedPurchase,
       });
 
       const method =
@@ -332,92 +153,59 @@ export const createOrder = async (req: Request, res: Response) => {
       }
     }
 
-    for (const p of prepared) {
-      if (!itemsBySeller[p.sellerId]) itemsBySeller[p.sellerId] = [];
-      itemsBySeller[p.sellerId].push({
-        ...p.row,
-        _meta: {
-          hasVariants: p.resolved.hasVariants,
-          variantId: p.resolved.variantId,
-        },
-      });
-    }
-
     const createdOrders = [];
     const contactPhone = String(phone || user.phone || "").trim();
-    const decremented: {
-      productId: any;
-      quantity: number;
-      variantId: string;
-      hasVariants: boolean;
-    }[] = [];
 
-    try {
-      for (const sellerId of Object.keys(itemsBySeller)) {
-        const sellerItems = itemsBySeller[sellerId];
-        const snap = shippingBySeller[sellerId];
+    for (const sellerId of Object.keys(itemsBySeller)) {
+      const sellerItems = itemsBySeller[sellerId];
+      const snap = shippingBySeller[sellerId];
 
-        // Atomic decrement per line
-        for (const row of sellerItems) {
-          const ok = await atomicDecrementStock({
-            productId: row.product,
-            quantity: row.quantity,
-            variantId: row._meta.variantId,
-            hasVariants: row._meta.hasVariants,
-          });
-          if (!ok) {
-            // roll back previous decrements
-            for (const d of decremented) {
-              await atomicRestoreStock(d);
-            }
-            return res.status(409).json({
-              success: false,
-              message: `Insufficient stock for ${row.name}. Please refresh and try again.`,
-            });
-          }
-          decremented.push({
-            productId: row.product,
-            quantity: row.quantity,
-            variantId: row._meta.variantId,
-            hasVariants: row._meta.hasVariants,
-          });
-        }
+      // Order is already split per seller → buyer===seller means whole order is self-purchase
+      const isSellerOwnedPurchase =
+        user._id.toString() === String(sellerId);
 
-        const orderItems = sellerItems.map(({ _meta, ...rest }) => rest);
+      const subtotal = sellerItems.reduce(
+        (sum, row) => sum + row.price * row.quantity,
+        0
+      );
+      const shippingCost = snap?.deliveryFee || 0;
 
-        const subtotal = orderItems.reduce(
-          (sum, row) => sum + row.price * row.quantity,
-          0
-        );
-        const shippingCost = snap?.deliveryFee || 0;
+      const order = await Order.create({
+        buyer: user._id,
+        seller: sellerId,
+        orderNumber: `PLZ#${Math.floor(10000 + Math.random() * 90000)}`,
+        items: sellerItems,
+        shippingAddress,
+        buyerNote: buyerNote || "",
+        buyerContact: {
+          name: user.name || "",
+          phone: contactPhone,
+        },
+        productShipping: {
+          method: snap?.method || "courier",
+          courierCompany: snap?.courierCompany || "",
+          deliveryFee: shippingCost,
+        },
+        orderStatus: "Preparing",
+        subtotal,
+        shippingCost,
+        totalAmount: subtotal + shippingCost,
+        paymentStatus: "pending",
+        paymentMethod: "pending",
+        buyerConfirmation: { status: "none" },
+        payout: { status: "not_eligible" },
+        isSellerOwnedPurchase,
+      });
 
-        const order = await Order.create({
-          buyer: user._id,
-          seller: sellerId,
-          orderNumber: `PLZ#${Math.floor(10000 + Math.random() * 90000)}`,
-          items: orderItems,
-          shippingAddress,
-          buyerNote: buyerNote || "",
-          buyerContact: {
-            name: user.name || "",
-            phone: contactPhone,
-          },
-          productShipping: {
-            method: snap?.method || "courier",
-            courierCompany: snap?.courierCompany || "",
-            deliveryFee: shippingCost,
-          },
-          orderStatus: "Preparing",
-          subtotal,
-          shippingCost,
-          totalAmount: subtotal + shippingCost,
-          paymentStatus: "pending",
-          paymentMethod: "pending",
-          buyerConfirmation: { status: "none" },
-          payout: { status: "not_eligible" },
+      for (const row of sellerItems) {
+        await Product.findByIdAndUpdate(row.product, {
+          $inc: { stock: -row.quantity },
         });
+      }
 
-        for (const row of orderItems) {
+      // Demand / popularity metrics: only independent customer purchases
+      if (!isSellerOwnedPurchase) {
+        for (const row of sellerItems) {
           trackProductPerformance({
             productId: String(row.product),
             action: "purchase",
@@ -425,23 +213,23 @@ export const createOrder = async (req: Request, res: Response) => {
             quantity: row.quantity || 1,
           }).catch(() => {});
         }
-
-        await sendNotification({
-          userId: sellerId,
-          type: "new_order",
-          title: "New Order Received",
-          message: `A new order has been placed. Order: ${order.orderNumber}`,
-          orderId: order._id.toString(),
-          orderNumber: order.orderNumber,
-        });
-
-        createdOrders.push(order);
       }
-    } catch (err) {
-      for (const d of decremented) {
-        await atomicRestoreStock(d);
-      }
-      throw err;
+
+      // Still notify for real order flow (useful for seller testing checkout)
+      await sendNotification({
+        userId: sellerId,
+        type: "new_order",
+        title: isSellerOwnedPurchase
+          ? "Self-purchase order placed"
+          : "New Order Received",
+        message: isSellerOwnedPurchase
+          ? `You placed a test/self order: ${order.orderNumber}. It will not count toward customer demand metrics.`
+          : `A new order has been placed. Order: ${order.orderNumber}`,
+        orderId: order._id.toString(),
+        orderNumber: order.orderNumber,
+      });
+
+      createdOrders.push(order);
     }
 
     try {
@@ -665,6 +453,7 @@ export const deliverOrder = async (req: Request, res: Response) => {
     order.orderStatus = "Delivered";
     order.deliveredAt = new Date();
 
+    // Open buyer confirmation gate (does not change seller flow)
     (order as any).buyerConfirmation = {
       status: "pending",
       confirmedAt: undefined,
@@ -955,14 +744,9 @@ export const cancelOrderBySeller = async (req: Request, res: Response) => {
 
     await order.save();
 
-    // Restore stock — use snapshot variantId when present
-    for (const row of order.items as any[]) {
-      const variantId = String(row.variantId || "").trim();
-      await atomicRestoreStock({
-        productId: row.product,
-        quantity: row.quantity,
-        variantId,
-        hasVariants: !!variantId,
+    for (const row of order.items) {
+      await Product.findByIdAndUpdate(row.product, {
+        $inc: { stock: row.quantity },
       });
     }
 

@@ -22,7 +22,7 @@ const RAIL_KEY = "plazore.admin.railOpen";
 const RAIL = [
   { href: "/overview", label: "Home", icon: Home },
   { href: "/analytics", label: "Analytics", icon: LayoutGrid },
-  { href: "/team", label: "Team", icon: Users }, // add
+  { href: "/team", label: "Team", icon: Users },
 ];
 
 export function AdminShell({ children }: { children: React.ReactNode }) {
@@ -55,6 +55,11 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
     });
   };
 
+  /**
+   * When a counted screen is opened, lock the badge baseline to the last
+   * known live total so the notification does not return until the metric grows.
+   * Never write 0 when the key is missing from liveCounts (would break unread).
+   */
   useEffect(() => {
     const key = countKeyForPath(pathname);
     if (!key) return;
@@ -62,7 +67,10 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
     if (!raw) return;
     try {
       const counts = JSON.parse(raw) as Record<string, number>;
-      markCountSeen(key, Number(counts[key] ?? 0));
+      if (!(key in counts)) return;
+      const n = Number(counts[key]);
+      if (!Number.isFinite(n)) return;
+      markCountSeen(key, n);
     } catch {
       /* ignore */
     }
@@ -82,7 +90,6 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
       <div className="absolute inset-0 bg-gradient-to-r from-[#090B0F]/92 via-[#090B0F]/60 to-transparent" />
 
       <div className="relative z-10 flex min-h-dvh">
-        {/* Rail */}
         <aside
           className={`fixed left-0 top-0 z-40 flex h-dvh flex-col items-center bg-black/40 py-4 backdrop-blur-md transition-all duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] ${
             railOpen
@@ -90,7 +97,6 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
               : "w-16 -translate-x-full opacity-0 pointer-events-none"
           }`}
         >
-          {/* Logo on top */}
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src="/plazore-logo.png"
@@ -149,7 +155,6 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
           </button>
         </aside>
 
-        {/* Edge control when rail is closed */}
         {!railOpen && ready && (
           <button
             type="button"

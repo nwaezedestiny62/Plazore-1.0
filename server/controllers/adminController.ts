@@ -5,6 +5,9 @@ import Product from "../models/Products.js";
 import Order from "../models/Order.js";
 import ContactMessage from "../models/ContactMessage.js";
 import ProductPerformance from "../models/ProductPerformance.js";
+import Conversation from "../models/Conversation.js";
+import Message from "../models/Message.js";
+import { assessMerchantIntegrity } from "../services/admin/merchantIntegrity.js";
 import Wishlist from "../models/Wishlist.js";
 import Report from "../models/Report.js";
 import Cart from "../models/Cart.js";
@@ -1731,6 +1734,384 @@ export const pingPresence = async (req: Request, res: Response) => {
 
     res.json({ success: true });
   } catch (error: any) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// ═══════════════════════════════════════════════════════════
+// PASTE into server/controllers/adminController.ts
+// 1) Add these imports near the top with other model imports:
+//
+// import Conversation from "../models/Conversation.js";
+// import Message from "../models/Message.js";
+// import { assessMerchantIntegrity } from "../services/admin/merchantIntegrity.js";
+//
+// 2) Append the two handlers below at the end of the file.
+// ═══════════════════════════════════════════════════════════
+
+function toEpochMs(value: unknown): number {
+  if (value == null || value === "") return 0;
+  try {
+    const t = new Date(value as string | number | Date).getTime();
+    return Number.isFinite(t) ? t : 0;
+  } catch {
+    return 0;
+  }
+}
+
+export const getAdminMerchants = async (req: Request, res: Response) => {
+  try {
+    const page = Math.max(1, parseInt(String(req.query.page || "1"), 10));
+    const limit = Math.min(
+      50,
+      Math.max(1, parseInt(String(req.query.limit || "25"), 10))
+    );
+    const q = String(req.query.q || "").trim();
+    const region = String(req.query.region || "").trim();
+    const severity = String(req.query.severity || "").trim();
+    const sort = String(req.query.sort || "newest").trim();
+    const spot = String(req.query.spot || "").trim();
+
+    const and: any[] = [
+      {
+        $or: [
+          { role: "seller" },
+          { storeName: { $exists: true, $nin: [null, ""] } },
+        ],
+      },
+    ];
+
+    if (region) {
+      and.push({
+        marketplaceRegion: {
+          $regex: `^${escapeRegex(region)}$`,
+          $options: "i",
+        },
+      });
+    }
+
+    if (spot === "suspended") and.push({ isSellerSuspended: true });
+    if (spot === "verified") and.push({ isSellerVerified: true });
+    if (spot === "unverified") {
+      and.push({
+        isSellerVerified: { $ne: true },
+        isSellerSuspended: { $ne: true },
+      });
+    }
+    if (spot === "new") {
+      const d7 = new Date(Date.now() - 7 * 86400 * 1000);
+      and.push({
+        $or: [
+          { sellerAppliedAt: { $gte: d7 } },
+          { createdAt: { $gte: d7 }, role: "seller" },
+        ],
+      });
+    }
+
+    if (q) {
+      const or: any[] = [
+        { name: { $regex: q, $options: "i" } },
+        { email: { $regex: q, $options: "i" } },
+        { storeName: { $regex: q, $options: "i" } },
+        { phone: { $regex: q, $options: "i" } },
+        { businessGoal: { $regex: q, $options: "i" } },
+      ];
+      if (/^[a-f\d]{24}$/i.test(q)) or.push({ _id: q });
+      and.push({ $or: or });
+    }
+
+    const filter = { $and: and };
+    const sortMap: Record<string, any> = {
+      newest: { createdAt: -1 },
+      oldest: { createdAt: 1 },
+      name: { storeName: 1, name: 1 },
+      active: { lastSeenAt: -1 },
+    };
+
+    const [items, total, new7d, suspendedN, verifiedN] = await Promise.all([
+      User.find(filter)
+        .sort(sortMap[sort] || sortMap.newest)
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .select(
+          "name email phone role image clerkId marketplaceRegion storeName storeDescription businessGoal storeLogo storeBanner isSellerVerified isSellerSuspended sellerAppliedAt payout shippingDefaults lastSeenAt lastSeenPlatform createdAt updatedAt moderation"
+        )
+        .lean(),
+      User.countDocuments(filter),
+      User.countDocuments({
+        role: "seller",
+        createdAt: { $gte: new Date(Date.now() - 7 * 86400 * 1000) },
+      }),
+      User.countDocuments({ role: "seller", isSellerSuspended: true }),
+      User.countDocuments({ role: "seller", isSellerVerified: true }),
+    ]);
+
+    const ids = items.map((u: any) => u._id);
+
+    const [productAgg, orderAgg, convAgg] = await Promise.all([
+      Product.aggregate([
+        { $match: { seller: { $in: ids } } },
+        {
+          $group: {
+            _id: "$seller",
+            total: { $sum: 1 },
+            active: {
+              $sum: { $cond: [{ $eq: ["$isActive", true] }, 1, 0] },
+            },
+          },
+        },
+      ]),
+      Order.aggregate([
+        { $match: { seller: { $in: ids } } },
+        {
+          $group: {
+            _id: "$seller",
+            total: { $sum: 1 },
+            cancelled: {
+              $sum: {
+                $cond: [{ $eq: ["$orderStatus", "Cancelled"] }, 1, 0],
+              },
+            },
+            lastOrderAt: { $max: "$createdAt" },
+          },
+        },
+      ]),
+      Conversation.aggregate([
+        { $match: { seller: { $in: ids } } },
+        {
+          $group: {
+            _id: "$seller",
+            conversations: { $sum: 1 },
+            lastChatAt: { $max: "$updatedAt" },
+          },
+        },
+      ]),
+    ]);
+
+    const pMap = new Map(productAgg.map((r: any) => [String(r._id), r]));
+    const oMap = new Map(orderAgg.map((r: any) => [String(r._id), r]));
+    const cMap = new Map(convAgg.map((r: any) => [String(r._id), r]));
+
+    let rows = items.map((u: any) => {
+      const id = String(u._id);
+      const p = pMap.get(id) || { total: 0, active: 0 };
+      const o = oMap.get(id) || { total: 0, cancelled: 0, lastOrderAt: null };
+      const c = cMap.get(id) || { conversations: 0, lastChatAt: null };
+
+      const lastMs = Math.max(
+        toEpochMs(u.lastSeenAt),
+        toEpochMs(o.lastOrderAt),
+        toEpochMs(c.lastChatAt),
+        toEpochMs(u.updatedAt)
+      );
+      const lastActivityAt = lastMs > 0 ? new Date(lastMs).toISOString() : null;
+
+      const integrity = assessMerchantIntegrity({
+        name: u.name,
+        email: u.email,
+        storeName: u.storeName,
+        storeDescription: u.storeDescription,
+        businessGoal: u.businessGoal,
+        storeLogo: u.storeLogo,
+        storeBanner: u.storeBanner,
+        marketplaceRegion: u.marketplaceRegion,
+        isSellerVerified: u.isSellerVerified,
+        isSellerSuspended: u.isSellerSuspended,
+        payout: u.payout,
+        shippingDefaults: u.shippingDefaults,
+        productCount: p.total,
+        activeProductCount: p.active,
+        orderCount: o.total,
+        cancelledOrderCount: o.cancelled,
+        conversationCount: c.conversations,
+        messageCount: 0,
+        lastActivityAt,
+      });
+
+      return {
+        ...u,
+        productStats: { total: p.total, active: p.active },
+        orderStats: {
+          total: o.total,
+          cancelled: o.cancelled,
+          lastOrderAt: o.lastOrderAt || null,
+        },
+        chatStats: {
+          conversations: c.conversations,
+          lastChatAt: c.lastChatAt || null,
+        },
+        lastActivityAt,
+        integrity,
+      };
+    });
+
+    if (severity === "ok" || severity === "warn" || severity === "critical") {
+      rows = rows.filter((r: any) => r.integrity?.severity === severity);
+    }
+
+    const criticalN = rows.filter(
+      (r: any) => r.integrity?.severity === "critical"
+    ).length;
+    const warnN = rows.filter((r: any) => r.integrity?.severity === "warn")
+      .length;
+    const avgScore =
+      rows.length === 0
+        ? 0
+        : Math.round(
+            rows.reduce(
+              (s: number, r: any) => s + (r.integrity?.score || 0),
+              0
+            ) / rows.length
+          );
+
+    res.json({
+      success: true,
+      data: {
+        items: rows,
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit) || 1,
+        summary: {
+          total,
+          new7d,
+          suspended: suspendedN,
+          verified: verifiedN,
+          pageCritical: criticalN,
+          pageWarn: warnN,
+          pageAvgScore: avgScore,
+        },
+      },
+    });
+  } catch (error: any) {
+    console.error("getAdminMerchants", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+export const getAdminMerchantDetail = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    if (!id || !mongoose.isValidObjectId(String(id))) {
+      return res.status(404).json({ success: false, message: "Not found" });
+    }
+
+    const user: any = await User.findById(id)
+      .select(
+        "name email phone role image clerkId marketplaceRegion storeName storeDescription businessGoal storeLogo storeBanner isSellerVerified isSellerSuspended sellerAppliedAt payout shippingDefaults lastSeenAt lastSeenPlatform createdAt updatedAt moderation"
+      )
+      .lean();
+
+    if (!user) {
+      return res.status(404).json({ success: false, message: "Not found" });
+    }
+
+    const sellerId = user._id;
+
+    const convIds = await Conversation.find({ seller: sellerId }).distinct(
+      "_id"
+    );
+
+    const [products, orders, conversations, messageCount] = await Promise.all([
+      Product.find({ seller: sellerId })
+        .sort({ createdAt: -1 })
+        .limit(40)
+        .select(
+          "name images price stock isActive category subCategory region createdAt hasVariants"
+        )
+        .lean(),
+      Order.find({ seller: sellerId })
+        .sort({ createdAt: -1 })
+        .limit(40)
+        .populate("buyer", "name email")
+        .select(
+          "orderNumber orderStatus paymentStatus totalAmount items createdAt isSellerOwnedPurchase buyerConfirmation cancellation"
+        )
+        .lean(),
+      Conversation.find({ seller: sellerId })
+        .sort({ updatedAt: -1 })
+        .limit(30)
+        .populate("buyer", "name email image")
+        .populate("product", "name images")
+        .select(
+          "product buyer lastMessage unreadBySeller unreadByBuyer status updatedAt createdAt"
+        )
+        .lean(),
+      Message.countDocuments({ conversation: { $in: convIds } }).catch(
+        () => 0
+      ),
+    ]);
+
+    const [
+      productCount,
+      activeProductCount,
+      orderCount,
+      cancelledOrderCount,
+      conversationCount,
+    ] = await Promise.all([
+      Product.countDocuments({ seller: sellerId }),
+      Product.countDocuments({ seller: sellerId, isActive: true }),
+      Order.countDocuments({ seller: sellerId }),
+      Order.countDocuments({ seller: sellerId, orderStatus: "Cancelled" }),
+      Conversation.countDocuments({ seller: sellerId }),
+    ]);
+
+    const lastMs = Math.max(
+      toEpochMs(user.lastSeenAt),
+      toEpochMs((orders as any[])[0]?.createdAt),
+      toEpochMs((conversations as any[])[0]?.updatedAt),
+      toEpochMs(user.updatedAt)
+    );
+    const lastActivityAt = lastMs > 0 ? new Date(lastMs).toISOString() : null;
+
+    const integrity = assessMerchantIntegrity({
+      name: user.name,
+      email: user.email,
+      storeName: user.storeName,
+      storeDescription: user.storeDescription,
+      businessGoal: user.businessGoal,
+      storeLogo: user.storeLogo,
+      storeBanner: user.storeBanner,
+      marketplaceRegion: user.marketplaceRegion,
+      isSellerVerified: user.isSellerVerified,
+      isSellerSuspended: user.isSellerSuspended,
+      payout: user.payout,
+      shippingDefaults: user.shippingDefaults,
+      productCount,
+      activeProductCount,
+      orderCount,
+      cancelledOrderCount,
+      conversationCount,
+      messageCount: Number(messageCount) || 0,
+      lastActivityAt,
+    });
+
+    res.json({
+      success: true,
+      data: {
+        user,
+        lastActivityAt,
+        integrity,
+        stats: {
+          productCount,
+          activeProductCount,
+          orderCount,
+          cancelledOrderCount,
+          conversationCount,
+          messageCount: Number(messageCount) || 0,
+        },
+        products,
+        orders,
+        conversations,
+        subscription: {
+          plan: "free",
+          status: "not_configured",
+          note: "Seller subscriptions will appear here when monetization plans ship.",
+        },
+      },
+    });
+  } catch (error: any) {
+    console.error("getAdminMerchantDetail", error);
     res.status(500).json({ success: false, message: error.message });
   }
 };

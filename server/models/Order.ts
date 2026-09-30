@@ -15,14 +15,15 @@ const orderItemSchema = new mongoose.Schema({
     maxlength: 120,
     default: "",
   },
-
-  // Snapshot of selected configuration at purchase time (immutable history)
-  variantId: { type: String, default: "" },
-  variantKey: { type: String, default: "" },
-  selectedOptions: {
-    type: Map,
-    of: String,
-    default: {},
+  /**
+   * Set only by the backend at order creation when the authenticated buyer
+   * is the same user as the product's seller. Never accept from the client.
+   * Used to exclude self-purchases from Buyer Confidence / demand metrics.
+   */
+  isSellerOwnedPurchase: {
+    type: Boolean,
+    default: false,
+    index: true,
   },
 });
 
@@ -172,6 +173,19 @@ const orderSchema = new mongoose.Schema(
       eligibleAt: { type: Date },
       blockedReason: { type: String, default: "" },
     },
+
+    /**
+     * True when the authenticated buyer is the same user as this order's seller.
+     * Set only by the backend (createOrder). Because Plazore splits carts into
+     * one Order document per seller, this is reliable at order level; items also
+     * carry the same flag for future multi-item analytics.
+     * Missing/false on legacy orders → treated as independent unless buyer===seller.
+     */
+    isSellerOwnedPurchase: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
   },
   { timestamps: true }
 );
@@ -181,6 +195,7 @@ orderSchema.index({ seller: 1, createdAt: -1 });
 orderSchema.index({ orderStatus: 1 });
 orderSchema.index({ "buyerConfirmation.status": 1 });
 orderSchema.index({ "payout.status": 1 });
+orderSchema.index({ seller: 1, isSellerOwnedPurchase: 1, orderStatus: 1 });
 
 const Order = mongoose.model("Order", orderSchema);
 export default Order;

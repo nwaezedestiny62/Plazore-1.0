@@ -89,6 +89,15 @@ export const TV_ROWS: TvRow[] = [
         countKey: "usersNew",
       },
       {
+        href: "/merchants",
+        label: "Merchants",
+        kicker: "Storefronts",
+        kind: "image",
+        image:
+          "https://images.unsplash.com/photo-1556742049-0cfed4f6a45d?auto=format&fit=crop&w=900&q=80",
+        countKey: "sellersNew",
+      },
+      {
         href: "/products",
         label: "Catalog",
         kicker: "Live listings",
@@ -119,10 +128,8 @@ export const TV_ROWS: TvRow[] = [
         label: "Rates",
         kicker: "Currency",
         kind: "image",
-        // Reliable finance visual (no broken CDN path)
         image:
           "https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?auto=format&fit=crop&w=900&q=80",
-        countKey: undefined,
       },
     ],
   },
@@ -157,13 +164,13 @@ export const TV_ROWS: TvRow[] = [
         countKey: "contactsNew",
       },
       {
-  href: "/team",
-  label: "Team",
-  kicker: "Administrators",
-  kind: "image",
-  image:
-    "https://images.unsplash.com/photo-1522071820081-009f0129c71c?auto=format&fit=crop&w=900&q=80",
-},
+        href: "/team",
+        label: "Team",
+        kicker: "Administrators",
+        kind: "image",
+        image:
+          "https://images.unsplash.com/photo-1522071820081-009f0129c71c?auto=format&fit=crop&w=900&q=80",
+      },
     ],
   },
   {
@@ -248,11 +255,11 @@ export const TV_ROWS: TvRow[] = [
       },
     ],
   },
-  
 ];
 
 export type ActivityCounts = {
   usersNew: number;
+  sellersNew: number;
   productsNew: number;
   ordersActive: number;
   reportsNew: number;
@@ -264,6 +271,7 @@ export function countsFromStats(data: any): ActivityCounts {
   const s = data ?? {};
   return {
     usersNew: Number(s.users?.new7d ?? 0),
+    sellersNew: Number(s.users?.newSellers7d ?? 0),
     productsNew: Number(s.products?.new7d ?? 0),
     ordersActive:
       Number(s.orders?.preparing ?? 0) + Number(s.orders?.shipped ?? 0),

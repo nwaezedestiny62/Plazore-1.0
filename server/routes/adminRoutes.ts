@@ -4,6 +4,8 @@ import {
   getDashboardStats,
   getAdminUsers,
   getAdminUserDetail,
+  getAdminMerchants,
+  getAdminMerchantDetail,
   getAdminProducts,
   setSellerSuspended,
   setSellerVerified,
@@ -66,6 +68,8 @@ AdminRouter.get("/stats", ...adminOnly, getDashboardStats);
 
 AdminRouter.get("/users", ...adminOnly, getAdminUsers);
 AdminRouter.get("/users/:id", ...adminOnly, getAdminUserDetail);
+AdminRouter.get("/merchants", ...adminOnly, getAdminMerchants);
+AdminRouter.get("/merchants/:id", ...adminOnly, getAdminMerchantDetail);
 AdminRouter.patch("/sellers/:id/suspend", ...adminOnly, setSellerSuspended);
 AdminRouter.patch("/sellers/:id/verify", ...adminOnly, setSellerVerified);
 
