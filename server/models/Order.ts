@@ -9,6 +9,8 @@ const orderItemSchema = new mongoose.Schema({
   name: { type: String, required: true },
   quantity: { type: Number, required: true, min: 1 },
   price: { type: Number, required: true },
+  /** Listing region currency this line price was frozen in (product.region at checkout) */
+  region: { type: String, default: "", trim: true, index: true },
   image: { type: String },
   note: {
     type: String,
@@ -121,6 +123,12 @@ const orderSchema = new mongoose.Schema(
         default: "not_applicable",
       },
     },
+
+    /**
+     * Primary currency region for this order's frozen amounts (product listing region).
+     * Snapshot at createOrder — same semantics as product.region.
+     */
+    region: { type: String, default: "", trim: true, index: true },
 
     subtotal: { type: Number, required: true },
     shippingCost: { type: Number, default: 0 },

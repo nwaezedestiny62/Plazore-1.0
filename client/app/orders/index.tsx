@@ -1,4 +1,5 @@
 import api from '@/constants/api'
+import { DEFAULT_REGION, resolveRegionCode } from '@/constants/regions'
 import { ScreenConfigMenu } from '@/components/ScreenConfigMenu'
 import { useMarketplace } from '@/context/MarketplaceContext'
 import { useAuth } from '@clerk/clerk-expo'
@@ -95,11 +96,44 @@ function PlazoreOrbPreloader() {
   )
 }
 
+
+/**
+ * Product page rule:
+ *   formatProduct(amount, product.region)
+ *
+ * Order line prices are frozen in the product's listing region currency
+ * (backend createOrder: price = product.price, region = product.region).
+ * Never call format(amount) alone — that only changes the symbol.
+ */
+function orderSourceRegion(order: any): string {
+  if (!order) return DEFAULT_REGION
+  // 1) Snapshot on the order document (new orders)
+  if (order.region) return resolveRegionCode(order.region)
+  // 2) First line item snapshot / product.region
+  const first = order.items?.[0]
+  if (first?.region) return resolveRegionCode(first.region)
+  const prod = first?.product
+  if (prod && typeof prod === 'object' && prod.region) {
+    return resolveRegionCode(prod.region)
+  }
+  return DEFAULT_REGION
+}
+
+function itemSourceRegion(item: any, order?: any): string {
+  // Prefer frozen snapshot on the line
+  if (item?.region) return resolveRegionCode(item.region)
+  const prod = item?.product
+  if (prod && typeof prod === 'object' && prod.region) {
+    return resolveRegionCode(prod.region)
+  }
+  return orderSourceRegion(order)
+}
+
 export default function BuyerOrders() {
   const { getToken, isSignedIn, isLoaded } = useAuth()
   const router = useRouter()
   /** Frozen order totals — format in buyer marketplace currency only (no formatProduct FX). */
-  const { format, refreshRegion } = useMarketplace()
+  const { formatProduct, refreshRegion } = useMarketplace()
 
   const [orders, setOrders] = useState<any[]>([])
   const [hiddenIds, setHiddenIds] = useState<string[]>([])
@@ -293,7 +327,7 @@ export default function BuyerOrders() {
           const count = item.items?.length || 0
           const color = statusColor[item.orderStatus] || MUTED
           const hint = confirmationHint(item)
-          const totalLabel = format(Number(item.totalAmount) || 0)
+          const totalLabel = formatProduct(Number(item.totalAmount) || 0, orderSourceRegion(item))
 
           return (
             <TouchableOpacity

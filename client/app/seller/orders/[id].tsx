@@ -1,4 +1,5 @@
 import api from '@/constants/api'
+import { DEFAULT_REGION, resolveRegionCode } from '@/constants/regions'
 import { useMarketplace } from '@/context/MarketplaceContext'
 import { useAuth } from '@clerk/clerk-expo'
 import { Ionicons } from '@expo/vector-icons'
@@ -389,11 +390,44 @@ function DeliveredBurst({
   )
 }
 
+
+/**
+ * Product page rule:
+ *   formatProduct(amount, product.region)
+ *
+ * Order line prices are frozen in the product's listing region currency
+ * (backend createOrder: price = product.price, region = product.region).
+ * Never call format(amount) alone — that only changes the symbol.
+ */
+function orderSourceRegion(order: any): string {
+  if (!order) return DEFAULT_REGION
+  // 1) Snapshot on the order document (new orders)
+  if (order.region) return resolveRegionCode(order.region)
+  // 2) First line item snapshot / product.region
+  const first = order.items?.[0]
+  if (first?.region) return resolveRegionCode(first.region)
+  const prod = first?.product
+  if (prod && typeof prod === 'object' && prod.region) {
+    return resolveRegionCode(prod.region)
+  }
+  return DEFAULT_REGION
+}
+
+function itemSourceRegion(item: any, order?: any): string {
+  // Prefer frozen snapshot on the line
+  if (item?.region) return resolveRegionCode(item.region)
+  const prod = item?.product
+  if (prod && typeof prod === 'object' && prod.region) {
+    return resolveRegionCode(prod.region)
+  }
+  return orderSourceRegion(order)
+}
+
 export default function SellerOrderDetails() {
   const { id } = useLocalSearchParams<{ id: string }>()
   const { getToken } = useAuth()
   const router = useRouter()
-  const { format, refreshRegion } = useMarketplace()
+  const { formatProduct, refreshRegion } = useMarketplace()
 
   const [order, setOrder] = useState<any>(null)
   const [loading, setLoading] = useState(true)
@@ -433,11 +467,19 @@ export default function SellerOrderDetails() {
     [],
   )
 
-  /** Frozen order amounts — never FX-convert with formatProduct */
+  // Same as product page: formatProduct(amount, listingRegion)
+  const orderRegion = useMemo(() => orderSourceRegion(order), [order])
   const fmt = useCallback(
-    (amount: number) => format(Number(amount) || 0),
-    [format],
+    (amount: number, listingRegion?: string | null) =>
+      formatProduct(Number(amount) || 0, listingRegion || orderRegion),
+    [formatProduct, orderRegion],
   )
+  const fmtItem = useCallback(
+    (amount: number, item: any) =>
+      formatProduct(Number(amount) || 0, itemSourceRegion(item, order)),
+    [formatProduct, order],
+  )
+
 
   const loadOrder = useCallback(async () => {
     try {
@@ -855,10 +897,10 @@ export default function SellerOrderDetails() {
                     </Text>
                   )}
                   <Text style={styles.meta}>
-                    Qty: {item.quantity} · {fmt(unit)} each
+                    Qty: {item.quantity} · {fmtItem(unit, item)} each
                   </Text>
                   <Text style={[styles.bodyStrong, { marginTop: 2, fontSize: 14 }]}>
-                    {fmt(unit * (Number(item.quantity) || 1))}
+                    {fmtItem(unit * (Number(item.quantity) || 1), item)}
                   </Text>
                 </View>
               </View>

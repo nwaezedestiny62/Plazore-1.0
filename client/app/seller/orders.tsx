@@ -18,6 +18,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useMarketplace } from '@/context/MarketplaceContext'
 import { ScreenConfigMenu } from '@/components/ScreenConfigMenu'
 import api from '@/constants/api'
+import { DEFAULT_REGION, resolveRegionCode } from '@/constants/regions'
 
 const BG = '#090B0F'
 const SURFACE = '#11141A'
@@ -251,11 +252,44 @@ function TopOverlay({
   )
 }
 
+
+/**
+ * Product page rule:
+ *   formatProduct(amount, product.region)
+ *
+ * Order line prices are frozen in the product's listing region currency
+ * (backend createOrder: price = product.price, region = product.region).
+ * Never call format(amount) alone — that only changes the symbol.
+ */
+function orderSourceRegion(order: any): string {
+  if (!order) return DEFAULT_REGION
+  // 1) Snapshot on the order document (new orders)
+  if (order.region) return resolveRegionCode(order.region)
+  // 2) First line item snapshot / product.region
+  const first = order.items?.[0]
+  if (first?.region) return resolveRegionCode(first.region)
+  const prod = first?.product
+  if (prod && typeof prod === 'object' && prod.region) {
+    return resolveRegionCode(prod.region)
+  }
+  return DEFAULT_REGION
+}
+
+function itemSourceRegion(item: any, order?: any): string {
+  // Prefer frozen snapshot on the line
+  if (item?.region) return resolveRegionCode(item.region)
+  const prod = item?.product
+  if (prod && typeof prod === 'object' && prod.region) {
+    return resolveRegionCode(prod.region)
+  }
+  return orderSourceRegion(order)
+}
+
 export default function SellerOrders() {
   const { getToken } = useAuth()
   const router = useRouter()
   /** Frozen order totals — format in marketplace currency only (never formatProduct). */
-  const { format } = useMarketplace()
+  const { formatProduct } = useMarketplace()
 
   const [orders, setOrders] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
@@ -476,7 +510,7 @@ export default function SellerOrders() {
               </Text>
               <View style={styles.cardBottom}>
                 <Text style={styles.amount}>
-                  {format(Number(item.totalAmount) || 0)}
+                  {formatProduct(Number(item.totalAmount) || 0, orderSourceRegion(item))}
                 </Text>
                 {!!dateStr && <Text style={styles.date}>{dateStr}</Text>}
               </View>

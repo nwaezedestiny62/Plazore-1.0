@@ -1,11 +1,12 @@
 import api from '@/constants/api'
+import { DEFAULT_REGION, resolveRegionCode } from '@/constants/regions'
 import { useMarketplace } from '@/context/MarketplaceContext'
 import { useAuth } from '@clerk/clerk-expo'
 import { Ionicons } from '@expo/vector-icons'
 import * as Clipboard from 'expo-clipboard'
 import { LinearGradient } from 'expo-linear-gradient'
 import { useLocalSearchParams, useRouter } from 'expo-router'
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Animated,
@@ -91,12 +92,45 @@ function PlazoreOrbPreloader() {
   )
 }
 
+
+/**
+ * Product page rule:
+ *   formatProduct(amount, product.region)
+ *
+ * Order line prices are frozen in the product's listing region currency
+ * (backend createOrder: price = product.price, region = product.region).
+ * Never call format(amount) alone — that only changes the symbol.
+ */
+function orderSourceRegion(order: any): string {
+  if (!order) return DEFAULT_REGION
+  // 1) Snapshot on the order document (new orders)
+  if (order.region) return resolveRegionCode(order.region)
+  // 2) First line item snapshot / product.region
+  const first = order.items?.[0]
+  if (first?.region) return resolveRegionCode(first.region)
+  const prod = first?.product
+  if (prod && typeof prod === 'object' && prod.region) {
+    return resolveRegionCode(prod.region)
+  }
+  return DEFAULT_REGION
+}
+
+function itemSourceRegion(item: any, order?: any): string {
+  // Prefer frozen snapshot on the line
+  if (item?.region) return resolveRegionCode(item.region)
+  const prod = item?.product
+  if (prod && typeof prod === 'object' && prod.region) {
+    return resolveRegionCode(prod.region)
+  }
+  return orderSourceRegion(order)
+}
+
 export default function BuyerOrderDetails() {
   const rawId = useLocalSearchParams<{ id: string | string[] }>().id
   const id = Array.isArray(rawId) ? rawId[0] : rawId
   const { getToken, isSignedIn, isLoaded } = useAuth()
   const router = useRouter()
-  const { format, refreshRegion } = useMarketplace()
+  const { formatProduct, refreshRegion } = useMarketplace()
 
   const [order, setOrder] = useState<any>(null)
   const [loading, setLoading] = useState(true)
@@ -106,14 +140,19 @@ export default function BuyerOrderDetails() {
   const toastAnim = useRef(new Animated.Value(0)).current
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  /**
-   * Order totals / line prices are frozen at purchase.
-   * Only format() in the buyer's marketplace currency — never formatProduct / FX again.
-   */
+  // Same as product page: formatProduct(amount, listingRegion)
+  const orderRegion = useMemo(() => orderSourceRegion(order), [order])
   const fmt = useCallback(
-    (amount: number) => format(Number(amount) || 0),
-    [format],
+    (amount: number, listingRegion?: string | null) =>
+      formatProduct(Number(amount) || 0, listingRegion || orderRegion),
+    [formatProduct, orderRegion],
   )
+  const fmtItem = useCallback(
+    (amount: number, item: any) =>
+      formatProduct(Number(amount) || 0, itemSourceRegion(item, order)),
+    [formatProduct, order],
+  )
+
 
   const loadOrder = useCallback(async () => {
     if (!id) {
@@ -524,9 +563,9 @@ export default function BuyerOrderDetails() {
                     </Text>
                   )}
                   <Text style={styles.itemMeta}>
-                    Qty {item.quantity} · {fmt(unit)} each
+                    Qty {item.quantity} · {fmtItem(unit, item)} each
                   </Text>
-                  <Text style={styles.itemLineTotal}>{fmt(lineTotal)}</Text>
+                  <Text style={styles.itemLineTotal}>{fmtItem(lineTotal, item)}</Text>
                 </View>
               </View>
 

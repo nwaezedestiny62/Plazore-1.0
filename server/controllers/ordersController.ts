@@ -119,11 +119,15 @@ export const createOrder = async (req: Request, res: Response) => {
       const isSellerOwnedPurchase =
         user._id.toString() === sellerId;
 
+      // Price is always in product.region currency (same as product page source of truth)
+      const listingRegion = String((product as any).region || "").trim();
+
       itemsBySeller[sellerId].push({
         product: product._id,
         name: product.name,
         quantity: item.quantity,
         price: item.price ?? product.price,
+        region: listingRegion,
         image: product.images?.[0] || "",
         note: String(item.note || "")
           .trim()
@@ -187,6 +191,10 @@ export const createOrder = async (req: Request, res: Response) => {
           deliveryFee: shippingCost,
         },
         orderStatus: "Preparing",
+        // Frozen currency region — product listing region (matches product page)
+        region:
+          String(sellerItems[0]?.region || "").trim() ||
+          "",
         subtotal,
         shippingCost,
         totalAmount: subtotal + shippingCost,
@@ -261,7 +269,7 @@ export const getMyOrders = async (req: Request, res: Response) => {
 
     const orders = await Order.find({ buyer: user._id })
       .populate("seller", "name storeName storeLogo")
-      .populate("items.product", "name images")
+      .populate("items.product", "name images region price")
       .sort({ createdAt: -1 });
 
     res.json({ success: true, data: orders });
@@ -285,7 +293,7 @@ export const getOrder = async (req: Request, res: Response) => {
     const order = await Order.findById(id)
       .populate("seller", "name storeName storeLogo shippingDefaults")
       .populate("buyer", "name phone")
-      .populate("items.product", "name images shipping fulfillmentLocation");
+      .populate("items.product", "name images region price shipping fulfillmentLocation");
 
     if (!order) {
       return res
@@ -323,7 +331,7 @@ export const getSellerOrders = async (req: Request, res: Response) => {
 
     const orders = await Order.find({ seller: user._id })
       .populate("buyer", "name phone")
-      .populate("items.product", "name images")
+      .populate("items.product", "name images region price")
       .sort({ createdAt: -1 });
 
     res.json({ success: true, data: orders });
@@ -496,7 +504,7 @@ export const getAllOrders = async (req: Request, res: Response) => {
     const orders = await Order.find(query)
       .populate("buyer", "name email phone")
       .populate("seller", "name storeName")
-      .populate("items.product", "name")
+      .populate("items.product", "name region price")
       .sort({ createdAt: -1 })
       .skip((Number(page) - 1) * Number(limit))
       .limit(Number(limit));
