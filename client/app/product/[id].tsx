@@ -246,6 +246,264 @@ function normalizeSpecs(raw: any): Record<string, string> {
   return {};
 }
 
+
+/** ——— Variants (product options ≠ specifications) ——— */
+function productHasVariants(p: any): boolean {
+  if (!p) return false;
+  if (p.hasVariants === true) return true;
+  return Array.isArray(p.variants) && p.variants.length > 0;
+}
+
+function normalizeProductOptions(product: any): { id: string; name: string; values: string[] }[] {
+  const raw = product?.options;
+  if (Array.isArray(raw) && raw.length) {
+    return raw
+      .map((o: any) => ({
+        id: String(o.id || o.name || ""),
+        name: String(o.name || "").trim(),
+        values: Array.isArray(o.values)
+          ? o.values.map((v: any) => String(v).trim()).filter(Boolean)
+          : [],
+      }))
+      .filter((o: any) => o.name && o.values.length);
+  }
+  const map: Record<string, Set<string>> = {};
+  for (const v of product?.variants || []) {
+    const opts = v.options || v.selectedOptions || {};
+    for (const [k, val] of Object.entries(opts)) {
+      if (!map[k]) map[k] = new Set();
+      if (val != null && String(val).trim()) map[k].add(String(val));
+    }
+  }
+  return Object.entries(map).map(([name, set]) => ({
+    id: name,
+    name,
+    values: Array.from(set),
+  }));
+}
+
+function matchVariant(product: any, selected: Record<string, string>): any | null {
+  const list = product?.variants || [];
+  if (!list.length) return null;
+  const entries = Object.entries(selected).filter(
+    ([, v]) => v != null && String(v) !== "",
+  );
+  if (!entries.length) return null;
+  return (
+    list.find((v: any) => {
+      const o = v.options || v.selectedOptions || {};
+      return entries.every(([k, val]) => String(o[k]) === String(val));
+    }) || null
+  );
+}
+
+function unitPriceForSelection(product: any, matched: any | null): number {
+  if (matched && matched.price != null && Number.isFinite(Number(matched.price))) {
+    return Number(matched.price);
+  }
+  return Number(product?.price) || 0;
+}
+
+function stockForSelection(
+  product: any,
+  matched: any | null,
+  hasVar: boolean,
+): number {
+  if (hasVar) {
+    if (!matched) return 0;
+    if (matched.isActive === false) return 0;
+    return Math.max(0, Number(matched.stock) || 0);
+  }
+  return Math.max(0, Number(product?.stock) || 0);
+}
+
+function buildCartOpts(
+  product: any,
+  selected: Record<string, string>,
+  matched: any | null,
+) {
+  if (!productHasVariants(product) || !matched) return undefined;
+  return {
+    variantId: matched.variantId,
+    variantKey: matched.variantKey,
+    selectedOptions: { ...selected },
+    price: unitPriceForSelection(product, matched),
+    image: matched.image || product.images?.[0],
+  };
+}
+
+function isColorOptionName(name: string) {
+  const n = name.toLowerCase();
+  return n.includes("color") || n.includes("colour") || n === "shade";
+}
+
+/** Map common color names to hex for cinematic swatches */
+function colorToHex(label: string): string | null {
+  const map: Record<string, string> = {
+    black: "#0A0A0A",
+    white: "#F5F5F5",
+    red: "#DC2626",
+    blue: "#2563EB",
+    navy: "#1E3A5F",
+    green: "#16A34A",
+    olive: "#6B8E23",
+    yellow: "#EAB308",
+    gold: "#D4AF37",
+    silver: "#C0C0C0",
+    grey: "#9CA3AF",
+    gray: "#9CA3AF",
+    pink: "#EC4899",
+    purple: "#7C3AED",
+    orange: "#EA580C",
+    brown: "#92400E",
+    beige: "#D4C4A8",
+    cream: "#FFFDD0",
+    ivory: "#FFFFF0",
+    teal: "#0D9488",
+    cyan: "#06B6D4",
+    maroon: "#7F1D1D",
+    charcoal: "#36454F",
+  };
+  const key = label.trim().toLowerCase();
+  if (map[key]) return map[key];
+  // hex-like
+  if (/^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(key)) return key;
+  return null;
+}
+
+
+/** Cinematic option value — scale + border glow on select */
+function CinematicOptionChip({
+  label,
+  selected,
+  isColor,
+  onPress,
+}: {
+  label: string;
+  selected: boolean;
+  isColor: boolean;
+  onPress: () => void;
+}) {
+  const scale = useRef(new Animated.Value(1)).current;
+  const glow = useRef(new Animated.Value(selected ? 1 : 0)).current;
+
+  useEffect(() => {
+    Animated.spring(glow, {
+      toValue: selected ? 1 : 0,
+      friction: 7,
+      tension: 120,
+      useNativeDriver: true,
+    }).start();
+  }, [selected, glow]);
+
+  const onPressIn = () => {
+    Animated.spring(scale, {
+      toValue: 0.94,
+      friction: 6,
+      tension: 200,
+      useNativeDriver: true,
+    }).start();
+  };
+  const onPressOut = () => {
+    Animated.spring(scale, {
+      toValue: 1,
+      friction: 5,
+      tension: 160,
+      useNativeDriver: true,
+    }).start();
+  };
+
+  const hex = isColor ? colorToHex(label) : null;
+  const liftY = glow.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, -2],
+  });
+
+  if (isColor && hex) {
+    return (
+      <Pressable
+        onPress={onPress}
+        onPressIn={onPressIn}
+        onPressOut={onPressOut}
+        accessibilityRole="button"
+        accessibilityState={{ selected }}
+      >
+        <Animated.View
+          style={[
+            styles.colorOrbOuter,
+            {
+              transform: [{ scale }, { translateY: liftY }],
+              borderColor: selected ? AI_GREEN : "rgba(255,255,255,0.14)",
+            },
+          ]}
+        >
+          <View
+            style={[
+              styles.colorOrbInner,
+              {
+                backgroundColor: hex,
+                borderColor:
+                  hex === "#F5F5F5" || hex === "#FFFFF0" || hex === "#FFFDD0"
+                    ? "rgba(0,0,0,0.15)"
+                    : "transparent",
+              },
+            ]}
+          />
+          {selected ? (
+            <View style={styles.colorOrbCheck}>
+              <Ionicons name="checkmark" size={12} color="#041412" />
+            </View>
+          ) : null}
+        </Animated.View>
+        <Text
+          style={[
+            styles.colorOrbLabel,
+            selected && styles.colorOrbLabelOn,
+          ]}
+          numberOfLines={1}
+        >
+          {label}
+        </Text>
+      </Pressable>
+    );
+  }
+
+  return (
+    <Pressable
+      onPress={onPress}
+      onPressIn={onPressIn}
+      onPressOut={onPressOut}
+      accessibilityRole="button"
+      accessibilityState={{ selected }}
+    >
+      <Animated.View
+        style={[
+          styles.optionPill,
+          selected && styles.optionPillOn,
+          {
+            transform: [{ scale }, { translateY: liftY }],
+          },
+        ]}
+      >
+        {selected ? (
+          <LinearGradient
+            colors={[AI_GREEN, "#14B8A6", AI_BLUE]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+            style={styles.optionPillEdge}
+          />
+        ) : null}
+        <Text
+          style={[styles.optionPillText, selected && styles.optionPillTextOn]}
+          numberOfLines={1}
+        >
+          {label}
+        </Text>
+      </Animated.View>
+    </Pressable>
+  );
+}
+
 function PlazoreAIOrb({ size = 48 }: { size?: number }) {
   const rotation = useRef(new Animated.Value(0)).current;
 
@@ -340,6 +598,7 @@ export default function ProductDetails() {
   const [copied, setCopied] = useState(false);
   const [shareBusy, setShareBusy] = useState(false);
   const [googleBusy, setGoogleBusy] = useState(false);
+  const [selectedOptions, setSelectedOptions] = useState<Record<string, string>>({});
 
   const ranPending = useRef(false);
 
@@ -517,7 +776,47 @@ export default function ProductDetails() {
       : typeof seller === "string"
         ? seller
         : null;
+
   const storeName = String(seller.storeName || seller.name || "this store");
+
+  const hasVar = productHasVariants(product);
+  const optionGroups = useMemo(
+    () => (product ? normalizeProductOptions(product) : []),
+    [product],
+  );
+  const matchedVariant = useMemo(
+    () => (product ? matchVariant(product, selectedOptions) : null),
+    [product, selectedOptions],
+  );
+  const allOptionsPicked =
+    !hasVar ||
+    (optionGroups.length > 0 &&
+      optionGroups.every((g) => !!selectedOptions[g.name]));
+  const displayPrice = product
+    ? unitPriceForSelection(product, matchedVariant)
+    : 0;
+  const displayStock = product
+    ? stockForSelection(product, matchedVariant, !!hasVar)
+    : 0;
+  const canPurchase =
+    !!product &&
+    (!hasVar || (allOptionsPicked && !!matchedVariant)) &&
+    displayStock > 0;
+
+  useEffect(() => {
+    setSelectedOptions({});
+  }, [product?._id]);
+
+  const galleryImages = useMemo(() => {
+    if (!product) return [] as string[];
+    const base = Array.isArray(product.images) ? product.images.filter(Boolean) : [];
+    if (matchedVariant?.image) {
+      const rest = base.filter((u: string) => u !== matchedVariant.image);
+      return [matchedVariant.image, ...rest];
+    }
+    return base;
+  }, [product, matchedVariant]);
+
 
   const openReport = useCallback(() => {
     if (!product) return;
@@ -653,13 +952,17 @@ export default function ProductDetails() {
   const handleAddToBag = () => {
     if (!product) return;
     if (!requireAuth("add_to_cart")) return;
-    addToCart(product, "");
+    if (hasVar && !allOptionsPicked) return;
+    const opts = buildCartOpts(product, selectedOptions, matchedVariant);
+    addToCart(product, opts as any);
   };
 
   const handleBuyNow = () => {
     if (!product) return;
     if (!requireAuth("buy_now")) return;
-    addToCart(product, "");
+    if (hasVar && !allOptionsPicked) return;
+    const opts = buildCartOpts(product, selectedOptions, matchedVariant);
+    addToCart(product, opts as any);
     router.push("/(tabs)/checkout" as any);
   };
 
@@ -714,16 +1017,51 @@ export default function ProductDetails() {
     (action: PendingAction) => {
       if (action === "wishlist") runWishlist("toggle");
       else if (action === "add_to_cart") {
-        if (product) addToCart(product, "");
+        if (product) {
+          if (productHasVariants(product)) {
+            const groups = normalizeProductOptions(product);
+            const matched = matchVariant(product, selectedOptions);
+            const picked =
+              groups.length > 0 &&
+              groups.every((g) => !!selectedOptions[g.name]);
+            if (!picked || !matched) return;
+            addToCart(
+              product,
+              buildCartOpts(product, selectedOptions, matched) as any,
+            );
+          } else {
+            addToCart(product, undefined as any);
+          }
+        }
       } else if (action === "buy_now") {
         if (product) {
-          addToCart(product, "");
+          if (productHasVariants(product)) {
+            const groups = normalizeProductOptions(product);
+            const matched = matchVariant(product, selectedOptions);
+            const picked =
+              groups.length > 0 &&
+              groups.every((g) => !!selectedOptions[g.name]);
+            if (!picked || !matched) return;
+            addToCart(
+              product,
+              buildCartOpts(product, selectedOptions, matched) as any,
+            );
+          } else {
+            addToCart(product, undefined as any);
+          }
           router.push("/(tabs)/checkout" as any);
         }
       } else if (action === "message") void handleMessageSeller();
       else if (action === "report") openReport();
     },
-    [product, addToCart, router, runWishlist, openReport],
+    [
+      product,
+      addToCart,
+      router,
+      runWishlist,
+      openReport,
+      selectedOptions,
+    ],
   );
 
   useEffect(() => {
@@ -866,7 +1204,12 @@ export default function ProductDetails() {
     );
   }
 
-  const images: string[] = product.images?.length > 0 ? product.images : [];
+  const images: string[] =
+    galleryImages.length > 0
+      ? galleryImages
+      : product.images?.length > 0
+        ? product.images
+        : [];
   // ── Shipping (multi-region aware) ──
   const ship = product.shipping || {};
   const feeMode = String(ship.feeMode || "fixed").toLowerCase(); // free | fixed | on_delivery
@@ -922,7 +1265,7 @@ export default function ProductDetails() {
     null;
 
   const showProductCommunication = !isOwnProduct;
-  const inStock = Number(product.stock) > 0;
+  const inStock = displayStock > 0;
   const productName = String(product.name || "this piece");
 
   return (
@@ -1058,7 +1401,7 @@ export default function ProductDetails() {
 
               <View style={styles.priceRow}>
                 <Text style={styles.price} numberOfLines={1}>
-                  {formatProduct(Number(product.price), productRegion)}
+                  {formatProduct(displayPrice, productRegion)}
                 </Text>
 
                 <View
@@ -1083,7 +1426,7 @@ export default function ProductDetails() {
                   )}
                   {inStock ? (
                     <GradientText style={styles.availableText}>
-                      {`Available · ${product.stock}`}
+                      {`Available · ${displayStock}`}
                     </GradientText>
                   ) : (
                     <Text style={[styles.availableText, { color: ERROR }]}>
@@ -1092,6 +1435,107 @@ export default function ProductDetails() {
                   )}
                 </View>
               </View>
+
+
+              {/* ——— Product options — cinematic mall selection ——— */}
+              {hasVar && optionGroups.length > 0 && (
+                <View style={styles.optionsBlock}>
+                  <View style={styles.optionsIntro}>
+                    <Text style={styles.optionsKicker}>CONFIGURE</Text>
+                    <Text style={styles.optionsTitle}>
+                      Choose your exact piece
+                    </Text>
+                    <View style={styles.optionsAccentRule}>
+                      <LinearGradient
+                        colors={[
+                          "transparent",
+                          "rgba(16,185,129,0.55)",
+                          "rgba(59,130,246,0.4)",
+                          "transparent",
+                        ]}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 0 }}
+                        style={StyleSheet.absoluteFill}
+                      />
+                    </View>
+                  </View>
+
+                  {optionGroups.map((group, gi) => {
+                    const isColor = isColorOptionName(group.name);
+                    const picked = selectedOptions[group.name];
+                    return (
+                      <View
+                        key={group.id || group.name}
+                        style={[
+                          styles.optionGroup,
+                          gi > 0 && styles.optionGroupDivider,
+                        ]}
+                      >
+                        <View style={styles.optionGroupHead}>
+                          <Text style={styles.optionGroupLabel}>
+                            {group.name.toUpperCase()}
+                          </Text>
+                          <Text
+                            style={[
+                              styles.optionGroupValue,
+                              !picked && styles.optionGroupValueMuted,
+                            ]}
+                          >
+                            {picked || "Select"}
+                          </Text>
+                        </View>
+
+                        <View
+                          style={[
+                            styles.optionValuesRow,
+                            isColor && styles.optionValuesRowColor,
+                          ]}
+                        >
+                          {group.values.map((val) => (
+                            <CinematicOptionChip
+                              key={val}
+                              label={val}
+                              isColor={isColor}
+                              selected={picked === val}
+                              onPress={() =>
+                                setSelectedOptions((prev) => ({
+                                  ...prev,
+                                  [group.name]: val,
+                                }))
+                              }
+                            />
+                          ))}
+                        </View>
+                      </View>
+                    );
+                  })}
+
+                  <View style={styles.optionStatusBar}>
+                    {!allOptionsPicked ? (
+                      <Text style={styles.optionHint}>
+                        Select every option to unlock this listing.
+                      </Text>
+                    ) : matchedVariant ? (
+                      <View style={styles.optionReadyRow}>
+                        <View style={styles.optionReadyDot} />
+                        <Text style={styles.optionHintOk}>
+                          Ready · {displayStock} available
+                          {matchedVariant.price != null
+                            ? ` · ${formatProduct(
+                                Number(matchedVariant.price),
+                                product.region,
+                              )}`
+                            : ""}
+                        </Text>
+                      </View>
+                    ) : (
+                      <Text style={styles.optionHint}>
+                        Combination unavailable — try another selection.
+                      </Text>
+                    )}
+                  </View>
+                </View>
+              )}
 
               {(categoryLabel || product.subCategory) && (
                 <View style={styles.chipRow}>
@@ -1481,18 +1925,44 @@ export default function ProductDetails() {
           <View style={styles.actionRow}>
             <TouchableOpacity
               onPress={handleAddToBag}
-              style={styles.secondaryBtn}
+              style={[
+                styles.secondaryBtn,
+                !canPurchase && styles.actionBtnDisabled,
+              ]}
               activeOpacity={0.85}
+              disabled={!canPurchase}
             >
-              <Text style={styles.secondaryBtnText}>Add to Bag</Text>
+              <Text
+                style={[
+                  styles.secondaryBtnText,
+                  !canPurchase && styles.actionBtnTextDisabled,
+                ]}
+              >
+                {hasVar && !allOptionsPicked ? "Select options" : "Add to Bag"}
+              </Text>
             </TouchableOpacity>
 
             <TouchableOpacity
               onPress={handleBuyNow}
               activeOpacity={0.9}
-              style={styles.primaryBtn}
+              style={[
+                styles.primaryBtn,
+                !canPurchase && styles.actionBtnDisabled,
+              ]}
+              disabled={!canPurchase}
             >
-              <Text style={styles.primaryBtnText}>Buy Now</Text>
+              <Text
+                style={[
+                  styles.primaryBtnText,
+                  !canPurchase && styles.actionBtnTextDisabled,
+                ]}
+              >
+                {hasVar && !allOptionsPicked
+                  ? "Select options"
+                  : !inStock
+                    ? "Out of stock"
+                    : "Buy Now"}
+              </Text>
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -2508,6 +2978,174 @@ const styles = StyleSheet.create({
     color: AI_GREEN,
     fontSize: 14,
     fontWeight: "700",
+  },
+
+  optionsBlock: {
+    marginTop: 22,
+    marginBottom: 8,
+    width: "100%",
+    paddingTop: 4,
+  },
+  optionsIntro: {
+    marginBottom: 18,
+  },
+  optionsKicker: {
+    color: MUTED,
+    fontSize: 10,
+    fontWeight: "800",
+    letterSpacing: 2.2,
+    marginBottom: 4,
+  },
+  optionsTitle: {
+    color: TEXT,
+    fontSize: 18,
+    fontWeight: "700",
+    letterSpacing: -0.4,
+    marginBottom: 12,
+  },
+  optionsAccentRule: {
+    height: 1,
+    width: "100%",
+    overflow: "hidden",
+  },
+  optionGroup: {
+    width: "100%",
+    marginBottom: 18,
+  },
+  optionGroupDivider: {
+    paddingTop: 4,
+  },
+  optionGroupHead: {
+    flexDirection: "row",
+    alignItems: "baseline",
+    justifyContent: "space-between",
+    marginBottom: 12,
+    gap: 12,
+  },
+  optionGroupLabel: {
+    color: MUTED,
+    fontSize: 11,
+    fontWeight: "800",
+    letterSpacing: 1.8,
+  },
+  optionGroupValue: {
+    color: TEXT,
+    fontSize: 13,
+    fontWeight: "700",
+    letterSpacing: -0.2,
+  },
+  optionGroupValueMuted: {
+    color: MUTED,
+    fontWeight: "500",
+  },
+  optionValuesRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+  },
+  optionValuesRowColor: {
+    gap: 14,
+  },
+  /* Text / size / material pills */
+  optionPill: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: SURFACE_2,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "rgba(255,255,255,0.1)",
+    overflow: "hidden",
+    minWidth: 52,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  optionPillOn: {
+    backgroundColor: "rgba(16,185,129,0.12)",
+    borderColor: "rgba(16,185,129,0.45)",
+  },
+  optionPillEdge: {
+    position: "absolute",
+    left: 0,
+    top: 0,
+    bottom: 0,
+    width: 3,
+  },
+  optionPillText: {
+    color: SECONDARY,
+    fontSize: 13.5,
+    fontWeight: "600",
+    letterSpacing: -0.15,
+  },
+  optionPillTextOn: {
+    color: TEXT,
+    fontWeight: "800",
+  },
+  /* Color orbs — visual first */
+  colorOrbOuter: {
+    width: 52,
+    height: 52,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 2,
+    borderColor: "rgba(255,255,255,0.14)",
+    backgroundColor: "rgba(0,0,0,0.25)",
+  },
+  colorOrbInner: {
+    width: 40,
+    height: 40,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  colorOrbCheck: {
+    position: "absolute",
+    width: 18,
+    height: 18,
+    backgroundColor: AI_GREEN,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  colorOrbLabel: {
+    marginTop: 6,
+    maxWidth: 64,
+    textAlign: "center",
+    color: MUTED,
+    fontSize: 10,
+    fontWeight: "600",
+  },
+  colorOrbLabelOn: {
+    color: TEXT,
+    fontWeight: "800",
+  },
+  optionStatusBar: {
+    marginTop: 4,
+    paddingTop: 14,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: "rgba(255,255,255,0.06)",
+  },
+  optionReadyRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  optionReadyDot: {
+    width: 6,
+    height: 6,
+    backgroundColor: AI_GREEN,
+  },
+  optionHint: {
+    color: MUTED,
+    fontSize: 12.5,
+    lineHeight: 18,
+  },
+  optionHintOk: {
+    color: AI_GREEN,
+    fontSize: 12.5,
+    fontWeight: "700",
+    letterSpacing: -0.1,
+  },
+  actionBtnDisabled: {
+    opacity: 0.42,
+  },
+  actionBtnTextDisabled: {
+    color: MUTED,
   },
   authFoot: {
     marginTop: 8,

@@ -767,7 +767,7 @@ export default function Checkout() {
           const id = item.productId || item.product?._id
           const qty = Math.max(1, Number(item.quantity) || 1)
           const price = Number(item.price ?? item.product?.price) || 0
-          return {
+          const payload: Record<string, unknown> = {
             productId: id,
             quantity: qty,
             price,
@@ -775,8 +775,14 @@ export default function Checkout() {
               .trim()
               .slice(0, 120),
           }
+          if (item.variantId) payload.variantId = item.variantId
+          if (item.variantKey) payload.variantKey = item.variantKey
+          if (item.selectedOptions && typeof item.selectedOptions === 'object') {
+            payload.selectedOptions = item.selectedOptions
+          }
+          return payload
         })
-        .filter((i) => i.productId && i.price > 0 && i.quantity > 0)
+        .filter((i) => i.productId && Number(i.price) > 0 && Number(i.quantity) > 0)
 
       if (!items.length) throw new Error('No valid products in bag')
       if (!addressComplete(selectedAddress)) {
@@ -1000,6 +1006,14 @@ export default function Checkout() {
                       <Text style={styles.itemName} numberOfLines={2}>
                         {item.product?.name || 'Product'}
                       </Text>
+                      {!!item.selectedOptions &&
+                        Object.keys(item.selectedOptions).length > 0 && (
+                          <Text style={styles.itemMeta} numberOfLines={2}>
+                            {Object.entries(item.selectedOptions)
+                              .map(([k, v]) => `${k}: ${v}`)
+                              .join(' · ')}
+                          </Text>
+                        )}
                       <Text style={styles.itemMeta}>
                         Qty {qty} · {fmtProduct(unit, productRegion)} each
                       </Text>

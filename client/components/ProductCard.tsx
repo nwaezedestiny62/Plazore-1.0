@@ -1,5 +1,9 @@
 // client/components/ProductCard.tsx
-import { ProductCardProps } from "@/constants/types";
+import {
+  ProductCardProps,
+  effectiveProductStock,
+  productHasVariants,
+} from "@/constants/types";
 import { useMarketplace } from "@/context/MarketplaceContext";
 import { Ionicons } from "@expo/vector-icons";
 import { Image as ExpoImage } from "expo-image";
@@ -28,6 +32,21 @@ function resolveShipLocation(product: any): string {
   return product?.brand || product?.subCategory || "";
 }
 
+function displayPrice(product: any): number {
+  const base = Number(product.price) || 0;
+  if (!productHasVariants(product)) return base;
+  const prices = (product.variants || [])
+    .filter((v: any) => v.isActive !== false)
+    .map((v: any) =>
+      v.price != null && Number.isFinite(Number(v.price))
+        ? Number(v.price)
+        : base
+    )
+    .filter((n: number) => n > 0);
+  if (!prices.length) return base;
+  return Math.min(...prices);
+}
+
 interface Props extends ProductCardProps {
   cardWidth?: number;
 }
@@ -40,12 +59,16 @@ export default function ProductCard({ product, cardWidth }: Props) {
   const imgH = w * 1.22;
 
   const location = useMemo(() => resolveShipLocation(product), [product]);
+  const unit = useMemo(() => displayPrice(product), [product]);
   const price = useMemo(
-    () => formatProduct(Number(product.price) || 0, (product as any).region),
-    [product, formatProduct]
+    () => formatProduct(unit, (product as any).region),
+    [unit, product, formatProduct]
   );
-  const inStock = Number(product.stock ?? 0) > 0;
+  const stock = effectiveProductStock(product);
+  const inStock = stock > 0;
+  const hasVar = productHasVariants(product);
   const img = product.images?.[0];
+  const fromLabel = hasVar && unit !== Number(product.price);
 
   return (
     <Link href={`/product/${product._id}` as any} asChild>
@@ -105,6 +128,33 @@ export default function ProductCard({ product, cardWidth }: Props) {
             </View>
           ) : null}
 
+          {hasVar ? (
+            <View
+              style={{
+                position: "absolute",
+                top: 8,
+                right: 8,
+                backgroundColor: "rgba(0,0,0,0.55)",
+                paddingHorizontal: 7,
+                paddingVertical: 3,
+                borderWidth: 1,
+                borderColor: "rgba(255,255,255,0.12)",
+              }}
+            >
+              <Text
+                style={{
+                  color: "rgba(255,255,255,0.75)",
+                  fontSize: 9,
+                  fontWeight: "700",
+                  letterSpacing: 0.6,
+                  textTransform: "uppercase",
+                }}
+              >
+                Options
+              </Text>
+            </View>
+          ) : null}
+
           {!inStock ? (
             <View
               style={{
@@ -152,7 +202,7 @@ export default function ProductCard({ product, cardWidth }: Props) {
             }}
             numberOfLines={1}
           >
-            {price}
+            {fromLabel ? `From ${price}` : price}
           </Text>
 
           {!!location && (

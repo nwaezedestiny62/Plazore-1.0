@@ -11,6 +11,10 @@ export interface User {
     zipCode: string
     country: string
   }
+  storeName?: string
+  storeLogo?: string
+  storeDescription?: string
+  marketplaceRegion?: string
   createdAt: string
 }
 
@@ -28,6 +32,27 @@ export interface VerificationDocument {
   documentName: string
   documentType: string
   secureUrl: string
+}
+
+/** Buyer-selectable option group (Size, Color, …) — not specifications */
+export interface ProductOption {
+  id: string
+  name: string
+  values: string[]
+}
+
+/** Concrete combination of option values + inventory */
+export interface ProductVariant {
+  variantId: string
+  /** Sorted "opt=val|…" key for matching */
+  variantKey?: string
+  /** Map of option name → value */
+  options: Record<string, string>
+  price?: number | null
+  stock: number
+  sku?: string
+  image?: string
+  isActive?: boolean
 }
 
 export interface Product {
@@ -63,6 +88,15 @@ export interface Product {
         storeLogo?: string
         storeDescription?: string
         marketplaceRegion?: string
+        shippingDefaults?: {
+          address?: {
+            street?: string
+            city?: string
+            state?: string
+            zipCode?: string
+            country?: string
+          }
+        }
       }
   shipping?: {
     method: 'self' | 'courier'
@@ -70,11 +104,14 @@ export interface Product {
     deliveryFee: number
   }
   fulfillmentLocation?: FulfillmentLocation
-  /** Category-specific structured specs */
+  /** Category-specific structured specs (not buyer options) */
   specifications?: Record<string, string>
-  /** Cloudinary metadata only */
   verificationDocuments?: VerificationDocument[]
   wishlistCount?: number
+  /** When true, inventory & optional price live on variants */
+  hasVariants?: boolean
+  options?: ProductOption[]
+  variants?: ProductVariant[]
   createdAt: string
 }
 
@@ -83,18 +120,22 @@ export type ProductCardProps = {
 }
 
 export interface CartItem {
+  id: string
+  productId: string
   product: Product
   quantity: number
-  size: string
+  /** @deprecated legacy size field — prefer selectedOptions */
+  size?: string
+  price: number
+  note?: string
+  variantId?: string
+  variantKey?: string
+  selectedOptions?: Record<string, string>
+  image?: string
 }
 
 export type CartItemProps = {
-  item: {
-    id: string
-    product: { name: string; price: number; images: string[] }
-    quantity: number
-    size: string
-  }
+  item: CartItem
   onRemove?: () => void
   onUpdateQuantity?: (newQty: number) => void
 }
@@ -134,11 +175,17 @@ export interface OrderItem {
   image?: string
   size?: string
   note?: string
+  variantId?: string
+  variantKey?: string
+  selectedOptions?: Record<string, string>
+  isSellerOwnedPurchase?: boolean
 }
 
 export interface Order {
   _id: string
-  user: User | string
+  user?: User | string
+  buyer?: User | string
+  seller?: User | string
   orderNumber: string
   items: OrderItem[]
   shippingAddress: {
@@ -148,8 +195,8 @@ export interface Order {
     zipCode: string
     country: string
   }
-  paymentMethod: string
-  paymentStatus: 'pending' | 'paid' | 'failed' | 'refunded'
+  paymentMethod?: string
+  paymentStatus?: 'pending' | 'paid' | 'failed' | 'refunded' | string
   orderStatus:
     | 'placed'
     | 'processing'
@@ -160,11 +207,15 @@ export interface Order {
     | 'Shipped'
     | 'Delivered'
     | 'Cancelled'
-  subtotal: number
-  shippingCost: number
+    | string
+  subtotal?: number
+  shippingCost?: number
   tax?: number
   totalAmount: number
   notes?: string
+  buyerNote?: string
+  region?: string
+  isSellerOwnedPurchase?: boolean
   deliveredAt?: string
   createdAt: string
 }
@@ -174,4 +225,33 @@ export type WishlistContextType = {
   toggleWishlist: (product: Product) => void
   isInWishlist: (productId: string) => boolean
   loading: boolean
+}
+
+/** Helpers used across product / cart / showroom */
+export function productHasVariants(product?: Product | null): boolean {
+  if (!product) return false
+  if (product.hasVariants) return true
+  return Array.isArray(product.variants) && product.variants.length > 0
+}
+
+export function effectiveProductStock(product?: Product | null): number {
+  if (!product) return 0
+  if (productHasVariants(product)) {
+    const list = product.variants || []
+    return list.reduce((sum, v) => {
+      if (v.isActive === false) return sum
+      return sum + Math.max(0, Number(v.stock) || 0)
+    }, 0)
+  }
+  return Math.max(0, Number(product.stock) || 0)
+}
+
+export function formatSelectedOptions(
+  opts?: Record<string, string> | null
+): string {
+  if (!opts || typeof opts !== 'object') return ''
+  return Object.entries(opts)
+    .filter(([, v]) => v != null && String(v).trim() !== '')
+    .map(([k, v]) => `${k}: ${v}`)
+    .join(' · ')
 }

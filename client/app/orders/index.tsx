@@ -1,6 +1,5 @@
 import api from '@/constants/api'
 import { ScreenConfigMenu } from '@/components/ScreenConfigMenu'
-import { DEFAULT_REGION } from '@/constants/regions'
 import { useMarketplace } from '@/context/MarketplaceContext'
 import { useAuth } from '@clerk/clerk-expo'
 import { Ionicons } from '@expo/vector-icons'
@@ -29,7 +28,6 @@ const SECONDARY = '#A7ADB8'
 const MUTED = '#6B7280'
 const GREEN = '#00E575'
 const BLUE = '#3B82F6'
-const DANGER = '#EF4444'
 const AMBER = '#F59E0B'
 
 const HIDDEN_KEY = '@plazore_hidden_completed_orders'
@@ -44,18 +42,6 @@ const statusColor: Record<string, string> = {
 const STATUS_ORDER = ['Preparing', 'Shipped', 'Delivered', 'Cancelled']
 
 type SortMode = 'newest' | 'oldest' | 'status'
-
-function resolveOrderRegion(order: any): string {
-  if (order?.items?.[0]?.product?.region) {
-    return String(order.items[0].product.region)
-  }
-  if (order?.items?.[0]?.region) return String(order.items[0].region)
-  if (order?.region) return String(order.region)
-  if (order?.seller?.marketplaceRegion) {
-    return String(order.seller.marketplaceRegion)
-  }
-  return DEFAULT_REGION
-}
 
 function confirmationHint(order: any): { label: string; color: string } | null {
   if (order?.orderStatus !== 'Delivered') return null
@@ -112,7 +98,8 @@ function PlazoreOrbPreloader() {
 export default function BuyerOrders() {
   const { getToken, isSignedIn, isLoaded } = useAuth()
   const router = useRouter()
-  const { formatProduct } = useMarketplace()
+  /** Frozen order totals — format in buyer marketplace currency only (no formatProduct FX). */
+  const { format, refreshRegion } = useMarketplace()
 
   const [orders, setOrders] = useState<any[]>([])
   const [hiddenIds, setHiddenIds] = useState<string[]>([])
@@ -134,6 +121,7 @@ export default function BuyerOrders() {
 
   const fetchOrders = useCallback(async () => {
     try {
+      refreshRegion?.()
       const token = await getToken()
       if (!token) return
       const res = await api.get('/orders', {
@@ -146,7 +134,7 @@ export default function BuyerOrders() {
       setLoading(false)
       setRefreshing(false)
     }
-  }, [getToken])
+  }, [getToken, refreshRegion])
 
   useFocusEffect(
     useCallback(() => {
@@ -305,7 +293,7 @@ export default function BuyerOrders() {
           const count = item.items?.length || 0
           const color = statusColor[item.orderStatus] || MUTED
           const hint = confirmationHint(item)
-          const orderRegion = resolveOrderRegion(item)
+          const totalLabel = format(Number(item.totalAmount) || 0)
 
           return (
             <TouchableOpacity
@@ -357,8 +345,7 @@ export default function BuyerOrders() {
 
               <View style={styles.cardBottom}>
                 <Text style={styles.meta}>
-                  {count} item{count !== 1 ? 's' : ''} ·{' '}
-                  {formatProduct(Number(item.totalAmount) || 0, orderRegion)}
+                  {count} item{count !== 1 ? 's' : ''} · {totalLabel}
                 </Text>
                 <Text style={styles.date}>
                   {item.createdAt
@@ -479,7 +466,6 @@ const styles = StyleSheet.create({
   configBtn: {
     width: 40,
     height: 40,
-    borderRadius: 12,
     backgroundColor: SURFACE,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: LINE,
@@ -499,7 +485,6 @@ const styles = StyleSheet.create({
   emptyIcon: {
     width: 80,
     height: 80,
-    borderRadius: 40,
     backgroundColor: SURFACE,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: LINE,
@@ -521,7 +506,6 @@ const styles = StyleSheet.create({
   },
   card: {
     backgroundColor: SURFACE,
-    borderRadius: 16,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: LINE,
     padding: 16,
@@ -545,13 +529,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 10,
     paddingVertical: 4,
-    borderRadius: 20,
     gap: 5,
   },
   statusDot: {
     width: 6,
     height: 6,
-    borderRadius: 3,
   },
   statusText: {
     fontSize: 11,
@@ -571,7 +553,6 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
     paddingHorizontal: 10,
     paddingVertical: 5,
-    borderRadius: 8,
     marginBottom: 10,
   },
   hintText: {

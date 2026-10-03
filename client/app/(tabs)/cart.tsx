@@ -4,6 +4,7 @@ import {
   formatMoney,
   formatProductPrice,
 } from '@/constants/regions'
+import { formatSelectedOptions } from '@/constants/types'
 import { useCart } from '@/context/CartContext'
 import { useMarketplace } from '@/context/MarketplaceContext'
 import { Ionicons } from '@expo/vector-icons'
@@ -32,7 +33,6 @@ if (
   UIManager.setLayoutAnimationEnabledExperimental(true)
 }
 
-/* ── Plazore tokens — sharp geometry ── */
 const BG = '#090B0F'
 const SURFACE = '#0E1116'
 const SURFACE_2 = '#14181F'
@@ -47,7 +47,7 @@ const DANGER = '#EF4444'
 const GRAD = [GREEN, TEAL, BLUE] as const
 
 const U = 8
-const H_PAD = U * 2 // 16
+const H_PAD = U * 2
 
 function resolveProductRegion(product: any): string {
   if (!product) return DEFAULT_REGION
@@ -176,7 +176,6 @@ export default function Cart() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
-      {/* Header — flush, no radius */}
       <View style={styles.header}>
         <TouchableOpacity
           onPress={() => router.back()}
@@ -198,7 +197,6 @@ export default function Cart() {
         <View style={styles.headerRight} />
       </View>
 
-      {/* Thin accent rule under header */}
       <LinearGradient
         colors={['transparent', 'rgba(0,229,117,0.45)', 'rgba(37,99,235,0.35)', 'transparent']}
         locations={[0, 0.3, 0.7, 1]}
@@ -259,18 +257,19 @@ export default function Cart() {
                 const lineFee =
                   Number(item.product?.shipping?.deliveryFee) || 0
                 const note = item.note || ''
+                const optionLine =
+                  formatSelectedOptions(item.selectedOptions) ||
+                  (item.size ? `Size: ${item.size}` : '')
+                const thumb =
+                  item.image || item.product?.images?.[0] || undefined
 
                 return (
                   <View key={item.id} style={styles.card}>
-                    {/* Left green edge accent when present */}
                     <View style={styles.cardEdge} />
 
                     <View style={styles.cardTop}>
-                      {item.product?.images?.[0] ? (
-                        <Image
-                          source={{ uri: item.product.images[0] }}
-                          style={styles.thumb}
-                        />
+                      {thumb ? (
+                        <Image source={{ uri: thumb }} style={styles.thumb} />
                       ) : (
                         <View style={[styles.thumb, styles.thumbPlaceholder]}>
                           <Ionicons
@@ -285,6 +284,12 @@ export default function Cart() {
                         <Text style={styles.productName} numberOfLines={2}>
                           {item.product?.name || 'Product'}
                         </Text>
+
+                        {!!optionLine && (
+                          <Text style={styles.optionLine} numberOfLines={2}>
+                            {optionLine}
+                          </Text>
+                        )}
 
                         <Text style={styles.unitPrice} numberOfLines={1}>
                           {fmtProduct(unit, productRegion)}
@@ -359,7 +364,6 @@ export default function Cart() {
                 )
               })}
 
-              {/* Summary — sharp panel */}
               <View style={styles.summaryCard}>
                 <View style={styles.summaryHead}>
                   <Text style={styles.summaryTitle}>ORDER SUMMARY</Text>
@@ -393,7 +397,6 @@ export default function Cart() {
             </Animated.View>
           </ScrollView>
 
-          {/* Bottom bar — square */}
           <View style={styles.bottomBar}>
             <LinearGradient
               colors={['transparent', 'rgba(0,229,117,0.35)', 'rgba(37,99,235,0.25)', 'transparent']}
@@ -440,12 +443,7 @@ export default function Cart() {
 }
 
 const styles = StyleSheet.create({
-  safe: {
-    flex: 1,
-    backgroundColor: BG,
-  },
-
-  /* Header — no radius */
+  safe: { flex: 1, backgroundColor: BG },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -461,10 +459,7 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: LINE,
   },
-  headerCenter: {
-    flex: 1,
-    alignItems: 'center',
-  },
+  headerCenter: { flex: 1, alignItems: 'center' },
   headerTitle: {
     fontSize: 17,
     fontWeight: '800',
@@ -478,15 +473,8 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     letterSpacing: 0.3,
   },
-  headerRight: {
-    width: 44,
-  },
-  headerRule: {
-    height: 1,
-    marginHorizontal: H_PAD,
-  },
-
-  /* Empty */
+  headerRight: { width: 44 },
+  headerRule: { height: 1, marginHorizontal: H_PAD },
   emptyWrap: {
     flex: 1,
     alignItems: 'center',
@@ -516,32 +504,20 @@ const styles = StyleSheet.create({
     marginTop: 10,
     lineHeight: 21,
   },
-  emptyBtnWrap: {
-    marginTop: 32,
-    overflow: 'hidden',
-  },
-  emptyBtn: {
-    paddingHorizontal: 32,
-    paddingVertical: 15,
-  },
+  emptyBtnWrap: { marginTop: 32, overflow: 'hidden' },
+  emptyBtn: { paddingHorizontal: 32, paddingVertical: 15 },
   emptyBtnText: {
     color: '#041412',
     fontWeight: '800',
     fontSize: 15,
     letterSpacing: 0.2,
   },
-
-  /* Scroll */
-  scroll: {
-    flex: 1,
-  },
+  scroll: { flex: 1 },
   scrollContent: {
     paddingHorizontal: H_PAD,
     paddingTop: U * 2,
     paddingBottom: U * 3,
   },
-
-  /* Card — square */
   card: {
     backgroundColor: SURFACE,
     borderWidth: StyleSheet.hairlineWidth,
@@ -563,26 +539,21 @@ const styles = StyleSheet.create({
     padding: U * 1.75,
     paddingLeft: U * 2,
   },
-  thumb: {
-    width: 76,
-    height: 76,
-    backgroundColor: SURFACE_2,
-  },
-  thumbPlaceholder: {
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  infoCol: {
-    flex: 1,
-    marginLeft: U * 1.5,
-    minWidth: 0,
-  },
+  thumb: { width: 76, height: 76, backgroundColor: SURFACE_2 },
+  thumbPlaceholder: { alignItems: 'center', justifyContent: 'center' },
+  infoCol: { flex: 1, marginLeft: U * 1.5, minWidth: 0 },
   productName: {
     fontSize: 14,
     fontWeight: '600',
     color: TEXT,
     lineHeight: 19,
     letterSpacing: -0.15,
+  },
+  optionLine: {
+    fontSize: 12,
+    color: SECONDARY,
+    marginTop: 4,
+    lineHeight: 16,
   },
   unitPrice: {
     fontSize: 14,
@@ -622,11 +593,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: TEXT,
   },
-  priceBlock: {
-    flex: 1,
-    marginHorizontal: 10,
-    minWidth: 0,
-  },
+  priceBlock: { flex: 1, marginHorizontal: 10, minWidth: 0 },
   lineTotal: {
     textAlign: 'right',
     fontSize: 14,
@@ -642,8 +609,6 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(239,68,68,0.2)',
   },
-
-  /* Note */
   noteWrap: {
     paddingHorizontal: U * 2,
     paddingBottom: U * 1.75,
@@ -677,8 +642,6 @@ const styles = StyleSheet.create({
     marginTop: 5,
     fontWeight: '600',
   },
-
-  /* Summary */
   summaryCard: {
     backgroundColor: SURFACE,
     borderWidth: StyleSheet.hairlineWidth,
@@ -699,20 +662,14 @@ const styles = StyleSheet.create({
     color: MUTED,
     letterSpacing: 1.4,
   },
-  summaryBody: {
-    padding: U * 2,
-  },
+  summaryBody: { padding: U * 2 },
   summaryRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 11,
   },
-  summaryLabel: {
-    fontSize: 13,
-    color: SECONDARY,
-    fontWeight: '500',
-  },
+  summaryLabel: { fontSize: 13, color: SECONDARY, fontWeight: '500' },
   summaryValue: {
     fontSize: 13,
     fontWeight: '700',
@@ -726,11 +683,7 @@ const styles = StyleSheet.create({
     marginVertical: 6,
     marginBottom: 12,
   },
-  totalLabel: {
-    fontSize: 14,
-    fontWeight: '800',
-    color: TEXT,
-  },
+  totalLabel: { fontSize: 14, fontWeight: '800', color: TEXT },
   totalValue: {
     fontSize: 17,
     fontWeight: '800',
@@ -739,16 +692,12 @@ const styles = StyleSheet.create({
     textAlign: 'right',
     letterSpacing: -0.3,
   },
-
-  /* Bottom — square */
   bottomBar: {
     backgroundColor: SURFACE,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: LINE,
   },
-  bottomRule: {
-    height: 1,
-  },
+  bottomRule: { height: 1 },
   bottomInner: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -756,11 +705,7 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     paddingBottom: Platform.OS === 'ios' ? 12 : 14,
   },
-  bottomLeft: {
-    flex: 1,
-    marginRight: 14,
-    minWidth: 0,
-  },
+  bottomLeft: { flex: 1, marginRight: 14, minWidth: 0 },
   amountDueLabel: {
     fontSize: 10,
     color: MUTED,
@@ -774,9 +719,7 @@ const styles = StyleSheet.create({
     color: TEXT,
     letterSpacing: -0.4,
   },
-  checkoutWrap: {
-    overflow: 'hidden',
-  },
+  checkoutWrap: { overflow: 'hidden' },
   checkoutBtn: {
     flexDirection: 'row',
     alignItems: 'center',

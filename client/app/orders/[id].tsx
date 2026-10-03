@@ -33,7 +33,6 @@ const AMBER = '#F59E0B'
 
 const steps = ['Preparing', 'Shipped', 'Delivered']
 
-/** Only real buyer notes — empty / garbage → treat as none */
 function resolveBuyerNote(note: unknown): string {
   if (typeof note !== 'string') return ''
   const t = note.trim()
@@ -41,6 +40,18 @@ function resolveBuyerNote(note: unknown): string {
   const lower = t.toLowerCase()
   if (lower === 'null' || lower === 'undefined' || lower === 'n/a') return ''
   return t
+}
+
+function formatOptionLine(item: any): string {
+  const so = item?.selectedOptions
+  if (so && typeof so === 'object') {
+    const parts = Object.entries(so)
+      .filter(([, v]) => v != null && String(v).trim() !== '')
+      .map(([k, v]) => `${k}: ${v}`)
+    if (parts.length) return parts.join(' · ')
+  }
+  if (item?.size) return `Size: ${item.size}`
+  return ''
 }
 
 function PlazoreOrbPreloader() {
@@ -97,8 +108,7 @@ export default function BuyerOrderDetails() {
 
   /**
    * Order totals / line prices are frozen at purchase.
-   * Do NOT run formatProduct (FX) on them — only format in the buyer's
-   * current marketplace currency for display.
+   * Only format() in the buyer's marketplace currency — never formatProduct / FX again.
    */
   const fmt = useCallback(
     (amount: number) => format(Number(amount) || 0),
@@ -491,6 +501,8 @@ export default function BuyerOrderDetails() {
         {order.items?.map((item: any, idx: number) => {
           const unit = Number(item.price) || 0
           const buyerNote = resolveBuyerNote(item.note)
+          const optionLine = formatOptionLine(item)
+          const lineTotal = unit * (Number(item.quantity) || 1)
 
           return (
             <View key={idx} style={styles.itemCard}>
@@ -506,9 +518,15 @@ export default function BuyerOrderDetails() {
                   <Text style={styles.itemName} numberOfLines={2}>
                     {item.name}
                   </Text>
+                  {!!optionLine && (
+                    <Text style={styles.optionLine} numberOfLines={2}>
+                      {optionLine}
+                    </Text>
+                  )}
                   <Text style={styles.itemMeta}>
-                    Qty {item.quantity} · {fmt(unit)}
+                    Qty {item.quantity} · {fmt(unit)} each
                   </Text>
+                  <Text style={styles.itemLineTotal}>{fmt(lineTotal)}</Text>
                 </View>
               </View>
 
@@ -626,6 +644,10 @@ export default function BuyerOrderDetails() {
               {fmt(Number(order.totalAmount) || 0)}
             </Text>
           </View>
+          <Text style={styles.receiptNote}>
+            Amounts shown in your marketplace currency. Line prices were locked
+            when you placed the order.
+          </Text>
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -646,7 +668,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 10,
     backgroundColor: SURFACE,
-    borderRadius: 12,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: LINE,
   },
@@ -699,7 +720,6 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingVertical: 12,
     paddingHorizontal: 16,
-    borderRadius: 14,
     backgroundColor: SURFACE,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: LINE,
@@ -736,7 +756,6 @@ const styles = StyleSheet.create({
   scrollContent: { padding: 16, paddingBottom: 40 },
   confirmCard: {
     backgroundColor: 'rgba(0,229,117,0.06)',
-    borderRadius: 16,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(0,229,117,0.25)',
     padding: 16,
@@ -761,41 +780,26 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     marginBottom: 14,
   },
-  actionError: {
-    color: DANGER,
-    fontSize: 12,
-    marginBottom: 10,
-  },
+  actionError: { color: DANGER, fontSize: 12, marginBottom: 10 },
   confirmBtn: {
     height: 48,
     backgroundColor: GREEN,
-    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 10,
   },
-  confirmBtnText: {
-    color: '#041412',
-    fontSize: 15,
-    fontWeight: '800',
-  },
+  confirmBtnText: { color: '#041412', fontSize: 15, fontWeight: '800' },
   issuesBtn: {
     height: 48,
-    borderRadius: 12,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: LINE,
     backgroundColor: SURFACE_2,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  issuesBtnText: {
-    color: SECONDARY,
-    fontSize: 15,
-    fontWeight: '700',
-  },
+  issuesBtnText: { color: SECONDARY, fontSize: 15, fontWeight: '700' },
   issueCard: {
     backgroundColor: 'rgba(245,158,11,0.1)',
-    borderRadius: 16,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(245,158,11,0.3)',
     padding: 16,
@@ -808,15 +812,9 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     marginTop: 6,
   },
-  issueLink: {
-    marginTop: 12,
-    fontSize: 13,
-    fontWeight: '700',
-    color: GREEN,
-  },
+  issueLink: { marginTop: 12, fontSize: 13, fontWeight: '700', color: GREEN },
   confirmedCard: {
     backgroundColor: 'rgba(0,229,117,0.05)',
-    borderRadius: 16,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(0,229,117,0.2)',
     padding: 16,
@@ -831,7 +829,6 @@ const styles = StyleSheet.create({
   },
   card: {
     backgroundColor: SURFACE,
-    borderRadius: 16,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: LINE,
     padding: 16,
@@ -845,7 +842,6 @@ const styles = StyleSheet.create({
   },
   cancelCard: {
     backgroundColor: 'rgba(239,68,68,0.08)',
-    borderRadius: 16,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(239,68,68,0.25)',
     padding: 16,
@@ -860,7 +856,6 @@ const styles = StyleSheet.create({
   cancelIcon: {
     width: 36,
     height: 36,
-    borderRadius: 18,
     backgroundColor: 'rgba(239,68,68,0.15)',
     alignItems: 'center',
     justifyContent: 'center',
@@ -884,7 +879,6 @@ const styles = StyleSheet.create({
   stepDot: {
     width: 30,
     height: 30,
-    borderRadius: 15,
     backgroundColor: SURFACE_2,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: LINE,
@@ -894,7 +888,6 @@ const styles = StyleSheet.create({
   stepDotGradient: {
     width: 30,
     height: 30,
-    borderRadius: 15,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -941,7 +934,6 @@ const styles = StyleSheet.create({
   },
   itemCard: {
     backgroundColor: SURFACE,
-    borderRadius: 16,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: LINE,
     padding: 14,
@@ -951,7 +943,6 @@ const styles = StyleSheet.create({
   thumb: {
     width: 56,
     height: 56,
-    borderRadius: 12,
     backgroundColor: SURFACE_2,
   },
   thumbPlaceholder: { alignItems: 'center', justifyContent: 'center' },
@@ -962,11 +953,22 @@ const styles = StyleSheet.create({
     color: TEXT,
     lineHeight: 19,
   },
+  optionLine: {
+    fontSize: 12,
+    color: SECONDARY,
+    marginTop: 3,
+    lineHeight: 16,
+  },
   itemMeta: { fontSize: 12, color: SECONDARY, marginTop: 3 },
+  itemLineTotal: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: TEXT,
+    marginTop: 4,
+  },
   noteBox: {
     marginTop: 12,
     backgroundColor: SURFACE_2,
-    borderRadius: 12,
     paddingHorizontal: 12,
     paddingVertical: 10,
   },
@@ -985,7 +987,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: SURFACE_2,
-    borderRadius: 12,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: LINE,
     paddingHorizontal: 14,
@@ -1010,14 +1011,12 @@ const styles = StyleSheet.create({
   copyText: { fontSize: 12, fontWeight: '600', color: SECONDARY },
   sellerNoteBox: {
     backgroundColor: SURFACE_2,
-    borderRadius: 12,
     padding: 12,
     marginBottom: 4,
   },
   infoCard: {
     flexDirection: 'row',
     backgroundColor: 'rgba(59,130,246,0.08)',
-    borderRadius: 14,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(59,130,246,0.2)',
     padding: 14,
@@ -1027,7 +1026,6 @@ const styles = StyleSheet.create({
   infoIcon: {
     width: 36,
     height: 36,
-    borderRadius: 10,
     backgroundColor: 'rgba(59,130,246,0.15)',
     alignItems: 'center',
     justifyContent: 'center',
@@ -1059,5 +1057,11 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: TEXT,
     letterSpacing: -0.4,
+  },
+  receiptNote: {
+    marginTop: 10,
+    fontSize: 11,
+    color: MUTED,
+    lineHeight: 16,
   },
 })

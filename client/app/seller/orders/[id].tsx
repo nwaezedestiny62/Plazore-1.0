@@ -68,6 +68,20 @@ function resolveNote(note: unknown): string {
   return t
 }
 
+
+function formatOptionLine(item: any): string {
+  const so = item?.selectedOptions
+  if (so && typeof so === 'object' && !Array.isArray(so)) {
+    const parts = Object.entries(so)
+      .filter(([, v]) => v != null && String(v).trim() !== '')
+      .map(([k, v]) => `${k}: ${v}`)
+    if (parts.length) return parts.join(' · ')
+  }
+  if (item?.size) return `Size: ${item.size}`
+  return ''
+}
+
+
 function toYMD(d: Date): string {
   const y = d.getFullYear()
   const m = String(d.getMonth() + 1).padStart(2, '0')
@@ -835,8 +849,16 @@ export default function SellerOrderDetails() {
                   <Text style={styles.bodyStrong} numberOfLines={2}>
                     {item.name}
                   </Text>
+                  {!!formatOptionLine(item) && (
+                    <Text style={[styles.meta, { color: SECONDARY }]} numberOfLines={2}>
+                      {formatOptionLine(item)}
+                    </Text>
+                  )}
                   <Text style={styles.meta}>
-                    Qty: {item.quantity} · {fmt(unit)}
+                    Qty: {item.quantity} · {fmt(unit)} each
+                  </Text>
+                  <Text style={[styles.bodyStrong, { marginTop: 2, fontSize: 14 }]}>
+                    {fmt(unit * (Number(item.quantity) || 1))}
                   </Text>
                 </View>
               </View>

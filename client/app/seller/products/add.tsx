@@ -68,6 +68,94 @@ type LocalDoc = {
   mimeType?: string
 }
 
+
+/** ——— Options / variants (≠ specifications; stock changes do not touch Plazore AI) ——— */
+type OptionDraft = { id: string; name: string; valuesText: string }
+type VariantDraft = {
+  variantId: string
+  key: string
+  options: Record<string, string>
+  stock: string
+  price: string
+  available: boolean
+}
+
+function draftUid() {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+}
+
+function parseValues(text: string): string[] {
+  const parts = text
+    .split(/[,|\n]/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const p of parts) {
+    const k = p.toLowerCase()
+    if (seen.has(k)) continue
+    seen.add(k)
+    out.push(p)
+    if (out.length >= 30) break
+  }
+  return out
+}
+
+function cartesian(
+  groups: { name: string; values: string[] }[],
+): Record<string, string>[] {
+  if (!groups.length) return []
+  return groups.reduce<Record<string, string>[]>(
+    (acc, g) => {
+      if (!acc.length) return g.values.map((v) => ({ [g.name]: v }))
+      const next: Record<string, string>[] = []
+      for (const row of acc) {
+        for (const v of g.values) next.push({ ...row, [g.name]: v })
+      }
+      return next
+    },
+    [],
+  )
+}
+
+function buildVariantKey(opts: Record<string, string>): string {
+  return Object.entries(opts)
+    .map(([k, v]) => [k.trim().toLowerCase(), String(v).trim().toLowerCase()])
+    .filter(([k, v]) => k && v)
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([k, v]) => `${k}=${v}`)
+    .join('|')
+}
+
+function generateVariantsFromOptions(
+  optionDrafts: OptionDraft[],
+  prev: VariantDraft[],
+): VariantDraft[] {
+  const groups = optionDrafts
+    .map((o) => ({
+      name: o.name.trim(),
+      values: parseValues(o.valuesText),
+    }))
+    .filter((g) => g.name && g.values.length > 0)
+    .slice(0, 5)
+  if (!groups.length) return []
+  const combos = cartesian(groups).slice(0, 200)
+  const prevByKey = new Map(prev.map((v) => [v.key, v]))
+  return combos.map((opts) => {
+    const key = buildVariantKey(opts)
+    const old = prevByKey.get(key)
+    return {
+      variantId: old?.variantId || draftUid(),
+      key,
+      options: opts,
+      stock: old?.stock ?? '0',
+      price: old?.price ?? '',
+      available: old?.available ?? true,
+    }
+  })
+}
+
+
 export type ProductPreviewData = {
   name: string
   brand: string
@@ -863,6 +951,10 @@ export default function AddProduct() {
   const [brand, setBrand] = useState('')
   const [price, setPrice] = useState('')
   const [stock, setStock] = useState('1')
+  const [hasVariants, setHasVariants] = useState(false)
+  const [optionDrafts, setOptionDrafts] = useState<OptionDraft[]>([])
+  const [variantDrafts, setVariantDrafts] = useState<VariantDraft[]>([])
+
   const [description, setDescription] = useState('')
   const [category, setCategory] = useState('')
   const [subCategory, setSubCategory] = useState('')
@@ -890,7 +982,35 @@ export default function AddProduct() {
   const courierRef = useRef<TextInput>(null)
   const feeRef = useRef<TextInput>(null)
 
-  const toast = useCallback(
+  
+  // Rebuild variant matrix when option groups change (preserve stock/price by key)
+  const optionsSignature = useMemo(
+    () =>
+      optionDrafts
+        .map((o) => `${o.id}|${o.name.trim()}|${o.valuesText.trim()}`)
+        .join('||'),
+    [optionDrafts],
+  )
+
+  useEffect(() => {
+    if (!hasVariants) {
+      setVariantDrafts([])
+      return
+    }
+    setVariantDrafts((prev) => generateVariantsFromOptions(optionDrafts, prev))
+  }, [hasVariants, optionsSignature])
+
+  const totalVariantStock = useMemo(() => {
+    if (!hasVariants) return 0
+    return variantDrafts.reduce(
+      (sum, v) =>
+        sum +
+        (v.available ? Math.max(0, parseInt(v.stock || '0', 10) || 0) : 0),
+      0,
+    )
+  }, [hasVariants, variantDrafts])
+
+const toast = useCallback(
     (
       title: string,
       message?: string,
@@ -967,7 +1087,7 @@ export default function AddProduct() {
       price: priceN,
       description,
       images,
-      stock: stockN,
+      stock: hasVariants ? totalVariantStock : stockN,
       category,
       subCategory,
       region: region || 'NG',
@@ -1064,6 +1184,21 @@ export default function AddProduct() {
       return 'Add at least one product image (first one becomes the cover)'
     if (!name.trim()) return 'Product name is required'
     if (!priceN || priceN <= 0) return 'Enter a valid price'
+    if (!hasVariants) {
+      const sn = parseInt(stock || '0', 10)
+      if (!Number.isFinite(sn) || sn < 0) return 'Enter valid stock (0 or more)'
+    } else {
+      if (!optionDrafts.length) return 'Add at least one option group (e.g. Color, Size)'
+      const groups = optionDrafts.filter(
+        (o) => o.name.trim() && parseValues(o.valuesText).length,
+      )
+      if (!groups.length) return 'Each option needs a name and values (comma-separated)'
+      if (!variantDrafts.length) return 'No variants generated — check option values'
+      const anyStock = variantDrafts.some(
+        (v) => v.available && (parseInt(v.stock || '0', 10) || 0) > 0,
+      )
+      if (!anyStock) return 'Set stock on at least one available variant'
+    }
     if (!category) return 'Select a category'
     if (!fulfillCountryCode || !fulfillCity) return 'Set fulfillment location'
     if (!feeMode) return 'Choose a delivery charge option'
@@ -1095,7 +1230,39 @@ export default function AddProduct() {
       fd.append('name', name.trim())
       fd.append('brand', brand.trim())
       fd.append('price', String(priceN))
-      fd.append('stock', String(stockN))
+      if (hasVariants) {
+        const optionsPayload = optionDrafts
+          .map((o) => ({
+            id: o.id,
+            name: o.name.trim(),
+            values: parseValues(o.valuesText),
+          }))
+          .filter((o) => o.name && o.values.length)
+        const variantsPayload = variantDrafts.map((v) => ({
+          variantId: v.variantId,
+          variantKey: v.key,
+          options: v.options,
+          stock: Math.max(0, parseInt(v.stock || '0', 10) || 0),
+          price:
+            v.price.trim() === ''
+              ? null
+              : Math.max(0, Number(v.price) || 0),
+          isActive: v.available !== false,
+        }))
+        const summed = variantsPayload.reduce(
+          (s, v) => s + (v.isActive ? v.stock : 0),
+          0,
+        )
+        fd.append('hasVariants', 'true')
+        fd.append('options', JSON.stringify(optionsPayload))
+        fd.append('variants', JSON.stringify(variantsPayload))
+        fd.append('stock', String(summed))
+      } else {
+        fd.append('hasVariants', 'false')
+        fd.append('options', JSON.stringify([]))
+        fd.append('variants', JSON.stringify([]))
+        fd.append('stock', String(stockN))
+      }
       fd.append('description', description.trim())
       fd.append('category', category)
       fd.append('subCategory', subCategory)
@@ -1399,16 +1566,240 @@ export default function AddProduct() {
             the converted amount.
           </Text>
 
-          <Label onPress={() => stockRef.current?.focus()}>Stock *</Label>
-          <TextInput
-            ref={stockRef}
-            value={stock}
-            onChangeText={(t) => setStock(t.replace(/[^0-9]/g, ''))}
-            placeholder="1"
-            keyboardType="number-pad"
-            placeholderTextColor="#3D5268"
-            style={styles.input}
-          />
+
+          {/* Simple stock vs variants */}
+          <Label>Inventory mode</Label>
+          <View style={{ flexDirection: 'row', gap: 10, marginBottom: 14 }}>
+            {([false, true] as const).map((flag) => {
+              const active = hasVariants === flag
+              return (
+                <TouchableOpacity
+                  key={String(flag)}
+                  onPress={() => setHasVariants(flag)}
+                  style={[styles.shipChoice, active && styles.shipChoiceOn]}
+                >
+                  <Text
+                    style={{
+                      fontWeight: '700',
+                      fontSize: 13,
+                      color: active ? TEXT : MUTED,
+                    }}
+                  >
+                    {flag ? 'Options & variants' : 'Simple stock'}
+                  </Text>
+                  <Text
+                    style={{
+                      marginTop: 4,
+                      fontSize: 11,
+                      color: MUTED,
+                      textAlign: 'center',
+                    }}
+                  >
+                    {flag ? 'Color, size, etc.' : 'One quantity'}
+                  </Text>
+                </TouchableOpacity>
+              )
+            })}
+          </View>
+
+          {!hasVariants ? (
+            <>
+              <Label onPress={() => stockRef.current?.focus()}>Stock *</Label>
+              <TextInput
+                ref={stockRef}
+                value={stock}
+                onChangeText={(txt) => setStock(txt.replace(/[^0-9]/g, ''))}
+                placeholder="1"
+                keyboardType="number-pad"
+                placeholderTextColor="#3D5268"
+                style={styles.input}
+              />
+            </>
+          ) : (
+            <View style={{ marginBottom: 12 }}>
+              <Text style={[styles.hint, { marginTop: 0, marginBottom: 10 }]}>
+                Specs above stay fixed. Options are what buyers pick. Stock /
+                optional price live on each variant. Changing stock does not
+                refresh Plazore AI.
+              </Text>
+
+              {optionDrafts.map((od, oi) => (
+                <View key={od.id} style={styles.docBox}>
+                  <View
+                    style={{
+                      flexDirection: 'row',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      marginBottom: 8,
+                    }}
+                  >
+                    <Text style={{ color: TEXT, fontWeight: '700', fontSize: 13 }}>
+                      Option {oi + 1}
+                    </Text>
+                    <TouchableOpacity
+                      onPress={() =>
+                        setOptionDrafts((prev) =>
+                          prev.filter((x) => x.id !== od.id),
+                        )
+                      }
+                      hitSlop={10}
+                    >
+                      <Ionicons name="trash-outline" size={18} color={MUTED} />
+                    </TouchableOpacity>
+                  </View>
+                  <TextInput
+                    value={od.name}
+                    onChangeText={(txt) =>
+                      setOptionDrafts((prev) =>
+                        prev.map((x) =>
+                          x.id === od.id ? { ...x, name: txt } : x,
+                        ),
+                      )
+                    }
+                    placeholder="Name — e.g. Color, Size, Storage"
+                    placeholderTextColor="#3D5268"
+                    style={styles.input}
+                  />
+                  <TextInput
+                    value={od.valuesText}
+                    onChangeText={(txt) =>
+                      setOptionDrafts((prev) =>
+                        prev.map((x) =>
+                          x.id === od.id ? { ...x, valuesText: txt } : x,
+                        ),
+                      )
+                    }
+                    placeholder="Values — comma separated: Black, White, Navy"
+                    placeholderTextColor="#3D5268"
+                    style={[styles.input, { marginBottom: 0 }]}
+                  />
+                </View>
+              ))}
+
+              {optionDrafts.length < 5 && (
+                <TouchableOpacity
+                  onPress={() =>
+                    setOptionDrafts((prev) => [
+                      ...prev,
+                      { id: draftUid(), name: '', valuesText: '' },
+                    ])
+                  }
+                  style={[styles.dashedBtn, { marginBottom: 14 }]}
+                >
+                  <Ionicons name="add" size={20} color={MUTED} />
+                  <Text style={{ color: MUTED, fontSize: 12, marginTop: 4 }}>
+                    Add option group
+                  </Text>
+                </TouchableOpacity>
+              )}
+
+              {variantDrafts.length > 0 && (
+                <>
+                  <Label>
+                    Variants · {variantDrafts.length} · total stock{' '}
+                    {totalVariantStock}
+                  </Label>
+                  {variantDrafts.map((vd) => {
+                    const label = Object.values(vd.options).join(' · ')
+                    return (
+                      <View key={vd.variantId} style={styles.docBox}>
+                        <View
+                          style={{
+                            flexDirection: 'row',
+                            justifyContent: 'space-between',
+                            marginBottom: 8,
+                          }}
+                        >
+                          <Text
+                            style={{
+                              color: TEXT,
+                              fontWeight: '700',
+                              fontSize: 13,
+                              flex: 1,
+                            }}
+                            numberOfLines={2}
+                          >
+                            {label}
+                          </Text>
+                          <TouchableOpacity
+                            onPress={() =>
+                              setVariantDrafts((prev) =>
+                                prev.map((x) =>
+                                  x.variantId === vd.variantId
+                                    ? { ...x, available: !x.available }
+                                    : x,
+                                ),
+                              )
+                            }
+                          >
+                            <Text
+                              style={{
+                                color: vd.available ? GREEN : MUTED,
+                                fontWeight: '700',
+                                fontSize: 11,
+                              }}
+                            >
+                              {vd.available ? 'ON' : 'OFF'}
+                            </Text>
+                          </TouchableOpacity>
+                        </View>
+                        <View style={{ flexDirection: 'row', gap: 10 }}>
+                          <View style={{ flex: 1 }}>
+                            <Text style={[styles.label, { marginBottom: 4 }]}>
+                              Stock
+                            </Text>
+                            <TextInput
+                              value={vd.stock}
+                              onChangeText={(txt) =>
+                                setVariantDrafts((prev) =>
+                                  prev.map((x) =>
+                                    x.variantId === vd.variantId
+                                      ? {
+                                          ...x,
+                                          stock: txt.replace(/[^0-9]/g, ''),
+                                        }
+                                      : x,
+                                  ),
+                                )
+                              }
+                              keyboardType="number-pad"
+                              placeholder="0"
+                              placeholderTextColor="#3D5268"
+                              style={[styles.input, { marginBottom: 0 }]}
+                            />
+                          </View>
+                          <View style={{ flex: 1 }}>
+                            <Text style={[styles.label, { marginBottom: 4 }]}>
+                              Price (opt.)
+                            </Text>
+                            <TextInput
+                              value={vd.price}
+                              onChangeText={(txt) =>
+                                setVariantDrafts((prev) =>
+                                  prev.map((x) =>
+                                    x.variantId === vd.variantId
+                                      ? {
+                                          ...x,
+                                          price: txt.replace(/[^0-9.]/g, ''),
+                                        }
+                                      : x,
+                                  ),
+                                )
+                              }
+                              keyboardType="decimal-pad"
+                              placeholder="Base price"
+                              placeholderTextColor="#3D5268"
+                              style={[styles.input, { marginBottom: 0 }]}
+                            />
+                          </View>
+                        </View>
+                      </View>
+                    )
+                  })}
+                </>
+              )}
+            </View>
+          )}
 
           <Label onPress={() => descRef.current?.focus()}>Description</Label>
           <TextInput

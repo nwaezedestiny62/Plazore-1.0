@@ -1,5 +1,5 @@
 // client/components/showroom/ShowroomFlyCart.tsx
-import { useCart } from '@/context/CartContext'
+import { useCart, type AddToCartOpts } from '@/context/CartContext'
 import { Product } from '@/constants/types'
 import { Ionicons } from '@expo/vector-icons'
 import { Image } from 'expo-image'
@@ -30,7 +30,11 @@ type FlyJob = {
 }
 
 type FlyCartContextValue = {
-  flyAdd: (product: Product, origin: Origin) => void
+  flyAdd: (
+    product: Product,
+    origin: Origin,
+    opts?: AddToCartOpts
+  ) => void
   registerTarget: (x: number, y: number) => void
 }
 
@@ -46,7 +50,6 @@ const ARC = 90
 
 function fallbackTarget() {
   const { width, height } = Dimensions.get('window')
-  // approx Cart tab on the floating pill (right side, above home indicator)
   return {
     x: width - 48,
     y: height - 72,
@@ -70,26 +73,29 @@ export function ShowroomFlyCartProvider({
   }, [])
 
   const flyAdd = useCallback(
-    (product: Product, origin: Origin) => {
+    (product: Product, origin: Origin, opts?: AddToCartOpts) => {
       try {
-        addToCart(product)
+        addToCart(product, opts)
       } catch {
-        // still try visual if cart fails
+        /* still try visual */
       }
 
       if (!origin || origin.width < 2 || origin.height < 2) return
 
       const target = pos.current ?? fallbackTarget()
-
       const id = `${product._id}-${Date.now()}-${Math.random()
         .toString(36)
         .slice(2, 7)}`
+
+      const img =
+        opts?.image ||
+        product.images?.[0]
 
       setJobs((prev) => [
         ...prev,
         {
           id,
-          image: product.images?.[0],
+          image: img,
           origin: {
             x: origin.x,
             y: origin.y,
@@ -110,7 +116,6 @@ export function ShowroomFlyCartProvider({
   return (
     <FlyCartContext.Provider value={{ flyAdd, registerTarget }}>
       {children}
-      {/* overlay above tab bar */}
       <View style={styles.layer} pointerEvents="none">
         {jobs.map((job) => (
           <FlyingClone key={job.id} job={job} onComplete={onDone} />

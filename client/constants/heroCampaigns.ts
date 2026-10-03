@@ -40,7 +40,7 @@ export const HERO_SLIDES: HeroSlide[] = [
       kind: 'image',
       source: require('../assets/hero/welcome.jpg'),
     },
-    headline: 'Plaozre. Commerce in 2040.',
+    headline: 'Plazore. Commerce in 2040.',
     subheadline:
       'A quieter way to discover what matters.',
     ctaLabel: 'Enter',

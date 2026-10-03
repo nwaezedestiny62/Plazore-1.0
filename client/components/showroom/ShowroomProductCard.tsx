@@ -1,5 +1,5 @@
-import { Product } from '@/constants/types'
-import { useCart } from '@/context/CartContext'
+import { Product, productHasVariants, effectiveProductStock } from '@/constants/types'
+import { useCart, findVariant } from '@/context/CartContext'
 import { useMarketplace } from '@/context/MarketplaceContext'
 import { trackShowroomEvent } from '@/services/showroomEvents'
 import { useAuth, useOAuth } from '@clerk/clerk-expo'
@@ -13,6 +13,7 @@ import {
   Modal,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   useWindowDimensions,
@@ -24,7 +25,6 @@ WebBrowser.maybeCompleteAuthSession()
 
 const H_PADDING = 16
 const GAP = 4
-/** Was 1.35 — shorter product cards */
 const IMAGE_ASPECT = 1.08
 
 const SURFACE = '#11141A'
@@ -32,6 +32,7 @@ const LINE = 'rgba(255,255,255,0.1)'
 const TEXT = '#F5F7FA'
 const SECONDARY = 'rgba(255,255,255,0.55)'
 const GREEN = '#00E575'
+const GRAD = ['#00E575', '#14B8A6', '#2563EB']
 
 type Props = {
   product: Product
@@ -85,6 +86,35 @@ function resolvePrice(product: Product): number {
   return 0
 }
 
+function normalizeOptions(product: Product) {
+  const raw = product.options
+  if (Array.isArray(raw) && raw.length) {
+    return raw
+      .map((o) => ({
+        id: String(o.id || o.name || ''),
+        name: String(o.name || '').trim(),
+        values: Array.isArray(o.values)
+          ? o.values.map((v) => String(v).trim()).filter(Boolean)
+          : [],
+      }))
+      .filter((o) => o.name && o.values.length)
+  }
+  // Derive from variants if options missing
+  const map: Record<string, Set<string>> = {}
+  for (const v of product.variants || []) {
+    const o = v.options || {}
+    for (const [k, val] of Object.entries(o)) {
+      if (!map[k]) map[k] = new Set()
+      if (val) map[k].add(String(val))
+    }
+  }
+  return Object.entries(map).map(([name, set]) => ({
+    id: name,
+    name,
+    values: Array.from(set),
+  }))
+}
+
 function ShowroomProductCard({
   product,
   style,
@@ -102,9 +132,11 @@ function ShowroomProductCard({
   const pathname = usePathname()
 
   const [authOpen, setAuthOpen] = useState(false)
+  const [variantOpen, setVariantOpen] = useState(false)
   const [googleBusy, setGoogleBusy] = useState(false)
+  const [selected, setSelected] = useState<Record<string, string>>({})
+  const [adding, setAdding] = useState(false)
 
-  /** Product waiting to be added after successful auth */
   const pendingCartRef = useRef<Product | null>(null)
   const cartBtnRef = useRef<View>(null)
   const impressed = useRef(false)
@@ -113,24 +145,52 @@ function ShowroomProductCard({
   const cardW = Number(style?.width) > 0 ? Number(style.width) : defaultW
   const imageHeight = cardW * IMAGE_ASPECT
 
+  const hasVar = productHasVariants(product)
+  const optionGroups = useMemo(() => normalizeOptions(product), [product])
+
+  const matched = useMemo(() => {
+    if (!hasVar) return null
+    return findVariant(product, selected)
+  }, [hasVar, product, selected])
+
+  const allPicked =
+    !hasVar ||
+    (optionGroups.length > 0 &&
+      optionGroups.every((g) => !!selected[g.name]))
+
+  const unitPrice = useMemo(() => {
+    if (matched && matched.price != null && Number.isFinite(Number(matched.price))) {
+      return Number(matched.price)
+    }
+    return resolvePrice(product)
+  }, [matched, product])
+
+  const inStock = useMemo(() => {
+    if (matched) return Number(matched.stock) > 0 && matched.isActive !== false
+    return effectiveProductStock(product) > 0
+  }, [matched, product])
+
   const location = useMemo(() => resolveShipLocation(product), [product])
   const brand = useMemo(() => resolveBrand(product), [product])
   const priceLabel = useMemo(
+    () => formatProduct(unitPrice, product.region),
+    [formatProduct, unitPrice, product.region],
+  )
+  const basePriceLabel = useMemo(
     () => formatProduct(resolvePrice(product), product.region),
     [formatProduct, product],
   )
 
-  // Only keep the first image — this alone removes most of the lag
   const primaryImage = useMemo(() => {
+    if (matched?.image) return matched.image
     const raw = Array.isArray(product.images) ? product.images : []
     for (const img of raw) {
       const uri = imageUri(img)
       if (uri) return uri
     }
     return ''
-  }, [product.images])
+  }, [product.images, matched])
 
-  // Prefetch ONLY the visible image
   useEffect(() => {
     if (primaryImage) {
       Image.prefetch(primaryImage).catch(() => {})
@@ -150,7 +210,13 @@ function ShowroomProductCard({
   }, [product?._id, product?.region, room, position])
 
   const doAddToCart = useCallback(
-    (p: Product) => {
+    (p: Product, variantPayload?: {
+      variantId?: string
+      variantKey?: string
+      selectedOptions?: Record<string, string>
+      price?: number
+      image?: string
+    }) => {
       trackShowroomEvent({
         productId: String(p._id),
         type: 'cart',
@@ -160,24 +226,29 @@ function ShowroomProductCard({
       })
       cartBtnRef.current?.measureInWindow((x, y, width, height) => {
         if (width <= 0 || height <= 0) {
-          addToCart(p)
+          addToCart(p, variantPayload)
           return
         }
-        if (flyCart) flyCart.flyAdd(p, { x, y, width, height })
-        else addToCart(p)
+        if (flyCart) flyCart.flyAdd(p, { x, y, width, height }, variantPayload)
+        else addToCart(p, variantPayload)
       })
     },
     [flyCart, addToCart, room, position],
   )
 
-  /** After sign-in / Google OAuth succeeds → add pending product */
   useEffect(() => {
     if (!isLoaded || !isSignedIn) return
     const pending = pendingCartRef.current
     if (!pending) return
     pendingCartRef.current = null
     setAuthOpen(false)
-    const t = setTimeout(() => doAddToCart(pending), 120)
+    const t = setTimeout(() => {
+      if (productHasVariants(pending)) {
+        setVariantOpen(true)
+      } else {
+        doAddToCart(pending)
+      }
+    }, 120)
     return () => clearTimeout(t)
   }, [isLoaded, isSignedIn, doAddToCart])
 
@@ -201,8 +272,37 @@ function ShowroomProductCard({
       return
     }
 
+    if (hasVar) {
+      setSelected({})
+      setVariantOpen(true)
+      return
+    }
+
     doAddToCart(product)
-  }, [isLoaded, isSignedIn, product, doAddToCart])
+  }, [isLoaded, isSignedIn, product, doAddToCart, hasVar])
+
+  const confirmVariantAdd = useCallback(() => {
+    if (!allPicked || !matched || !inStock || adding) return
+    setAdding(true)
+    doAddToCart(product, {
+      variantId: matched.variantId,
+      variantKey: matched.variantKey,
+      selectedOptions: { ...selected },
+      price: unitPrice,
+      image: matched.image || product.images?.[0],
+    })
+    setVariantOpen(false)
+    setAdding(false)
+  }, [
+    allPicked,
+    matched,
+    inStock,
+    adding,
+    doAddToCart,
+    product,
+    selected,
+    unitPrice,
+  ])
 
   const returnPath = pathname || '/'
 
@@ -223,7 +323,7 @@ function ShowroomProductCard({
         setAuthOpen(false)
       }
     } catch {
-      // user cancelled or error
+      // cancelled
     } finally {
       setGoogleBusy(false)
     }
@@ -274,7 +374,7 @@ function ShowroomProductCard({
             </Text>
             <Text style={[styles.divider, { color: textMuted }]}> · </Text>
             <Text style={[styles.price, { color: textSecondary }]}>
-              {priceLabel}
+              {basePriceLabel}
             </Text>
           </View>
           {!!location && (
@@ -288,7 +388,114 @@ function ShowroomProductCard({
         </Pressable>
       </Link>
 
-      {/* Auth sheet — identical design */}
+      {/* Variant sheet — mall counter, sharp edges */}
+      <Modal
+        visible={variantOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setVariantOpen(false)}
+      >
+        <Pressable
+          style={styles.authScrim}
+          onPress={() => setVariantOpen(false)}
+        >
+          <Pressable
+            style={styles.variantSheet}
+            onPress={(e) => e.stopPropagation()}
+          >
+            <View style={styles.variantAccent} />
+            <View style={styles.authHead}>
+              <View style={{ flex: 1, paddingRight: 12 }}>
+                <Text style={styles.authTitle}>Choose options</Text>
+                <Text style={styles.authSub} numberOfLines={2}>
+                  {product.name}
+                </Text>
+              </View>
+              <Pressable
+                onPress={() => setVariantOpen(false)}
+                hitSlop={12}
+                style={styles.authClose}
+              >
+                <Ionicons name="close" size={18} color="rgba(255,255,255,0.5)" />
+              </Pressable>
+            </View>
+
+            <ScrollView
+              style={{ maxHeight: 340 }}
+              showsVerticalScrollIndicator={false}
+            >
+              {optionGroups.map((group) => (
+                <View key={group.id || group.name} style={styles.optGroup}>
+                  <Text style={styles.optLabel}>{group.name}</Text>
+                  <View style={styles.optRow}>
+                    {group.values.map((val) => {
+                      const active = selected[group.name] === val
+                      return (
+                        <Pressable
+                          key={val}
+                          onPress={() =>
+                            setSelected((prev) => ({
+                              ...prev,
+                              [group.name]: val,
+                            }))
+                          }
+                          style={[
+                            styles.optChip,
+                            active && styles.optChipOn,
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.optChipText,
+                              active && styles.optChipTextOn,
+                            ]}
+                          >
+                            {val}
+                          </Text>
+                        </Pressable>
+                      )
+                    })}
+                  </View>
+                </View>
+              ))}
+            </ScrollView>
+
+            <View style={styles.variantFooter}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.variantPriceLabel}>
+                  {allPicked && matched ? 'Price' : 'From'}
+                </Text>
+                <Text style={styles.variantPrice}>{priceLabel}</Text>
+                {allPicked && matched ? (
+                  <Text style={styles.variantStock}>
+                    {inStock
+                      ? `${matched.stock} in stock`
+                      : 'Out of stock'}
+                  </Text>
+                ) : (
+                  <Text style={styles.variantStock}>Select all options</Text>
+                )}
+              </View>
+              <Pressable
+                onPress={confirmVariantAdd}
+                disabled={!allPicked || !matched || !inStock || adding}
+                style={[
+                  styles.variantAdd,
+                  (!allPicked || !matched || !inStock) && styles.variantAddOff,
+                ]}
+              >
+                {adding ? (
+                  <ActivityIndicator color="#041412" />
+                ) : (
+                  <Text style={styles.variantAddText}>Add</Text>
+                )}
+              </Pressable>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* Auth sheet */}
       <Modal
         visible={authOpen}
         transparent
@@ -428,9 +635,9 @@ const styles = StyleSheet.create({
 
   authScrim: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.75)',
+    backgroundColor: 'rgba(0,0,0,0.78)',
     justifyContent: Platform.OS === 'ios' ? 'flex-end' : 'center',
-    paddingHorizontal: Platform.OS === 'ios' ? 0 : 24,
+    paddingHorizontal: Platform.OS === 'ios' ? 0 : 20,
   },
   authSheet: {
     backgroundColor: SURFACE,
@@ -439,14 +646,26 @@ const styles = StyleSheet.create({
     paddingTop: 20,
     paddingBottom: Platform.OS === 'ios' ? 36 : 24,
     paddingHorizontal: 20,
-    ...(Platform.OS === 'ios'
-      ? {}
-      : { borderRadius: 16, borderWidth: StyleSheet.hairlineWidth }),
+  },
+  variantSheet: {
+    backgroundColor: SURFACE,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderColor: LINE,
+    paddingTop: 0,
+    paddingBottom: Platform.OS === 'ios' ? 36 : 24,
+    paddingHorizontal: 20,
+    maxHeight: '88%',
+  },
+  variantAccent: {
+    height: 2,
+    marginHorizontal: -20,
+    marginBottom: 16,
+    backgroundColor: GREEN,
   },
   authHead: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    marginBottom: 20,
+    marginBottom: 16,
   },
   authTitle: {
     color: TEXT,
@@ -463,7 +682,6 @@ const styles = StyleSheet.create({
   authClose: {
     width: 32,
     height: 32,
-    borderRadius: 16,
     backgroundColor: 'rgba(255,255,255,0.06)',
     alignItems: 'center',
     justifyContent: 'center',
@@ -474,7 +692,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 12,
   },
   authPrimaryText: {
     color: '#1F1F1F',
@@ -486,7 +703,6 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: LINE,
     backgroundColor: 'rgba(255,255,255,0.04)',
-    borderRadius: 12,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -503,5 +719,79 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
     paddingVertical: 12,
+  },
+
+  optGroup: { marginBottom: 18 },
+  optLabel: {
+    color: 'rgba(255,255,255,0.4)',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
+    marginBottom: 10,
+  },
+  optRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  optChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: LINE,
+    backgroundColor: 'rgba(255,255,255,0.03)',
+  },
+  optChipOn: {
+    borderColor: GREEN,
+    backgroundColor: 'rgba(0,229,117,0.12)',
+  },
+  optChipText: {
+    color: SECONDARY,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  optChipTextOn: {
+    color: GREEN,
+    fontWeight: '800',
+  },
+  variantFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginTop: 16,
+    paddingTop: 14,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: LINE,
+  },
+  variantPriceLabel: {
+    color: 'rgba(255,255,255,0.4)',
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+  },
+  variantPrice: {
+    color: TEXT,
+    fontSize: 18,
+    fontWeight: '800',
+    marginTop: 2,
+  },
+  variantStock: {
+    color: SECONDARY,
+    fontSize: 12,
+    marginTop: 2,
+  },
+  variantAdd: {
+    minWidth: 108,
+    height: 48,
+    backgroundColor: GREEN,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+  },
+  variantAddOff: {
+    backgroundColor: '#2A2F38',
+  },
+  variantAddText: {
+    color: '#041412',
+    fontSize: 15,
+    fontWeight: '800',
   },
 })
