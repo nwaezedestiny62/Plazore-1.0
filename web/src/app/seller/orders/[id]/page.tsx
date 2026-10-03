@@ -124,8 +124,12 @@ function itemImage(item: any): string {
 }
 
 /**
- * Listing amounts are stored in the product/listing region at checkout.
- * Prefer item → product → order region so mixed listings stay accurate.
+ * Product page rule: formatProduct(amount, product.region)
+ *
+ * Line prices are frozen in the product listing region at checkout
+ * (backend: price = product.price, region = product.region).
+ *
+ * Priority: item.region → product.region → order.region → DEFAULT
  */
 function itemSourceRegion(item: any, order: any): string {
   const prod = item?.product;
@@ -913,7 +917,9 @@ export default function SellerOrderDetailsPage() {
                   Estimated delivery
                 </p>
                 <p className="text-sm text-[#A7ADB8]">
-                  {new Date(order.shipping.estimatedDelivery).toLocaleDateString()}
+                  {new Date(
+                    order.shipping.estimatedDelivery
+                  ).toLocaleDateString()}
                 </p>
               </>
             )}

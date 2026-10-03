@@ -1,5 +1,5 @@
-import React, { useCallback, useRef, useState } from 'react'
-import { Animated, Easing, View, ViewStyle } from 'react-native'
+import React, { useEffect, useRef } from 'react'
+import { Animated, Easing, ViewStyle } from 'react-native'
 
 interface ScrollFadeUpProps {
   children: React.ReactNode
@@ -8,42 +8,35 @@ interface ScrollFadeUpProps {
   distance?: number
   duration?: number
   delay?: number
+  /** @deprecated ignored — kept for API compat */
   staggerIndex?: number
   staggerDelay?: number
   scale?: boolean
 }
 
 /**
- * ScrollFadeUp — Cinematic entrance animation
- * Fade + translateY (optional subtle scale)
+ * Lightweight one-shot fade-up. No setState, no onLayout loops.
+ * Prefer NOT wrapping every product card — section headers only.
  */
 export default function ScrollFadeUp({
   children,
   style,
   once = true,
-  distance = 40,
-  duration = 700,
+  distance = 16,
+  duration = 420,
   delay = 0,
-  staggerIndex = 0,
-  staggerDelay = 0,
   scale = false,
 }: ScrollFadeUpProps) {
-  const [isVisible, setIsVisible] = useState(false)
-  const hasAnimated = useRef(false)
   const translateY = useRef(new Animated.Value(distance)).current
   const opacity = useRef(new Animated.Value(0)).current
-  const scaleValue = useRef(new Animated.Value(scale ? 0.94 : 1)).current
+  const scaleValue = useRef(new Animated.Value(scale ? 0.97 : 1)).current
+  const ran = useRef(false)
 
-  const triggerAnimation = useCallback(() => {
-    if (isVisible) return
-    setIsVisible(true)
-    if (once && hasAnimated.current) return
-    hasAnimated.current = true
-
-    const totalDelay = delay + staggerIndex * staggerDelay
-
+  useEffect(() => {
+    if (once && ran.current) return
+    ran.current = true
     const timer = setTimeout(() => {
-      const animations = [
+      const anims = [
         Animated.timing(translateY, {
           toValue: 0,
           duration,
@@ -57,37 +50,34 @@ export default function ScrollFadeUp({
           useNativeDriver: true,
         }),
       ]
-
       if (scale) {
-        animations.push(
+        anims.push(
           Animated.timing(scaleValue, {
             toValue: 1,
             duration,
             easing: Easing.out(Easing.cubic),
             useNativeDriver: true,
-          })
+          }),
         )
       }
-
-      Animated.parallel(animations).start()
-    }, totalDelay)
-
+      Animated.parallel(anims).start()
+    }, delay)
     return () => clearTimeout(timer)
-  }, [isVisible, duration, delay, staggerIndex, staggerDelay, scale])
+  }, [delay, duration, once, scale, translateY, opacity, scaleValue])
 
   return (
-    <View onLayout={triggerAnimation} style={[{ opacity: isVisible ? undefined : 0 }, style]}>
-      <Animated.View
-        style={{
-          transform: [
-            { translateY },
-            ...(scale ? [{ scale: scaleValue }] : []),
-          ],
+    <Animated.View
+      style={[
+        {
           opacity,
-        }}
-      >
-        {children}
-      </Animated.View>
-    </View>
+          transform: scale
+            ? [{ translateY }, { scale: scaleValue }]
+            : [{ translateY }],
+        },
+        style,
+      ]}
+    >
+      {children}
+    </Animated.View>
   )
 }

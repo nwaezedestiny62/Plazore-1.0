@@ -641,10 +641,9 @@ export default function SellerDashboardPage() {
                       key={String(p?.productId || i)}
                       type="button"
                       onClick={() => {
-                        if (p?.productId)
-                          router.push(
-                            `/seller/products/performance/${p.productId}`
-                          );
+                        const id = p?.productId != null ? String(p.productId) : "";
+                        if (id)
+                          router.push(`/seller/products/${id}/performance`);
                       }}
                       className="flex w-full items-center gap-1 border-b border-white/[0.07] py-2 text-left last:border-0 sm:py-2.5"
                     >

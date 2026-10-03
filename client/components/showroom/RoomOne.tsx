@@ -9,7 +9,6 @@ import {
   View,
 } from 'react-native'
 import ShowroomProductCard from './ShowroomProductCard'
-import ScrollFadeUp from './ScrollFadeUp'
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window')
 const CARD_W = Math.min(SCREEN_W * 0.58, 220)
@@ -47,44 +46,39 @@ export default function RoomOne({
 
   return (
     <View style={styles.room}>
-      <ScrollFadeUp delay={50} duration={750} distance={32}>
-        <View style={styles.banner}>
-          {featureImage ? (
-            <Image
-              source={{ uri: featureImage as string }}
-              style={styles.fill}
-              contentFit="cover"
-              transition={500}
-            />
-          ) : (
-            <View style={[styles.fill, { backgroundColor: '#151A22' }]} />
-          )}
-          <View style={styles.bannerOverlay} />
-          <View style={styles.bannerContent}>
-            <Text style={styles.bannerKicker}>{title}</Text>
-            <Text style={styles.bannerTitle}>{subtitle}</Text>
-          </View>
+      <View style={styles.banner}>
+        {featureImage ? (
+          <Image
+            source={{ uri: featureImage as string }}
+            style={styles.fill}
+            contentFit="cover"
+            transition={0}
+            cachePolicy="memory-disk"
+          />
+        ) : (
+          <View style={[styles.fill, { backgroundColor: '#151A22' }]} />
+        )}
+        <View style={styles.bannerOverlay} />
+        <View style={styles.bannerContent}>
+          <Text style={styles.bannerKicker}>{title}</Text>
+          <Text style={styles.bannerTitle}>{subtitle}</Text>
         </View>
-      </ScrollFadeUp>
+      </View>
 
-      {railA.length > 0 && (
+      {railA.length > 0 ? (
         <View style={styles.railSection}>
-          <ScrollFadeUp delay={160} duration={550} distance={18}>
-            <Text style={styles.railLabel}>NOW SHOWING</Text>
-          </ScrollFadeUp>
+          <Text style={styles.railLabel}>NOW SHOWING</Text>
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.rail}
             decelerationRate="fast"
             snapToInterval={CARD_W + CARD_GAP}
+            removeClippedSubviews
           >
             {railA.map((product, index) => (
-              <ScrollFadeUp
-                key={`a-${product._id}-${index}`}
-                delay={220 + index * 55}
-                duration={600}
-                distance={24}
+              <View
+                key={String(product._id)}
                 style={{ width: CARD_W, marginRight: CARD_GAP }}
               >
                 <ShowroomProductCard
@@ -94,13 +88,13 @@ export default function RoomOne({
                   position={index}
                   style={{ width: CARD_W }}
                 />
-              </ScrollFadeUp>
+              </View>
             ))}
           </ScrollView>
         </View>
-      )}
+      ) : null}
 
-      {railB.length > 0 && (
+      {railB.length > 0 ? (
         <View style={[styles.railSection, { paddingTop: 28 }]}>
           <ScrollView
             horizontal
@@ -108,13 +102,11 @@ export default function RoomOne({
             contentContainerStyle={styles.rail}
             decelerationRate="fast"
             snapToInterval={CARD_W + CARD_GAP}
+            removeClippedSubviews
           >
             {railB.map((product, index) => (
-              <ScrollFadeUp
-                key={`b-${product._id}-${index}`}
-                delay={320 + index * 55}
-                duration={600}
-                distance={24}
+              <View
+                key={String(product._id)}
                 style={{ width: CARD_W, marginRight: CARD_GAP }}
               >
                 <ShowroomProductCard
@@ -124,11 +116,11 @@ export default function RoomOne({
                   position={railA.length + index}
                   style={{ width: CARD_W }}
                 />
-              </ScrollFadeUp>
+              </View>
             ))}
           </ScrollView>
         </View>
-      )}
+      ) : null}
     </View>
   )
 }
@@ -158,42 +150,41 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     left: 0,
-    backgroundColor: 'rgba(6,8,12,0.58)',
+    backgroundColor: 'rgba(0,0,0,0.42)',
   },
   bannerContent: {
     position: 'absolute',
-    bottom: 34,
-    left: 24,
-    right: 24,
+    left: 20,
+    right: 20,
+    bottom: 28,
   },
   bannerKicker: {
-    fontFamily: 'Manrope_600SemiBold',
+    color: 'rgba(255,255,255,0.55)',
     fontSize: 11,
-    letterSpacing: 4,
-    color: 'rgba(255,255,255,0.5)',
+    fontWeight: '700',
+    letterSpacing: 3,
     textTransform: 'uppercase',
-    marginBottom: 8,
+    marginBottom: 6,
   },
   bannerTitle: {
-    fontFamily: 'Manrope_700Bold',
-    fontSize: 30,
-    color: '#FFFFFF',
+    color: '#FFF',
+    fontSize: 28,
+    fontWeight: '800',
     letterSpacing: -0.5,
   },
   railSection: {
-    paddingTop: 32,
+    paddingTop: 24,
   },
   railLabel: {
-    fontFamily: 'Manrope_600SemiBold',
-    fontSize: 11,
-    letterSpacing: 3.2,
     color: 'rgba(255,255,255,0.38)',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 2.4,
     textTransform: 'uppercase',
-    paddingHorizontal: 24,
-    marginBottom: 18,
+    paddingHorizontal: 16,
+    marginBottom: 12,
   },
   rail: {
-    paddingHorizontal: 24,
-    paddingRight: 48,
+    paddingHorizontal: 16,
   },
 })

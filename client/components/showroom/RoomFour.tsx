@@ -85,7 +85,7 @@ export default function RoomFour({
         >
           {products.map((product, index) => (
             <View
-              key={`${product._id}-locale-${index}`}
+              key={String(product._id)}
               style={{ width: cardW, marginRight: CARD_GAP }}
             >
               <ShowroomProductCard

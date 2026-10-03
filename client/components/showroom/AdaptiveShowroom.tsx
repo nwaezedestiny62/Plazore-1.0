@@ -24,11 +24,12 @@ interface AdaptiveShowroomProps {
  * Capacities tuned for smoothness while still looking full.
  * (Original was 50/14/16/30 — these values keep the design language)
  */
+/** Match web mall capacities exactly */
 const ROOM_CAPACITY = {
-  1: 24,
-  2: 12,
-  3: 12,
-  4: 16,
+  1: 50,
+  2: 14,
+  3: 16,
+  4: 30,
 } as const
 
 function uniqueCount(rooms?: ShowroomRooms | null, products?: Product[]) {
@@ -150,7 +151,8 @@ function AdaptiveShowroom({
     ].filter((s) => s.products.length > 0)
   }, [products, rooms])
 
-  if (loading) {
+  // Keep previous rooms mounted while refreshing — prevents card re-animation
+  if (loading && count === 0) {
     return (
       <View style={styles.center}>
         <ActivityIndicator color="#94A3B8" size="small" />
@@ -158,7 +160,7 @@ function AdaptiveShowroom({
     )
   }
 
-  if (count === 0) {
+  if (!loading && count === 0) {
     return (
       <View style={styles.center}>
         <View style={styles.empty} />

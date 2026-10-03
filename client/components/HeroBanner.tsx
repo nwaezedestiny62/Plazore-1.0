@@ -1,7 +1,7 @@
 /**
  * PlazoreHeroBanner — 5-slot carousel (web Mall parity)
- * GET /content/hero + /content/hero/public
- * Rotation ALWAYS 12s. Images never blank. Text is dual-phase + staggered.
+ * Local fallbacks ALWAYS full-bleed cover. Remote overlays when valid.
+ * CTA never 404s. SHOWROOM chevron scrolls the mall.
  */
 
 import {
@@ -31,13 +31,15 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 const SLOT_COUNT = 5
-const HOLD_MS = 12_000
-const CROSSFADE_MS = 3_200
+const HOLD_MS = 10_000
+const CROSSFADE_MS = 2_000
 const TEXT_EXIT_MS = 720
 const TEXT_ENTER_MS = 1_150
 const TEXT_STAGGER = 95
 const SWIPE_THRESH = 48
-const KEN_BURNS_SCALE = 1.07
+const KEN_BURNS_SCALE = 1.08
+/** Extra paint around the frame so Ken Burns never shows edges */
+const MEDIA_PAD = 0.16
 
 const EASE_CROSSFADE = Easing.bezier(0.33, 0, 0.2, 1)
 const EASE_TEXT = Easing.bezier(0.22, 1, 0.36, 1)
@@ -67,6 +69,7 @@ export type BannerSlide = {
   ctaTarget?: string
   media: { kind: 'image'; source: ImageSourcePropType }
   remoteUrl?: string
+  localSource?: ImageSourcePropType
 }
 
 type ApiHeroBanner = {
@@ -141,10 +144,13 @@ function ctaFit(text: string) {
   return { fontSize: 11, letterSpacing: 2, paddingHorizontal: 22 }
 }
 
-function localSource(index: number): ImageSourcePropType | undefined {
+function localSource(index: number): ImageSourcePropType {
   const n = HERO_SLIDES.length
-  if (!n) return undefined
-  return HERO_SLIDES[index % n]?.media?.source
+  if (n > 0) {
+    const src = HERO_SLIDES[index % n]?.media?.source
+    if (src) return src
+  }
+  return require('../assets/hero/welcome.jpg')
 }
 
 function isUsableRemoteUrl(url: string): boolean {
@@ -167,23 +173,21 @@ function toAbsoluteUrl(url: string): string {
 function resolveImageSource(
   imageUrl: string,
   index: number,
-): { source: ImageSourcePropType; remoteUrl?: string } {
-  const fallback = localSource(index)
+): { source: ImageSourcePropType; remoteUrl?: string; local: ImageSourcePropType } {
+  const local = localSource(index)
   const url = String(imageUrl || '').trim()
 
   if (isUsableRemoteUrl(url)) {
     const absolute = toAbsoluteUrl(url)
-    return { source: { uri: absolute }, remoteUrl: absolute }
+    return { source: { uri: absolute }, remoteUrl: absolute, local }
   }
 
-  if (fallback) return { source: fallback }
-  return {
-    source: { uri: 'data:image/gif;base64,R0lGODlhAQABAAAAACw=' },
-  }
+  return { source: local, local }
 }
 
 function staticToBanner(s: StaticHeroSlide, index: number): BannerSlide {
   const pos = index + 1
+  const local = s.media?.source || localSource(index)
   return {
     id: `static-${pos}`,
     position: pos,
@@ -193,7 +197,8 @@ function staticToBanner(s: StaticHeroSlide, index: number): BannerSlide {
     ctaLabel: s.ctaLabel || 'Explore',
     ctaAction: String((s as any).ctaAction || 'scroll_showroom'),
     ctaTarget: String((s as any).ctaTarget || ''),
-    media: s.media,
+    media: { kind: 'image', source: local },
+    localSource: local,
   }
 }
 
@@ -254,6 +259,7 @@ function apiToBanner(raw: any, index: number): BannerSlide | null {
     ctaTarget: String(b.ctaTarget || ''),
     media: { kind: 'image', source: resolved.source },
     remoteUrl: resolved.remoteUrl,
+    localSource: resolved.local,
   }
 }
 
@@ -273,26 +279,32 @@ function fiveSlotDeck(
       fallback[pos - 1] ||
       fallback[(pos - 1) % Math.max(fallback.length, 1)]
     const slot = byPos.get(pos)
+    const local = base?.localSource || localSource(pos - 1)
 
     if (slot) {
       const hasRemote =
-        !!slot.remoteUrl ||
-        (typeof slot.media?.source === 'object' &&
-          'uri' in (slot.media.source as object) &&
-          isUsableRemoteUrl(
-            String((slot.media.source as { uri?: string }).uri || ''),
-          ))
+        !!slot.remoteUrl && isUsableRemoteUrl(String(slot.remoteUrl))
 
       deck.push({
         ...base,
         ...slot,
         id: `slot-${pos}`,
         position: pos,
-        media: hasRemote ? slot.media : base?.media || slot.media,
+        localSource: local,
+        media: hasRemote
+          ? slot.media
+          : { kind: 'image', source: local },
         remoteUrl: hasRemote ? slot.remoteUrl : undefined,
       })
     } else if (base) {
-      deck.push({ ...base, id: `static-${pos}`, position: pos })
+      deck.push({
+        ...base,
+        id: `static-${pos}`,
+        position: pos,
+        localSource: local,
+        media: { kind: 'image', source: local },
+        remoteUrl: undefined,
+      })
     }
   }
   return deck
@@ -365,19 +377,19 @@ async function loadHeroFromApi(opts: {
 
 function prefetchDeck(slides: BannerSlide[]) {
   slides.forEach((s) => {
-    const uri =
-      s.remoteUrl ||
-      (typeof s.media?.source === 'object' &&
-      s.media.source &&
-      'uri' in s.media.source
-        ? String((s.media.source as { uri?: string }).uri || '')
-        : '')
-    if (uri && /^https?:\/\//i.test(uri)) {
-      Image.prefetch(uri).catch(() => {})
+    if (s.remoteUrl && /^https?:\/\//i.test(s.remoteUrl)) {
+      Image.prefetch(s.remoteUrl).catch(() => {})
     }
   })
 }
 
+/**
+ * Full-bleed Ken Burns:
+ * - LOCAL bundled jpg ALWAYS painted with explicit width×height + cover
+ *   (RN Image with only top/right/bottom/left does NOT fill — that was the bug)
+ * - Layer is oversized (MEDIA_PAD) so scale never opens a gap
+ * - Remote sits on top; onError → hide remote, local stays covering
+ */
 function KenBurnsImage({
   slide,
   width,
@@ -391,68 +403,78 @@ function KenBurnsImage({
 }) {
   const scale = useRef(new Animated.Value(1)).current
   const indexHint = Math.max(0, (slide.position || 1) - 1)
-  const local = localSource(indexHint)
+  const local =
+    slide.localSource ||
+    localSource(indexHint) ||
+    require('../assets/hero/welcome.jpg')
+  const remoteUri =
+    slide.remoteUrl && isUsableRemoteUrl(slide.remoteUrl)
+      ? slide.remoteUrl
+      : undefined
 
-  const [remoteOk, setRemoteOk] = useState(true)
-  const [source, setSource] = useState<ImageSourcePropType>(slide.media.source)
+  const [remoteOk, setRemoteOk] = useState(!!remoteUri)
+
+  const mw = width * (1 + MEDIA_PAD)
+  const mh = height * (1 + MEDIA_PAD)
+  const ox = (width - mw) / 2
+  const oy = (height - mh) / 2
 
   useEffect(() => {
-    setSource(slide.media.source)
-    setRemoteOk(true)
-  }, [slide.id, slide.media.source])
+    setRemoteOk(!!remoteUri)
+  }, [remoteUri, slide.id])
 
   useEffect(() => {
     scale.stopAnimation()
-    if (!isActive) {
-      scale.setValue(1)
-      return
-    }
     scale.setValue(1)
-    Animated.timing(scale, {
+    if (!isActive) return
+    const anim = Animated.timing(scale, {
       toValue: KEN_BURNS_SCALE,
       duration: HOLD_MS,
       easing: Easing.inOut(Easing.quad),
       useNativeDriver: true,
-    }).start()
+    })
+    anim.start()
+    return () => anim.stop()
   }, [isActive, scale, slide.id])
 
-  const showRemote =
-    remoteOk &&
-    typeof source === 'object' &&
-    source &&
-    'uri' in source &&
-    isUsableRemoteUrl(String((source as { uri?: string }).uri || ''))
-
   return (
-    <View style={[styles.mediaClip, { width, height }]}>
-      {local ? (
-        <Image
-          source={local}
-          style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 }}
-          resizeMode="cover"
-        />
-      ) : null}
-
+    <View
+      style={{
+        width,
+        height,
+        overflow: 'hidden',
+        backgroundColor: '#090B0F',
+      }}
+    >
       <Animated.View
         style={{
           position: 'absolute',
-          top: -height * 0.03,
-          left: -width * 0.03,
-          width: width * 1.06,
-          height: height * 1.06,
+          left: ox,
+          top: oy,
+          width: mw,
+          height: mh,
           transform: [{ scale }],
-          opacity: showRemote || !local ? 1 : 0,
         }}
       >
         <Image
-          source={source}
-          style={{ width: width * 1.06, height: height * 1.06 }}
+          source={local}
+          style={{ width: mw, height: mh }}
           resizeMode="cover"
-          onError={() => {
-            setRemoteOk(false)
-            if (local) setSource(local)
-          }}
         />
+        {remoteUri && remoteOk ? (
+          <Image
+            source={{ uri: remoteUri }}
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: mw,
+              height: mh,
+            }}
+            resizeMode="cover"
+            onError={() => setRemoteOk(false)}
+          />
+        ) : null}
       </Animated.View>
     </View>
   )
@@ -472,7 +494,7 @@ export default function HeroBanner({
   const insets = useSafeAreaInsets()
   const { width: winW, height: winH } = useWindowDimensions()
 
-  const heroWidth = winW
+  const heroWidth = Math.max(winW, 1)
   const heroHeight = Math.max(winH - topChrome, 480)
   const statusTop = Math.max(insets.top, Platform.OS === 'android' ? 24 : 20)
   const bottomPad = Math.max(insets.bottom, 12)
@@ -558,7 +580,6 @@ export default function HeroBanner({
       const linesOp = [kickerOp, headOp, subOp, ctaOp]
       const linesY = [kickerY, headY, subY, ctaY]
 
-      // 1) Text fully out
       Animated.parallel([
         ...linesOp.map((v) =>
           Animated.timing(v, {
@@ -577,11 +598,9 @@ export default function HeroBanner({
           }),
         ),
       ]).start(() => {
-        // 2) Swap content only after text is gone
         currentRef.current = target
         setCurrent(target)
 
-        // 3) Image crossfade
         Animated.parallel([
           Animated.timing(opacities[from], {
             toValue: 0,
@@ -597,7 +616,6 @@ export default function HeroBanner({
           }),
         ]).start()
 
-        // 4) Text in, staggered
         linesY.forEach((v) => v.setValue(16))
         linesOp.forEach((v) => v.setValue(0))
 
@@ -699,6 +717,22 @@ export default function HeroBanner({
       let path = target
       if (path.startsWith('/browse')) path = path.replace(/^\/browse/, '/search')
       else if (path.startsWith('/shop')) path = path.replace(/^\/shop/, '/search')
+      else if (path === '/' || path === '/home' || path === '/mall') {
+        onScrollToShowroom?.()
+        return
+      }
+      const allowed =
+        path.startsWith('/search') ||
+        path.startsWith('/product') ||
+        path.startsWith('/store') ||
+        path.startsWith('/(tabs)') ||
+        path.startsWith('/seller') ||
+        path.startsWith('/cart') ||
+        path.startsWith('/wishlist')
+      if (!allowed) {
+        onScrollToShowroom?.()
+        return
+      }
       try {
         router.push(path as any)
       } catch {
@@ -723,13 +757,17 @@ export default function HeroBanner({
       case 'browse':
         if (target) {
           router.push({
-            pathname: '/search',
+            pathname: '/(tabs)/search',
             params: { category: target, q: target },
           } as any)
         } else {
-          router.push('/search' as any)
+          router.push('/(tabs)/search' as any)
         }
         break
+      case 'scroll_showroom':
+      case 'enter':
+      case 'explore':
+      case 'campaign':
       default:
         onScrollToShowroom?.()
         break
@@ -919,7 +957,11 @@ export default function HeroBanner({
 const styles = StyleSheet.create({
   mediaClip: { overflow: 'hidden', backgroundColor: '#090B0F' },
   copyBlock: {
-    ...FILL,
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
     justifyContent: 'flex-end',
     alignItems: 'flex-start',
     zIndex: 3,
@@ -969,7 +1011,7 @@ const styles = StyleSheet.create({
     gap: 6,
     marginTop: 18,
   },
-  dot: { height: 4, borderRadius: 2 },
+  dot: { height: 4 },
   dotActive: { width: 20, backgroundColor: 'rgba(255,255,255,0.9)' },
   dotIdle: { width: 6, backgroundColor: 'rgba(255,255,255,0.25)' },
   arrowBar: {

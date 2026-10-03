@@ -191,11 +191,13 @@ export function ProductCard({
   const [authOpen, setAuthOpen] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerIn, setPickerIn] = useState(false);
-  const [imgIdx, setImgIdx] = useState(0);
   const [pressed, setPressed] = useState(false);
   const [selected, setSelected] = useState<Record<string, string>>({});
 
-  const images = product.images?.length ? product.images : [];
+  // Single static image only — no carousel / no interval (prevents lag)
+  const primaryImage =
+    product.images?.length && product.images[0] ? product.images[0] : null;
+
   const brand = storeName(product);
   const location = productLocation(product);
   const hasVariants = productHasVariants(product);
@@ -260,14 +262,6 @@ export function ProductCard({
       region: product.region || displayRegion || "NG",
     });
   }, [product?._id, product?.region, room, position, displayRegion]);
-
-  useEffect(() => {
-    if (images.length < 2 || pickerOpen) return;
-    const id = window.setInterval(() => {
-      setImgIdx((i) => (i + 1) % images.length);
-    }, 4800);
-    return () => clearInterval(id);
-  }, [images.length, pickerOpen]);
 
   useEffect(() => {
     if (!pickerOpen) {
@@ -442,55 +436,23 @@ export function ProductCard({
           onClick={trackOpen}
         >
           <div className="relative aspect-[3/3.55] overflow-hidden bg-[#0A0C10] sm:aspect-[3/3.5]">
-            {images.length > 0 ? (
-              images.map((src, i) => {
-                const active = i === imgIdx;
-                if (!active && images.length > 3) {
-                  const prev = (imgIdx - 1 + images.length) % images.length;
-                  const next = (imgIdx + 1) % images.length;
-                  if (i !== prev && i !== next) return null;
-                }
-                return (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    key={`${product._id}-${i}`}
-                    src={src}
-                    alt={product.name}
-                    loading={i === 0 ? "eager" : "lazy"}
-                    decoding="async"
-                    className="absolute inset-0 h-full w-full object-cover"
-                    style={{
-                      opacity: active ? 1 : 0,
-                      transform: pickerOpen ? "scale(1.04)" : "scale(1)",
-                      filter: pickerOpen ? "saturate(0.85)" : "none",
-                      transition:
-                        "opacity 1.25s cubic-bezier(0.4, 0, 0.2, 1), transform 0.5s cubic-bezier(0.22, 1, 0.36, 1), filter 0.4s ease",
-                    }}
-                  />
-                );
-              })
+            {primaryImage ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={primaryImage}
+                alt={product.name}
+                loading="lazy"
+                decoding="async"
+                className="absolute inset-0 h-full w-full object-cover"
+                style={{
+                  transform: pickerOpen ? "scale(1.03)" : "scale(1)",
+                  filter: pickerOpen ? "saturate(0.88) brightness(0.92)" : "none",
+                  transition:
+                    "transform 0.35s cubic-bezier(0.22, 1, 0.36, 1), filter 0.3s ease",
+                }}
+              />
             ) : (
               <div className="h-full w-full bg-surface" />
-            )}
-
-            {images.length > 1 && !pickerOpen && (
-              <div className="pointer-events-none absolute bottom-2 left-0 right-0 flex justify-center gap-1">
-                {images.slice(0, 5).map((_, i) => (
-                  <span
-                    key={i}
-                    className="block h-[2px]"
-                    style={{
-                      width: i === imgIdx ? 14 : 6,
-                      backgroundColor:
-                        i === imgIdx
-                          ? "rgba(255,255,255,0.95)"
-                          : "rgba(255,255,255,0.28)",
-                      transition:
-                        "width 0.45s cubic-bezier(0.22, 1, 0.36, 1), background-color 0.45s ease",
-                    }}
-                  />
-                ))}
-              </div>
             )}
 
             {pickerOpen ? (
@@ -501,26 +463,24 @@ export function ProductCard({
                   e.stopPropagation();
                 }}
               >
-                {/* Atmosphere */}
                 <div
                   className="absolute inset-0"
                   style={{
                     background:
                       "radial-gradient(120% 80% at 50% 100%, rgba(0,229,117,0.08), transparent 55%), linear-gradient(180deg, rgba(4,6,10,0.28) 0%, rgba(4,6,10,0.62) 100%)",
                     opacity: pickerIn ? 1 : 0,
-                    transition: "opacity 0.32s cubic-bezier(0.22, 1, 0.36, 1)",
+                    transition: "opacity 0.28s ease",
                   }}
                   onClick={closePicker}
                 />
 
-                {/* Glass sheet */}
                 <div
                   className="relative z-10 mt-auto flex min-h-0 max-h-full flex-1 flex-col"
                   style={{
-                    transform: pickerIn ? "translateY(0)" : "translateY(18px)",
+                    transform: pickerIn ? "translateY(0)" : "translateY(14px)",
                     opacity: pickerIn ? 1 : 0,
                     transition:
-                      "transform 0.42s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.3s ease",
+                      "transform 0.36s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.26s ease",
                   }}
                 >
                   <div
@@ -535,13 +495,11 @@ export function ProductCard({
                         "inset 0 1px 0 rgba(255,255,255,0.12), 0 -24px 48px rgba(0,0,0,0.38)",
                     }}
                   >
-                    {/* Gradient hairline */}
                     <div
                       className="h-[2px] w-full shrink-0"
                       style={{ backgroundImage: GRAD }}
                     />
 
-                    {/* Header */}
                     <div className="flex shrink-0 items-center justify-between gap-2 px-2.5 py-2 sm:px-3">
                       <div className="min-w-0">
                         <p className="text-[9px] font-bold uppercase tracking-[0.2em] text-white/38 sm:text-[10px]">
@@ -561,7 +519,6 @@ export function ProductCard({
                       </button>
                     </div>
 
-                    {/* Scrollable options */}
                     <div
                       ref={scrollRef}
                       className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2.5 pb-1 sm:px-3"
@@ -627,11 +584,8 @@ export function ProductCard({
                                       ? "none"
                                       : "line-through",
                                     cursor: possible ? "pointer" : "not-allowed",
-                                    backdropFilter: on
-                                      ? undefined
-                                      : "blur(8px)",
                                     transition:
-                                      "background-color 0.16s ease, border-color 0.16s ease, color 0.16s ease, box-shadow 0.2s ease",
+                                      "background-color 0.16s ease, border-color 0.16s ease, color 0.16s ease",
                                   }}
                                 >
                                   {val}
@@ -643,7 +597,6 @@ export function ProductCard({
                       ))}
                     </div>
 
-                    {/* Sticky add */}
                     <div
                       className="shrink-0 border-t px-2.5 py-2 sm:px-3 sm:py-2.5"
                       style={{
@@ -684,8 +637,6 @@ export function ProductCard({
                             selectionComplete && inStock
                               ? "0 10px 24px rgba(0,229,117,0.18)"
                               : "none",
-                          transition:
-                            "opacity 0.18s ease, box-shadow 0.22s ease",
                         }}
                       >
                         {!selectionComplete

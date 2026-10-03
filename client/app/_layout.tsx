@@ -16,10 +16,17 @@ import {
   Manrope_400Regular,
   Manrope_600SemiBold,
   Manrope_700Bold,
-  useFonts,
 } from '@expo-google-fonts/manrope'
+import {
+  Poppins_400Regular,
+  Poppins_500Medium,
+  Poppins_600SemiBold,
+  Poppins_700Bold,
+  useFonts,
+} from '@expo-google-fonts/poppins'
 import { Stack } from 'expo-router'
 import { StatusBar as ExpoStatusBar } from 'expo-status-bar'
+import * as SplashScreen from 'expo-splash-screen'
 import React, { useEffect, useRef, useState } from 'react'
 import {
   ActivityIndicator,
@@ -35,9 +42,15 @@ import {
 } from 'react-native'
 import { GestureHandlerRootView } from 'react-native-gesture-handler'
 
+try {
+  SplashScreen.preventAutoHideAsync()
+} catch {
+  /* ignore */
+}
+
 const BG = '#090B0F'
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window')
-const OPENER_MS = 3300
+const OPENER_MS = 3600
 const EASE = Easing.bezier(0.22, 1, 0.36, 1)
 
 /**
@@ -107,19 +120,17 @@ function AppShell() {
 
   return (
     <>
-      <ExpoStatusBar
-        style="light"
-        hidden={showOpener}
-        backgroundColor={showOpener ? 'transparent' : BG}
-        translucent={showOpener}
-      />
+      {/* expo-status-bar: only `style` + `hidden` are safe across SDK versions */}
+      <ExpoStatusBar style="light" hidden={showOpener} />
 
-      {Platform.OS === 'android' && !showOpener ? (
+      {/* Android bar color / translucent via RN StatusBar only */}
+      {Platform.OS === 'android' ? (
         <StatusBar
           barStyle="light-content"
-          backgroundColor={BG}
-          translucent={false}
+          backgroundColor={showOpener ? 'transparent' : BG}
+          translucent={showOpener}
           animated
+          hidden={showOpener}
         />
       ) : null}
 
@@ -159,7 +170,7 @@ function MissingClerkKeyScreen() {
         backgroundColor={BG}
         translucent={false}
       />
-      <ExpoStatusBar style="light" backgroundColor={BG} />
+      <ExpoStatusBar style="light" />
       <Text style={styles.missingTitle}>Plazore</Text>
       <Text style={styles.missingBody}>
         Missing Clerk key in this build. Rebuild after setting
@@ -175,11 +186,20 @@ export default function RootLayout() {
     Manrope_400Regular,
     Manrope_600SemiBold,
     Manrope_700Bold,
+    Poppins_400Regular,
+    Poppins_500Medium,
+    Poppins_600SemiBold,
+    Poppins_700Bold,
   })
 
   useEffect(() => {
     applyDarkStatusBar()
   }, [])
+
+  useEffect(() => {
+    if (!fontsLoaded) return
+    SplashScreen.hideAsync().catch(() => {})
+  }, [fontsLoaded])
 
   if (!fontsLoaded) {
     return (
@@ -189,13 +209,12 @@ export default function RootLayout() {
           backgroundColor={BG}
           translucent={false}
         />
-        <ExpoStatusBar style="light" backgroundColor={BG} />
+        <ExpoStatusBar style="light" />
         <ActivityIndicator color="#FFFFFF" />
       </View>
     )
   }
 
-  // Visible error instead of native crash when key was not inlined
   if (!CLERK_PUBLISHABLE_KEY) {
     return <MissingClerkKeyScreen />
   }
@@ -252,7 +271,11 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   opener: {
-    ...FILL,
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
     zIndex: 9999,
     backgroundColor: '#000',
   },

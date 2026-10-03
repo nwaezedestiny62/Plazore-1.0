@@ -112,7 +112,7 @@ async function afterAuthNavigate(
     await new Promise((r) => setTimeout(r, 400))
     const token = await getToken()
     if (!token) {
-      router.replace('/complete-profile')
+      router.replace('/complete-profile' as any)
       return
     }
     const res = await api.get('/users/me', {
@@ -124,9 +124,17 @@ async function afterAuthNavigate(
       !String(u.name).trim() ||
       !u?.phone ||
       !String(u.phone).trim()
-    router.replace(needsProfile ? '/complete-profile' : '/(tabs)')
+
+    if (needsProfile) {
+      router.replace('/complete-profile' as any)
+      return
+    }
+
+    // Existing users: enter mall — never a bare "/" that can 404
+    router.replace('/(tabs)' as any)
   } catch {
-    router.replace('/complete-profile')
+    // Network / new user without DB row yet → complete profile
+    router.replace('/complete-profile' as any)
   }
 }
 

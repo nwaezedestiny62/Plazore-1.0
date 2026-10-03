@@ -4,6 +4,7 @@ import { useMarketplace } from '@/context/MarketplaceContext'
 import { trackShowroomEvent } from '@/services/showroomEvents'
 import { useAuth, useOAuth } from '@clerk/clerk-expo'
 import { Ionicons } from '@expo/vector-icons'
+import * as Linking from 'expo-linking'
 import * as WebBrowser from 'expo-web-browser'
 import { Link, usePathname, useRouter } from 'expo-router'
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -33,6 +34,61 @@ const TEXT = '#F5F7FA'
 const SECONDARY = 'rgba(255,255,255,0.55)'
 const GREEN = '#00E575'
 const GRAD = ['#00E575', '#14B8A6', '#2563EB']
+
+const PENDING_KEY = 'plazore_pending_action'
+const RETURN_KEY = 'plazore_return_to'
+const GOOGLE_G =
+  'https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg'
+
+async function savePending(productId: string, returnPath: string) {
+  try {
+    const AsyncStorage =
+      require('@react-native-async-storage/async-storage').default
+    await AsyncStorage.setItem(
+      PENDING_KEY,
+      JSON.stringify({
+        type: 'add_to_cart',
+        productId: String(productId),
+        at: Date.now(),
+      }),
+    )
+    await AsyncStorage.setItem(RETURN_KEY, returnPath || '/')
+  } catch {
+    /* optional */
+  }
+}
+
+async function readPending(): Promise<{
+  type?: string
+  productId?: string
+  at?: number
+} | null> {
+  try {
+    const AsyncStorage =
+      require('@react-native-async-storage/async-storage').default
+    const raw = await AsyncStorage.getItem(PENDING_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    if (parsed?.type !== 'add_to_cart' || !parsed?.productId) return null
+    if (Date.now() - Number(parsed.at || 0) > 30 * 60 * 1000) {
+      await AsyncStorage.removeItem(PENDING_KEY)
+      return null
+    }
+    return parsed
+  } catch {
+    return null
+  }
+}
+
+async function clearPending() {
+  try {
+    const AsyncStorage =
+      require('@react-native-async-storage/async-storage').default
+    await AsyncStorage.removeItem(PENDING_KEY)
+  } catch {
+    /* optional */
+  }
+}
 
 type Props = {
   product: Product
@@ -191,11 +247,6 @@ function ShowroomProductCard({
     return ''
   }, [product.images, matched])
 
-  useEffect(() => {
-    if (primaryImage) {
-      Image.prefetch(primaryImage).catch(() => {})
-    }
-  }, [primaryImage])
 
   useEffect(() => {
     if (impressed.current || !product?._id) return
@@ -224,13 +275,17 @@ function ShowroomProductCard({
         position,
         region: p.region,
       })
+      // Skip layout measure when fly-cart is unavailable — kills scroll jank
+      if (!flyCart) {
+        addToCart(p, variantPayload)
+        return
+      }
       cartBtnRef.current?.measureInWindow((x, y, width, height) => {
         if (width <= 0 || height <= 0) {
           addToCart(p, variantPayload)
           return
         }
-        if (flyCart) flyCart.flyAdd(p, { x, y, width, height }, variantPayload)
-        else addToCart(p, variantPayload)
+        flyCart.flyAdd(p, { x, y, width, height }, variantPayload)
       })
     },
     [flyCart, addToCart, room, position],
@@ -238,19 +293,34 @@ function ShowroomProductCard({
 
   useEffect(() => {
     if (!isLoaded || !isSignedIn) return
-    const pending = pendingCartRef.current
-    if (!pending) return
-    pendingCartRef.current = null
-    setAuthOpen(false)
-    const t = setTimeout(() => {
-      if (productHasVariants(pending)) {
-        setVariantOpen(true)
-      } else {
-        doAddToCart(pending)
+
+    const run = async () => {
+      let pending = pendingCartRef.current
+      if (!pending) {
+        const stored = await readPending()
+        if (
+          stored?.productId &&
+          String(stored.productId) === String(product._id)
+        ) {
+          pending = product
+        }
       }
-    }, 120)
-    return () => clearTimeout(t)
-  }, [isLoaded, isSignedIn, doAddToCart])
+      if (!pending) return
+      if (String(pending._id) !== String(product._id)) return
+      pendingCartRef.current = null
+      await clearPending()
+      setAuthOpen(false)
+      setTimeout(() => {
+        if (productHasVariants(pending!)) {
+          setSelected({})
+          setVariantOpen(true)
+        } else {
+          doAddToCart(pending!)
+        }
+      }, 120)
+    }
+    void run()
+  }, [isLoaded, isSignedIn, doAddToCart, product])
 
   const trackOpen = useCallback(() => {
     if (!product?._id) return
@@ -268,6 +338,7 @@ function ShowroomProductCard({
 
     if (!isSignedIn) {
       pendingCartRef.current = product
+      void savePending(String(product._id), pathname || '/')
       setAuthOpen(true)
       return
     }
@@ -307,17 +378,24 @@ function ShowroomProductCard({
   const returnPath = pathname || '/'
 
   const onSignIn = useCallback(() => {
+    pendingCartRef.current = product
+    void savePending(String(product._id), pathname || '/')
     setAuthOpen(false)
     router.push({
       pathname: '/(auth)/sign-in' as any,
-      params: { redirect_url: returnPath },
+      params: { redirect_url: pathname || '/' },
     })
-  }, [router, returnPath])
+  }, [product, pathname, router])
 
   const onContinueGoogle = useCallback(async () => {
     try {
       setGoogleBusy(true)
-      const { createdSessionId, setActive } = await startOAuthFlow()
+      pendingCartRef.current = product
+      await savePending(String(product._id), pathname || '/')
+      const redirectUrl = Linking.createURL('/', { scheme: 'plazore' })
+      const { createdSessionId, setActive } = await startOAuthFlow({
+        redirectUrl,
+      })
       if (createdSessionId && setActive) {
         await setActive({ session: createdSessionId })
         setAuthOpen(false)
@@ -327,7 +405,7 @@ function ShowroomProductCard({
     } finally {
       setGoogleBusy(false)
     }
-  }, [startOAuthFlow])
+  }, [startOAuthFlow, product, pathname])
 
   const textPrimary = dark ? '#FFFFFF' : '#111111'
   const textSecondary = dark ? 'rgba(255,255,255,0.65)' : '#6B7280'
@@ -518,10 +596,10 @@ function ShowroomProductCard({
           >
             <View style={styles.authHead}>
               <View style={{ flex: 1, paddingRight: 12 }}>
-                <Text style={styles.authTitle}>Continue on Plazore</Text>
+                <Text style={styles.authKicker}>Account required</Text>
+                <Text style={styles.authTitle}>Sign in to add to your bag</Text>
                 <Text style={styles.authSub}>
-                  Sign in to add this product to your cart. You’ll return here
-                  after.
+                  Your bag stays with your Plazore account across devices.
                 </Text>
               </View>
               <Pressable
@@ -538,28 +616,32 @@ function ShowroomProductCard({
 
             <View style={styles.authActions}>
               <Pressable
-                onPress={onSignIn}
-                style={styles.authPrimary}
-                disabled={googleBusy}
-              >
-                <Text style={styles.authPrimaryText}>Sign in</Text>
-              </Pressable>
-
-              <Pressable
                 onPress={onContinueGoogle}
-                style={styles.authGoogle}
+                style={styles.authGoogleWhite}
                 disabled={googleBusy}
               >
                 {googleBusy ? (
-                  <ActivityIndicator color={TEXT} />
+                  <ActivityIndicator color="#111" />
                 ) : (
                   <>
-                    <Ionicons name="logo-google" size={18} color={TEXT} />
-                    <Text style={styles.authGoogleText}>
+                    <Image
+                      source={{ uri: GOOGLE_G }}
+                      style={{ width: 20, height: 20 }}
+                      resizeMode="contain"
+                    />
+                    <Text style={styles.authGoogleWhiteText}>
                       Continue with Google
                     </Text>
                   </>
                 )}
+              </Pressable>
+
+              <Pressable
+                onPress={onSignIn}
+                style={styles.authPrimaryDark}
+                disabled={googleBusy}
+              >
+                <Text style={styles.authPrimaryDarkText}>Sign in</Text>
               </Pressable>
 
               <Pressable
@@ -586,7 +668,17 @@ function ShowroomProductCard({
   )
 }
 
-export default React.memo(ShowroomProductCard)
+export default React.memo(ShowroomProductCard, (a, b) => {
+  return (
+    a.product?._id === b.product?._id &&
+    a.product?.price === b.product?.price &&
+    a.product?.images?.[0] === b.product?.images?.[0] &&
+    a.dark === b.dark &&
+    a.room === b.room &&
+    a.position === b.position &&
+    a.style?.width === b.style?.width
+  )
+})
 
 const styles = StyleSheet.create({
   card: { backgroundColor: 'transparent' },
@@ -666,6 +758,42 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-start',
     marginBottom: 16,
+  },
+  authKicker: {
+    color: 'rgba(255,255,255,0.38)',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 1.8,
+    textTransform: 'uppercase',
+    marginBottom: 2,
+  },
+  authGoogleWhite: {
+    height: 48,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: LINE,
+    backgroundColor: '#FFFFFF',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+  },
+  authGoogleWhiteText: {
+    color: '#111111',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  authPrimaryDark: {
+    height: 48,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: LINE,
+    backgroundColor: '#161A20',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  authPrimaryDarkText: {
+    color: TEXT,
+    fontSize: 14,
+    fontWeight: '700',
   },
   authTitle: {
     color: TEXT,

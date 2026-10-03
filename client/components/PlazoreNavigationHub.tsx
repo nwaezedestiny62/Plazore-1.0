@@ -1,7 +1,7 @@
-// ============================================================
-// FILE: client/components/PlazoreNavigationHub.tsx
-// ============================================================
-
+/**
+ * Plazore Navigation Hub (Lounge) — mobile
+ * Layout aligned with web lounge; HubLogo (lounge image) kept as-is.
+ */
 import api from '@/constants/api'
 import { CATEGORY_LIST } from '@/constants/productCatalog'
 import { Product } from '@/constants/types'
@@ -46,10 +46,30 @@ const EASE = Easing.bezier(0.22, 1, 0.36, 1)
 const DEBOUNCE = 280
 const CART_SLIDE_MS = 3200
 
-const TILE_COLORS: Record<
-  string,
-  { bg: string; accent: string; glow: string }
-> = {
+const SELL_POSTER =
+  'https://images.unsplash.com/photo-1441986300917-64674bd600d8?auto=format&fit=crop&w=1200&q=80'
+
+const CATEGORY_IMAGES: Record<string, string> = {
+  Electronics: 'https://images.unsplash.com/photo-1498049794561-7780e7231661?w=400&h=300&fit=crop',
+  'Phones & Accessories': 'https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?w=400&h=300&fit=crop',
+  Computers: 'https://images.unsplash.com/photo-1517336714731-489689fd1ca8?w=400&h=300&fit=crop',
+  Fashion: 'https://images.unsplash.com/photo-1445205170230-053b83016050?w=400&h=300&fit=crop',
+  'Beauty & Personal Care': 'https://images.unsplash.com/photo-1596462502278-27bfdc403348?w=400&h=300&fit=crop',
+  'Home & Living': 'https://images.unsplash.com/photo-1616486338812-3dadae4b4ace?w=400&h=300&fit=crop',
+  Furniture: 'https://images.unsplash.com/photo-1555041469-a586c61ea9bc?w=400&h=300&fit=crop',
+  'Kitchen & Dining': 'https://images.unsplash.com/photo-1556911220-bff31c812dba?w=400&h=300&fit=crop',
+  Groceries: 'https://images.unsplash.com/photo-1542838132-92c53300491e?w=400&h=300&fit=crop',
+  Health: 'https://images.unsplash.com/photo-1505751172876-fa1923c5c528?w=400&h=300&fit=crop',
+  'Sports & Outdoors': 'https://images.unsplash.com/photo-1461896836934-ffe607ba6851?w=400&h=300&fit=crop',
+  Automotive: 'https://images.unsplash.com/photo-1492144534655-ae79c964c9d7?w=400&h=300&fit=crop',
+  'Toys & Games': 'https://images.unsplash.com/photo-1558060370-d644479cb6f7?w=400&h=300&fit=crop',
+  'Jewelry & Watches': 'https://images.unsplash.com/photo-1515562141207-7a88fb7ce338?w=400&h=300&fit=crop',
+}
+
+const FALLBACK_CAT =
+  'https://images.unsplash.com/photo-1472851294608-062f824d29cc?w=400&h=300&fit=crop'
+
+const TILE_COLORS: Record<string, { bg: string; accent: string; glow: string }> = {
   home: { bg: '#0A1C14', accent: '#00E575', glow: 'rgba(0,229,117,0.25)' },
   browse: { bg: '#0B1E28', accent: '#22D3EE', glow: 'rgba(34,211,238,0.22)' },
   cart: { bg: '#0D172A', accent: '#3B82F6', glow: 'rgba(59,130,246,0.28)' },
@@ -131,16 +151,6 @@ const SECTIONS: NavSection[] = [
     ],
   },
   {
-    id: 'explore',
-    title: 'Explore',
-    items: [
-      { id: 'categories', label: 'Categories', subtitle: 'Shop by type', icon: 'apps', href: '/shop?mode=categories' },
-      { id: 'new', label: 'New arrivals', subtitle: 'Just listed', icon: 'sparkles', href: '/shop?mode=new' },
-      { id: 'trending', label: 'Trending', subtitle: 'Most viewed', icon: 'flame', href: '/shop?mode=trending' },
-      { id: 'stores', label: 'Stores', subtitle: 'Seller directories', icon: 'business-outline', href: '/shop?mode=stores' },
-    ],
-  },
-  {
     id: 'support',
     title: 'Support',
     items: [
@@ -151,12 +161,18 @@ const SECTIONS: NavSection[] = [
   },
 ]
 
-/** Lightweight staggered fade — capped delay so late tiles don’t feel laggy */
+const EXPLORE_CHIPS = [
+  { id: 'categories', label: 'Categories', mode: 'categories' },
+  { id: 'new', label: 'New', mode: 'new' },
+  { id: 'trending', label: 'Trending', mode: 'trending' },
+  { id: 'stores', label: 'Stores', mode: 'stores' },
+]
+
 function FadeSlideIn({
   index,
   children,
   delayBase = 0,
-  duration = 520,
+  duration = 480,
 }: {
   index: number
   children: React.ReactNode
@@ -164,14 +180,12 @@ function FadeSlideIn({
   duration?: number
 }) {
   const anim = useRef(new Animated.Value(0)).current
-
   useEffect(() => {
     anim.setValue(0)
-    const delay = delayBase + Math.min(index, 10) * 36
     Animated.timing(anim, {
       toValue: 1,
       duration,
-      delay,
+      delay: delayBase + Math.min(index, 8) * 28,
       easing: EASE,
       useNativeDriver: true,
     }).start()
@@ -185,7 +199,7 @@ function FadeSlideIn({
           {
             translateY: anim.interpolate({
               inputRange: [0, 1],
-              outputRange: [12, 0],
+              outputRange: [10, 0],
             }),
           },
         ],
@@ -196,7 +210,6 @@ function FadeSlideIn({
   )
 }
 
-/** Cart product image rail — only mounts when cart has images */
 function CartImageRail({
   uris,
   width,
@@ -216,10 +229,8 @@ function CartImageRail({
     setIndex(0)
     slide.setValue(0)
     if (uris.length < 2) return
-
     let alive = true
     let timeout: ReturnType<typeof setTimeout> | null = null
-
     const tick = () => {
       if (!alive) return
       const next = (indexRef.current + 1) % uris.length
@@ -235,7 +246,6 @@ function CartImageRail({
         timeout = setTimeout(tick, CART_SLIDE_MS)
       })
     }
-
     timeout = setTimeout(tick, CART_SLIDE_MS)
     return () => {
       alive = false
@@ -283,13 +293,6 @@ function CartImageRail({
         end={{ x: 1, y: 0 }}
         style={StyleSheet.absoluteFill}
       />
-      {uris.length > 1 && (
-        <View style={styles.cartDots}>
-          {uris.map((_, i) => (
-            <View key={i} style={[styles.cartDot, i === index && styles.cartDotOn]} />
-          ))}
-        </View>
-      )}
     </View>
   )
 }
@@ -323,7 +326,7 @@ function MallTile({
   const hasCartMedia = isCart && (cartImages?.length ?? 0) > 0
 
   return (
-    <FadeSlideIn index={index} delayBase={100} duration={560}>
+    <FadeSlideIn index={index} delayBase={80} duration={500}>
       <Pressable
         onPress={onPress}
         onPressIn={() =>
@@ -367,11 +370,9 @@ function MallTile({
               opacity: active ? 0.5 : 0.18,
             }}
           />
-
           {hasCartMedia && (
             <CartImageRail uris={cartImages!} width={width} height={height} />
           )}
-
           {active && (
             <View
               style={{
@@ -384,7 +385,6 @@ function MallTile({
               }}
             />
           )}
-
           <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
             <View
               style={{
@@ -411,7 +411,6 @@ function MallTile({
               </View>
             )}
           </View>
-
           <View style={{ maxWidth: hasCartMedia ? '55%' : '100%' }}>
             <Text
               style={{
@@ -439,7 +438,7 @@ function MallTile({
   )
 }
 
-/** Logo with LOUNGE text fallback if image missing / fails / slow */
+/** LOUNGE logo — keep as on mobile (user request) */
 function HubLogo() {
   const [phase, setPhase] = useState<'loading' | 'ok' | 'fallback'>('loading')
   const logoOp = useRef(new Animated.Value(0)).current
@@ -500,6 +499,53 @@ function HubLogo() {
   )
 }
 
+function PosterCard({
+  image,
+  kicker,
+  title,
+  cta,
+  onPress,
+}: {
+  image?: string | null
+  kicker: string
+  title: string
+  cta: string
+  onPress: () => void
+}) {
+  return (
+    <Pressable onPress={onPress} style={styles.poster}>
+      {image ? (
+        <ExpoImage
+          source={{ uri: image }}
+          style={StyleSheet.absoluteFill}
+          contentFit="cover"
+          cachePolicy="memory-disk"
+          transition={0}
+        />
+      ) : (
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: SURFACE_2 }]} />
+      )}
+      <LinearGradient
+        colors={[
+          'rgba(5,5,8,0.15)',
+          'rgba(5,5,8,0.55)',
+          'rgba(5,5,8,0.92)',
+        ]}
+        locations={[0, 0.45, 1]}
+        style={StyleSheet.absoluteFill}
+      />
+      <View style={styles.posterCopy}>
+        <Text style={styles.posterKicker}>{kicker}</Text>
+        <Text style={styles.posterTitle}>{title}</Text>
+        <View style={styles.posterCtaRow}>
+          <Text style={styles.posterCta}>{cta}</Text>
+          <Ionicons name="arrow-forward" size={13} color={GREEN} />
+        </View>
+      </View>
+    </Pressable>
+  )
+}
+
 export default function PlazoreNavigationHub({
   visible,
   onClose,
@@ -516,18 +562,15 @@ export default function PlazoreNavigationHub({
     cartCtx?.itemCount ??
       cartItems.reduce(
         (n: number, i: any) => n + (Number(i.quantity) || 1),
-        0
-      )
+        0,
+      ),
   )
 
   const cartImages = useMemo(() => {
     const uris: string[] = []
     for (const item of cartItems) {
       const img =
-        item?.product?.images?.[0] ||
-        item?.image ||
-        item?.product?.image ||
-        null
+        item?.product?.images?.[0] || item?.image || item?.product?.image || null
       if (img && typeof img === 'string' && !uris.includes(img)) uris.push(img)
       if (uris.length >= 6) break
     }
@@ -546,6 +589,7 @@ export default function PlazoreNavigationHub({
   const [mounted, setMounted] = useState(false)
   const [contentKey, setContentKey] = useState(0)
   const [storeLogo, setStoreLogo] = useState<string | null>(null)
+  const [storeName, setStoreName] = useState<string>('')
   const inputRef = useRef<TextInput>(null)
   const getTokenRef = useRef(getToken)
   getTokenRef.current = getToken
@@ -562,15 +606,14 @@ export default function PlazoreNavigationHub({
   const gap = 9
   const tileW = Math.floor((windowW - pad * 2 - gap) / 2)
   const tileH = Math.round(tileW * 0.86)
-
   const topInset = Math.max(insets.top, StatusBar.currentHeight ?? 0, 12)
   const bottomInset = Math.max(insets.bottom, 12)
   const isSearching = query.trim().length >= 1
 
-  // Seller logo — only when hub open + seller
   useEffect(() => {
     if (!visible || !isSeller || !isSignedIn) {
       setStoreLogo(null)
+      setStoreName('')
       return
     }
     let alive = true
@@ -587,9 +630,12 @@ export default function PlazoreNavigationHub({
             const data = res.data?.data || res.data
             const logo =
               data?.storeLogo || data?.store?.storeLogo || data?.logo || null
-            if (logo && alive) {
-              setStoreLogo(String(logo))
-              return
+            const name =
+              data?.storeName || data?.store?.storeName || data?.name || ''
+            if (alive) {
+              if (logo) setStoreLogo(String(logo))
+              if (name) setStoreName(String(name))
+              if (logo || name) return
             }
           } catch {
             /* next */
@@ -604,13 +650,12 @@ export default function PlazoreNavigationHub({
     }
   }, [visible, isSeller, isSignedIn])
 
-  // Products for local store-name search — only while open
   useEffect(() => {
     if (!visible) return
     let alive = true
     ;(async () => {
       try {
-        const res = await api.get('/products?limit=60')
+        const res = await api.get('/products?limit=48')
         if (alive && res.data?.success) setAllProducts(res.data.data || [])
       } catch {
         /* ignore */
@@ -639,7 +684,7 @@ export default function PlazoreNavigationHub({
     ;(async () => {
       try {
         const res = await api.get(
-          `/ai/search-suggest?q=${encodeURIComponent(debounced)}`
+          `/ai/search-suggest?q=${encodeURIComponent(debounced)}`,
         )
         if (cancelled || !res.data?.success) return
         const d = res.data.data
@@ -661,6 +706,52 @@ export default function PlazoreNavigationHub({
     }
   }, [debounced])
 
+  const newest = useMemo(() => {
+    return [...allProducts]
+      .sort((a, b) => {
+        const ta = new Date((a as any).createdAt || 0).getTime()
+        const tb = new Date((b as any).createdAt || 0).getTime()
+        return tb - ta
+      })
+      .slice(0, 10)
+  }, [allProducts])
+
+  const trending = useMemo(() => {
+    return [...allProducts]
+      .sort((a, b) => {
+        const va = Number((a as any).wishlistCount || (a as any).viewCount || 0)
+        const vb = Number((b as any).wishlistCount || (b as any).viewCount || 0)
+        return vb - va
+      })
+      .slice(0, 10)
+  }, [allProducts])
+
+  const storePicks = useMemo(() => {
+    const map = new Map<string, { id: string; name: string; logo?: string; cover?: string }>()
+    for (const p of allProducts) {
+      const s = (p as any).seller
+      if (!s || typeof s === 'string' || !s._id) continue
+      const id = String(s._id)
+      if (map.has(id)) continue
+      map.set(id, {
+        id,
+        name: s.storeName || s.name || 'Store',
+        logo: s.storeLogo,
+        cover: p.images?.[0],
+      })
+      if (map.size >= 8) break
+    }
+    return Array.from(map.values())
+  }, [allProducts])
+
+  const categoryStrip = useMemo(() => {
+    const list = (CATEGORY_LIST || []).slice(0, 12)
+    return list.map((c: string) => ({
+      name: c,
+      image: CATEGORY_IMAGES[c] || FALLBACK_CAT,
+    }))
+  }, [])
+
   const getSeller = (p: any): SellerInfo | null => {
     const s = p.seller
     if (!s) return null
@@ -677,9 +768,13 @@ export default function PlazoreNavigationHub({
   const groupedHits = useMemo(() => {
     const q = query.trim().toLowerCase()
     if (q.length < 1) {
-      return { products: [] as LocalHit[], stores: [] as LocalHit[], categories: [] as LocalHit[], ai: [] as LocalHit[] }
+      return {
+        products: [] as LocalHit[],
+        stores: [] as LocalHit[],
+        categories: [] as LocalHit[],
+        ai: [] as LocalHit[],
+      }
     }
-
     const products: LocalHit[] = (serverProducts || []).slice(0, 8).map((p: any) => {
       const seller = getSeller(p)
       return {
@@ -692,7 +787,6 @@ export default function PlazoreNavigationHub({
         storeName: seller?.storeName || seller?.name,
       }
     })
-
     const storesMap = new Map<string, SellerInfo>()
     allProducts.forEach((p) => {
       const s = getSeller(p)
@@ -700,7 +794,6 @@ export default function PlazoreNavigationHub({
       const name = (s.storeName || s.name || '').toLowerCase()
       if (name && name.includes(q)) storesMap.set(s._id, s)
     })
-
     const stores: LocalHit[] = []
     storesMap.forEach((s) => {
       if (stores.length < 4) {
@@ -712,32 +805,19 @@ export default function PlazoreNavigationHub({
         })
       }
     })
-
     const categories: LocalHit[] = []
     CATEGORY_LIST.forEach((c) => {
       if (c.toLowerCase().includes(q) && categories.length < 4) {
         categories.push({ type: 'category', label: c })
       }
     })
-    aiFloors.forEach((f) => {
-      if (categories.length < 6 && !categories.some((c) => c.label === f)) {
-        categories.push({ type: 'category', label: f })
-      }
-    })
-
-    const aiHits: LocalHit[] = aiPhrases.slice(0, 5).map((phrase) => ({
-      type: 'ai' as const,
-      label: phrase,
-    }))
-
-    return { products, stores, categories, ai: aiHits }
-  }, [query, serverProducts, allProducts, aiPhrases, aiFloors])
+    return { products, stores, categories, ai: [] as LocalHit[] }
+  }, [query, serverProducts, allProducts])
 
   const totalHitsCount =
     groupedHits.products.length +
     groupedHits.stores.length +
-    groupedHits.categories.length +
-    groupedHits.ai.length
+    groupedHits.categories.length
 
   const resetSearch = useCallback(() => {
     setQuery('')
@@ -767,7 +847,6 @@ export default function PlazoreNavigationHub({
     })
   }
 
-  // Calm open / close
   useEffect(() => {
     if (visible) {
       setMounted(true)
@@ -775,7 +854,6 @@ export default function PlazoreNavigationHub({
       progress.setValue(0)
       contentFade.setValue(0)
       backdropOp.setValue(0)
-
       Animated.parallel([
         Animated.timing(backdropOp, {
           toValue: 1,
@@ -832,14 +910,6 @@ export default function PlazoreNavigationHub({
 
   const isActive = (href?: string, itemId?: string) => {
     if (!href && !itemId) return false
-    if (
-      itemId === 'categories' ||
-      itemId === 'new' ||
-      itemId === 'trending' ||
-      itemId === 'stores'
-    ) {
-      return typeof pathname === 'string' && pathname.includes('shop')
-    }
     if (!href) return false
     if (href === '/(tabs)' || href === '/(tabs)/') {
       return (
@@ -858,45 +928,13 @@ export default function PlazoreNavigationHub({
     SECTIONS.forEach((s) =>
       s.items.forEach((item) => {
         map[item.id] = isActive(item.href, item.id)
-      })
+      }),
     )
-    if (
-      pathname === '/' ||
-      pathname === '/(tabs)' ||
-      pathname === '/(tabs)/' ||
-      pathname?.endsWith('/index')
-    ) {
-      map.home = true
-    }
     return map
   }, [pathname])
 
   const navigate = (href?: string, itemId?: string) => {
     onClose()
-    const exploreRoutes: Record<string, { mode: string }> = {
-      categories: { mode: 'categories' },
-      new: { mode: 'new' },
-      trending: { mode: 'trending' },
-      stores: { mode: 'stores' },
-    }
-    if (itemId && exploreRoutes[itemId]) {
-      requestAnimationFrame(() => {
-        router.push({ pathname: '/shop', params: exploreRoutes[itemId] } as any)
-      })
-      return
-    }
-    if (itemId === 'help') {
-      requestAnimationFrame(() => router.push('/help' as any))
-      return
-    }
-    if (itemId === 'contact') {
-      requestAnimationFrame(() => router.push('/contact' as any))
-      return
-    }
-    if (itemId === 'about') {
-      requestAnimationFrame(() => router.push('/settings/about' as any))
-      return
-    }
     if (!href) return
     requestAnimationFrame(() => {
       try {
@@ -907,11 +945,18 @@ export default function PlazoreNavigationHub({
     })
   }
 
+  const goShop = (mode: string) => {
+    onClose()
+    requestAnimationFrame(() => {
+      router.push({ pathname: '/shop', params: { mode } } as any)
+    })
+  }
+
   const handleLogout = async () => {
     onClose()
     try {
       await signOut()
-      router.replace('/sign-in' as any)
+      router.replace('/(auth)/sign-in' as any)
     } catch {
       /* ignore */
     }
@@ -1036,156 +1081,298 @@ export default function PlazoreNavigationHub({
                   </View>
                 ) : (
                   <>
-                    {groupedHits.products.length > 0 && (
-                      <View style={{ marginBottom: 20 }}>
-                        <View style={styles.resultHeader}>
-                          <Text style={styles.sectionHeaderInline}>PRODUCTS</Text>
-                          <Text style={styles.resultCount}>
-                            {groupedHits.products.length}
-                          </Text>
-                        </View>
-                        {groupedHits.products.map((h, i) => {
-                          if (h.type !== 'product') return null
-                          return (
-                            <FadeSlideIn key={h.id} index={i} delayBase={40} duration={480}>
-                              <Pressable
-                                onPress={() => onHitPress(h)}
-                                style={styles.resultRow}
-                              >
-                                <View style={styles.resultThumb}>
-                                  {h.image ? (
-                                    <ExpoImage
-                                      source={{ uri: h.image }}
-                                      style={{ width: 60, height: 60 }}
-                                      contentFit="cover"
-                                      cachePolicy="memory-disk"
-                                      transition={120}
-                                    />
-                                  ) : (
-                                    <Text style={styles.thumbFallback}>LOUNGE</Text>
-                                  )}
-                                </View>
-                                <View style={{ flex: 1, minWidth: 0 }}>
-                                  <Text style={styles.resultTitle} numberOfLines={2}>
-                                    {h.label}
-                                  </Text>
-                                  <Text style={styles.resultPrice}>
-                                    {formatProduct(h.price, h.region)}
-                                  </Text>
-                                </View>
-                              </Pressable>
-                            </FadeSlideIn>
-                          )
-                        })}
-                      </View>
-                    )}
-
-                    {groupedHits.stores.length > 0 && (
-                      <View style={{ marginBottom: 14 }}>
-                        <View style={styles.resultHeader}>
-                          <Text style={styles.sectionHeaderInline}>STORES</Text>
-                          <Text style={styles.resultCount}>
-                            {groupedHits.stores.length}
-                          </Text>
-                        </View>
-                        {groupedHits.stores.map((h, i) => {
-                          if (h.type !== 'store') return null
-                          return (
-                            <FadeSlideIn key={h.id} index={i} delayBase={30} duration={450}>
-                              <Pressable
-                                onPress={() => onHitPress(h)}
-                                style={styles.resultRow}
-                              >
-                                <View style={styles.resultThumb}>
-                                  {h.logo ? (
-                                    <ExpoImage
-                                      source={{ uri: h.logo }}
-                                      style={{ width: 60, height: 60 }}
-                                      contentFit="cover"
-                                      cachePolicy="memory-disk"
-                                      transition={120}
-                                    />
-                                  ) : (
-                                    <Ionicons name="storefront" size={20} color={BLUE} />
-                                  )}
-                                </View>
-                                <View style={{ flex: 1, minWidth: 0 }}>
-                                  <Text style={styles.resultTitle} numberOfLines={1}>
-                                    {h.label}
-                                  </Text>
-                                  <Text style={styles.resultStoreMeta}>
-                                    Official storefront
-                                  </Text>
-                                </View>
-                              </Pressable>
-                            </FadeSlideIn>
-                          )
-                        })}
-                      </View>
-                    )}
+                    {groupedHits.products.map((h, i) => {
+                      if (h.type !== 'product') return null
+                      return (
+                        <Pressable
+                          key={h.id}
+                          onPress={() => onHitPress(h)}
+                          style={styles.resultRow}
+                        >
+                          <View style={styles.resultThumb}>
+                            {h.image ? (
+                              <ExpoImage
+                                source={{ uri: h.image }}
+                                style={{ width: 60, height: 60 }}
+                                contentFit="cover"
+                                cachePolicy="memory-disk"
+                                transition={0}
+                              />
+                            ) : null}
+                          </View>
+                          <View style={{ flex: 1, minWidth: 0 }}>
+                            <Text style={styles.resultTitle} numberOfLines={2}>
+                              {h.label}
+                            </Text>
+                            <Text style={styles.resultPrice}>
+                              {formatProduct(h.price, h.region)}
+                            </Text>
+                          </View>
+                        </Pressable>
+                      )
+                    })}
+                    {groupedHits.stores.map((h) => {
+                      if (h.type !== 'store') return null
+                      return (
+                        <Pressable
+                          key={h.id}
+                          onPress={() => onHitPress(h)}
+                          style={styles.resultRow}
+                        >
+                          <View style={styles.resultThumb}>
+                            {h.logo ? (
+                              <ExpoImage
+                                source={{ uri: h.logo }}
+                                style={{ width: 60, height: 60 }}
+                                contentFit="cover"
+                                transition={0}
+                              />
+                            ) : (
+                              <Ionicons name="storefront" size={20} color={BLUE} />
+                            )}
+                          </View>
+                          <Text style={styles.resultTitle}>{h.label}</Text>
+                        </Pressable>
+                      )
+                    })}
                   </>
                 )}
               </View>
             ) : (
               <>
-                <FadeSlideIn index={0} delayBase={70}>
-                  <Pressable onPress={handleSellerCta}>
-                    {isSeller ? (
+                {/* Posters */}
+                <View style={{ paddingHorizontal: 14, gap: 8, marginBottom: 12 }}>
+                  <PosterCard
+                    image={SELL_POSTER}
+                    kicker="MALL"
+                    title="Discover"
+                    cta="Browse"
+                    onPress={() => {
+                      onClose()
+                      requestAnimationFrame(() =>
+                        router.push('/(tabs)/search' as any),
+                      )
+                    }}
+                  />
+                  <PosterCard
+                    image={isSeller ? storeLogo || SELL_POSTER : SELL_POSTER}
+                    kicker={isSeller ? 'STORE' : 'SELL'}
+                    title={isSeller ? storeName || 'Dashboard' : 'Open a store'}
+                    cta={isSeller ? 'Manage' : 'Start'}
+                    onPress={handleSellerCta}
+                  />
+                </View>
+
+                {/* Explore chips */}
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.chipRow}
+                >
+                  {EXPLORE_CHIPS.map((c) => (
+                    <Pressable
+                      key={c.id}
+                      onPress={() => goShop(c.mode)}
+                      style={styles.chip}
+                    >
+                      <Text style={styles.chipText}>{c.label}</Text>
+                    </Pressable>
+                  ))}
+                </ScrollView>
+
+                {/* Categories */}
+                <Text style={styles.sectionHeader}>Categories</Text>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={{ paddingHorizontal: 14, gap: 10 }}
+                >
+                  {categoryStrip.map((c) => (
+                    <Pressable
+                      key={c.name}
+                      onPress={() => {
+                        onClose()
+                        requestAnimationFrame(() =>
+                          router.push({
+                            pathname: '/shop',
+                            params: { mode: 'categories', q: c.name },
+                          } as any),
+                        )
+                      }}
+                      style={styles.catCard}
+                    >
+                      <ExpoImage
+                        source={{ uri: c.image }}
+                        style={StyleSheet.absoluteFill}
+                        contentFit="cover"
+                        cachePolicy="memory-disk"
+                        transition={0}
+                      />
                       <LinearGradient
-                        colors={[GREEN, BLUE]}
-                        start={{ x: 0, y: 0 }}
-                        end={{ x: 1, y: 0 }}
-                        style={styles.sellerCtaActive}
-                      >
-                        <View style={styles.sellerIconActive}>
-                          {storeLogo ? (
-                            <Image
-                              source={{ uri: storeLogo }}
-                              style={{ width: 42, height: 42 }}
-                              resizeMode="cover"
+                        colors={['transparent', 'rgba(0,0,0,0.85)']}
+                        style={StyleSheet.absoluteFill}
+                      />
+                      <Text style={styles.catLabel} numberOfLines={2}>
+                        {c.name}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </ScrollView>
+
+                {/* New arrivals */}
+                {newest.length > 0 && (
+                  <>
+                    <View style={styles.railHead}>
+                      <Text style={styles.sectionHeaderInline}>New arrivals</Text>
+                      <Pressable onPress={() => goShop('new')}>
+                        <Text style={styles.seeAll}>See all</Text>
+                      </Pressable>
+                    </View>
+                    <ScrollView
+                      horizontal
+                      showsHorizontalScrollIndicator={false}
+                      contentContainerStyle={{ paddingHorizontal: 14, gap: 10 }}
+                    >
+                      {newest.map((p) => (
+                        <Pressable
+                          key={String(p._id)}
+                          onPress={() => {
+                            onClose()
+                            requestAnimationFrame(() =>
+                              router.push(`/product/${p._id}` as any),
+                            )
+                          }}
+                          style={styles.productCard}
+                        >
+                          <ExpoImage
+                            source={{ uri: p.images?.[0] }}
+                            style={styles.productImg}
+                            contentFit="cover"
+                            cachePolicy="memory-disk"
+                            transition={0}
+                          />
+                          <Text style={styles.productName} numberOfLines={2}>
+                            {p.name}
+                          </Text>
+                          <Text style={styles.productPrice}>
+                            {formatProduct(p.price, p.region)}
+                          </Text>
+                        </Pressable>
+                      ))}
+                    </ScrollView>
+                  </>
+                )}
+
+                {/* Trending */}
+                {trending.length > 0 && (
+                  <>
+                    <View style={styles.railHead}>
+                      <Text style={styles.sectionHeaderInline}>Trending</Text>
+                      <Pressable onPress={() => goShop('trending')}>
+                        <Text style={styles.seeAll}>See all</Text>
+                      </Pressable>
+                    </View>
+                    <ScrollView
+                      horizontal
+                      showsHorizontalScrollIndicator={false}
+                      contentContainerStyle={{ paddingHorizontal: 14, gap: 10 }}
+                    >
+                      {trending.map((p) => (
+                        <Pressable
+                          key={`t-${String(p._id)}`}
+                          onPress={() => {
+                            onClose()
+                            requestAnimationFrame(() =>
+                              router.push(`/product/${p._id}` as any),
+                            )
+                          }}
+                          style={styles.productCard}
+                        >
+                          <ExpoImage
+                            source={{ uri: p.images?.[0] }}
+                            style={styles.productImg}
+                            contentFit="cover"
+                            cachePolicy="memory-disk"
+                            transition={0}
+                          />
+                          <Text style={styles.productName} numberOfLines={2}>
+                            {p.name}
+                          </Text>
+                          <Text style={styles.productPrice}>
+                            {formatProduct(p.price, p.region)}
+                          </Text>
+                        </Pressable>
+                      ))}
+                    </ScrollView>
+                  </>
+                )}
+
+                {/* Stores */}
+                {storePicks.length > 0 && (
+                  <>
+                    <View style={styles.railHead}>
+                      <Text style={styles.sectionHeaderInline}>Stores to visit</Text>
+                      <Pressable onPress={() => goShop('stores')}>
+                        <Text style={styles.seeAll}>See all</Text>
+                      </Pressable>
+                    </View>
+                    <ScrollView
+                      horizontal
+                      showsHorizontalScrollIndicator={false}
+                      contentContainerStyle={{ paddingHorizontal: 14, gap: 10 }}
+                    >
+                      {storePicks.map((s) => (
+                        <Pressable
+                          key={s.id}
+                          onPress={() => {
+                            onClose()
+                            requestAnimationFrame(() =>
+                              router.push(`/store/${s.id}` as any),
+                            )
+                          }}
+                          style={styles.storeCard}
+                        >
+                          {s.cover ? (
+                            <ExpoImage
+                              source={{ uri: s.cover }}
+                              style={StyleSheet.absoluteFill}
+                              contentFit="cover"
+                              transition={0}
                             />
-                          ) : (
-                            <Ionicons name="storefront" size={18} color={BG} />
-                          )}
-                        </View>
-                        <View style={{ flex: 1 }}>
-                          <Text style={styles.sellerTitleActive}>Seller Storefront</Text>
-                          <Text style={styles.sellerSubActive}>
-                            Products, orders & messages
-                          </Text>
-                        </View>
-                        <Ionicons name="arrow-forward" size={16} color={BG} />
-                      </LinearGradient>
-                    ) : (
-                      <View style={styles.sellerCta}>
-                        <View style={styles.sellerIcon}>
-                          <Ionicons name="storefront-outline" size={20} color={TEXT} />
-                        </View>
-                        <View style={{ flex: 1 }}>
-                          <Text style={styles.sellerTitle}>Open a store</Text>
-                          <Text style={styles.sellerSub}>
-                            Sell on Plazore’s Digital Mall
-                          </Text>
-                        </View>
-                        <Ionicons name="chevron-forward" size={16} color={TEXT_MUTED} />
-                      </View>
-                    )}
-                  </Pressable>
-                </FadeSlideIn>
-
-                {slots?.profile && <View style={styles.slotWrap}>{slots.profile}</View>}
-                {slots?.recommendations && (
-                  <View style={styles.slotWrap}>{slots.recommendations}</View>
-                )}
-                {slots?.recentlyViewed && (
-                  <View style={styles.slotWrap}>{slots.recentlyViewed}</View>
-                )}
-                {slots?.sellerShortcuts && (
-                  <View style={styles.slotWrap}>{slots.sellerShortcuts}</View>
+                          ) : null}
+                          <LinearGradient
+                            colors={['transparent', 'rgba(0,0,0,0.9)']}
+                            style={StyleSheet.absoluteFill}
+                          />
+                          <View style={styles.storeFoot}>
+                            {s.logo ? (
+                              <ExpoImage
+                                source={{ uri: s.logo }}
+                                style={styles.storeLogo}
+                                contentFit="cover"
+                              />
+                            ) : (
+                              <View style={styles.storeLogo}>
+                                <Ionicons name="storefront" size={14} color={TEXT} />
+                              </View>
+                            )}
+                            <Text style={styles.storeName} numberOfLines={1}>
+                              {s.name}
+                            </Text>
+                          </View>
+                        </Pressable>
+                      ))}
+                    </ScrollView>
+                  </>
                 )}
 
+                {slots?.musicSettings ? (
+                  <View style={styles.slotWrap}>{slots.musicSettings}</View>
+                ) : null}
+
+                {/* Main hub tiles */}
                 {SECTIONS.map((section) => (
-                  <View key={section.id} style={{ marginBottom: 18 }}>
+                  <View key={section.id} style={{ marginBottom: 18, marginTop: 8 }}>
                     <Text style={styles.sectionHeader}>{section.title}</Text>
                     <View style={styles.tileGrid}>
                       {section.items.map((item) => {
@@ -1208,46 +1395,39 @@ export default function PlazoreNavigationHub({
                   </View>
                 ))}
 
-                {slots?.musicSettings && (
-                  <View style={[styles.slotWrap, { marginTop: 2 }]}>
-                    {slots.musicSettings}
-                  </View>
-                )}
-
-                <FadeSlideIn index={12} delayBase={120}>
-                  <View style={styles.footerCard}>
-                    <Pressable style={styles.footerProfile}>
-                      {user?.imageUrl ? (
-                        <Image
-                          source={{ uri: user.imageUrl }}
-                          style={styles.footerAvatar}
-                        />
-                      ) : (
-                        <View style={styles.footerAvatarFallback}>
-                          <Ionicons name="person" size={16} color={TEXT_DIM} />
-                        </View>
-                      )}
-                      <View style={{ flex: 1, minWidth: 0 }}>
-                        <Text style={styles.footerName} numberOfLines={1}>
-                          {user?.firstName || user?.username || 'Guest'}
-                        </Text>
-                        <Text style={styles.footerMeta} numberOfLines={1}>
-                          {isSignedIn
-                            ? 'This profile is currently active'
-                            : 'Sign in to sync your account'}
-                        </Text>
+                <View style={styles.footerCard}>
+                  <Pressable
+                    style={styles.footerProfile}
+                    onPress={() => navigate('/(tabs)/profile')}
+                  >
+                    {user?.imageUrl ? (
+                      <Image
+                        source={{ uri: user.imageUrl }}
+                        style={styles.footerAvatar}
+                      />
+                    ) : (
+                      <View style={styles.footerAvatarFallback}>
+                        <Ionicons name="person" size={16} color={TEXT_DIM} />
                       </View>
-                      <Ionicons name="chevron-forward" size={14} color={TEXT_MUTED} />
-                    </Pressable>
-
-                    {isSignedIn && (
-                      <Pressable onPress={handleLogout} style={styles.logoutBtn}>
-                        <Ionicons name="log-out-outline" size={15} color={TEXT_DIM} />
-                        <Text style={styles.logoutText}>Log out</Text>
-                      </Pressable>
                     )}
-                  </View>
-                </FadeSlideIn>
+                    <View style={{ flex: 1, minWidth: 0 }}>
+                      <Text style={styles.footerName} numberOfLines={1}>
+                        {user?.firstName || user?.username || 'Guest'}
+                      </Text>
+                      <Text style={styles.footerMeta} numberOfLines={1}>
+                        {isSignedIn
+                          ? 'This profile is currently active'
+                          : 'Sign in to sync your account'}
+                      </Text>
+                    </View>
+                  </Pressable>
+                  {isSignedIn && (
+                    <Pressable onPress={handleLogout} style={styles.logoutBtn}>
+                      <Ionicons name="log-out-outline" size={15} color={TEXT_DIM} />
+                      <Text style={styles.logoutText}>Log out</Text>
+                    </Pressable>
+                  )}
+                </View>
               </>
             )}
           </ScrollView>
@@ -1318,6 +1498,61 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     paddingVertical: 0,
   },
+  poster: {
+    height: 132,
+    overflow: 'hidden',
+    backgroundColor: SURFACE_2,
+    justifyContent: 'flex-end',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  posterCopy: {
+    paddingHorizontal: 16,
+    paddingBottom: 14,
+    paddingTop: 20,
+  },
+  posterKicker: {
+    color: 'rgba(255,255,255,0.42)',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 2.4,
+    marginBottom: 6,
+  },
+  posterTitle: {
+    color: TEXT,
+    fontSize: 22,
+    fontWeight: '800',
+    letterSpacing: -0.6,
+    marginBottom: 10,
+  },
+  posterCtaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  posterCta: {
+    color: GREEN,
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 0.4,
+  },
+  chipRow: {
+    paddingHorizontal: 14,
+    gap: 8,
+    marginBottom: 16,
+  },
+  chip: {
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    backgroundColor: SURFACE,
+    borderWidth: 1,
+    borderColor: LINE,
+  },
+  chipText: {
+    color: TEXT,
+    fontSize: 12,
+    fontWeight: '700',
+  },
   sectionHeader: {
     color: TEXT_MUTED,
     fontSize: 10,
@@ -1325,6 +1560,7 @@ const styles = StyleSheet.create({
     letterSpacing: 1.6,
     textTransform: 'uppercase',
     marginBottom: 9,
+    marginTop: 6,
     paddingHorizontal: 14,
   },
   sectionHeaderInline: {
@@ -1333,6 +1569,78 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     letterSpacing: 1.6,
     textTransform: 'uppercase',
+  },
+  railHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 14,
+    marginTop: 16,
+    marginBottom: 10,
+  },
+  seeAll: {
+    color: TEXT_MUTED,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  catCard: {
+    width: 120,
+    height: 90,
+    overflow: 'hidden',
+    justifyContent: 'flex-end',
+    backgroundColor: SURFACE_2,
+  },
+  catLabel: {
+    color: TEXT,
+    fontSize: 12,
+    fontWeight: '700',
+    padding: 8,
+  },
+  productCard: {
+    width: 132,
+  },
+  productImg: {
+    width: 132,
+    height: 132,
+    backgroundColor: SURFACE_2,
+    marginBottom: 6,
+  },
+  productName: {
+    color: TEXT,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  productPrice: {
+    color: GREEN,
+    fontSize: 12,
+    fontWeight: '700',
+    marginTop: 2,
+  },
+  storeCard: {
+    width: 200,
+    height: 132,
+    overflow: 'hidden',
+    backgroundColor: SURFACE_2,
+    justifyContent: 'flex-end',
+  },
+  storeFoot: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    padding: 10,
+  },
+  storeLogo: {
+    width: 28,
+    height: 28,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  storeName: {
+    flex: 1,
+    color: TEXT,
+    fontSize: 12,
+    fontWeight: '700',
   },
   tileGrid: {
     paddingHorizontal: 14,
@@ -1354,77 +1662,9 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '800',
   },
-  cartDots: {
-    position: 'absolute',
-    bottom: 8,
-    right: 8,
-    flexDirection: 'row',
-    gap: 3,
-  },
-  cartDot: {
-    width: 4,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: 'rgba(255,255,255,0.25)',
-  },
-  cartDotOn: {
-    backgroundColor: '#fff',
-    width: 10,
-  },
-  sellerCta: {
-    marginHorizontal: 14,
-    marginBottom: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: SURFACE,
-    borderWidth: 1,
-    borderColor: LINE,
-    paddingVertical: 12,
-    paddingHorizontal: 12,
-    gap: 12,
-  },
-  sellerCtaActive: {
-    marginHorizontal: 14,
-    marginBottom: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 12,
-    gap: 12,
-  },
-  sellerIcon: {
-    width: 42,
-    height: 42,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: SURFACE_2,
-  },
-  sellerIconActive: {
-    width: 42,
-    height: 42,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(9,11,15,0.12)',
-    overflow: 'hidden',
-  },
-  sellerTitle: { color: TEXT, fontSize: 14, fontWeight: '700' },
-  sellerSub: { color: TEXT_DIM, fontSize: 12, marginTop: 2 },
-  sellerTitleActive: { color: BG, fontSize: 14, fontWeight: '700' },
-  sellerSubActive: {
-    color: 'rgba(9,11,15,0.65)',
-    fontSize: 12,
-    marginTop: 2,
-  },
   slotWrap: { marginBottom: 10, paddingHorizontal: 14 },
   emptySearch: { paddingVertical: 40, alignItems: 'center' },
   emptySearchText: { color: TEXT_DIM, fontSize: 14, marginTop: 10 },
-  resultHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-  resultCount: { color: TEXT_MUTED, fontSize: 12 },
   resultRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1439,12 +1679,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     overflow: 'hidden',
   },
-  thumbFallback: {
-    color: TEXT_MUTED,
-    fontSize: 8,
-    fontWeight: '800',
-    letterSpacing: 1.4,
-  },
   resultTitle: { color: TEXT, fontSize: 14, fontWeight: '500' },
   resultPrice: {
     color: GREEN,
@@ -1452,14 +1686,9 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginTop: 3,
   },
-  resultStoreMeta: {
-    color: BLUE,
-    fontSize: 12,
-    marginTop: 2,
-    fontWeight: '600',
-  },
   footerCard: {
     marginHorizontal: 14,
+    marginTop: 8,
     marginBottom: 8,
     backgroundColor: SURFACE,
     borderWidth: 1,

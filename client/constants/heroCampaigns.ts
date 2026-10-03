@@ -18,20 +18,28 @@ export type HeroSlide = {
 }
 
 /**
- * Plazore Hero Campaigns — "Calm Signage" Edition
+ * Plazore Hero Campaigns — "The Digital Mall" Edition
  *
- * Copy has been rewritten for a psychologically soothing tone.
- * Each slide speaks softly — no urgency, no loud CTAs.
- * The language is quiet, inviting, and premium.
- * Think: a curated gallery wall, not a billboard.
+ * Each campaign introduces a different part of the Plazore experience:
+ * discovery, products, sellers, seasons, and what is happening across the mall.
  *
- * Image recommendations (for the actual files):
- *  - welcome.jpg          → Dark moody editorial photo, soft bokeh, warm tones
- *  - summer-poster.jpg    → Sun-dappled still life, linen textures, golden hour
- *  - featured-seller.jpg  → Minimal product flat-lay, muted palette, shallow DOF
- *  - christmas-poster.jpg → Warm candlelight, gift textures, deep shadows
- *  - new-arrivals.jpg     → Clean shelf or rack, soft lighting, neutral tones
+ * The language should feel:
+ * - futuristic, but human
+ * - premium, but accessible
+ * - confident, but never desperate
+ * - discovery-led rather than sales-heavy
+ *
+ * Think: walking into a remarkable mall and seeing something worth exploring,
+ * not being shouted at by an advertisement.
+ *
+ * Image recommendations:
+ * - welcome.jpg          → Futuristic digital-mall atmosphere, premium and immersive
+ * - summer-poster.jpg    → Seasonal products with bright, natural summer energy
+ * - featured-seller.jpg → Strong storefront/product presentation with a premium feel
+ * - christmas-poster.jpg → Rich seasonal shopping atmosphere, warm but modern
+ * - new-arrivals.jpg    → Fresh products presented like a curated new section
  */
+
 export const HERO_SLIDES: HeroSlide[] = [
   {
     id: 'welcome',
@@ -40,26 +48,27 @@ export const HERO_SLIDES: HeroSlide[] = [
       kind: 'image',
       source: require('../assets/hero/welcome.jpg'),
     },
-    headline: 'Plazore. Commerce in 2040.',
+    headline: 'Commerce, Reimagined.',
     subheadline:
-      'A quieter way to discover what matters.',
-    ctaLabel: 'Enter',
+      'Discover products, explore sellers, and experience a new way to shop.',
+    ctaLabel: 'Enter Showroom',
     ctaAction: 'scroll_showroom',
   },
+
   {
-    id: 'summer',
-    campaignKey: 'campaign_summer',
-    season: 'summer',
+    id: 'discover',
+    campaignKey: 'showroom_discovery',
     media: {
       kind: 'image',
       source: require('../assets/hero/summer-poster.jpg'),
     },
-    headline: 'Summer, gently',
+    headline: 'Don’t Just Search. Discover.',
     subheadline:
-      'Pieces that feel like warm light and slow afternoons.',
-    ctaLabel: 'Browse',
+      'Explore products worth seeing, even before you know what you’re looking for.',
+    ctaLabel: 'Explore',
     ctaAction: 'scroll_showroom',
   },
+
   {
     id: 'featured-seller',
     campaignKey: 'featured_seller',
@@ -67,37 +76,38 @@ export const HERO_SLIDES: HeroSlide[] = [
       kind: 'image',
       source: require('../assets/hero/featured-seller.jpg'),
     },
-    headline: 'Featured Maker',
+    headline: 'Meet the Businesses Behind the Products.',
     subheadline:
-      'Craft meets confidence. A storefront worth lingering in.',
-    ctaLabel: 'Visit',
+      'Explore stores, discover what they offer, and shop directly through Plazore.',
+    ctaLabel: 'Visit Store',
     ctaAction: 'storefront',
   },
+
   {
-    id: 'christmas',
-    campaignKey: 'campaign_christmas',
-    season: 'winter',
+    id: 'commerce',
+    campaignKey: 'commerce_evolved',
     media: {
       kind: 'image',
       source: require('../assets/hero/christmas-poster.jpg'),
     },
-    headline: 'Thoughtful Season',
+    headline: 'More Than a Marketplace.',
     subheadline:
-      'Gifts that say something, for the people who mean it.',
-    ctaLabel: 'Explore',
+      'A digital mall built around discovery, intelligent commerce, and confident buying.',
+    ctaLabel: 'Explore Plazore',
     ctaAction: 'scroll_showroom',
   },
+
   {
     id: 'new-arrivals',
-    campaignKey: 'entrance_new_arrivals',
+    campaignKey: 'new_arrivals',
     media: {
       kind: 'image',
       source: require('../assets/hero/new-arrivals.jpg'),
     },
-    headline: 'Just Arrived',
+    headline: 'There’s Always More to Discover.',
     subheadline:
-      'New pieces, same calm. Take your time.',
-    ctaLabel: 'See More',
+      'New products, new businesses, and new reasons to keep exploring.',
+    ctaLabel: 'See What’s New',
     ctaAction: 'scroll_showroom',
   },
 ]

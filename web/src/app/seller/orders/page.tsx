@@ -63,6 +63,7 @@ type SellerOrder = {
   totalAmount?: number;
   subtotal?: number;
   shippingCost?: number;
+  /** Snapshot at createOrder — listing region for frozen amounts */
   region?: string;
   marketplaceRegion?: string;
   currencyRegion?: string;
@@ -80,8 +81,8 @@ type SellerOrder = {
 };
 
 /**
- * Checkout frozen the number in the listing region's currency.
- * Prefer order.region → item/product region → default.
+ * Product page: formatProduct(amount, product.region)
+ * Order totals freeze product.price in product.region at checkout.
  */
 function orderSourceRegion(order: SellerOrder | null | undefined): string {
   if (!order) return DEFAULT_REGION;

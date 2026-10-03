@@ -46,6 +46,7 @@ type Order = {
   orderStatus?: string;
   totalAmount?: number;
   createdAt?: string;
+  /** Snapshot at createOrder — listing region currency for frozen amounts */
   region?: string;
   marketplaceRegion?: string;
   currencyRegion?: string;
@@ -80,21 +81,28 @@ function confirmationHint(
   return { label: "Confirm delivery", color: "#00E575" };
 }
 
-/** Frozen checkout amount lives in listing region currency. */
+/**
+ * Product page rule: formatProduct(amount, product.region)
+ *
+ * Order totals are frozen in the product listing region's currency at checkout
+ * (backend: price = product.price, region = product.region).
+ *
+ * Priority: order.region → item.region → product.region → DEFAULT
+ */
 function orderSourceRegion(order: Order | null | undefined): string {
   if (!order) return DEFAULT_REGION;
   if (order.region) return resolveRegionCode(order.region);
   if (order.marketplaceRegion)
     return resolveRegionCode(order.marketplaceRegion);
   if (order.currencyRegion) return resolveRegionCode(order.currencyRegion);
-  if (order.seller?.marketplaceRegion) {
-    return resolveRegionCode(order.seller.marketplaceRegion);
-  }
   const first = order.items?.[0];
   if (first?.region) return resolveRegionCode(first.region);
   const prod = first?.product;
   if (prod && typeof prod === "object" && prod.region) {
     return resolveRegionCode(prod.region);
+  }
+  if (order.seller?.marketplaceRegion) {
+    return resolveRegionCode(order.seller.marketplaceRegion);
   }
   return DEFAULT_REGION;
 }
@@ -143,7 +151,9 @@ export default function OrdersPage() {
 
   /**
    * Product-page pipeline:
-   * listing-region amount → after mount convert into buyer marketplace region.
+   *   amount is listing-region currency
+   *   → first paint: formatMoney in source region (no FX, no hydration mismatch)
+   *   → after mount: formatProduct → convert into buyer marketplace region
    */
   const fmtFrom = useCallback(
     (amount: number, sourceRegion?: string | null) => {
@@ -298,7 +308,7 @@ export default function OrdersPage() {
         <button
           type="button"
           onClick={() => setConfigOpen(true)}
-          className="mr-1.5 flex h-10 w-10 items-center justify-center rounded-xl border border-white/[0.07] bg-[#11141A]"
+          className="mr-1.5 flex h-10 w-10 items-center justify-center border border-white/[0.07] bg-[#11141A]"
           aria-label="Order options"
         >
           <SlidersHorizontal className="h-5 w-5" />
@@ -314,7 +324,7 @@ export default function OrdersPage() {
 
         {sorted.length === 0 ? (
           <div className="mx-auto flex max-w-md flex-col items-center px-7 pt-20 text-center">
-            <div className="mb-4 flex h-20 w-20 items-center justify-center rounded-full border border-white/[0.07] bg-[#11141A]">
+            <div className="mb-4 flex h-20 w-20 items-center justify-center border border-white/[0.07] bg-[#11141A]">
               <Receipt className="h-9 w-9 text-[#6B7280]" />
             </div>
             <h2 className="text-[17px] font-bold">No orders yet</h2>
@@ -335,18 +345,18 @@ export default function OrdersPage() {
                   <button
                     type="button"
                     onClick={() => router.push(`/orders/${item._id}`)}
-                    className="w-full rounded-2xl border border-white/[0.07] bg-[#11141A] p-4 text-left transition hover:border-white/[0.12]"
+                    className="w-full border border-white/[0.07] bg-[#11141A] p-4 text-left transition hover:border-white/[0.12]"
                   >
                     <div className="mb-2 flex items-center justify-between gap-2.5">
                       <p className="min-w-0 flex-1 truncate text-[15px] font-bold">
                         {item.orderNumber}
                       </p>
                       <span
-                        className="inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1"
+                        className="inline-flex shrink-0 items-center gap-1.5 px-2.5 py-1"
                         style={{ backgroundColor: `${color}18` }}
                       >
                         <span
-                          className="h-1.5 w-1.5 rounded-full"
+                          className="h-1.5 w-1.5"
                           style={{ backgroundColor: color }}
                         />
                         <span
@@ -365,7 +375,7 @@ export default function OrdersPage() {
 
                     {hint ? (
                       <div
-                        className="mb-2.5 inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[12px] font-bold"
+                        className="mb-2.5 inline-flex items-center gap-1.5 px-2.5 py-1 text-[12px] font-bold"
                         style={{
                           backgroundColor: `${hint.color}14`,
                           color: hint.color,

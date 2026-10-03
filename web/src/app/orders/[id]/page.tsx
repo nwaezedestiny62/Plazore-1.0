@@ -3,6 +3,11 @@
 import { useParams, useRouter } from "next/navigation";
 import { useAuth } from "@clerk/nextjs";
 import { useMarketplace } from "@/context/MarketplaceContext";
+import {
+  DEFAULT_REGION,
+  formatProductPrice,
+  resolveRegionCode,
+} from "@/lib/regions";
 import { useCallback, useEffect, useState } from "react";
 import {
   Check,
@@ -16,6 +21,29 @@ import {
 const BASE = process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com/api";
 const steps = ["Preparing", "Shipped", "Delivered"];
 
+
+/** Product page: formatProduct(amount, product.region). Order lines freeze product.price in product.region. */
+function orderSourceRegion(order: any): string {
+  if (!order) return DEFAULT_REGION;
+  if (order.region) return resolveRegionCode(order.region);
+  const first = order?.items?.[0];
+  if (first?.region) return resolveRegionCode(first.region);
+  const prod = first?.product;
+  if (prod && typeof prod === "object" && prod.region) {
+    return resolveRegionCode(prod.region);
+  }
+  return DEFAULT_REGION;
+}
+
+function itemSourceRegion(item: any, order?: any): string {
+  if (item?.region) return resolveRegionCode(item.region);
+  const prod = item?.product;
+  if (prod && typeof prod === "object" && prod.region) {
+    return resolveRegionCode(prod.region);
+  }
+  return orderSourceRegion(order);
+}
+
 export default function OrderDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
@@ -25,16 +53,33 @@ export default function OrderDetailPage() {
   const [toast, setToast] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
   const [actionError, setActionError] = useState("");
-  const { format } = useMarketplace();
+  const marketplace = useMarketplace() as {
+    region?: string;
+    formatProduct?: (amount: number, productRegion?: string | null) => string;
+    ratesToNgn?: Record<string, number> | null;
+  };
+  const displayRegion = resolveRegionCode(marketplace?.region || DEFAULT_REGION);
+  const formatProductFn =
+    marketplace?.formatProduct ||
+    ((amount: number, productRegion?: string | null) =>
+      formatProductPrice(
+        amount,
+        productRegion,
+        displayRegion,
+        marketplace?.ratesToNgn || null
+      ));
 
-  /**
-   * Order totals / line prices are frozen at purchase.
-   * Do NOT run formatProduct (FX) on them — only format in the buyer's
-   * current marketplace currency for display.
-   */
+  /** Same as product page: formatProduct(amount, listingRegion). */
+  const orderRegion = order ? orderSourceRegion(order) : DEFAULT_REGION;
   const fmt = useCallback(
-    (amount: number) => format(Number(amount) || 0),
-    [format]
+    (amount: number, listingRegion?: string | null) =>
+      formatProductFn(Number(amount) || 0, listingRegion || orderRegion),
+    [formatProductFn, orderRegion]
+  );
+  const fmtItem = useCallback(
+    (amount: number, item: any) =>
+      formatProductFn(Number(amount) || 0, itemSourceRegion(item, order)),
+    [formatProductFn, order]
   );
 
   const loadOrder = useCallback(async () => {
@@ -412,7 +457,7 @@ export default function OrderDetailPage() {
                     {item.name}
                   </p>
                   <p className="mt-0.5 text-xs text-secondary">
-                    Qty {item.quantity} · {fmt(Number(item.price) || 0)}
+                    Qty {item.quantity} · {fmtItem(Number(item.price) || 0, item)}
                   </p>
                 </div>
               </div>
