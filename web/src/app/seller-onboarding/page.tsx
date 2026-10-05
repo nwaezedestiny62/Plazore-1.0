@@ -28,44 +28,44 @@ const SLIDES: {
   key: SlideKey;
   kicker: string;
   headline: string;
-  /** public path under /public — swap to /board1.png etc when assets exist */
+  /** files in web/public/ — board1.png … board6.png */
   image: string;
 }[] = [
   {
     key: "welcome",
     kicker: "Seller Lounge",
     headline: "Welcome to Plazore.",
-    image: "/logo.png",
+    image: "/board1.png",
   },
   {
     key: "how",
     kicker: "The journey",
     headline: "Your products. A larger digital marketplace.",
-    image: "/logo.png",
+    image: "/board2.png",
   },
   {
     key: "products",
     kicker: "Listings",
     headline: "Presentation matters.",
-    image: "/logo.png",
+    image: "/board3.png",
   },
   {
     key: "orders",
     kicker: "Fulfilment",
     headline: "When a buyer orders, Plazore keeps the process structured.",
-    image: "/logo.png",
+    image: "/board4.png",
   },
   {
     key: "earn",
     kicker: "Economics",
     headline: "Sell through Plazore. Earn from every completed order.",
-    image: "/logo.png",
+    image: "/board5.png",
   },
   {
     key: "presence",
     kicker: "Your store",
     headline: "Your store is part of the Plazore experience.",
-    image: "/logo.png",
+    image: "/board6.png",
   },
 ];
 
