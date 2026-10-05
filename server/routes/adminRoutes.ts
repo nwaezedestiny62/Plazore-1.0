@@ -6,6 +6,7 @@ import {
   getAdminUserDetail,
   getAdminMerchants,
   getAdminMerchantDetail,
+  updateAdminMerchantLocation,
   getAdminProducts,
   setSellerSuspended,
   setSellerVerified,
@@ -70,6 +71,11 @@ AdminRouter.get("/users", ...adminOnly, getAdminUsers);
 AdminRouter.get("/users/:id", ...adminOnly, getAdminUserDetail);
 AdminRouter.get("/merchants", ...adminOnly, getAdminMerchants);
 AdminRouter.get("/merchants/:id", ...adminOnly, getAdminMerchantDetail);
+AdminRouter.patch(
+  "/merchants/:id/business-location",
+  ...adminOnly,
+  updateAdminMerchantLocation
+);
 AdminRouter.patch("/sellers/:id/suspend", ...adminOnly, setSellerSuspended);
 AdminRouter.patch("/sellers/:id/verify", ...adminOnly, setSellerVerified);
 

@@ -8,6 +8,8 @@ import {
   useRef,
   useState,
   type ReactNode,
+  type Dispatch,
+  type SetStateAction,
 } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -23,6 +25,9 @@ import {
   ShoppingBag,
   Store,
   X,
+  MapPin,
+  Pencil,
+  Save,
 } from "lucide-react";
 import { adminFetch } from "@/lib/api";
 import { OrbLoader } from "@/components/OrbLoader";
@@ -83,10 +88,14 @@ type MerchantDetail = {
         state?: string;
         zipCode?: string;
         country?: string;
+        landmark?: string;
+        label?: string;
       };
       deliveryMethod?: string;
       courierCompany?: string;
     };
+    sellerOnboardingCompleted?: boolean;
+    businessLocationCompleted?: boolean;
     sellerAppliedAt?: string;
     clerkId?: string;
   };
@@ -292,16 +301,254 @@ function ActivityFloat({
   );
 }
 
+
+type LocAddress = {
+  street?: string;
+  city?: string;
+  state?: string;
+  zipCode?: string;
+  country?: string;
+  landmark?: string;
+  label?: string;
+};
+
+function BusinessLocationCard({
+  merchantId,
+  address,
+  deliveryMethod,
+  courierCompany,
+  businessLocationCompleted,
+  sellerOnboardingCompleted,
+  getToken,
+  onSaved,
+}: {
+  merchantId: string;
+  address?: LocAddress | null;
+  deliveryMethod?: string;
+  courierCompany?: string;
+  businessLocationCompleted?: boolean;
+  sellerOnboardingCompleted?: boolean;
+  getToken: () => Promise<string | null>;
+  onSaved: (next: LocAddress) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [form, setForm] = useState<LocAddress>({
+    street: "",
+    city: "",
+    state: "",
+    zipCode: "",
+    country: "",
+    landmark: "",
+    label: "",
+  });
+
+  useEffect(() => {
+    setForm({
+      street: address?.street || "",
+      city: address?.city || "",
+      state: address?.state || "",
+      zipCode: address?.zipCode || "",
+      country: address?.country || "",
+      landmark: address?.landmark || "",
+      label: address?.label || "",
+    });
+    setEditing(false);
+    setErr(null);
+  }, [address, merchantId]);
+
+  const set = (k: keyof LocAddress, v: string) =>
+    setForm((f) => ({ ...f, [k]: v }));
+
+  const save = async () => {
+    if (!form.country?.trim() || !form.city?.trim() || !form.street?.trim()) {
+      setErr("Country, city and business address are required.");
+      return;
+    }
+    setSaving(true);
+    setErr(null);
+    try {
+      const token = await getToken();
+      if (!token) throw new Error("Not authenticated");
+      await adminFetch(
+        `/admin/merchants/${merchantId}/business-location`,
+        token,
+        {
+          method: "PATCH",
+          body: JSON.stringify({
+            street: form.street?.trim(),
+            city: form.city?.trim(),
+            state: form.state?.trim() || "",
+            zipCode: form.zipCode?.trim() || "",
+            country: form.country?.trim(),
+            landmark: form.landmark?.trim() || "",
+            label: form.label?.trim() || "",
+          }),
+        }
+      );
+      onSaved({
+        street: form.street?.trim(),
+        city: form.city?.trim(),
+        state: form.state?.trim() || "",
+        zipCode: form.zipCode?.trim() || "",
+        country: form.country?.trim(),
+        landmark: form.landmark?.trim() || "",
+        label: form.label?.trim() || "",
+      });
+      setEditing(false);
+    } catch (e: any) {
+      setErr(e?.message || "Failed to save location");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const rows: [string, string | undefined][] = [
+    ["Label", address?.label],
+    ["Street", address?.street],
+    ["City", address?.city],
+    ["State / Province", address?.state],
+    ["Postal / ZIP", address?.zipCode],
+    ["Country", address?.country],
+    ["Landmark", address?.landmark],
+    [
+      "Delivery",
+      [deliveryMethod, courierCompany].filter(Boolean).join(" · ") || undefined,
+    ],
+  ];
+
+  const hasLoc = !!(address?.city || address?.street || address?.country);
+
+  return (
+    <section className="rounded-2xl border border-white/[0.07] bg-white/[0.025] p-4">
+      <div className="mb-3 flex items-center gap-2">
+        <MapPin className="h-4 w-4 text-[#00E575]" />
+        <p className="text-[13px] font-bold">Business location</p>
+        <div className="ml-auto flex items-center gap-2">
+          {businessLocationCompleted ? (
+            <Badge tone="green">Complete</Badge>
+          ) : (
+            <Badge tone="error">Missing</Badge>
+          )}
+          {sellerOnboardingCompleted === false ? (
+            <Badge tone="neutral">Onboarding pending</Badge>
+          ) : null}
+          {!editing ? (
+            <button
+              type="button"
+              onClick={() => setEditing(true)}
+              className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.04] px-2.5 text-[11px] font-semibold text-white/70 hover:border-white/20 hover:text-white"
+            >
+              <Pencil className="h-3 w-3" />
+              Edit
+            </button>
+          ) : null}
+        </div>
+      </div>
+
+      {!editing ? (
+        hasLoc ? (
+          <div className="grid gap-2 sm:grid-cols-2">
+            {rows.map(([k, v]) =>
+              v ? (
+                <div
+                  key={k}
+                  className="rounded-xl border border-white/[0.06] bg-[#0A0D12]/50 px-3 py-2"
+                >
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-white/35">
+                    {k}
+                  </p>
+                  <p className="mt-0.5 text-[13px] font-medium text-white/90">
+                    {v}
+                  </p>
+                </div>
+              ) : null
+            )}
+          </div>
+        ) : (
+          <p className="text-[12px] text-white/40">
+            No business location on file. Use Edit to set one.
+          </p>
+        )
+      ) : (
+        <div className="space-y-2.5">
+          {(
+            [
+              ["label", "Location label", "e.g. Main warehouse"],
+              ["street", "Business address *", "Street, building, suite"],
+              ["city", "City *", "City or town"],
+              ["state", "State / Province", ""],
+              ["zipCode", "Postal / ZIP", ""],
+              ["country", "Country *", ""],
+              ["landmark", "Landmark", "Optional"],
+            ] as const
+          ).map(([key, lab, ph]) => (
+            <div key={key}>
+              <label className="mb-1 block text-[11px] font-semibold text-white/45">
+                {lab}
+              </label>
+              <input
+                value={(form as any)[key] || ""}
+                onChange={(e) => set(key, e.target.value)}
+                placeholder={ph}
+                className="h-10 w-full rounded-xl border border-white/12 bg-[#14181F] px-3 text-[13px] outline-none focus:border-[#00E575]/45"
+              />
+            </div>
+          ))}
+          {err ? <p className="text-xs text-red-400">{err}</p> : null}
+          <div className="flex gap-2 pt-1">
+            <button
+              type="button"
+              disabled={saving}
+              onClick={() => void save()}
+              className="inline-flex h-10 flex-1 items-center justify-center gap-1.5 rounded-xl bg-gradient-to-r from-[#00E575] to-[#00C060] text-[13px] font-bold text-[#041008] disabled:opacity-60"
+            >
+              <Save className="h-3.5 w-3.5" />
+              {saving ? "Saving…" : "Save location"}
+            </button>
+            <button
+              type="button"
+              disabled={saving}
+              onClick={() => {
+                setEditing(false);
+                setErr(null);
+                setForm({
+                  street: address?.street || "",
+                  city: address?.city || "",
+                  state: address?.state || "",
+                  zipCode: address?.zipCode || "",
+                  country: address?.country || "",
+                  landmark: address?.landmark || "",
+                  label: address?.label || "",
+                });
+              }}
+              className="h-10 rounded-xl border border-white/12 px-4 text-[13px] font-semibold text-white/60"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+
 function DetailModal({
   open,
   detail,
   loading,
   onClose,
+  getToken,
+  setDetail,
 }: {
   open: boolean;
   detail: MerchantDetail | null;
   loading: boolean;
   onClose: () => void;
+  getToken: () => Promise<string | null>;
+  setDetail: Dispatch<SetStateAction<MerchantDetail | null>>;
 }) {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
@@ -448,16 +695,6 @@ function DetailModal({
                   ["Region", u?.marketplaceRegion],
                   ["Business goal", u?.businessGoal],
                   [
-                    "Ship from",
-                    [
-                      u?.shippingDefaults?.address?.city,
-                      u?.shippingDefaults?.address?.state,
-                      u?.shippingDefaults?.address?.country,
-                    ]
-                      .filter(Boolean)
-                      .join(", ") || "—",
-                  ],
-                  [
                     "Bank",
                     u?.payout?.bankName
                       ? `${u.payout.bankName} · ${u.payout.accountName || "—"} · ${u.payout.accountNumber ? "••••" + String(u.payout.accountNumber).slice(-4) : "—"}`
@@ -478,6 +715,33 @@ function DetailModal({
                   </div>
                 ))}
               </section>
+
+              <BusinessLocationCard
+                merchantId={u?._id || ""}
+                address={u?.shippingDefaults?.address}
+                deliveryMethod={u?.shippingDefaults?.deliveryMethod}
+                courierCompany={u?.shippingDefaults?.courierCompany}
+                businessLocationCompleted={u?.businessLocationCompleted}
+                sellerOnboardingCompleted={u?.sellerOnboardingCompleted}
+                getToken={getToken}
+                onSaved={(next) => {
+                  setDetail((prev) =>
+                    prev
+                      ? {
+                          ...prev,
+                          user: {
+                            ...prev.user,
+                            shippingDefaults: {
+                              ...(prev.user.shippingDefaults || {}),
+                              address: next,
+                            },
+                            businessLocationCompleted: true,
+                          },
+                        }
+                      : prev
+                  );
+                }}
+              />
 
               {u?.storeDescription ? (
                 <section className="rounded-2xl border border-white/[0.07] bg-white/[0.025] p-4">
@@ -974,6 +1238,8 @@ export default function MerchantsPage() {
         detail={detail}
         loading={detailLoading}
         onClose={closeModal}
+        getToken={getToken}
+        setDetail={setDetail}
       />
     </Gate>
   );

@@ -2,6 +2,9 @@
  * Plazore Seller Onboarding
  * Appears ONLY after successful seller registration.
  * Progress is persisted server-side.
+ *
+ * Horizontal pager between slides; each slide body scrolls vertically
+ * when content exceeds the available space.
  */
 
 import api from '@/constants/api'
@@ -37,14 +40,8 @@ const TEXT_DIM = 'rgba(245, 247, 250, 0.72)'
 const LINE = 'rgba(255, 255, 255, 0.08)'
 
 /**
- * Static requires only — Metro resolves these at bundle time.
  * Put board1.png … board6.png in client/assets/
  */
-/**
- * Swap these to board1.png … board6.png once the files are in client/assets/
- * Using logo-0.png so the app builds even before board assets are added.
- */
-const LOGO = require('../../assets/logo-0.png')
 const BOARD_IMAGES: Record<number, ImageSourcePropType> = {
   1: require('../../assets/board1.png'),
   2: require('../../assets/board2.png'),
@@ -53,10 +50,6 @@ const BOARD_IMAGES: Record<number, ImageSourcePropType> = {
   5: require('../../assets/board5.png'),
   6: require('../../assets/board6.png'),
 }
-// When board assets exist, replace with:
-// 1: require('../../assets/board1.png'),
-// 2: require('../../assets/board2.png'),
-// etc.
 
 type SlideKey = 'welcome' | 'how' | 'products' | 'orders' | 'earn' | 'presence'
 
@@ -338,6 +331,7 @@ export default function SellerOnboarding() {
           ))}
         </View>
 
+        {/* Horizontal pager between slides */}
         <ScrollView
           ref={scrollRef}
           horizontal
@@ -350,27 +344,37 @@ export default function SellerOnboarding() {
         >
           {SLIDES.map((s) => (
             <View key={s.key} style={[styles.page, { width: SCREEN_W }]}>
-              <View style={styles.imageWrap}>
-                <Image
-                  source={BOARD_IMAGES[s.image]}
-                  style={styles.image}
-                  resizeMode="contain"
-                />
-                <LinearGradient
-                  colors={['transparent', 'rgba(9,11,15,0.4)', BG]}
-                  locations={[0.5, 0.85, 1]}
-                  style={StyleSheet.absoluteFill}
-                  pointerEvents="none"
-                />
-              </View>
-
-              <View style={styles.content}>
-                <Text style={styles.kicker}>{s.kicker}</Text>
-                <Text style={styles.headline}>{s.headline}</Text>
-                <View style={styles.body}>
-                  <SlideBody kind={s.bodyKind} />
+              {/* Vertical scroll so long content (e.g. fulfilment steps) is reachable */}
+              <ScrollView
+                style={styles.pageScroll}
+                contentContainerStyle={styles.pageScrollContent}
+                showsVerticalScrollIndicator={false}
+                bounces
+                nestedScrollEnabled
+                keyboardShouldPersistTaps="handled"
+              >
+                <View style={styles.imageWrap}>
+                  <Image
+                    source={BOARD_IMAGES[s.image]}
+                    style={styles.image}
+                    resizeMode="contain"
+                  />
+                  <LinearGradient
+                    colors={['transparent', 'rgba(9,11,15,0.4)', BG]}
+                    locations={[0.5, 0.85, 1]}
+                    style={StyleSheet.absoluteFill}
+                    pointerEvents="none"
+                  />
                 </View>
-              </View>
+
+                <View style={styles.content}>
+                  <Text style={styles.kicker}>{s.kicker}</Text>
+                  <Text style={styles.headline}>{s.headline}</Text>
+                  <View style={styles.body}>
+                    <SlideBody kind={s.bodyKind} />
+                  </View>
+                </View>
+              </ScrollView>
             </View>
           ))}
         </ScrollView>
@@ -450,8 +454,13 @@ const styles = StyleSheet.create({
   progressSegCurrent: { backgroundColor: GREEN },
   pager: { flex: 1 },
   page: { flex: 1 },
+  pageScroll: { flex: 1 },
+  pageScrollContent: {
+    paddingBottom: 24,
+    flexGrow: 1,
+  },
   imageWrap: {
-    height: SCREEN_W * 0.58,
+    height: SCREEN_W * 0.48,
     marginHorizontal: 20,
     marginTop: 12,
     borderRadius: 20,
@@ -467,7 +476,6 @@ const styles = StyleSheet.create({
     height: '88%',
   },
   content: {
-    flex: 1,
     paddingHorizontal: 24,
     paddingTop: 20,
   },
@@ -487,7 +495,7 @@ const styles = StyleSheet.create({
     letterSpacing: -0.3,
     marginBottom: 14,
   },
-  body: { flexShrink: 1 },
+  body: {},
   bodyText: {
     fontSize: 15,
     lineHeight: 23,
@@ -580,6 +588,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingBottom: Platform.OS === 'ios' ? 8 : 16,
     paddingTop: 8,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: LINE,
   },
   backBtn: {
     flexDirection: 'row',

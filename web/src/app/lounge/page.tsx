@@ -1018,12 +1018,12 @@ export default function LoungePage() {
           <div className="flex h-12 items-center gap-2 px-3 sm:h-14 sm:px-4">
             <HomeToMall />
             <div className="min-w-0 flex-1">
-              <p className="text-[10px] font-semibold tracking-[0.18em] text-white/40">
-                PLAZORE
-              </p>
-              <p className="truncate text-[15px] font-bold tracking-tight">
-                Lounge
-              </p>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/logo-2.png"
+                alt="Plazore Lounge"
+                className="h-8 w-auto max-w-[160px] object-contain object-left sm:h-9"
+              />
             </div>
             <Link
               href="/cart"
@@ -1256,11 +1256,13 @@ export default function LoungePage() {
           <header className="mb-6 flex items-center justify-between gap-4">
             <div className="flex min-w-0 items-center gap-4">
               <HomeToMall />
-              <div>
-                <p className="text-[11px] font-semibold tracking-[0.18em] text-white/40">
-                  PLAZORE
-                </p>
-                <p className="text-[18px] font-bold tracking-tight">Lounge</p>
+              <div className="flex items-center">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src="/logo-2.png"
+                  alt="Plazore Lounge"
+                  className="h-9 w-auto max-w-[180px] object-contain object-left"
+                />
               </div>
               <nav className="flex items-center gap-1">
                 {TOP_TABS.map((tab) => {

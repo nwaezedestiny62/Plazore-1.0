@@ -375,7 +375,7 @@ export const getAdminUsers = async (req: Request, res: Response) => {
         .skip((page - 1) * limit)
         .limit(limit)
         .select(
-          "name email phone role image clerkId marketplaceRegion storeName storeDescription businessGoal storeLogo storeBanner isSellerVerified isSellerSuspended sellerAppliedAt payout shippingDefaults lastSeenAt lastSeenPlatform createdAt updatedAt moderation"
+          "name email phone role image clerkId marketplaceRegion storeName storeDescription businessGoal storeLogo storeBanner isSellerVerified isSellerSuspended sellerAppliedAt payout shippingDefaults sellerOnboardingCompleted businessLocationCompleted lastSeenAt lastSeenPlatform createdAt updatedAt moderation"
         )
         .lean(),
       User.countDocuments(filter),
@@ -1834,7 +1834,7 @@ export const getAdminMerchants = async (req: Request, res: Response) => {
         .skip((page - 1) * limit)
         .limit(limit)
         .select(
-          "name email phone role image clerkId marketplaceRegion storeName storeDescription businessGoal storeLogo storeBanner isSellerVerified isSellerSuspended sellerAppliedAt payout shippingDefaults lastSeenAt lastSeenPlatform createdAt updatedAt moderation"
+          "name email phone role image clerkId marketplaceRegion storeName storeDescription businessGoal storeLogo storeBanner isSellerVerified isSellerSuspended sellerAppliedAt payout shippingDefaults sellerOnboardingCompleted businessLocationCompleted lastSeenAt lastSeenPlatform createdAt updatedAt moderation"
         )
         .lean(),
       User.countDocuments(filter),
@@ -1998,7 +1998,7 @@ export const getAdminMerchantDetail = async (req: Request, res: Response) => {
 
     const user: any = await User.findById(id)
       .select(
-        "name email phone role image clerkId marketplaceRegion storeName storeDescription businessGoal storeLogo storeBanner isSellerVerified isSellerSuspended sellerAppliedAt payout shippingDefaults lastSeenAt lastSeenPlatform createdAt updatedAt moderation"
+        "name email phone role image clerkId marketplaceRegion storeName storeDescription businessGoal storeLogo storeBanner isSellerVerified isSellerSuspended sellerAppliedAt payout shippingDefaults sellerOnboardingCompleted businessLocationCompleted lastSeenAt lastSeenPlatform createdAt updatedAt moderation"
       )
       .lean();
 
@@ -2113,5 +2113,74 @@ export const getAdminMerchantDetail = async (req: Request, res: Response) => {
   } catch (error: any) {
     console.error("getAdminMerchantDetail", error);
     res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+
+/** Admin: update merchant business location (same fields as seller onboarding) */
+export const updateAdminMerchantLocation = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const {
+      street,
+      city,
+      state,
+      zipCode,
+      country,
+      landmark,
+      label,
+    } = req.body || {};
+
+    if (!country?.trim() || !city?.trim() || !street?.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Country, city and business address are required",
+      });
+    }
+
+    const merchant = await User.findById(id);
+    if (!merchant || (merchant.role !== "seller" && merchant.role !== "admin")) {
+      return res.status(404).json({
+        success: false,
+        message: "Merchant not found",
+      });
+    }
+
+    const address = {
+      street: String(street).trim(),
+      city: String(city).trim(),
+      state: String(state || "").trim(),
+      zipCode: String(zipCode || "").trim(),
+      country: String(country).trim(),
+      landmark: String(landmark || "").trim(),
+      label: String(label || "").trim(),
+    };
+
+    const prev: any = merchant.shippingDefaults || {};
+
+    merchant.shippingDefaults = {
+      address,
+      deliveryMethod: prev.deliveryMethod || "",
+      courierCompany: prev.courierCompany || "",
+    } as any;
+
+    (merchant as any).businessLocationCompleted = true;
+    (merchant as any).businessLocationCompletedAt = new Date();
+    await merchant.save();
+
+    return res.json({
+      success: true,
+      message: "Business location updated",
+      data: {
+        shippingDefaults: merchant.shippingDefaults,
+        businessLocationCompleted: true,
+      },
+    });
+  } catch (error: any) {
+    console.error("updateAdminMerchantLocation", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to update location",
+    });
   }
 };
