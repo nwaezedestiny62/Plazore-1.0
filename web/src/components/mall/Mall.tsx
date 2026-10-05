@@ -974,7 +974,7 @@ function MallInner({
                 }}
                 className="bg-[#0C0F14] pb-16"
               >
-                <div className="relative h-[38vh] min-h-[240px] max-h-[420px] overflow-hidden sm:h-[42vh]">
+                <div className="relative h-[34vh] min-h-[220px] max-h-[360px] overflow-hidden sm:h-[38vh]">
                   {rooms.one[0]?.images?.[0] ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
