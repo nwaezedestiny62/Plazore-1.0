@@ -67,6 +67,10 @@ export const applyAsSeller = async (req: Request, res: Response) => {
         phone: String(phone).trim(),
         sellerAppliedAt: new Date(),
         isSellerVerified: true, // immediate access — no 17h review for now
+        // New sellers must complete onboarding + business location
+        sellerOnboardingCompleted: false,
+        sellerOnboardingVersion: 0,
+        businessLocationCompleted: false,
         payout: {
           bankName: bankName.trim(),
           accountName: accountName.trim(),
@@ -463,6 +467,318 @@ export const verifyPayoutAccess = async (req: Request, res: Response) => {
     return res.status(500).json({
       success: false,
       message: error.message || "Verification failed",
+    });
+  }
+};
+// ====================== SELLER ONBOARDING ======================
+
+const CURRENT_ONBOARDING_VERSION = 1;
+
+/**
+ * GET /api/seller/onboarding-status
+ * Returns progress so the client can route correctly after login / refresh.
+ */
+export const getOnboardingStatus = async (req: Request, res: Response) => {
+  try {
+    const user = getUser(req);
+    const full = await User.findById(user._id).select(
+      "role sellerOnboardingCompleted sellerOnboardingVersion sellerOnboardingCompletedAt businessLocationCompleted businessLocationCompletedAt shippingDefaults marketplaceRegion storeName"
+    );
+
+    if (!full) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+
+    if (full.role !== "seller" && full.role !== "admin") {
+      return res.json({
+        success: true,
+        data: {
+          isSeller: false,
+          needsOnboarding: false,
+          needsBusinessLocation: false,
+        },
+      });
+    }
+
+    // Admins skip onboarding
+    if (full.role === "admin") {
+      return res.json({
+        success: true,
+        data: {
+          isSeller: true,
+          needsOnboarding: false,
+          needsBusinessLocation: false,
+          sellerOnboardingCompleted: true,
+          businessLocationCompleted: true,
+        },
+      });
+    }
+
+    const addr = full.shippingDefaults?.address;
+    const hasExistingLocation = !!(addr?.city && addr?.country);
+
+    // Explicitly completed onboarding (new flow)
+    let onboardingDone =
+      !!full.sellerOnboardingCompleted &&
+      (full.sellerOnboardingVersion ?? 0) >= CURRENT_ONBOARDING_VERSION;
+
+    // Grandfather existing sellers who registered before this feature:
+    // if they never had the flag set but already operate (have location or long-standing account)
+    if (!onboardingDone && full.sellerAppliedAt) {
+      const appliedMs = new Date(full.sellerAppliedAt).getTime();
+      const featureLaunchMs = new Date("2026-10-04T00:00:00Z").getTime();
+      if (appliedMs < featureLaunchMs || hasExistingLocation) {
+        onboardingDone = true;
+      }
+    }
+
+    let locationDone = !!full.businessLocationCompleted || hasExistingLocation;
+
+    return res.json({
+      success: true,
+      data: {
+        isSeller: true,
+        needsOnboarding: !onboardingDone,
+        needsBusinessLocation: onboardingDone && !locationDone,
+        sellerOnboardingCompleted: onboardingDone,
+        sellerOnboardingVersion: full.sellerOnboardingVersion ?? 0,
+        businessLocationCompleted: locationDone,
+        businessLocation: addr
+          ? {
+              street: addr.street || "",
+              city: addr.city || "",
+              state: addr.state || "",
+              zipCode: addr.zipCode || "",
+              country: addr.country || "",
+              landmark: (addr as any).landmark || "",
+              label: (addr as any).label || "",
+            }
+          : null,
+        marketplaceRegion: full.marketplaceRegion || "NG",
+        storeName: full.storeName || "",
+      },
+    });
+  } catch (error: any) {
+    console.error("getOnboardingStatus:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to load onboarding status",
+    });
+  }
+};
+
+/**
+ * POST /api/seller/onboarding/complete
+ * Marks the educational onboarding screens as completed.
+ * Does NOT unlock the dashboard — business location is still required.
+ */
+export const completeSellerOnboarding = async (req: Request, res: Response) => {
+  try {
+    const user = getUser(req);
+
+    if (user.role !== "seller" && user.role !== "admin") {
+      return res.status(403).json({
+        success: false,
+        message: "Only sellers can complete onboarding",
+      });
+    }
+
+    const updated = await User.findByIdAndUpdate(
+      user._id,
+      {
+        sellerOnboardingCompleted: true,
+        sellerOnboardingVersion: CURRENT_ONBOARDING_VERSION,
+        sellerOnboardingCompletedAt: new Date(),
+      },
+      { new: true }
+    ).select(
+      "sellerOnboardingCompleted sellerOnboardingVersion businessLocationCompleted"
+    );
+
+    return res.json({
+      success: true,
+      message: "Onboarding completed. Please set your business location.",
+      data: {
+        sellerOnboardingCompleted: true,
+        sellerOnboardingVersion: CURRENT_ONBOARDING_VERSION,
+        needsBusinessLocation: !updated?.businessLocationCompleted,
+      },
+    });
+  } catch (error: any) {
+    console.error("completeSellerOnboarding:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to complete onboarding",
+    });
+  }
+};
+
+/**
+ * POST /api/seller/business-location
+ * Saves the mandatory business location and unlocks the seller dashboard.
+ */
+export const completeBusinessLocation = async (req: Request, res: Response) => {
+  try {
+    const user = getUser(req);
+
+    if (user.role !== "seller" && user.role !== "admin") {
+      return res.status(403).json({
+        success: false,
+        message: "Only sellers can set business location",
+      });
+    }
+
+    const {
+      street,
+      city,
+      state,
+      zipCode,
+      country,
+      landmark,
+      label,
+    } = req.body || {};
+
+    if (!country?.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Country is required",
+      });
+    }
+    if (!city?.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "City is required",
+      });
+    }
+    if (!street?.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Business address is required",
+      });
+    }
+
+    const address = {
+      street: String(street).trim(),
+      city: String(city).trim(),
+      state: String(state || "").trim(),
+      zipCode: String(zipCode || "").trim(),
+      country: String(country).trim(),
+      landmark: String(landmark || "").trim(),
+      label: String(label || "").trim(),
+    };
+
+    const existing = await User.findById(user._id).select("shippingDefaults");
+    const prevDefaults = existing?.shippingDefaults || {};
+
+    const updated = await User.findByIdAndUpdate(
+      user._id,
+      {
+        shippingDefaults: {
+          address,
+          deliveryMethod: (prevDefaults as any).deliveryMethod || "",
+          courierCompany: (prevDefaults as any).courierCompany || "",
+        },
+        businessLocationCompleted: true,
+        businessLocationCompletedAt: new Date(),
+        // Ensure onboarding is also marked if somehow skipped
+        sellerOnboardingCompleted: true,
+        sellerOnboardingVersion: CURRENT_ONBOARDING_VERSION,
+        sellerOnboardingCompletedAt:
+          existing && (existing as any).sellerOnboardingCompletedAt
+            ? (existing as any).sellerOnboardingCompletedAt
+            : new Date(),
+      },
+      { new: true }
+    ).select(
+      "shippingDefaults businessLocationCompleted sellerOnboardingCompleted marketplaceRegion storeName"
+    );
+
+    return res.json({
+      success: true,
+      message: "Business location saved. Welcome to your seller dashboard.",
+      data: {
+        businessLocationCompleted: true,
+        sellerOnboardingCompleted: true,
+        businessLocation: updated?.shippingDefaults?.address || address,
+      },
+    });
+  } catch (error: any) {
+    console.error("completeBusinessLocation:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to save business location",
+    });
+  }
+};
+
+/**
+ * PUT /api/seller/business-location (also used by admin via admin routes)
+ * Update business location after initial setup.
+ */
+export const updateBusinessLocation = async (req: Request, res: Response) => {
+  try {
+    const user = getUser(req);
+
+    if (user.role !== "seller" && user.role !== "admin") {
+      return res.status(403).json({
+        success: false,
+        message: "Only sellers can update business location",
+      });
+    }
+
+    const {
+      street,
+      city,
+      state,
+      zipCode,
+      country,
+      landmark,
+      label,
+    } = req.body || {};
+
+    if (!country?.trim() || !city?.trim() || !street?.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Country, city and business address are required",
+      });
+    }
+
+    const address = {
+      street: String(street).trim(),
+      city: String(city).trim(),
+      state: String(state || "").trim(),
+      zipCode: String(zipCode || "").trim(),
+      country: String(country).trim(),
+      landmark: String(landmark || "").trim(),
+      label: String(label || "").trim(),
+    };
+
+    const existing = await User.findById(user._id).select("shippingDefaults");
+    const prevDefaults = existing?.shippingDefaults || {};
+
+    const updated = await User.findByIdAndUpdate(
+      user._id,
+      {
+        "shippingDefaults.address": address,
+        businessLocationCompleted: true,
+        businessLocationCompletedAt: new Date(),
+      },
+      { new: true }
+    ).select("shippingDefaults businessLocationCompleted");
+
+    return res.json({
+      success: true,
+      message: "Business location updated",
+      data: {
+        businessLocation: updated?.shippingDefaults?.address || address,
+        businessLocationCompleted: true,
+      },
+    });
+  } catch (error: any) {
+    console.error("updateBusinessLocation:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to update business location",
     });
   }
 };

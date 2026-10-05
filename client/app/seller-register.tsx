@@ -197,11 +197,11 @@ export default function SellerRegister() {
       await user?.reload()
       Alert.alert(
         'Store Created',
-        'Your seller account is active. Welcome to the Plazore Seller Lounge.',
+        'Your seller account is active. Next, complete a short orientation and set your business location.',
         [
           {
-            text: 'Go to Dashboard',
-            onPress: () => router.replace('/seller' as any),
+            text: 'Continue',
+            onPress: () => router.replace('/seller-onboarding' as any),
           },
         ],
       )

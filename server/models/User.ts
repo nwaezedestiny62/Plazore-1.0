@@ -1,5 +1,4 @@
 import mongoose from "mongoose";
-import { IUser } from "../types/index.js";
 
 const moderationSideSchema = new mongoose.Schema(
   {
@@ -25,7 +24,6 @@ const moderationSideSchema = new mongoose.Schema(
     lastOutcome: {
       type: String,
       enum: ["PARDONED", "RESTORED"],
-      default: undefined,
     },
     restrictions: {
       preventNewListings: { type: Boolean, default: false },
@@ -76,6 +74,8 @@ const userSchema = new mongoose.Schema(
         state: { type: String },
         zipCode: { type: String },
         country: { type: String },
+        landmark: { type: String, default: "" },
+        label: { type: String, default: "" },
       },
       deliveryMethod: {
         type: String,
@@ -84,6 +84,12 @@ const userSchema = new mongoose.Schema(
       },
       courierCompany: { type: String, default: "" },
     },
+
+    sellerOnboardingCompleted: { type: Boolean, default: false, index: true },
+    sellerOnboardingVersion: { type: Number, default: 0 },
+    sellerOnboardingCompletedAt: { type: Date },
+    businessLocationCompleted: { type: Boolean, default: false, index: true },
+    businessLocationCompletedAt: { type: Date },
 
     moderation: {
       buyer: { type: moderationSideSchema, default: () => ({}) },
@@ -94,11 +100,10 @@ const userSchema = new mongoose.Schema(
     lastSeenPlatform: {
       type: String,
       enum: ["web", "app", "admin"],
-      default: undefined,
     },
   },
   { timestamps: true }
 );
 
-const User = mongoose.model<IUser>("User", userSchema);
+const User = mongoose.model("User", userSchema);
 export default User;

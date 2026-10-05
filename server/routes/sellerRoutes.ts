@@ -11,6 +11,10 @@ import {
   updateMyStore,
   getPublicStorefront,
   verifyPayoutAccess,
+  getOnboardingStatus,
+  completeSellerOnboarding,
+  completeBusinessLocation,
+  updateBusinessLocation,
 } from "../controllers/sellerController.js";
 import {
   createProduct,
@@ -22,6 +26,35 @@ import upload from "../middleware/upload.js";
 const SellerRouter = express.Router();
 
 SellerRouter.post("/apply", protect, authorize("buyer"), applyAsSeller);
+
+// ——— Seller onboarding (must complete before dashboard) ———
+SellerRouter.get(
+  "/onboarding-status",
+  protect,
+  authorize("seller", "admin"),
+  getOnboardingStatus
+);
+
+SellerRouter.post(
+  "/onboarding/complete",
+  protect,
+  authorize("seller", "admin"),
+  completeSellerOnboarding
+);
+
+SellerRouter.post(
+  "/business-location",
+  protect,
+  authorize("seller", "admin"),
+  completeBusinessLocation
+);
+
+SellerRouter.put(
+  "/business-location",
+  protect,
+  authorize("seller", "admin"),
+  updateBusinessLocation
+);
 
 SellerRouter.get(
   "/dashboard",

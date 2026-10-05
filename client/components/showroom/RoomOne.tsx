@@ -16,6 +16,9 @@ const CARD_GAP = 8
 const RAIL_CAP = 25
 const ROOM_CAP = 50
 
+/** Horizon strip — was 40% of the phone; keep it a short cinematic header. */
+const BANNER_H = Math.round(Math.min(Math.max(SCREEN_H * 0.3, 210), 268))
+
 interface RoomOneProps {
   products: Product[]
   title?: string
@@ -133,16 +136,13 @@ const styles = StyleSheet.create({
   },
   banner: {
     width: SCREEN_W,
-    height: SCREEN_H * 0.4,
+    height: BANNER_H,
     overflow: 'hidden',
     position: 'relative',
   },
   fill: {
-    position: 'absolute',
-    top: 0,
-    right: 0,
-    bottom: 0,
-    left: 0,
+    width: SCREEN_W,
+    height: BANNER_H,
   },
   bannerOverlay: {
     position: 'absolute',
@@ -156,21 +156,21 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 20,
     right: 20,
-    bottom: 28,
+    bottom: 16,
   },
   bannerKicker: {
     color: 'rgba(255,255,255,0.55)',
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '700',
     letterSpacing: 3,
     textTransform: 'uppercase',
-    marginBottom: 6,
+    marginBottom: 4,
   },
   bannerTitle: {
     color: '#FFF',
-    fontSize: 28,
+    fontSize: 22,
     fontWeight: '800',
-    letterSpacing: -0.5,
+    letterSpacing: -0.4,
   },
   railSection: {
     paddingTop: 24,

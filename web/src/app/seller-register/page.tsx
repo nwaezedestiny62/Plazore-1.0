@@ -234,15 +234,15 @@ export default function SellerRegisterPage() {
             Welcome to the Seller Lounge
           </h1>
           <p className="mt-3 text-[15px] leading-relaxed text-white/65">
-            Your seller account is active. Logo and banner are saved to your
-            storefront. You can start adding products.
+            Your seller account is active. Next, complete a short orientation
+            and set your business location before entering the dashboard.
           </p>
           <button
             type="button"
-            onClick={() => router.replace("/seller")}
+            onClick={() => router.replace("/seller-onboarding")}
             className="mt-8 inline-flex h-12 items-center gap-2 bg-gradient-to-r from-[#00E575] via-[#14B8A6] to-[#3B82F6] px-6 text-[14px] font-extrabold text-[#041412]"
           >
-            Go to Dashboard
+            Continue
             <ArrowRight className="h-4 w-4" />
           </button>
         </div>

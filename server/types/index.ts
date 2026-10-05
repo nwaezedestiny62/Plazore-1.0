@@ -214,10 +214,19 @@ export interface IUser extends Document {
       state?: string;
       zipCode?: string;
       country?: string;
+      landmark?: string;
+      label?: string;
     };
     deliveryMethod?: "courier" | "self" | "";
     courierCompany?: string;
   };
+
+  /** Seller onboarding — only relevant when role === "seller" */
+  sellerOnboardingCompleted?: boolean;
+  sellerOnboardingVersion?: number;
+  sellerOnboardingCompletedAt?: Date;
+  businessLocationCompleted?: boolean;
+  businessLocationCompletedAt?: Date;
 
   moderation?: IUserModeration;
 

@@ -87,20 +87,22 @@ function HeaderBack() {
 function TabIconWithBadge({
   name,
   color,
-  size,
+  size = 24,
   count,
 }: {
   name: keyof typeof Ionicons.glyphMap;
-  color: string;
-  size: number;
+  color?: string;
+  size?: number;
   count: number;
 }) {
   const label = count > 99 ? "99+" : String(count);
   const wide = count > 9;
+  const iconColor = color ?? MUTED;
+  const iconSize = size ?? 24;
 
   return (
     <View style={styles.iconWrap}>
-      <Ionicons name={name} size={size - 1} color={color} />
+      <Ionicons name={name} size={iconSize - 1} color={iconColor} />
       {count > 0 && (
         <View style={[styles.badge, wide && styles.badgeWide]}>
           <Text style={styles.badgeText} numberOfLines={1}>
@@ -122,7 +124,9 @@ export default function SellerLayout() {
   const [unreadChats, setUnreadChats] = useState(0);
   const [modChecking, setModChecking] = useState(true);
   const [sellerLocked, setSellerLocked] = useState(false);
+  const [onboardingGate, setOnboardingGate] = useState(true);
   const redirected = useRef(false);
+  const onboardingRedirected = useRef(false);
 
   const checkModeration = useCallback(async () => {
     try {
@@ -217,7 +221,7 @@ export default function SellerLayout() {
 
   useEffect(() => {
     if (!isLoaded) return;
-    const role = user?.publicMetadata?.role;
+    const role = user?.publicMetadata?.role as string | undefined;
     if (!user || (role !== "seller" && role !== "admin")) {
       router.replace("/(tabs)");
       return;
@@ -225,9 +229,59 @@ export default function SellerLayout() {
     checkModeration();
   }, [isLoaded, user, checkModeration, router]);
 
+  // Seller onboarding + business location gate
+  useEffect(() => {
+    if (!isLoaded) return;
+    const role = user?.publicMetadata?.role as string | undefined;
+    if (!user || (role !== "seller" && role !== "admin")) {
+      setOnboardingGate(false);
+      return;
+    }
+    if (role === "admin") {
+      setOnboardingGate(false);
+      return;
+    }
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const token = await getToken();
+        if (!token) {
+          if (!cancelled) setOnboardingGate(false);
+          return;
+        }
+        const res = await api.get("/seller/onboarding-status", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (cancelled) return;
+        const d = res.data?.data;
+        if (!d) {
+          setOnboardingGate(false);
+          return;
+        }
+        if (d.needsOnboarding && !onboardingRedirected.current) {
+          onboardingRedirected.current = true;
+          router.replace("/seller-onboarding" as any);
+          return;
+        }
+        if (d.needsBusinessLocation && !onboardingRedirected.current) {
+          onboardingRedirected.current = true;
+          router.replace("/seller-onboarding/business-location" as any);
+          return;
+        }
+        setOnboardingGate(false);
+      } catch {
+        if (!cancelled) setOnboardingGate(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isLoaded, user, getToken, router]);
+
   useEffect(() => {
     if (!isLoaded || sellerLocked) return;
-    const role = user?.publicMetadata?.role;
+    const role = user?.publicMetadata?.role as string | undefined;
     if (!user || (role !== "seller" && role !== "admin")) return;
 
     refreshBadges();
@@ -247,7 +301,7 @@ export default function SellerLayout() {
     return () => sub.remove();
   }, [checkModeration, refreshBadges, sellerLocked]);
 
-  if (!isLoaded || modChecking) {
+  if (!isLoaded || modChecking || onboardingGate) {
     return (
       <View style={styles.boot}>
         <ActivityIndicator size="large" color={GREEN} />
@@ -255,7 +309,7 @@ export default function SellerLayout() {
     );
   }
 
-  const role = user?.publicMetadata?.role;
+  const role = user?.publicMetadata?.role as string | undefined;
   if (!user || (role !== "seller" && role !== "admin")) return null;
   if (sellerLocked) {
     return (
@@ -309,7 +363,7 @@ export default function SellerLayout() {
           title: "Dashboard",
           headerShown: false,
           tabBarIcon: ({ color, size }) => (
-            <Ionicons name="grid-outline" size={size - 1} color={color} />
+            <Ionicons name="grid-outline" size={(size ?? 24) - 1} color={color ?? MUTED} />
           ),
         }}
       />
@@ -319,7 +373,7 @@ export default function SellerLayout() {
           title: "Products",
           headerShown: false,
           tabBarIcon: ({ color, size }) => (
-            <Ionicons name="cube-outline" size={size - 1} color={color} />
+            <Ionicons name="cube-outline" size={(size ?? 24) - 1} color={color ?? MUTED} />
           ),
         }}
       />
@@ -369,7 +423,7 @@ export default function SellerLayout() {
           title: "Plan",
           headerShown: false,
           tabBarIcon: ({ color, size }) => (
-            <Ionicons name="diamond-outline" size={size - 1} color={color} />
+            <Ionicons name="diamond-outline" size={(size ?? 24) - 1} color={color ?? MUTED} />
           ),
         }}
       />

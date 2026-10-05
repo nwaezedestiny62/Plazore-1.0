@@ -105,7 +105,9 @@ export default function SellerLayout({
   const [unreadChats, setUnreadChats] = useState(0);
   const [modChecking, setModChecking] = useState(true);
   const [sellerLocked, setSellerLocked] = useState(false);
+  const [onboardingGate, setOnboardingGate] = useState(true);
   const redirected = useRef(false);
+  const onboardingRedirected = useRef(false);
 
   const [railOpen, setRailOpen] = useState(true);
   const [railReady, setRailReady] = useState(false);
@@ -227,6 +229,57 @@ export default function SellerLayout({
     checkModeration();
   }, [isLoaded, user, router, checkModeration]);
 
+  // Seller onboarding + business location gate
+  useEffect(() => {
+    if (!isLoaded) return;
+    const role = user?.publicMetadata?.role as string | undefined;
+    if (!user || (role !== "seller" && role !== "admin")) {
+      setOnboardingGate(false);
+      return;
+    }
+    if (role === "admin") {
+      setOnboardingGate(false);
+      return;
+    }
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const token = await getToken();
+        if (!token) {
+          if (!cancelled) setOnboardingGate(false);
+          return;
+        }
+        const res = await fetch(`${API}/seller/onboarding-status`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const json = await res.json().catch(() => null);
+        if (cancelled) return;
+        const d = json?.data;
+        if (!d) {
+          setOnboardingGate(false);
+          return;
+        }
+        if (d.needsOnboarding && !onboardingRedirected.current) {
+          onboardingRedirected.current = true;
+          router.replace("/seller-onboarding");
+          return;
+        }
+        if (d.needsBusinessLocation && !onboardingRedirected.current) {
+          onboardingRedirected.current = true;
+          router.replace("/seller-onboarding/business-location");
+          return;
+        }
+        setOnboardingGate(false);
+      } catch {
+        if (!cancelled) setOnboardingGate(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isLoaded, user, getToken, router]);
+
   useEffect(() => {
     if (!isLoaded || sellerLocked) return;
     const role = user?.publicMetadata?.role as string | undefined;
@@ -246,7 +299,7 @@ export default function SellerLayout({
     return () => window.removeEventListener("focus", onFocus);
   }, [checkModeration, refreshBadges, sellerLocked]);
 
-  if (!isLoaded || modChecking) {
+  if (!isLoaded || modChecking || onboardingGate) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#090B0F]">
         <div className="h-8 w-8 animate-spin rounded-full border-2 border-[#00E575] border-t-transparent" />
