@@ -134,11 +134,14 @@ function SlideBody({ kind }: { kind: SlideKey }) {
   }
   if (kind === "orders") {
     const flow = [
-      "Buyer places order",
-      "Seller receives order",
-      "Seller prepares order",
-      "Seller fulfils via selected delivery method",
-      "Order is completed",
+       'Buyer places order',
+      'Seller receives order',
+      'Seller updates order status via shipped',
+      'Seller prepares order',
+      'Seller fulfils via selected delivery method',
+      'Seller updates order status via delivered',
+      'Buyer confirms delivery/package',
+      'Order is completed | Seller payout is released',
     ];
     return (
       <div className="space-y-4">
@@ -176,8 +179,8 @@ function SlideBody({ kind }: { kind: SlideKey }) {
         </div>
         <p className="text-[15px] leading-relaxed text-white/70">
           Plazore applies a{" "}
-          <span className="font-semibold text-[#00E575]">7% transaction fee</span>{" "}
-          to the combined product price + delivery fee, subject to the seller
+          <span className="font-semibold text-[#00E575]">8% transaction fee</span>{" "}
+          to the product price only! Never to the delivery fee, subject to the seller
           applicable subscription plan.
         </p>
         <p className="text-[15px] leading-relaxed text-white/70">
