@@ -14,10 +14,12 @@ import {
   CreditCard,
   Globe2,
   Home,
+  Lock,
   MapPin,
   Navigation,
   Plus,
   Receipt,
+  ShieldCheck,
   ShoppingBag,
   Store,
   X,
@@ -43,16 +45,6 @@ type Address = {
   state?: string;
   zipCode?: string;
   country?: string;
-  isDefault?: boolean;
-};
-
-type Card = {
-  _id: string;
-  brand?: string;
-  last4?: string;
-  expMonth?: string | number;
-  expYear?: string | number;
-  name?: string;
   isDefault?: boolean;
 };
 
@@ -138,10 +130,6 @@ function resolveShipFrom(product: CartItem["product"]): ShipFrom {
   };
 }
 
-function maskCard(last4?: string) {
-  return last4 ? `•••• ${last4}` : "••••";
-}
-
 function addressComplete(a: Address | null): boolean {
   if (!a) return false;
   return !!(
@@ -183,8 +171,6 @@ export default function CheckoutPage() {
   const [cartReady, setCartReady] = useState(false);
   const [addresses, setAddresses] = useState<Address[]>([]);
   const [selectedAddress, setSelectedAddress] = useState<Address | null>(null);
-  const [cards, setCards] = useState<Card[]>([]);
-  const [selectedCard, setSelectedCard] = useState<Card | null>(null);
   const [phase, setPhase] = useState<Phase>("idle");
   const [orderError, setOrderError] = useState("");
   const [toast, setToast] = useState<Toast>(null);
@@ -213,19 +199,6 @@ export default function CheckoutPage() {
     } catch {
       /* keep empty */
     }
-    try {
-      const pay = await apiAuth<{ success?: boolean; data?: Card[] }>(
-        "/payment-methods",
-        token
-      );
-      if (pay.body?.success && Array.isArray(pay.body.data)) {
-        const list = pay.body.data;
-        setCards(list);
-        setSelectedCard(list.find((c) => c.isDefault) || list[0] || null);
-      }
-    } catch {
-      /* keep empty */
-    }
   }, [getToken, isSignedIn]);
 
   useEffect(() => {
@@ -236,7 +209,6 @@ export default function CheckoutPage() {
   const fmtProduct = (n: number, region?: string | null) =>
     formatProductPrice(n, region, displayRegion);
 
-  /** Group bag by seller route + money in display currency */
   const routeGroups: RouteGroup[] = useMemo(() => {
     const map = new Map<string, RouteGroup>();
 
@@ -263,7 +235,6 @@ export default function CheckoutPage() {
       if (!product._id) invalid.push("Missing product id");
       if (!(unit > 0)) invalid.push("Invalid price");
       if (!ship.hasShipFrom) invalid.push("No ship-from location");
-      // Variant products must carry a resolved selection into checkout
       if (
         product.hasVariants &&
         Array.isArray(product.variants) &&
@@ -336,18 +307,17 @@ export default function CheckoutPage() {
     routeGroups.length > 0 && routeGroups.every((g) => !g.missingShipFrom);
   const noInvalidLines = routeGroups.every((g) => g.invalidItems.length === 0);
   const addressOk = addressComplete(selectedAddress);
-  const cardOk = !!selectedCard?._id;
 
   const internationalRoutes = routeGroups.filter((g) => g.isInternational);
   const hasInternational = internationalRoutes.length > 0;
   const incompleteSellers = routeGroups.filter((g) => g.missingShipFrom);
 
+  // No saved card required — Paystack hosts card entry
   const canPlaceOrder =
     hasItems &&
     allRoutesShipReady &&
     noInvalidLines &&
     addressOk &&
-    cardOk &&
     !!isSignedIn;
 
   const blockReason = useMemo(() => {
@@ -359,7 +329,6 @@ export default function CheckoutPage() {
       return "One or more items have invalid price, product data, or missing options. Remove them or re-add from the product page.";
     if (!addressOk)
       return "Select a complete delivery address (street, city, country).";
-    if (!cardOk) return "Select a payment card.";
     return null;
   }, [
     hasItems,
@@ -367,7 +336,6 @@ export default function CheckoutPage() {
     allRoutesShipReady,
     noInvalidLines,
     addressOk,
-    cardOk,
   ]);
 
   const deliverToLabel = selectedAddress
@@ -391,7 +359,7 @@ export default function CheckoutPage() {
     }
     if (!canPlaceOrder) {
       setToast({
-        title: "Cannot place order",
+        title: "Cannot continue",
         message: blockReason || "Complete all required steps first.",
         tone: "danger",
       });
@@ -406,22 +374,21 @@ export default function CheckoutPage() {
       const token = await getToken();
       if (!token) throw new Error("Sign in required");
 
+      // Server recalculates prices — send productId + qty only
       const payloadItems = items
         .map((item) => {
           const id = item.product?._id;
           const qty = Math.max(1, Number(item.quantity) || 1);
-          const price = Number(item.price ?? item.product?.price) || 0;
           return {
             productId: id,
             quantity: qty,
-            price,
             note: (item.note || "").trim().slice(0, 120),
             variantId: item.variantId || "",
             variantKey: item.variantKey || "",
             selectedOptions: item.selectedOptions || {},
           };
         })
-        .filter((i) => i.productId && i.price > 0 && i.quantity > 0);
+        .filter((i) => i.productId && i.quantity > 0);
 
       if (!payloadItems.length) {
         throw new Error("No valid products in bag");
@@ -431,33 +398,31 @@ export default function CheckoutPage() {
         throw new Error("Delivery address is incomplete");
       }
 
-      const res = await apiAuth<{ success?: boolean; message?: string }>(
-        "/orders",
-        token,
-        {
-          method: "POST",
-          body: JSON.stringify({
-            shippingAddress: {
-              street: selectedAddress.street,
-              city: selectedAddress.city,
-              state: selectedAddress.state,
-              zipCode: selectedAddress.zipCode,
-              country: selectedAddress.country,
-            },
-            paymentMethodId: selectedCard?._id,
-            buyerNote: hasInternational
-              ? "International shipment — seller review may apply."
-              : "",
-            items: payloadItems,
-          }),
-        }
-      );
+      const res = await apiAuth<{
+        success?: boolean;
+        message?: string;
+        code?: string;
+        authorization_url?: string;
+        reference?: string;
+        callback_url?: string;
+      }>("/payments/checkout", token, {
+        method: "POST",
+        body: JSON.stringify({
+          shippingAddress: {
+            street: selectedAddress.street,
+            city: selectedAddress.city,
+            state: selectedAddress.state,
+            zipCode: selectedAddress.zipCode,
+            country: selectedAddress.country,
+          },
+          buyerNote: hasInternational
+            ? "International shipment — seller review may apply."
+            : "",
+          items: payloadItems,
+        }),
+      });
 
-      if (res.ok && res.body?.success) {
-        clearCart();
-        setItems([]);
-        setPhase("success");
-      } else {
+      if (!res.ok || !res.body?.success) {
         setPhase("error");
         setOrderError(
           res.body?.message ||
@@ -465,9 +430,41 @@ export default function CheckoutPage() {
               ? "Session expired. Sign in again."
               : res.status >= 500
                 ? "Server error. Please try again in a moment."
-                : "Could not place order. Please review your bag and try again.")
+                : "Could not start payment. Please review your bag and try again.")
         );
+        return;
       }
+
+      // Paystack not configured yet — still treat as order created / pending
+      if (
+        res.body.code === "PAYSTACK_NOT_CONFIGURED" ||
+        !res.body.authorization_url
+      ) {
+        clearCart();
+        setItems([]);
+        setPhase("success");
+        setToast({
+          title: "Order created",
+          message:
+            res.body.message ||
+            "Payment gateway is not live yet. Your order is pending payment.",
+          tone: "info",
+        });
+        return;
+      }
+
+      // Redirect to Paystack hosted checkout
+      // Store reference so callback page can verify
+      try {
+        sessionStorage.setItem(
+          "plazore_pay_ref",
+          res.body.reference || ""
+        );
+      } catch {
+        /* ignore */
+      }
+
+      window.location.href = res.body.authorization_url;
     } catch (e: unknown) {
       setPhase("error");
       setOrderError(
@@ -566,9 +563,11 @@ export default function CheckoutPage() {
             {phase === "processing" && (
               <>
                 <div className="mx-auto h-[110px] w-[110px] animate-spin rounded-full border-[2.4px] border-transparent border-l-green border-r-blue border-t-green" />
-                <p className="mt-6 text-lg font-extrabold">Placing your order</p>
+                <p className="mt-6 text-lg font-extrabold">
+                  Preparing secure payment
+                </p>
                 <p className="mt-2 text-[13px] text-white/55">
-                  Securing your bag and confirming with{" "}
+                  Locking your bag and opening Paystack for{" "}
                   {routeGroups.length > 1
                     ? `${routeGroups.length} sellers`
                     : "the seller"}
@@ -581,7 +580,7 @@ export default function CheckoutPage() {
                 <div className="mx-auto flex h-[72px] w-[72px] items-center justify-center border border-red-500/25 bg-red-500/12">
                   <X className="h-8 w-8 text-red-500" />
                 </div>
-                <p className="mt-6 text-lg font-extrabold">Order failed</p>
+                <p className="mt-6 text-lg font-extrabold">Payment failed</p>
                 <p className="mt-2 text-[13px] text-white/55">
                   {orderError || "Something went wrong. Please try again."}
                 </p>
@@ -605,10 +604,10 @@ export default function CheckoutPage() {
                   <Check className="h-9 w-9 text-[#041412]" />
                 </div>
                 <p className="mt-4 text-[22px] font-extrabold tracking-tight">
-                  Order Successful
+                  Payment confirmed
                 </p>
                 <p className="mt-1.5 text-[13px] text-white/55">
-                  Your order is confirmed on Plazore.
+                  Your order is paid and locked on Plazore.
                 </p>
                 <div className="mt-5 w-full border border-white/8 bg-[#14181F] p-3.5 text-left">
                   <p className="mb-2.5 text-[10px] font-extrabold tracking-[0.14em] text-white/38">
@@ -618,13 +617,13 @@ export default function CheckoutPage() {
                     [
                       [
                         "1",
-                        "Confirmed",
-                        "Your bag is locked and each seller is notified for their items.",
+                        "Paid & protected",
+                        "Funds are held securely. Sellers are notified to prepare.",
                       ],
                       [
                         "2",
                         "Seller prepares",
-                        "Items are packed. International routes may need a short seller review first.",
+                        "Items are packed. International routes may need a short review first.",
                       ],
                       [
                         "3",
@@ -633,8 +632,8 @@ export default function CheckoutPage() {
                       ],
                       [
                         "4",
-                        "Delivered",
-                        "You receive your order at the address you selected.",
+                        "Confirm delivery",
+                        "Confirm within 17 hours after delivery, or we auto-confirm.",
                       ],
                     ] as const
                   ).map(([n, t, d]) => (
@@ -701,6 +700,7 @@ export default function CheckoutPage() {
             REVIEW · DELIVER · PAY
           </p>
 
+          {/* Bag */}
           <section className="mb-3 overflow-hidden border border-white/8 bg-[#0E1116]">
             <div className="flex items-center justify-between border-b border-white/8 bg-[#14181F] px-3.5 py-3">
               <div className="flex items-center gap-2.5">
@@ -797,6 +797,7 @@ export default function CheckoutPage() {
             ))}
           </section>
 
+          {/* Address */}
           <section className="mb-3 overflow-hidden border border-white/8 bg-[#0E1116]">
             <div className="flex items-center justify-between border-b border-white/8 bg-[#14181F] px-3.5 py-3">
               <div className="flex items-center gap-2.5">
@@ -876,74 +877,39 @@ export default function CheckoutPage() {
             )}
           </section>
 
+          {/* Paystack payment info — no card form */}
           <section className="mb-3 overflow-hidden border border-white/8 bg-[#0E1116]">
             <div className="flex items-center justify-between border-b border-white/8 bg-[#14181F] px-3.5 py-3">
               <div className="flex items-center gap-2.5">
                 <span className="flex h-[30px] w-[30px] items-center justify-center border border-white/8 bg-[#0E1116]">
                   <CreditCard className="h-3.5 w-3.5 text-white/55" />
                 </span>
-                <p className="text-sm font-extrabold">Pay with Card</p>
+                <div>
+                  <p className="text-sm font-extrabold">Pay securely</p>
+                  <p className="text-[10px] text-white/40">Powered by Paystack</p>
+                </div>
               </div>
-              <Link
-                href="/payment-methods"
-                className="text-[13px] font-bold text-green"
-              >
-                Change
-              </Link>
             </div>
-            {cards.length > 0 ? (
-              <div className="space-y-2 p-3">
-                {cards.map((card) => {
-                  const on = selectedCard?._id === card._id;
-                  return (
-                    <button
-                      key={card._id}
-                      type="button"
-                      onClick={() => setSelectedCard(card)}
-                      className={`flex w-full gap-3 border p-3 text-left ${
-                        on ? "border-green/50 bg-[#14181F]" : "border-white/8"
-                      }`}
-                    >
-                      <span
-                        className={`mt-0.5 flex h-[18px] w-[18px] items-center justify-center border-2 ${
-                          on ? "border-green" : "border-white/38"
-                        }`}
-                      >
-                        {on && <span className="h-2 w-2 bg-green" />}
-                      </span>
-                      <span>
-                        <span className="text-[13px] font-bold">
-                          {card.brand || "Card"} {maskCard(card.last4)}
-                        </span>
-                        <span className="mt-1 block text-xs text-white/55">
-                          Expires {card.expMonth}/{card.expYear}
-                          {card.name ? ` · ${card.name}` : ""}
-                        </span>
-                      </span>
-                    </button>
-                  );
-                })}
-                <Link
-                  href="/payment-methods"
-                  className="flex items-center justify-center gap-1.5 border border-white/8 bg-[#14181F] py-3 text-[13px] font-bold text-green"
-                >
-                  <Plus className="h-4 w-4" /> Add new card
-                </Link>
-              </div>
-            ) : (
-              <Link
-                href={isSignedIn ? "/payment-methods" : "/sign-in"}
-                className="block py-7 text-center"
-              >
-                <CreditCard className="mx-auto mb-3 h-6 w-6 text-white/38" />
-                <p className="text-sm font-bold">Add a payment card</p>
-                <p className="mt-1 text-xs text-white/38">
-                  A saved card is required before you can place an order.
+            <div className="space-y-3 p-3.5">
+              <div className="flex gap-2.5">
+                <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-green" />
+                <p className="text-[12.5px] leading-[18px] text-white/55">
+                  Card details are entered on Paystack’s secure page. Plazore
+                  never stores full card numbers.
                 </p>
-              </Link>
-            )}
+              </div>
+              <div className="flex gap-2.5">
+                <Lock className="mt-0.5 h-4 w-4 shrink-0 text-white/40" />
+                <p className="text-[12.5px] leading-[18px] text-white/55">
+                  Visa, Mastercard, Verve, bank transfer and USSD where
+                  available. After payment, a secure token may be saved for
+                  faster checkouts later.
+                </p>
+              </div>
+            </div>
           </section>
 
+          {/* Shipping routes */}
           <section className="mb-3 overflow-hidden border border-white/8 bg-[#0E1116]">
             <div className="flex items-center gap-2.5 border-b border-white/8 bg-[#14181F] px-3.5 py-3">
               <span className="flex h-[30px] w-[30px] items-center justify-center border border-white/8 bg-[#0E1116]">
@@ -1099,6 +1065,7 @@ export default function CheckoutPage() {
           )}
         </div>
 
+        {/* Receipt aside */}
         <aside className="h-fit border border-white/8 bg-[#0E1116] md:sticky md:top-6">
           <div className="flex items-center gap-2.5 border-b border-white/8 bg-[#14181F] px-3.5 py-3">
             <span className="flex h-[30px] w-[30px] items-center justify-center border border-white/8 bg-[#0E1116]">
@@ -1141,8 +1108,8 @@ export default function CheckoutPage() {
               </span>
             </div>
             <p className="text-[11px] text-white/38">
-              Prices converted to your marketplace currency ({displayRegion}).
-              Each product keeps its original listing region for conversion.
+              Final charge is calculated on the server. Display amounts are
+              converted to your marketplace currency ({displayRegion}).
             </p>
             {hasInternational && (
               <p className="text-[11px] text-blue-200/70">
@@ -1174,16 +1141,17 @@ export default function CheckoutPage() {
                 : !canPlaceOrder
                   ? "Complete required steps"
                   : placing
-                    ? "Placing…"
-                    : "Place Order"}
+                    ? "Opening Paystack…"
+                    : "Pay with Paystack"}
               {canPlaceOrder && !placing && (
-                <ArrowRight className="h-4 w-4" />
+                <Lock className="h-4 w-4" />
               )}
             </button>
           </div>
         </aside>
       </div>
 
+      {/* Mobile bottom bar */}
       <div className="fixed inset-x-0 bottom-0 border-t border-white/8 bg-[#0E1116] md:hidden">
         <div className="flex items-center gap-3 px-4 py-3">
           <div className="min-w-0 flex-1">
@@ -1196,7 +1164,7 @@ export default function CheckoutPage() {
             type="button"
             onClick={placeOrder}
             disabled={placing || !canPlaceOrder}
-            className="flex min-w-[140px] items-center justify-center gap-2 px-5 py-3.5 text-[15px] font-extrabold disabled:text-white/38"
+            className="flex min-w-[150px] items-center justify-center gap-2 px-5 py-3.5 text-[14px] font-extrabold disabled:text-white/38"
             style={{
               backgroundImage: placing || !canPlaceOrder ? undefined : GRAD,
               backgroundColor:
@@ -1210,7 +1178,7 @@ export default function CheckoutPage() {
                 ? "Unavailable"
                 : placing
                   ? "…"
-                  : "Place Order"}
+                  : "Pay with Paystack"}
           </button>
         </div>
       </div>

@@ -6,6 +6,12 @@ import Product from "../models/Products.js";
 import User from "../models/User.js";
 import { sendNotification } from "../utils/sendNotification.js";
 import { trackProductPerformance } from "../utils/performance.js";
+import {
+  DELIVERY_CONFIRMATION_WINDOW_MS,
+  calculateSellerPayout,
+  PLAZORE_TRANSACTION_FEE_RATE,
+  currencyForRegion,
+} from "../config/payment.js";
 
 const getUser = (req: Request) => (req as any).user;
 
@@ -29,6 +35,8 @@ function hasShipFromLocation(product: any, seller: any): boolean {
 }
 
 // ====================== CREATE ORDER ======================
+// Prefer POST /api/payments/checkout for Paystack.
+// This path still works: server-side prices only + PENDING_PAYMENT.
 export const createOrder = async (req: Request, res: Response) => {
   try {
     const user = getUser(req);
@@ -63,7 +71,6 @@ export const createOrder = async (req: Request, res: Response) => {
       rawItems = cart.items.map((item: any) => ({
         productId: item.product?._id || item.product,
         quantity: item.quantity,
-        price: item.price,
         note: item.note || "",
       }));
     }
@@ -115,18 +122,23 @@ export const createOrder = async (req: Request, res: Response) => {
 
       if (!itemsBySeller[sellerId]) itemsBySeller[sellerId] = [];
 
-      // Backend-only classification: never trust a client flag
-      const isSellerOwnedPurchase =
-        user._id.toString() === sellerId;
-
-      // Price is always in product.region currency (same as product page source of truth)
+      const isSellerOwnedPurchase = user._id.toString() === sellerId;
       const listingRegion = String((product as any).region || "").trim();
+
+      // SERVER PRICE ONLY — never trust client item.price
+      const unitPrice = Number(product.price);
+      if (!Number.isFinite(unitPrice) || unitPrice < 0) {
+        return res.status(400).json({
+          success: false,
+          message: `Invalid product price for ${product.name}`,
+        });
+      }
 
       itemsBySeller[sellerId].push({
         product: product._id,
         name: product.name,
         quantity: item.quantity,
-        price: item.price ?? product.price,
+        price: unitPrice,
         region: listingRegion,
         image: product.images?.[0] || "",
         note: String(item.note || "")
@@ -137,7 +149,12 @@ export const createOrder = async (req: Request, res: Response) => {
 
       const method =
         (product as any).shipping?.method === "self" ? "self" : "courier";
-      const fee = Number((product as any).shipping?.deliveryFee) || 0;
+      const feeMode = (product as any).shipping?.feeMode || "fixed";
+      let fee = 0;
+      if (feeMode === "free") fee = 0;
+      else if (feeMode === "on_delivery") fee = 0;
+      else fee = Number((product as any).shipping?.deliveryFee) || 0;
+
       const company = String(
         (product as any).shipping?.courierCompany || ""
       ).trim();
@@ -164,7 +181,6 @@ export const createOrder = async (req: Request, res: Response) => {
       const sellerItems = itemsBySeller[sellerId];
       const snap = shippingBySeller[sellerId];
 
-      // Order is already split per seller → buyer===seller means whole order is self-purchase
       const isSellerOwnedPurchase =
         user._id.toString() === String(sellerId);
 
@@ -173,6 +189,9 @@ export const createOrder = async (req: Request, res: Response) => {
         0
       );
       const shippingCost = snap?.deliveryFee || 0;
+      const region = String(sellerItems[0]?.region || "").trim() || "NG";
+      const currency = currencyForRegion(region);
+      const fees = calculateSellerPayout(subtotal, shippingCost);
 
       const order = await Order.create({
         buyer: user._id,
@@ -191,18 +210,30 @@ export const createOrder = async (req: Request, res: Response) => {
           deliveryFee: shippingCost,
         },
         orderStatus: "Preparing",
-        // Frozen currency region — product listing region (matches product page)
-        region:
-          String(sellerItems[0]?.region || "").trim() ||
-          "",
+        region,
         subtotal,
         shippingCost,
-        totalAmount: subtotal + shippingCost,
+        totalAmount: fees.grossAmount,
         paymentStatus: "pending",
         paymentMethod: "pending",
+        paymentLifecycle: "PENDING_PAYMENT",
+        feeBreakdown: {
+          subtotal,
+          shippingCost,
+          grossAmount: fees.grossAmount,
+          platformFeeRate: PLAZORE_TRANSACTION_FEE_RATE,
+          platformFee: fees.platformFee,
+          sellerPayoutAmount: fees.sellerPayoutAmount,
+          currency,
+        },
         buyerConfirmation: { status: "none" },
         payout: { status: "not_eligible" },
         isSellerOwnedPurchase,
+        stockReservation: {
+          reserved: true,
+          committed: false,
+          released: false,
+        },
       });
 
       for (const row of sellerItems) {
@@ -211,7 +242,6 @@ export const createOrder = async (req: Request, res: Response) => {
         });
       }
 
-      // Demand / popularity metrics: only independent customer purchases
       if (!isSellerOwnedPurchase) {
         for (const row of sellerItems) {
           trackProductPerformance({
@@ -223,7 +253,6 @@ export const createOrder = async (req: Request, res: Response) => {
         }
       }
 
-      // Still notify for real order flow (useful for seller testing checkout)
       await sendNotification({
         userId: sellerId,
         type: "new_order",
@@ -232,7 +261,7 @@ export const createOrder = async (req: Request, res: Response) => {
           : "New Order Received",
         message: isSellerOwnedPurchase
           ? `You placed a test/self order: ${order.orderNumber}. It will not count toward customer demand metrics.`
-          : `A new order has been placed. Order: ${order.orderNumber}`,
+          : `A new order has been placed. Order: ${order.orderNumber}. Awaiting payment.`,
         orderId: order._id.toString(),
         orderNumber: order.orderNumber,
       });
@@ -253,7 +282,7 @@ export const createOrder = async (req: Request, res: Response) => {
 
     res.status(201).json({
       success: true,
-      message: "Order(s) placed successfully",
+      message: "Order(s) placed successfully — complete payment to confirm",
       data: createdOrders,
     });
   } catch (error: any) {
@@ -293,7 +322,10 @@ export const getOrder = async (req: Request, res: Response) => {
     const order = await Order.findById(id)
       .populate("seller", "name storeName storeLogo shippingDefaults")
       .populate("buyer", "name phone")
-      .populate("items.product", "name images region price shipping fulfillmentLocation");
+      .populate(
+        "items.product",
+        "name images region price shipping fulfillmentLocation"
+      );
 
     if (!order) {
       return res
@@ -375,6 +407,13 @@ export const shipOrder = async (req: Request, res: Response) => {
         .json({ success: false, message: "Not authorized" });
     }
 
+    if (String(order.paymentStatus) !== "paid") {
+      return res.status(400).json({
+        success: false,
+        message: "Cannot ship an unpaid order",
+      });
+    }
+
     if (order.orderStatus !== "Preparing") {
       return res.status(400).json({
         success: false,
@@ -388,6 +427,7 @@ export const shipOrder = async (req: Request, res: Response) => {
       (order as any).productShipping?.courierCompany || "";
 
     order.orderStatus = "Shipped";
+    (order as any).paymentLifecycle = "SHIPPED";
     (order as any).shipping = {
       shippingMethod: method,
       deliveryCompany:
@@ -461,18 +501,22 @@ export const deliverOrder = async (req: Request, res: Response) => {
     order.orderStatus = "Delivered";
     order.deliveredAt = new Date();
 
-    // Open buyer confirmation gate (does not change seller flow)
+    // 17-hour server-side confirmation window
     (order as any).buyerConfirmation = {
       status: "pending",
       confirmedAt: undefined,
       issueReportedAt: undefined,
       issueContactId: null,
+      confirmationDeadline: new Date(
+        Date.now() + DELIVERY_CONFIRMATION_WINDOW_MS
+      ),
     };
     (order as any).payout = {
       status: "awaiting_buyer",
       eligibleAt: undefined,
       blockedReason: "",
     };
+    (order as any).paymentLifecycle = "DELIVERED";
 
     await order.save();
 
@@ -480,7 +524,7 @@ export const deliverOrder = async (req: Request, res: Response) => {
       userId: order.buyer.toString(),
       type: "order_delivered",
       title: "Order Delivered",
-      message: `Order ${order.orderNumber} has been delivered. Please confirm you received it.`,
+      message: `Order ${order.orderNumber} has been delivered. Please confirm you received it within 17 hours.`,
       orderId: order._id.toString(),
       orderNumber: order.orderNumber,
     });
@@ -555,11 +599,12 @@ export const confirmDelivery = async (req: Request, res: Response) => {
       });
     }
 
-    if ((order as any).buyerConfirmation?.status === "confirmed") {
+    const confStatus = String((order as any).buyerConfirmation?.status || "");
+    if (confStatus === "confirmed" || confStatus === "auto_confirmed") {
       return res.json({ success: true, data: order, alreadyConfirmed: true });
     }
 
-    if ((order as any).buyerConfirmation?.status === "issue_reported") {
+    if (confStatus === "issue_reported") {
       return res.status(400).json({
         success: false,
         message:
@@ -567,9 +612,18 @@ export const confirmDelivery = async (req: Request, res: Response) => {
       });
     }
 
+    if (String((order as any).paymentLifecycle) === "DISPUTED") {
+      return res.status(400).json({
+        success: false,
+        message: "This order is under dispute review",
+      });
+    }
+
+    const payoutStatus = String((order as any).payout?.status || "");
     if (
-      (order as any).payout?.status === "initiated" ||
-      (order as any).payout?.status === "completed"
+      payoutStatus === "initiated" ||
+      payoutStatus === "completed" ||
+      payoutStatus === "queued"
     ) {
       return res.status(400).json({
         success: false,
@@ -577,14 +631,20 @@ export const confirmDelivery = async (req: Request, res: Response) => {
       });
     }
 
-    if (order.paymentStatus === "refunded") {
+    if (String(order.paymentStatus) === "refunded") {
       return res.status(400).json({
         success: false,
         message: "This order was refunded",
       });
     }
 
+    const fees =
+      (order as any).feeBreakdown?.sellerPayoutAmount != null
+        ? (order as any).feeBreakdown
+        : calculateSellerPayout(order.subtotal, order.shippingCost);
+
     (order as any).buyerConfirmation = {
+      ...(order as any).buyerConfirmation,
       status: "confirmed",
       confirmedAt: new Date(),
       issueReportedAt: (order as any).buyerConfirmation?.issueReportedAt,
@@ -595,7 +655,10 @@ export const confirmDelivery = async (req: Request, res: Response) => {
       status: "eligible",
       eligibleAt: new Date(),
       blockedReason: "",
+      amount: fees.sellerPayoutAmount,
+      platformFee: fees.platformFee,
     };
+    (order as any).paymentLifecycle = "DELIVERY_CONFIRMED";
 
     await order.save();
 
@@ -603,7 +666,7 @@ export const confirmDelivery = async (req: Request, res: Response) => {
       userId: order.seller.toString(),
       type: "order_delivered",
       title: "Delivery confirmed",
-      message: `Buyer confirmed delivery for ${order.orderNumber}.`,
+      message: `Buyer confirmed delivery for ${order.orderNumber}. Payout is pending.`,
       orderId: order._id.toString(),
       orderNumber: order.orderNumber,
     });
@@ -647,14 +710,15 @@ export const reportDeliveryIssue = async (req: Request, res: Response) => {
       });
     }
 
-    if ((order as any).buyerConfirmation?.status === "confirmed") {
+    const confStatus = String((order as any).buyerConfirmation?.status || "");
+    if (confStatus === "confirmed" || confStatus === "auto_confirmed") {
       return res.status(400).json({
         success: false,
         message: "Delivery already confirmed",
       });
     }
 
-    if ((order as any).buyerConfirmation?.status === "issue_reported") {
+    if (confStatus === "issue_reported") {
       return res.json({ success: true, data: order, alreadyReported: true });
     }
 
@@ -666,12 +730,15 @@ export const reportDeliveryIssue = async (req: Request, res: Response) => {
         contactId && mongoose.isValidObjectId(String(contactId))
           ? contactId
           : (order as any).buyerConfirmation?.issueContactId || null,
+      confirmationDeadline: (order as any).buyerConfirmation
+        ?.confirmationDeadline,
     };
     (order as any).payout = {
       status: "blocked_issue",
       eligibleAt: undefined,
       blockedReason: "Buyer reported a delivery issue",
     };
+    (order as any).paymentLifecycle = "DISPUTED";
 
     await order.save();
 
@@ -737,26 +804,45 @@ export const cancelOrderBySeller = async (req: Request, res: Response) => {
       });
     }
 
+    // Paid orders must use refund/dispute flow — not simple cancel
+    if (String(order.paymentStatus) === "paid") {
+      return res.status(400).json({
+        success: false,
+        message:
+          "This order is already paid. Cancel via refund/dispute flow so the buyer can be refunded.",
+      });
+    }
+
     const reasonLabel =
       code === "other" && extraNote ? extraNote : CANCEL_REASONS[code];
 
     order.orderStatus = "Cancelled" as any;
+    (order as any).paymentLifecycle = "CANCELLED";
     (order as any).cancellation = {
       cancelledBy: "seller",
       reasonCode: code,
       reasonLabel,
       note: extraNote,
       cancelledAt: new Date(),
+      // Unpaid only at this point
       refundStatus: "not_applicable",
     };
 
-    await order.save();
-
+    // Release reserved stock
     for (const row of order.items) {
       await Product.findByIdAndUpdate(row.product, {
         $inc: { stock: row.quantity },
       });
     }
+    if ((order as any).stockReservation) {
+      (order as any).stockReservation = {
+        reserved: false,
+        committed: false,
+        released: true,
+      };
+    }
+
+    await order.save();
 
     const displayReason =
       code === "other" && extraNote ? extraNote : CANCEL_REASONS[code];

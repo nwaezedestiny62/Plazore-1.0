@@ -3,9 +3,17 @@
 import { useAuth } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
-import { Check, ChevronLeft, CreditCard, Plus, Trash2, X } from "lucide-react";
+import {
+  Check,
+  ChevronLeft,
+  CreditCard,
+  ShieldCheck,
+  Trash2,
+} from "lucide-react";
+import Link from "next/link";
 
-const API = process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com/api";
+const API =
+  process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com/api";
 const GRAD = "linear-gradient(90deg,#00E575,#14B8A6,#3B82F6)";
 
 const CARD_BRANDS = [
@@ -26,6 +34,7 @@ type Card = {
   expMonth?: string;
   expYear?: string;
   name?: string;
+  bank?: string;
   isDefault?: boolean;
 };
 
@@ -35,19 +44,10 @@ function maskCard(last4?: string) {
 }
 
 function getBrandMeta(brand?: string) {
-  return CARD_BRANDS.find((b) => b.key === brand) || CARD_BRANDS[CARD_BRANDS.length - 1];
-}
-
-function formatCardNumber(text: string) {
-  const cleaned = text.replace(/\D/g, "").slice(0, 16);
-  const parts = cleaned.match(/.{1,4}/g);
-  return parts ? parts.join(" ") : cleaned;
-}
-
-function formatExpiry(text: string) {
-  const cleaned = text.replace(/\D/g, "").slice(0, 4);
-  if (cleaned.length >= 3) return `${cleaned.slice(0, 2)}/${cleaned.slice(2)}`;
-  return cleaned;
+  return (
+    CARD_BRANDS.find((b) => b.key === brand) ||
+    CARD_BRANDS[CARD_BRANDS.length - 1]
+  );
 }
 
 function OrbLoader() {
@@ -60,7 +60,9 @@ function OrbLoader() {
           <img src="/logo.png" alt="" className="h-8 w-8 object-contain" />
         </div>
       </div>
-      <p className="mt-4 text-[13px] font-semibold text-[#737A86]">Loading cards…</p>
+      <p className="mt-4 text-[13px] font-semibold text-[#737A86]">
+        Loading cards…
+      </p>
     </div>
   );
 }
@@ -71,18 +73,8 @@ export default function PaymentMethodsPage() {
 
   const [cards, setCards] = useState<Card[]>([]);
   const [loading, setLoading] = useState(true);
-  const [modalOpen, setModalOpen] = useState(false);
-  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
-
-  const [brand, setBrand] = useState<Brand>("Visa");
-  const [name, setName] = useState("");
-  const [number, setNumber] = useState("");
-  const [expiry, setExpiry] = useState("");
-  const [cvc, setCvc] = useState("");
-  const [isDefault, setIsDefault] = useState(false);
-  const [focus, setFocus] = useState<string | null>(null);
 
   const authHeaders = useCallback(async () => {
     const token = await getToken();
@@ -117,62 +109,6 @@ export default function PaymentMethodsPage() {
     fetchCards();
   }, [isLoaded, isSignedIn, fetchCards, router]);
 
-  const resetForm = () => {
-    setBrand("Visa");
-    setName("");
-    setNumber("");
-    setExpiry("");
-    setCvc("");
-    setIsDefault(false);
-    setFocus(null);
-    setError(null);
-  };
-
-  const closeModal = () => {
-    setModalOpen(false);
-    resetForm();
-  };
-
-  const handleSave = async () => {
-    const cleanNumber = number.replace(/\s/g, "");
-    if (!name.trim() || cleanNumber.length < 12 || !expiry.trim() || !cvc.trim()) {
-      setError("Please fill all card details correctly");
-      return;
-    }
-    if (!/^\d{2}\/\d{2}$/.test(expiry.trim())) {
-      setError("Use expiry format MM/YY");
-      return;
-    }
-    setSaving(true);
-    setError(null);
-    try {
-      const headers = await authHeaders();
-      const res = await fetch(`${API}/payment-methods`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          brand,
-          name: name.trim(),
-          last4: cleanNumber.slice(-4),
-          expMonth: expiry.split("/")[0],
-          expYear: expiry.split("/")[1],
-          isDefault,
-        }),
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok || json?.success === false) {
-        setError(json?.message || "Failed to save card");
-        return;
-      }
-      closeModal();
-      fetchCards();
-    } catch {
-      setError("Failed to save card");
-    } finally {
-      setSaving(false);
-    }
-  };
-
   const handleSetDefault = async (id: string) => {
     try {
       const headers = await authHeaders();
@@ -190,19 +126,17 @@ export default function PaymentMethodsPage() {
   const handleDelete = async (id: string) => {
     try {
       const headers = await authHeaders();
-      await fetch(`${API}/payment-methods/${id}`, { method: "DELETE", headers });
+      await fetch(`${API}/payment-methods/${id}`, {
+        method: "DELETE",
+        headers,
+      });
       setDeleteId(null);
       fetchCards();
     } catch {
-      setError("Could not delete card");
+      setError("Could not remove card");
       setDeleteId(null);
     }
   };
-
-  const fieldClass = (key: string) =>
-    `flex min-h-[50px] items-center border bg-[#171B22] px-3.5 ${
-      focus === key ? "border-[#00E575] bg-[#00E575]/[0.06]" : "border-white/[0.08]"
-    }`;
 
   if (!isLoaded || (loading && isSignedIn)) return <OrbLoader />;
 
@@ -213,283 +147,160 @@ export default function PaymentMethodsPage() {
           <button
             type="button"
             onClick={() => router.back()}
-            className="flex h-10 w-10 shrink-0 items-center justify-center border border-white/[0.08] bg-[#11141A]"
+            className="flex h-10 w-10 shrink-0 items-center justify-center border border-white/[0.08] bg-[#0E1116]"
             aria-label="Back"
           >
             <ChevronLeft className="h-[22px] w-[22px]" />
           </button>
           <div className="min-w-0">
-            <p className="text-[10px] font-bold uppercase tracking-[1.4px] text-[#00E575]">Account</p>
-            <h1 className="truncate text-lg font-extrabold tracking-tight">Payment Methods</h1>
+            <p className="text-[10px] font-bold uppercase tracking-[1.4px] text-[#00E575]">
+              Account
+            </p>
+            <h1 className="truncate text-lg font-extrabold tracking-tight">
+              Payment Methods
+            </h1>
           </div>
         </div>
-        <button
-          type="button"
-          onClick={() => setModalOpen(true)}
-          className="flex h-10 w-10 shrink-0 items-center justify-center"
-          style={{ backgroundImage: GRAD }}
-          aria-label="Add card"
-        >
-          <Plus className="h-[22px] w-[22px] text-[#041412]" />
-        </button>
       </header>
 
       <main className="mx-auto w-full max-w-5xl px-4 py-5 sm:px-6 sm:py-8">
-        {error && !modalOpen ? (
+        {error ? (
           <p className="mb-4 border border-red-500/30 bg-red-500/10 px-3 py-2 text-[13px] text-red-300">
             {error}
           </p>
         ) : null}
 
+        {/* Security banner */}
+        <div className="mb-5 flex gap-3 border border-white/[0.08] bg-[#0E1116] p-4">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center border border-[#00E575]/25 bg-[#00E575]/10">
+            <ShieldCheck className="h-[18px] w-[18px] text-[#00E575]" />
+          </span>
+          <div>
+            <p className="text-[13px] font-bold">Cards stay with Paystack</p>
+            <p className="mt-1 text-[12.5px] leading-[18px] text-white/55">
+              We never collect full card numbers on this page. After you pay on
+              checkout, Paystack returns a secure token. Only the last four
+              digits appear here for recognition and defaults.
+            </p>
+          </div>
+        </div>
+
         {cards.length === 0 ? (
-          <div className="mx-auto flex max-w-md flex-col items-center px-4 pt-16 text-center sm:pt-24">
-            <div className="mb-4 flex h-20 w-20 items-center justify-center border border-white/[0.08] bg-[#11141A]">
+          <div className="mx-auto flex max-w-md flex-col items-center px-4 pt-10 text-center sm:pt-16">
+            <div className="mb-4 flex h-20 w-20 items-center justify-center border border-white/[0.08] bg-[#0E1116]">
               <CreditCard className="h-[34px] w-[34px] text-[#737A86]" />
             </div>
-            <h2 className="text-[17px] font-bold">No cards yet</h2>
-            <p className="mt-1.5 mb-6 text-[13px] leading-5 text-[#A7ADB8]">
-              Add a card so checkout is faster and more secure.
+            <h2 className="text-[17px] font-bold">No saved cards yet</h2>
+            <p className="mt-2 mb-6 max-w-sm text-[13px] leading-5 text-[#A7ADB8]">
+              Place an order and complete payment with Paystack. Your card will
+              be tokenized securely and listed here for faster checkouts later.
             </p>
-            <button
-              type="button"
-              onClick={() => setModalOpen(true)}
-              className="inline-flex items-center gap-1.5 px-[22px] py-[13px] text-[15px] font-extrabold text-[#041412]"
+            <Link
+              href="/"
+              className="inline-flex items-center gap-2 px-[22px] py-[13px] text-[15px] font-extrabold text-[#041412]"
               style={{ backgroundImage: GRAD }}
             >
-              <Plus className="h-[18px] w-[18px]" />
-              Add Card
-            </button>
+              Browse Showroom
+            </Link>
           </div>
         ) : (
-          <ul className="grid grid-cols-1 gap-3 md:grid-cols-2">
-            {cards.map((item) => {
-              const meta = getBrandMeta(item.brand);
-              return (
-                <li key={item._id}>
-                  <div
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => !item.isDefault && handleSetDefault(item._id)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && !item.isDefault) handleSetDefault(item._id);
-                    }}
-                    className={`flex cursor-pointer items-start border p-4 ${
-                      item.isDefault
-                        ? "border-[#00E575]/45 bg-[#171B22]"
-                        : "border-white/[0.08] bg-[#11141A]"
-                    }`}
-                  >
+          <>
+            <ul className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              {cards.map((item) => {
+                const meta = getBrandMeta(item.brand);
+                return (
+                  <li key={item._id}>
                     <div
-                      className="mr-3 flex h-[34px] w-12 shrink-0 items-center justify-center"
-                      style={{ backgroundColor: `${meta.color}22` }}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() =>
+                        !item.isDefault && handleSetDefault(item._id)
+                      }
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && !item.isDefault)
+                          handleSetDefault(item._id);
+                      }}
+                      className={`flex cursor-pointer items-start border p-4 transition-colors ${
+                        item.isDefault
+                          ? "border-[#00E575]/45 bg-[#14181F]"
+                          : "border-white/[0.08] bg-[#0E1116] hover:border-white/[0.14]"
+                      }`}
                     >
-                      <span className="text-[10px] font-extrabold tracking-wide" style={{ color: meta.color }}>
-                        {meta.short}
-                      </span>
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="mb-1 flex flex-wrap items-center gap-2">
-                        <p className="max-w-[70%] truncate text-[15px] font-bold">
-                          {item.brand || "Card"} {maskCard(item.last4)}
+                      <div
+                        className="mr-3 flex h-[34px] w-12 shrink-0 items-center justify-center"
+                        style={{ backgroundColor: `${meta.color}22` }}
+                      >
+                        <span
+                          className="text-[10px] font-extrabold tracking-wide"
+                          style={{ color: meta.color }}
+                        >
+                          {meta.short}
+                        </span>
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="mb-1 flex flex-wrap items-center gap-2">
+                          <p className="max-w-[70%] truncate text-[15px] font-bold">
+                            {item.brand || "Card"} {maskCard(item.last4)}
+                          </p>
+                          {item.isDefault ? (
+                            <span className="inline-flex items-center gap-0.5 bg-[#00E575]/12 px-1.5 py-0.5 text-[10px] font-bold text-[#00E575]">
+                              <Check className="h-[11px] w-[11px]" />
+                              DEFAULT
+                            </span>
+                          ) : null}
+                        </div>
+                        <p className="truncate text-[13px] leading-[18px] text-[#A7ADB8]">
+                          Expires {item.expMonth}/{item.expYear}
+                          {item.name ? ` · ${item.name}` : ""}
                         </p>
-                        {item.isDefault ? (
-                          <span className="inline-flex items-center gap-0.5 bg-[#00E575]/12 px-1.5 py-0.5 text-[10px] font-bold text-[#00E575]">
-                            <Check className="h-[11px] w-[11px]" />
-                            DEFAULT
-                          </span>
+                        {item.bank ? (
+                          <p className="mt-0.5 truncate text-[11px] text-[#737A86]">
+                            {item.bank}
+                          </p>
+                        ) : null}
+                        {!item.isDefault ? (
+                          <p className="mt-1.5 text-[11px] text-[#737A86]">
+                            Click to set as default
+                          </p>
                         ) : null}
                       </div>
-                      <p className="truncate text-[13px] leading-[18px] text-[#A7ADB8]">
-                        Expires {item.expMonth}/{item.expYear}
-                        {item.name ? ` · ${item.name}` : ""}
-                      </p>
-                      {!item.isDefault ? (
-                        <p className="mt-1.5 text-[11px] text-[#737A86]">Tap to set as default</p>
-                      ) : null}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setDeleteId(item._id);
+                        }}
+                        className="ml-1 p-1.5 text-[#EF4444] transition-opacity hover:opacity-80"
+                        aria-label="Remove card"
+                      >
+                        <Trash2 className="h-[18px] w-[18px]" />
+                      </button>
                     </div>
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setDeleteId(item._id);
-                      }}
-                      className="ml-1 p-1.5 text-[#EF4444]"
-                      aria-label="Delete card"
-                    >
-                      <Trash2 className="h-[18px] w-[18px]" />
-                    </button>
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
+                  </li>
+                );
+              })}
+            </ul>
+            <p className="mt-6 text-center text-[11px] leading-4 text-[#737A86]">
+              Managed securely · Paystack tokenisation · Plazore never stores
+              full card numbers
+            </p>
+          </>
         )}
       </main>
 
-      {modalOpen ? (
-        <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/72 sm:items-center sm:p-6">
-          <div className="flex max-h-[92vh] w-full max-w-lg flex-col overflow-hidden border-t border-white/[0.08] bg-[#11141A] sm:border">
-            <div className="flex items-center justify-between px-5 pt-5 pb-2 sm:px-6">
-              <div>
-                <p className="text-[10px] font-bold uppercase tracking-[1.4px] text-[#00E575]">Secure</p>
-                <h2 className="text-[19px] font-extrabold">New Card</h2>
-              </div>
-              <button
-                type="button"
-                onClick={closeModal}
-                className="flex h-[34px] w-[34px] items-center justify-center border border-white/[0.08] bg-[#171B22]"
-                aria-label="Close"
-              >
-                <X className="h-[18px] w-[18px] text-[#A7ADB8]" />
-              </button>
-            </div>
-
-            <div className="overflow-y-auto px-5 pb-8 sm:px-6">
-              {error ? (
-                <p className="mt-3 border border-red-500/30 bg-red-500/10 px-3 py-2 text-[13px] text-red-300">
-                  {error}
-                </p>
-              ) : null}
-
-              <p className="mt-3 mb-2 text-[11px] font-bold uppercase tracking-[0.8px] text-[#737A86]">
-                Card brand
-              </p>
-              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                {CARD_BRANDS.map((b) => {
-                  const active = brand === b.key;
-                  return (
-                    <button
-                      key={b.key}
-                      type="button"
-                      onClick={() => setBrand(b.key)}
-                      className={`flex items-center gap-2 px-2.5 py-2.5 text-left text-xs font-semibold ${
-                        active
-                          ? "border border-[#00E575] bg-[#00E575]/8 text-[#F5F7FA]"
-                          : "border border-white/[0.08] bg-[#171B22] text-[#A7ADB8]"
-                      }`}
-                    >
-                      <span className="h-2 w-2 shrink-0" style={{ backgroundColor: b.color }} />
-                      <span className="truncate">{b.key}</span>
-                    </button>
-                  );
-                })}
-              </div>
-
-              <p className="mt-3.5 mb-2 text-[11px] font-bold uppercase tracking-[0.8px] text-[#737A86]">
-                Name on card *
-              </p>
-              <div className={fieldClass("name")}>
-                <input
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="Full name"
-                  autoCapitalize="words"
-                  onFocus={() => setFocus("name")}
-                  onBlur={() => setFocus(null)}
-                  className="w-full bg-transparent text-[15px] outline-none placeholder:text-[#737A86]"
-                />
-              </div>
-
-              <p className="mt-3.5 mb-2 text-[11px] font-bold uppercase tracking-[0.8px] text-[#737A86]">
-                Card number *
-              </p>
-              <div className={fieldClass("number")}>
-                <input
-                  value={number}
-                  onChange={(e) => setNumber(formatCardNumber(e.target.value))}
-                  placeholder="ACCT-000003"
-                  inputMode="numeric"
-                  maxLength={19}
-                  onFocus={() => setFocus("number")}
-                  onBlur={() => setFocus(null)}
-                  className="w-full bg-transparent text-[15px] outline-none placeholder:text-[#737A86]"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <p className="mt-3.5 mb-2 text-[11px] font-bold uppercase tracking-[0.8px] text-[#737A86]">
-                    Expiry *
-                  </p>
-                  <div className={fieldClass("expiry")}>
-                    <input
-                      value={expiry}
-                      onChange={(e) => setExpiry(formatExpiry(e.target.value))}
-                      placeholder="MM/YY"
-                      inputMode="numeric"
-                      maxLength={5}
-                      onFocus={() => setFocus("expiry")}
-                      onBlur={() => setFocus(null)}
-                      className="w-full bg-transparent text-[15px] outline-none placeholder:text-[#737A86]"
-                    />
-                  </div>
-                </div>
-                <div>
-                  <p className="mt-3.5 mb-2 text-[11px] font-bold uppercase tracking-[0.8px] text-[#737A86]">
-                    CVC *
-                  </p>
-                  <div className={fieldClass("cvc")}>
-                    <input
-                      value={cvc}
-                      onChange={(e) => setCvc(e.target.value.replace(/\D/g, "").slice(0, 4))}
-                      placeholder="123"
-                      inputMode="numeric"
-                      maxLength={4}
-                      type="password"
-                      onFocus={() => setFocus("cvc")}
-                      onBlur={() => setFocus(null)}
-                      className="w-full bg-transparent text-[15px] outline-none placeholder:text-[#737A86]"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => setIsDefault((v) => !v)}
-                className="mt-[18px] flex w-full items-center gap-2.5 text-left"
-              >
-                <span
-                  className={`flex h-[22px] w-[22px] shrink-0 items-center justify-center border-2 ${
-                    isDefault ? "border-[#00E575] bg-[#00E575]" : "border-[#737A86]"
-                  }`}
-                >
-                  {isDefault ? <Check className="h-3.5 w-3.5 text-[#090B0F]" /> : null}
-                </span>
-                <span className="text-sm font-medium">Set as default payment method</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={handleSave}
-                disabled={saving}
-                className="mt-6 flex h-[50px] w-full items-center justify-center text-base font-extrabold text-[#041412] disabled:opacity-60"
-                style={{
-                  backgroundImage: saving ? "none" : GRAD,
-                  backgroundColor: saving ? "#4B5563" : undefined,
-                }}
-              >
-                {saving ? "Saving…" : "Save Card"}
-              </button>
-
-              <p className="mt-3.5 text-center text-[11px] leading-4 text-[#737A86]">
-                Only the last 4 digits are stored. Full payment processing comes with Stripe later.
-              </p>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
       {deleteId ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/72 p-5">
-          <div className="w-full max-w-sm border border-white/[0.08] bg-[#11141A] p-5">
-            <h3 className="text-base font-bold">Delete Card</h3>
-            <p className="mt-2 text-sm text-[#A7ADB8]">Remove this card?</p>
+          <div className="w-full max-w-sm border border-white/[0.08] bg-[#0E1116] p-5">
+            <h3 className="text-base font-bold">Remove card</h3>
+            <p className="mt-2 text-sm text-[#A7ADB8]">
+              This card will be removed from your account. You can always pay
+              again with Paystack on checkout.
+            </p>
             <div className="mt-5 flex gap-2">
               <button
                 type="button"
                 onClick={() => setDeleteId(null)}
-                className="flex-1 border border-white/[0.08] bg-[#171B22] py-3 text-sm font-semibold"
+                className="flex-1 border border-white/[0.08] bg-[#14181F] py-3 text-sm font-semibold"
               >
                 Cancel
               </button>
@@ -498,7 +309,7 @@ export default function PaymentMethodsPage() {
                 onClick={() => handleDelete(deleteId)}
                 className="flex-1 bg-[#EF4444] py-3 text-sm font-extrabold text-white"
               >
-                Delete
+                Remove
               </button>
             </div>
           </div>

@@ -4,7 +4,17 @@ import Link from "next/link";
 import { useAuth } from "@clerk/nextjs";
 import { Poppins } from "next/font/google";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { LayoutGrid, List, RefreshCw, WifiOff, X } from "lucide-react";
+import { useSearchParams } from "next/navigation";
+import {
+  LayoutGrid,
+  List,
+  RefreshCw,
+  WifiOff,
+  X,
+  Shield,
+  Banknote,
+  Scale,
+} from "lucide-react";
 import { adminFetch } from "@/lib/api";
 import { OrbLoader } from "@/components/OrbLoader";
 import {
@@ -33,19 +43,46 @@ type OrderItem = {
   note?: string;
 };
 
+type FeeBreakdown = {
+  subtotal?: number;
+  shippingCost?: number;
+  grossAmount?: number;
+  platformFeeRate?: number;
+  platformFee?: number;
+  sellerPayoutAmount?: number;
+  currency?: string;
+};
+
 type OrderRow = {
   _id: string;
   orderNumber?: string;
   orderStatus?: string;
   paymentStatus?: string;
   paymentMethod?: string;
+  paymentLifecycle?: string;
   totalAmount?: number;
   subtotal?: number;
   shippingCost?: number;
+  region?: string;
   createdAt?: string;
   updatedAt?: string;
   deliveredAt?: string;
   buyerNote?: string;
+  feeBreakdown?: FeeBreakdown;
+  buyerConfirmation?: {
+    status?: string;
+    confirmedAt?: string;
+    issueReportedAt?: string;
+    confirmationDeadline?: string;
+  };
+  payout?: {
+    status?: string;
+    eligibleAt?: string;
+    blockedReason?: string;
+    amount?: number;
+    platformFee?: number;
+    reference?: string;
+  };
   buyer?: {
     _id?: string;
     name?: string;
@@ -102,7 +139,6 @@ type Counts = {
   Cancelled: number;
 };
 
-/** Always show Plazore order code: PLZ#48291 */
 function formatPlz(order: OrderRow | null | undefined) {
   if (!order) return "PLZ#—";
   const raw = (order.orderNumber || "").trim();
@@ -124,6 +160,19 @@ function fmtDate(d?: string) {
   }
 }
 
+function fmtMoney(n?: number, currency = "NGN") {
+  const v = Number(n || 0);
+  try {
+    return new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency: currency.length === 3 ? currency : "NGN",
+      maximumFractionDigits: 2,
+    }).format(v);
+  } catch {
+    return v.toLocaleString();
+  }
+}
+
 function statusTone(s?: string): "green" | "error" | "blue" | "warn" | "neutral" {
   if (s === "Delivered") return "green";
   if (s === "Cancelled") return "error";
@@ -133,11 +182,37 @@ function statusTone(s?: string): "green" | "error" | "blue" | "warn" | "neutral"
 }
 
 function payTone(s?: string): "green" | "error" | "blue" | "warn" | "neutral" {
-  if (s === "paid") return "green";
-  if (s === "failed") return "error";
-  if (s === "refunded") return "blue";
-  if (s === "pending") return "warn";
+  const v = String(s || "").toLowerCase();
+  if (v === "paid") return "green";
+  if (v === "failed") return "error";
+  if (v === "refunded") return "blue";
+  if (v === "pending") return "warn";
   return "neutral";
+}
+
+function lifecycleTone(
+  s?: string
+): "green" | "error" | "blue" | "warn" | "neutral" {
+  const v = String(s || "").toUpperCase();
+  if (
+    ["SELLER_PAID", "DELIVERY_CONFIRMED", "PAYMENT_PROTECTED", "PAYMENT_VERIFIED"].includes(
+      v
+    )
+  )
+    return "green";
+  if (["REFUNDED", "PAYMENT_FAILED", "CANCELLED"].includes(v)) return "error";
+  if (["DISPUTED", "REFUND_PENDING"].includes(v)) return "warn";
+  if (["SETTLED_SELLER_FAVOUR", "SHIPPED", "DELIVERED"].includes(v)) return "blue";
+  if (["PENDING_PAYMENT", "PAYMENT_PROCESSING"].includes(v)) return "warn";
+  return "neutral";
+}
+
+function lifecycleLabel(s?: string) {
+  if (!s) return "—";
+  return s
+    .replace(/_/g, " ")
+    .toLowerCase()
+    .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 function Field({
@@ -167,16 +242,22 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   );
 }
 
-/** Visual order flow: Preparing → Shipped → Delivered (or Cancelled branch) */
 function OrderFlow({ order }: { order: OrderRow }) {
   const status = order.orderStatus || "Preparing";
   const cancelled = status === "Cancelled";
+  const lifecycle = String(order.paymentLifecycle || "").toUpperCase();
+  const paid =
+    order.paymentStatus === "paid" ||
+    ["PAYMENT_VERIFIED", "PAYMENT_PROTECTED", "PROCESSING_ORDER", "SHIPPED", "DELIVERED", "DELIVERY_CONFIRMED", "SELLER_PAYOUT_PENDING", "SELLER_PAID"].includes(
+      lifecycle
+    );
+
   const steps = [
     {
-      key: "placed",
-      label: "Placed",
-      at: order.createdAt,
-      done: true,
+      key: "paid",
+      label: "Payment",
+      at: paid ? order.createdAt : undefined,
+      done: paid,
     },
     {
       key: "Preparing",
@@ -196,6 +277,22 @@ function OrderFlow({ order }: { order: OrderRow }) {
       at: order.deliveredAt,
       done: status === "Delivered",
     },
+    {
+      key: "confirmed",
+      label: "Buyer confirm",
+      at: order.buyerConfirmation?.confirmedAt,
+      done: ["confirmed", "auto_confirmed"].includes(
+        String(order.buyerConfirmation?.status || "")
+      ),
+    },
+    {
+      key: "payout",
+      label: "Seller payout",
+      at: order.payout?.eligibleAt,
+      done: ["completed", "initiated", "queued"].includes(
+        String(order.payout?.status || "")
+      ),
+    },
   ];
 
   return (
@@ -211,10 +308,17 @@ function OrderFlow({ order }: { order: OrderRow }) {
             : ""}
         </div>
       )}
+      {lifecycle === "DISPUTED" && (
+        <div className="border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
+          Dispute open — payout blocked
+          {order.payout?.blockedReason ? ` · ${order.payout.blockedReason}` : ""}
+        </div>
+      )}
       <ol className="space-y-0">
         {steps.map((step, i) => {
-          const active = step.key === status || (step.key === "placed" && true);
-          const isCurrent = step.key === status;
+          const isCurrent =
+            (step.key === status) ||
+            (step.key === "paid" && !paid && status === "Preparing");
           return (
             <li key={step.key} className="flex gap-3">
               <div className="flex flex-col items-center">
@@ -246,11 +350,6 @@ function OrderFlow({ order }: { order: OrderRow }) {
                   )}
                 >
                   {step.label}
-                  {isCurrent && !cancelled ? (
-                    <span className="ml-2 text-[10px] font-semibold uppercase tracking-wider text-[#00E575]">
-                      Current
-                    </span>
-                  ) : null}
                 </p>
                 <p className="text-[11px] text-[#737A86]">
                   {step.at ? fmtDate(step.at) : step.done ? "—" : "Pending"}
@@ -266,12 +365,15 @@ function OrderFlow({ order }: { order: OrderRow }) {
 
 export default function OrdersPage() {
   const { getToken } = useAuth();
+  const searchParams = useSearchParams();
+  const deepOrderId = searchParams.get("orderId");
 
   const [mounted, setMounted] = useState(false);
   const [offline, setOffline] = useState(false);
 
   const [status, setStatus] = useState("");
   const [payment, setPayment] = useState("");
+  const [lifecycle, setLifecycle] = useState("");
   const [city, setCity] = useState("");
   const [sort, setSort] = useState("newest");
   const [q, setQ] = useState("");
@@ -291,6 +393,8 @@ export default function OrdersPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [stale, setStale] = useState(false);
+  const [actionBusy, setActionBusy] = useState(false);
+  const [actionMsg, setActionMsg] = useState("");
 
   const [openId, setOpenId] = useState<string | null>(null);
   const [selected, setSelected] = useState<OrderRow | null>(null);
@@ -304,6 +408,7 @@ export default function OrdersPage() {
     pages: number;
     page: number;
   } | null>(null);
+  const deepOpened = useRef(false);
 
   const showOffline = mounted && offline;
 
@@ -359,6 +464,7 @@ export default function OrdersPage() {
         });
         if (status) params.set("status", status);
         if (payment) params.set("payment", payment);
+        if (lifecycle) params.set("lifecycle", lifecycle);
         if (city.trim()) params.set("city", city.trim());
         if (q.trim()) params.set("q", q.trim());
 
@@ -368,7 +474,6 @@ export default function OrdersPage() {
         const nextPages = json.pagination?.pages || 1;
         const nextPage = json.pagination?.page || p;
 
-        // Local status tallies for the current result set + prefer API counts if present
         const nextCounts: Counts = json.counts || {
           all: nextTotal,
           Preparing: nextItems.filter((o) => o.orderStatus === "Preparing")
@@ -415,52 +520,93 @@ export default function OrdersPage() {
         setLoading(false);
       }
     },
-    [getToken, status, payment, city, q]
+    [getToken, status, payment, lifecycle, city, q]
   );
 
   useEffect(() => {
     if (!mounted) return;
     load(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mounted, status, payment]);
+  }, [mounted, status, payment, lifecycle]);
 
-  const openPane = async (row: OrderRow) => {
-    setOpenId(row._id);
-    setSelected(row);
-    setPaneOpen(true);
-    if (showOffline) return;
-    try {
-      setDetailLoading(true);
-      const token = await getToken();
-      const json = await adminFetch<{ data: OrderRow }>(
-        `/admin/orders/${row._id}`,
-        token
-      );
-      setSelected(json.data);
-    } catch {
-      // keep list row data
-    } finally {
-      setDetailLoading(false);
-    }
-  };
+  const openPane = useCallback(
+    async (row: OrderRow | { _id: string }) => {
+      setOpenId(row._id);
+      if ("orderNumber" in row) setSelected(row as OrderRow);
+      setPaneOpen(true);
+      if (showOffline) return;
+      try {
+        setDetailLoading(true);
+        const token = await getToken();
+        const json = await adminFetch<{ data: OrderRow }>(
+          `/admin/orders/${row._id}`,
+          token
+        );
+        setSelected(json.data);
+      } catch {
+        /* keep list row */
+      } finally {
+        setDetailLoading(false);
+      }
+    },
+    [getToken, showOffline]
+  );
+
+  // Deep link: /orders?orderId=xxx
+  useEffect(() => {
+    if (!mounted || !deepOrderId || deepOpened.current) return;
+    deepOpened.current = true;
+    void openPane({ _id: deepOrderId });
+  }, [mounted, deepOrderId, openPane]);
 
   const closePane = () => {
     setPaneOpen(false);
     window.setTimeout(() => {
       setOpenId(null);
       setSelected(null);
+      setActionMsg("");
     }, 280);
   };
 
   const clearFilters = () => {
     setStatus("");
     setPayment("");
+    setLifecycle("");
     setCity("");
     setQ("");
     setSort("newest");
   };
 
-  const filtersActive = !!(status || payment || city.trim() || q.trim());
+  const filtersActive = !!(
+    status ||
+    payment ||
+    lifecycle ||
+    city.trim() ||
+    q.trim()
+  );
+
+  const runAdminAction = async (
+    path: string,
+    body?: Record<string, unknown>
+  ) => {
+    if (!selected?._id) return;
+    try {
+      setActionBusy(true);
+      setActionMsg("");
+      const token = await getToken();
+      await adminFetch(path, token, {
+        method: "POST",
+        body: JSON.stringify(body || {}),
+      });
+      setActionMsg("Action completed");
+      await openPane(selected);
+      await load(page);
+    } catch (e: any) {
+      setActionMsg(e?.message || "Action failed");
+    } finally {
+      setActionBusy(false);
+    }
+  };
 
   const sortedItems = [...items].sort((a, b) => {
     if (sort === "oldest") {
@@ -480,6 +626,9 @@ export default function OrdersPage() {
       new Date(a.createdAt || 0).getTime()
     );
   });
+
+  const fee = selected?.feeBreakdown;
+  const currency = fee?.currency || "NGN";
 
   return (
     <div
@@ -531,8 +680,8 @@ export default function OrdersPage() {
               Orders
             </h1>
             <p className="mt-2 max-w-xl text-sm leading-relaxed text-[#A7ADB8]">
-              PLZ# codes, buyers, sellers, ship-to, payment, and fulfillment
-              flow.
+              PLZ# codes, payment lifecycle, 8% platform fee, payouts, disputes
+              and refunds.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -644,7 +793,7 @@ export default function OrdersPage() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-5">
             <Select
               value={status}
               onChange={(e) => setStatus(e.target.value)}
@@ -666,6 +815,20 @@ export default function OrdersPage() {
               <option value="paid">Paid</option>
               <option value="failed">Failed</option>
               <option value="refunded">Refunded</option>
+            </Select>
+            <Select
+              value={lifecycle}
+              onChange={(e) => setLifecycle(e.target.value)}
+              disabled={showOffline && !cacheRef.current}
+            >
+              <option value="">All lifecycles</option>
+              <option value="PENDING_PAYMENT">Pending payment</option>
+              <option value="PAYMENT_PROTECTED">Protected</option>
+              <option value="DISPUTED">Disputed</option>
+              <option value="DELIVERY_CONFIRMED">Delivery confirmed</option>
+              <option value="SELLER_PAID">Seller paid</option>
+              <option value="REFUNDED">Refunded</option>
+              <option value="SETTLED_SELLER_FAVOUR">Seller favour</option>
             </Select>
             <Input
               placeholder="Ship-to city…"
@@ -739,6 +902,11 @@ export default function OrdersPage() {
                   <Badge tone={payTone(o.paymentStatus)}>
                     {o.paymentStatus || "—"}
                   </Badge>
+                  {o.paymentLifecycle ? (
+                    <Badge tone={lifecycleTone(o.paymentLifecycle)}>
+                      {lifecycleLabel(o.paymentLifecycle)}
+                    </Badge>
+                  ) : null}
                 </div>
                 <div className="mt-3 flex items-center justify-between text-xs text-[#737A86]">
                   <span>{o.shippingAddress?.city || "—"}</span>
@@ -752,7 +920,7 @@ export default function OrdersPage() {
         </div>
       ) : (
         <Panel className="overflow-x-auto">
-          <table className="w-full min-w-[980px] text-left text-sm">
+          <table className="w-full min-w-[1080px] text-left text-sm">
             <thead className="border-b border-[#252A33] text-[11px] uppercase tracking-[0.12em] text-[#737A86]">
               <tr>
                 <th className="px-4 py-3 font-semibold">Order</th>
@@ -761,6 +929,7 @@ export default function OrdersPage() {
                 <th className="px-4 py-3 font-semibold">Ship to</th>
                 <th className="px-4 py-3 font-semibold">Status</th>
                 <th className="px-4 py-3 font-semibold">Payment</th>
+                <th className="px-4 py-3 font-semibold">Lifecycle</th>
                 <th className="px-4 py-3 font-semibold">Total</th>
                 <th className="px-4 py-3 font-semibold">Date</th>
               </tr>
@@ -774,9 +943,7 @@ export default function OrdersPage() {
                     onClick={() => openPane(o)}
                     className={cn(
                       "cursor-pointer border-b border-[#252A33]/70 transition-colors hover:bg-[#171B22]/80",
-                      openId === o._id &&
-                        paneOpen &&
-                        "bg-[#00E575]/[0.06]"
+                      openId === o._id && paneOpen && "bg-[#00E575]/[0.06]"
                     )}
                   >
                     <td className="px-4 py-3">
@@ -800,18 +967,9 @@ export default function OrdersPage() {
                       <p className="truncate">
                         {o.seller?.storeName || o.seller?.name || "—"}
                       </p>
-                      <p className="truncate text-xs text-[#737A86]">
-                        {o.seller?.email}
-                      </p>
                     </td>
                     <td className="px-4 py-3 text-[#A7ADB8]">
                       {o.shippingAddress?.city || "—"}
-                      {o.shippingAddress?.state ? (
-                        <span className="text-[#737A86]">
-                          {" "}
-                          · {o.shippingAddress.state}
-                        </span>
-                      ) : null}
                     </td>
                     <td className="px-4 py-3">
                       <Badge tone={statusTone(o.orderStatus)}>
@@ -821,6 +979,11 @@ export default function OrdersPage() {
                     <td className="px-4 py-3">
                       <Badge tone={payTone(o.paymentStatus)}>
                         {o.paymentStatus || "—"}
+                      </Badge>
+                    </td>
+                    <td className="px-4 py-3">
+                      <Badge tone={lifecycleTone(o.paymentLifecycle)}>
+                        {lifecycleLabel(o.paymentLifecycle)}
                       </Badge>
                     </td>
                     <td className="px-4 py-3 font-semibold tabular-nums">
@@ -873,7 +1036,7 @@ export default function OrdersPage() {
       <aside
         className={cn(
           poppins.className,
-          "fixed top-0 right-0 z-50 flex h-full w-full max-w-[460px] flex-col border-l border-[#252A33] bg-[#0C0F14] shadow-2xl transition-transform duration-300 ease-out",
+          "fixed top-0 right-0 z-50 flex h-full w-full max-w-[480px] flex-col border-l border-[#252A33] bg-[#0C0F14] shadow-2xl transition-transform duration-300 ease-out",
           paneOpen ? "translate-x-0" : "translate-x-full"
         )}
       >
@@ -896,9 +1059,7 @@ export default function OrdersPage() {
         </div>
 
         <div className="flex-1 overflow-y-auto px-4 py-5">
-          {detailLoading && !selected && (
-            <OrbLoader label="Loading order" />
-          )}
+          {detailLoading && !selected && <OrbLoader label="Loading order" />}
           {selected && (
             <div className="space-y-6">
               {detailLoading && (
@@ -912,8 +1073,77 @@ export default function OrdersPage() {
                 <Badge tone={payTone(selected.paymentStatus)}>
                   {selected.paymentStatus || "—"}
                 </Badge>
+                {selected.paymentLifecycle ? (
+                  <Badge tone={lifecycleTone(selected.paymentLifecycle)}>
+                    {lifecycleLabel(selected.paymentLifecycle)}
+                  </Badge>
+                ) : null}
                 {selected.paymentMethod ? (
                   <Badge tone="neutral">{selected.paymentMethod}</Badge>
+                ) : null}
+              </div>
+
+              {/* Payment & fee */}
+              <div className="space-y-3 border-t border-[#252A33] pt-4">
+                <SectionLabel>
+                  <span className="inline-flex items-center gap-1.5">
+                    <Banknote className="h-3 w-3" /> Payment & fees
+                  </span>
+                </SectionLabel>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="border border-[#252A33] bg-[#11141A] p-3">
+                    <p className="text-[10px] uppercase tracking-[0.14em] text-[#737A86]">
+                      Gross
+                    </p>
+                    <p className="mt-1 text-sm font-semibold tabular-nums">
+                      {fmtMoney(
+                        fee?.grossAmount ?? selected.totalAmount,
+                        currency
+                      )}
+                    </p>
+                  </div>
+                  <div className="border border-[#252A33] bg-[#11141A] p-3">
+                    <p className="text-[10px] uppercase tracking-[0.14em] text-[#737A86]">
+                      Platform fee (8%)
+                    </p>
+                    <p className="mt-1 text-sm font-semibold tabular-nums text-[#00E575]">
+                      {fmtMoney(
+                        fee?.platformFee ??
+                          Number(selected.subtotal || 0) * 0.08,
+                        currency
+                      )}
+                    </p>
+                  </div>
+                  <div className="border border-[#252A33] bg-[#11141A] p-3">
+                    <p className="text-[10px] uppercase tracking-[0.14em] text-[#737A86]">
+                      Seller payout
+                    </p>
+                    <p className="mt-1 text-sm font-semibold tabular-nums">
+                      {fmtMoney(
+                        fee?.sellerPayoutAmount ??
+                          selected.payout?.amount ??
+                          Number(selected.subtotal || 0) * 0.92 +
+                            Number(selected.shippingCost || 0),
+                        currency
+                      )}
+                    </p>
+                  </div>
+                  <div className="border border-[#252A33] bg-[#11141A] p-3">
+                    <p className="text-[10px] uppercase tracking-[0.14em] text-[#737A86]">
+                      Payout status
+                    </p>
+                    <p className="mt-1 text-sm font-semibold">
+                      {selected.payout?.status || "not_eligible"}
+                    </p>
+                  </div>
+                </div>
+                {selected.buyerConfirmation?.status ? (
+                  <Field label="Buyer confirmation">
+                    {selected.buyerConfirmation.status}
+                    {selected.buyerConfirmation.confirmationDeadline
+                      ? ` · deadline ${fmtDate(selected.buyerConfirmation.confirmationDeadline)}`
+                      : ""}
+                  </Field>
                 ) : null}
               </div>
 
@@ -924,25 +1154,56 @@ export default function OrdersPage() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3 border-t border-[#252A33] pt-4">
-                <div className="border border-[#252A33] bg-[#11141A] p-3">
-                  <p className="text-[10px] uppercase tracking-[0.14em] text-[#737A86]">
-                    Total
-                  </p>
-                  <p className="mt-1 text-lg font-semibold tabular-nums">
-                    {Number(selected.totalAmount || 0).toLocaleString()}
-                  </p>
-                </div>
-                <div className="border border-[#252A33] bg-[#11141A] p-3">
-                  <p className="text-[10px] uppercase tracking-[0.14em] text-[#737A86]">
-                    Items
-                  </p>
-                  <p className="mt-1 text-lg font-semibold tabular-nums">
-                    {selected.items?.length || 0}
-                  </p>
+              {/* Dispute / refund / seller favour */}
+              <div className="space-y-2 border-t border-[#252A33] pt-4">
+                <SectionLabel>
+                  <span className="inline-flex items-center gap-1.5">
+                    <Scale className="h-3 w-3" /> Resolve
+                  </span>
+                </SectionLabel>
+                <p className="text-[11px] text-[#737A86]">
+                  Admin settlement for disputes. Prefer refund to buyer or
+                  settle in seller’s favour when evidence supports it.
+                </p>
+                {actionMsg && (
+                  <p className="text-xs text-[#A7ADB8]">{actionMsg}</p>
+                )}
+                <div className="grid grid-cols-1 gap-2">
+                  <Button
+                    tone="ghost"
+                    className="h-10 justify-start gap-2 text-xs"
+                    disabled={actionBusy || selected.paymentStatus !== "paid"}
+                    onClick={() =>
+                      void runAdminAction(
+                        `/admin/orders/${selected._id}/refund`,
+                        { reason: "admin_buyer_refund" }
+                      )
+                    }
+                  >
+                    <Shield className="h-3.5 w-3.5" />
+                    Refund buyer (full)
+                  </Button>
+                  <Button
+                    tone="ghost"
+                    className="h-10 justify-start gap-2 text-xs"
+                    disabled={
+                      actionBusy ||
+                      String(selected.paymentLifecycle) !== "DISPUTED"
+                    }
+                    onClick={() =>
+                      void runAdminAction(
+                        `/admin/orders/${selected._id}/settle-seller`,
+                        { reason: "admin_seller_favour" }
+                      )
+                    }
+                  >
+                    <Banknote className="h-3.5 w-3.5" />
+                    Settle seller favour
+                  </Button>
                 </div>
               </div>
 
+              {/* Buyer / seller links for deep open */}
               <div className="space-y-3 border-t border-[#252A33] pt-4">
                 <SectionLabel>Buyer</SectionLabel>
                 <Field label="Name">
@@ -951,33 +1212,14 @@ export default function OrdersPage() {
                     "—"}
                 </Field>
                 <Field label="Email">{selected.buyer?.email || "—"}</Field>
-                <Field label="Phone">
-                  {selected.buyerContact?.phone ||
-                    selected.buyer?.phone ||
-                    "—"}
-                </Field>
-                <Field label="Region">
-                  {selected.buyer?.marketplaceRegion || "—"}
-                </Field>
-               {/* Buyer section — replace the Open buyer profile Link */}
-{selected.buyer?._id && (
-  <Link
-    href={`/users?userId=${encodeURIComponent(selected.buyer._id)}&role=buyer`}
-    className="inline-flex h-9 items-center justify-center border border-[#252A33] bg-[#171B22] px-3 text-xs font-medium text-[#A7ADB8] transition hover:border-[#00E575]/40 hover:text-[#00E575]"
-  >
-    Open buyer on Users
-  </Link>
-)}
-
-{/* Seller section — replace the Open seller profile Link */}
-{selected.seller?._id && (
-  <Link
-    href={`/users?userId=${encodeURIComponent(selected.seller._id)}&role=seller`}
-    className="inline-flex h-9 items-center justify-center border border-[#252A33] bg-[#171B22] px-3 text-xs font-medium text-[#A7ADB8] transition hover:border-[#00E575]/40 hover:text-[#00E575]"
-  >
-    Open seller on Users
-  </Link>
-)}
+                {selected.buyer?._id && (
+                  <Link
+                    href={`/users?userId=${encodeURIComponent(selected.buyer._id)}&role=buyer`}
+                    className="inline-flex h-9 items-center justify-center border border-[#252A33] bg-[#171B22] px-3 text-xs font-medium text-[#A7ADB8] transition hover:border-[#00E575]/40 hover:text-[#00E575]"
+                  >
+                    Open buyer on Users
+                  </Link>
+                )}
               </div>
 
               <div className="space-y-3 border-t border-[#252A33] pt-4">
@@ -986,23 +1228,15 @@ export default function OrdersPage() {
                   {selected.seller?.storeName || selected.seller?.name || "—"}
                 </Field>
                 <Field label="Email">{selected.seller?.email || "—"}</Field>
-                <Field label="Phone">{selected.seller?.phone || "—"}</Field>
-                <Field label="Region">
-                  {selected.seller?.marketplaceRegion || "—"}
-                </Field>
                 {selected.seller?.isSellerSuspended && (
                   <Badge tone="error">Seller suspended</Badge>
                 )}
                 {selected.seller?._id && (
                   <Link
-                    href={`/users?role=seller&q=${encodeURIComponent(
-                      selected.seller.storeName ||
-                        selected.seller.email ||
-                        selected.seller._id
-                    )}`}
-                    className="inline-flex text-xs font-medium text-[#00E575] hover:underline"
+                    href={`/users?userId=${encodeURIComponent(selected.seller._id)}&role=seller`}
+                    className="inline-flex h-9 items-center justify-center border border-[#252A33] bg-[#171B22] px-3 text-xs font-medium text-[#A7ADB8] transition hover:border-[#00E575]/40 hover:text-[#00E575]"
                   >
-                    Open seller profile
+                    Open seller on Users
                   </Link>
                 )}
               </div>
@@ -1015,49 +1249,9 @@ export default function OrdersPage() {
                 <Field label="City">
                   {selected.shippingAddress?.city || "—"}
                 </Field>
-                <Field label="State">
-                  {selected.shippingAddress?.state || "—"}
-                </Field>
-                <Field label="ZIP">
-                  {selected.shippingAddress?.zipCode || "—"}
-                </Field>
                 <Field label="Country">
                   {selected.shippingAddress?.country || "—"}
                 </Field>
-              </div>
-
-              <div className="space-y-3 border-t border-[#252A33] pt-4">
-                <SectionLabel>Shipping method</SectionLabel>
-                <Field label="Method">
-                  {selected.shipping?.shippingMethod ||
-                    selected.productShipping?.method ||
-                    "—"}
-                </Field>
-                <Field label="Courier">
-                  {selected.shipping?.deliveryCompany ||
-                    selected.productShipping?.courierCompany ||
-                    "—"}
-                </Field>
-                <Field label="Tracking">
-                  {selected.shipping?.trackingNumber ? (
-                    <span className="font-mono">
-                      {selected.shipping.trackingNumber}
-                    </span>
-                  ) : (
-                    "—"
-                  )}
-                </Field>
-                <Field label="Shipped at">
-                  {fmtDate(selected.shipping?.shippedAt)}
-                </Field>
-                <Field label="ETA">
-                  {fmtDate(selected.shipping?.estimatedDelivery)}
-                </Field>
-                {selected.shipping?.selfDeliveryNote ? (
-                  <Field label="Self-delivery note">
-                    {selected.shipping.selfDeliveryNote}
-                  </Field>
-                ) : null}
               </div>
 
               <div className="space-y-2 border-t border-[#252A33] pt-4">
@@ -1093,7 +1287,6 @@ export default function OrdersPage() {
                         <p className="truncate text-sm font-medium">{title}</p>
                         <p className="text-[11px] text-[#737A86]">
                           Qty {it.quantity ?? 1}
-                          {it.note ? ` · ${it.note}` : ""}
                         </p>
                       </div>
                       <p className="shrink-0 text-sm font-semibold tabular-nums">
@@ -1102,40 +1295,7 @@ export default function OrdersPage() {
                     </div>
                   );
                 })}
-                {!selected.items?.length && (
-                  <p className="text-xs text-[#737A86]">No line items.</p>
-                )}
               </div>
-
-              <div className="space-y-1.5 border-t border-[#252A33] pt-4 text-sm">
-                <div className="flex justify-between text-[#A7ADB8]">
-                  <span>Subtotal</span>
-                  <span className="tabular-nums">
-                    {Number(selected.subtotal || 0).toLocaleString()}
-                  </span>
-                </div>
-                <div className="flex justify-between text-[#A7ADB8]">
-                  <span>Shipping</span>
-                  <span className="tabular-nums">
-                    {Number(selected.shippingCost || 0).toLocaleString()}
-                  </span>
-                </div>
-                <div className="flex justify-between font-semibold text-[#F5F7FA]">
-                  <span>Total</span>
-                  <span className="tabular-nums">
-                    {Number(selected.totalAmount || 0).toLocaleString()}
-                  </span>
-                </div>
-              </div>
-
-              {selected.buyerNote ? (
-                <div className="border-t border-[#252A33] pt-4">
-                  <SectionLabel>Buyer note</SectionLabel>
-                  <p className="mt-2 text-sm text-[#A7ADB8]">
-                    {selected.buyerNote}
-                  </p>
-                </div>
-              ) : null}
 
               {selected.orderStatus === "Cancelled" &&
                 selected.cancellation && (
@@ -1146,15 +1306,7 @@ export default function OrdersPage() {
                       {selected.cancellation.reasonLabel
                         ? ` · ${selected.cancellation.reasonLabel}`
                         : ""}
-                      {selected.cancellation.cancelledAt
-                        ? ` · ${fmtDate(selected.cancellation.cancelledAt)}`
-                        : ""}
                     </p>
-                    {selected.cancellation.note ? (
-                      <p className="mt-1 text-xs opacity-80">
-                        {selected.cancellation.note}
-                      </p>
-                    ) : null}
                     {selected.cancellation.refundStatus &&
                       selected.cancellation.refundStatus !==
                         "not_applicable" && (
@@ -1169,9 +1321,6 @@ export default function OrdersPage() {
                 <p className="font-mono">ID {selected._id}</p>
                 <p>Placed {fmtDate(selected.createdAt)}</p>
                 <p>Updated {fmtDate(selected.updatedAt)}</p>
-                {selected.deliveredAt && (
-                  <p>Delivered {fmtDate(selected.deliveredAt)}</p>
-                )}
               </div>
             </div>
           )}

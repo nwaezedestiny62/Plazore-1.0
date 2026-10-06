@@ -1,10 +1,14 @@
 import mongoose from "mongoose";
 
 /**
- * Display metadata only for cards.
- * Never store full PAN, CVV, or PIN.
- * Paystack authorization_code is the token for future charges.
+ * REPLACE existing models/PaymentMethod.ts with this version.
+ *
+ * Changes:
+ * - Adds Paystack authorization fields (tokenized — never store PAN/CVV)
+ * - Keeps last4 / brand / exp for display only
+ * - Removes stripe placeholder; uses paystackAuthorizationCode
  */
+
 const PaymentMethodSchema = new mongoose.Schema(
   {
     user: {
@@ -30,30 +34,21 @@ const PaymentMethodSchema = new mongoose.Schema(
       minlength: 4,
       maxlength: 4,
     },
-    expMonth: {
-      type: String,
-      required: true,
-    },
-    expYear: {
-      type: String,
-      required: true,
-    },
-    isDefault: {
-      type: Boolean,
-      default: false,
-    },
+    expMonth: { type: String, required: true },
+    expYear: { type: String, required: true },
+    isDefault: { type: Boolean, default: false },
 
-    // ===== Paystack tokenization =====
+    // ===== Paystack tokenization (from successful charge authorization) =====
     provider: {
       type: String,
       enum: ["paystack", "manual"],
       default: "paystack",
     },
-    /** Paystack authorization_code — charge_authorization for return customers */
+    /** Paystack authorization_code — used for charge_authorization on return customers */
     paystackAuthorizationCode: {
       type: String,
       default: null,
-      select: false,
+      select: false, // do not leak in normal queries
     },
     paystackCustomerCode: { type: String, default: null },
     bin: { type: String, default: null },
@@ -61,13 +56,10 @@ const PaymentMethodSchema = new mongoose.Schema(
     channel: { type: String, default: null },
     countryCode: { type: String, default: null },
     reusable: { type: Boolean, default: false },
-    signature: { type: String, default: null },
+    signature: { type: String, default: null }, // Paystack signature for uniqueness
 
-    // Legacy — keep for migration safety
-    stripePaymentMethodId: {
-      type: String,
-      default: null,
-    },
+    // Legacy Stripe field — keep null for migration safety
+    stripePaymentMethodId: { type: String, default: null },
   },
   { timestamps: true }
 );

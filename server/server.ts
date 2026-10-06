@@ -29,6 +29,12 @@ import AnnouncementRouter from "./routes/announcementRoutes.js";
 import { telemetryMiddleware } from "./middleware/telemetry.js";
 import ContactRouter from "./routes/contactRoutes.js";
 
+// Paystack payment architecture
+import PaymentRouter from "./routes/paymentRoutes.js";
+import { paystackWebhook } from "./controllers/paymentController.js";
+import { startAutoConfirmDeliveryScheduler } from "./services/jobs/autoConfirmDelivery.js";
+import { startPayoutScheduler } from "./services/jobs/processEligiblePayouts.js";
+
 const app = express();
 
 await connectDB();
@@ -38,6 +44,24 @@ app.post(
   "/api/clerk",
   express.raw({ type: "application/json" }),
   clerkWebhook
+);
+
+// Paystack webhook — raw body for HMAC signature verification
+app.post(
+  "/api/payments/webhook",
+  express.raw({ type: "application/json" }),
+  (req, res, next) => {
+    (req as any).rawBody = req.body;
+    try {
+      if (Buffer.isBuffer(req.body)) {
+        req.body = JSON.parse(req.body.toString("utf8"));
+      }
+    } catch {
+      // handler will fail safely
+    }
+    next();
+  },
+  paystackWebhook
 );
 
 app.use(
@@ -79,6 +103,7 @@ app.use("/api/ai", AIRouter);
 app.use("/api/chat", ChatRouter);
 app.use("/api/saved-stores", SavedStoreRouter);
 app.use("/api/payment-methods", PaymentMethodRouter);
+app.use("/api/payments", PaymentRouter);
 app.use("/api/contact", ContactRouter);
 app.use("/api/content", ContentRouter);
 app.use("/api/announcements", AnnouncementRouter);
@@ -94,4 +119,6 @@ await makeAdmin();
 app.listen(port, () => {
   console.log(`Server is running at http://localhost:${port}`);
   startBuyerConfidenceScheduler();
+  startAutoConfirmDeliveryScheduler();
+  startPayoutScheduler();
 });

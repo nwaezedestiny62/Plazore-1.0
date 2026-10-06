@@ -141,17 +141,72 @@ const orderSchema = new mongoose.Schema(
     },
     paymentMethod: {
       type: String,
-      enum: ["cash", "card", "transfer", "pending"],
+      enum: ["cash", "card", "transfer", "pending", "paystack"],
       default: "pending",
+    },
+
+    // ========== PAYMENT LIFECYCLE (Paystack-ready) ==========
+    paymentLifecycle: {
+      type: String,
+      enum: [
+        "PENDING_PAYMENT",
+        "PAYMENT_PROCESSING",
+        "PAYMENT_VERIFIED",
+        "PAYMENT_PROTECTED",
+        "PROCESSING_ORDER",
+        "SHIPPED",
+        "DELIVERED",
+        "DELIVERY_CONFIRMED",
+        "SELLER_PAYOUT_PENDING",
+        "SELLER_PAID",
+        "REFUND_PENDING",
+        "REFUNDED",
+        "DISPUTED",
+        "SETTLED_SELLER_FAVOUR",
+        "PAYMENT_FAILED",
+        "CANCELLED",
+      ],
+      default: "PENDING_PAYMENT",
+      index: true,
+    },
+
+    paymentRef: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Payment",
+      default: null,
+      index: true,
+    },
+
+    /** Frozen fee breakdown — platform fee is always 8% of subtotal */
+    feeBreakdown: {
+      subtotal: { type: Number, default: 0 },
+      shippingCost: { type: Number, default: 0 },
+      grossAmount: { type: Number, default: 0 },
+      platformFeeRate: { type: Number, default: 0.08 },
+      platformFee: { type: Number, default: 0 },
+      sellerPayoutAmount: { type: Number, default: 0 },
+      currency: { type: String, default: "NGN" },
+    },
+
+    stockReservation: {
+      reserved: { type: Boolean, default: false },
+      committed: { type: Boolean, default: false },
+      released: { type: Boolean, default: false },
     },
 
     deliveredAt: { type: Date },
 
-    // After seller marks Delivered — buyer must confirm or report issue
+    // After seller marks Delivered — buyer confirms or 17h auto-confirm
     buyerConfirmation: {
       status: {
         type: String,
-        enum: ["none", "pending", "confirmed", "issue_reported"],
+        enum: [
+          "none",
+          "pending",
+          "confirmed",
+          "issue_reported",
+          "auto_confirmed",
+        ],
         default: "none",
       },
       confirmedAt: { type: Date },
@@ -161,9 +216,11 @@ const orderSchema = new mongoose.Schema(
         ref: "ContactMessage",
         default: null,
       },
+      /** Server-side deadline — set when seller marks Delivered (now + 17h) */
+      confirmationDeadline: { type: Date, default: null },
     },
 
-    // Payout gate (Paystack transfer comes later)
+    // Payout gate (Paystack transfer)
     payout: {
       status: {
         type: String,
@@ -172,14 +229,24 @@ const orderSchema = new mongoose.Schema(
           "awaiting_buyer",
           "eligible",
           "blocked_issue",
+          "queued",
           "initiated",
           "completed",
+          "failed",
           "refunded",
         ],
         default: "not_eligible",
       },
       eligibleAt: { type: Date },
       blockedReason: { type: String, default: "" },
+      amount: { type: Number, default: null },
+      platformFee: { type: Number, default: null },
+      reference: { type: String, default: null },
+      payoutDocId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Payout",
+        default: null,
+      },
     },
 
     /**
@@ -202,7 +269,9 @@ orderSchema.index({ buyer: 1, createdAt: -1 });
 orderSchema.index({ seller: 1, createdAt: -1 });
 orderSchema.index({ orderStatus: 1 });
 orderSchema.index({ "buyerConfirmation.status": 1 });
+orderSchema.index({ "buyerConfirmation.confirmationDeadline": 1 });
 orderSchema.index({ "payout.status": 1 });
+orderSchema.index({ paymentLifecycle: 1 });
 orderSchema.index({ seller: 1, isSellerOwnedPurchase: 1, orderStatus: 1 });
 
 const Order = mongoose.model("Order", orderSchema);

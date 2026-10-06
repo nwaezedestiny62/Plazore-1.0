@@ -1,3 +1,10 @@
+/**
+ * Checkout — Paystack-ready
+ * - Address + bag + shipping routes (unchanged business rules)
+ * - No required saved card (Paystack collects card)
+ * - POST /api/payments/checkout → open authorization_url
+ */
+
 import api from '@/constants/api'
 import {
   convertPrice,
@@ -10,6 +17,7 @@ import { useMarketplace } from '@/context/MarketplaceContext'
 import { useAuth } from '@clerk/clerk-expo'
 import { Ionicons } from '@expo/vector-icons'
 import { LinearGradient } from 'expo-linear-gradient'
+import * as WebBrowser from 'expo-web-browser'
 import { useFocusEffect, useRouter } from 'expo-router'
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
@@ -108,8 +116,7 @@ function resolveShipFrom(product: any): ShipFrom {
     : typeof seller === 'string'
       ? seller
       : ''
-  const storeName =
-    sellerObj?.storeName || sellerObj?.name || 'Seller'
+  const storeName = sellerObj?.storeName || sellerObj?.name || 'Seller'
 
   const fl = product?.fulfillmentLocation
   if (fl && (fl.city || fl.state) && fl.country) {
@@ -150,11 +157,6 @@ function resolveShipFrom(product: any): ShipFrom {
     storeName,
     sellerId,
   }
-}
-
-function maskCard(last4?: string) {
-  if (!last4) return '••••'
-  return `•••• ${last4}`
 }
 
 function addressComplete(a: any): boolean {
@@ -380,9 +382,11 @@ function OrderStatusModal({
           {phase === 'processing' && (
             <View style={styles.modalCenter}>
               <PlazoreOrb size={120} />
-              <Text style={styles.modalProcessingTitle}>Placing your order</Text>
+              <Text style={styles.modalProcessingTitle}>
+                Preparing secure payment
+              </Text>
               <Text style={styles.modalProcessingSub}>
-                Securing your bag and confirming with {sellerHint}…
+                Locking your bag and opening Paystack for {sellerHint}…
               </Text>
             </View>
           )}
@@ -392,7 +396,7 @@ function OrderStatusModal({
               <View style={styles.errorIconWrap}>
                 <Ionicons name="close" size={32} color={DANGER} />
               </View>
-              <Text style={styles.modalProcessingTitle}>Order failed</Text>
+              <Text style={styles.modalProcessingTitle}>Payment failed</Text>
               <Text style={styles.modalProcessingSub}>
                 {errorMessage || 'Something went wrong. Please try again.'}
               </Text>
@@ -432,9 +436,9 @@ function OrderStatusModal({
                     alignItems: 'center',
                   }}
                 >
-                  <Text style={styles.successTitle}>Order Successful</Text>
+                  <Text style={styles.successTitle}>Payment confirmed</Text>
                   <Text style={styles.successSub}>
-                    Your order is confirmed on Plazore.
+                    Your order is paid and locked on Plazore.
                   </Text>
 
                   <View style={styles.infoBlock}>
@@ -442,13 +446,13 @@ function OrderStatusModal({
                     {[
                       {
                         n: '1',
-                        t: 'Confirmed',
-                        d: 'Your bag is locked and each seller is notified for their items.',
+                        t: 'Paid & protected',
+                        d: 'Funds are held securely. Sellers are notified to prepare.',
                       },
                       {
                         n: '2',
                         t: 'Seller prepares',
-                        d: 'Items are packed. International routes may need a short seller review first.',
+                        d: 'Items are packed. Cross-border routes may need a short review.',
                       },
                       {
                         n: '3',
@@ -457,8 +461,8 @@ function OrderStatusModal({
                       },
                       {
                         n: '4',
-                        t: 'Delivered',
-                        d: 'You receive your order at the address you selected.',
+                        t: 'Confirm delivery',
+                        d: 'Confirm within 17 hours after delivery, or we auto-confirm.',
                       },
                     ].map((step) => (
                       <View key={step.n} style={styles.flowRow}>
@@ -530,8 +534,6 @@ export default function Checkout() {
 
   const [addresses, setAddresses] = useState<any[]>([])
   const [selectedAddress, setSelectedAddress] = useState<any>(null)
-  const [cards, setCards] = useState<any[]>([])
-  const [selectedCard, setSelectedCard] = useState<any>(null)
 
   const placingLock = useRef(false)
   const displayRegion = buyerRegion || DEFAULT_REGION
@@ -584,39 +586,15 @@ export default function Checkout() {
     }
   }, [getToken])
 
-  const loadCards = useCallback(async () => {
-    try {
-      const token = await getToken()
-      if (!token) return
-      const res = await api.get('/payment-methods', {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-      if (res.data.success) {
-        const list = res.data.data || []
-        setCards(list)
-        setSelectedCard((prev: any) => {
-          if (prev) {
-            const still = list.find((c: any) => c._id === prev._id)
-            if (still) return still
-          }
-          return list.find((c: any) => c.isDefault) || list[0] || null
-        })
-      }
-    } catch {
-      setCards([])
-      setSelectedCard(null)
-    }
-  }, [getToken])
-
   useFocusEffect(
     useCallback(() => {
       const boot = async () => {
         refreshRegion()
-        await Promise.all([loadAddresses(), loadCards()])
+        await loadAddresses()
         setPageLoading(false)
       }
       boot()
-    }, [refreshRegion, loadAddresses, loadCards]),
+    }, [refreshRegion, loadAddresses]),
   )
 
   const routeGroups: RouteGroup[] = useMemo(() => {
@@ -705,26 +683,24 @@ export default function Checkout() {
     routeGroups.length > 0 && routeGroups.every((g) => !g.missingShipFrom)
   const noInvalidLines = routeGroups.every((g) => g.invalidItems.length === 0)
   const addressOk = addressComplete(selectedAddress)
-  const cardOk = !!selectedCard?._id
 
   const internationalRoutes = routeGroups.filter((g) => g.isInternational)
   const hasInternational = internationalRoutes.length > 0
   const incompleteSellers = routeGroups.filter((g) => g.missingShipFrom)
 
   const canPlaceOrder =
-    hasItems && allRoutesShipReady && noInvalidLines && addressOk && cardOk
+    hasItems && allRoutesShipReady && noInvalidLines && addressOk
 
   const blockReason = useMemo(() => {
     if (!hasItems) return 'Your bag is empty. Add products before checkout.'
     if (!allRoutesShipReady)
       return 'One or more sellers have not set a shipping origin. Checkout is blocked until they complete it.'
     if (!noInvalidLines)
-      return 'One or more items have invalid price or product data.'
+      return 'One or more items have invalid price or product data. Remove them or re-add from the product page.'
     if (!addressOk)
       return 'Select a complete delivery address (street, city, country).'
-    if (!cardOk) return 'Select a payment card.'
     return null
-  }, [hasItems, allRoutesShipReady, noInvalidLines, addressOk, cardOk])
+  }, [hasItems, allRoutesShipReady, noInvalidLines, addressOk])
 
   const deliverToLabel = selectedAddress
     ? locationLabel({
@@ -737,17 +713,9 @@ export default function Checkout() {
   const handlePlaceOrder = async () => {
     if (placingLock.current || orderPhase === 'processing') return
 
-    if (!hasItems) {
-      setToast({
-        title: 'Empty bag',
-        message: 'There is nothing to checkout.',
-        tone: 'danger',
-      })
-      return
-    }
     if (!canPlaceOrder) {
       setToast({
-        title: 'Cannot place order',
+        title: 'Cannot continue',
         message: blockReason || 'Complete all required steps first.',
         tone: 'danger',
       })
@@ -762,69 +730,104 @@ export default function Checkout() {
       const token = await getToken()
       if (!token) throw new Error('Sign in required')
 
-      const items = (cartItems || [])
-        .map((item) => {
-          const id = item.productId || item.product?._id
+      // Server recalculates prices — send productId + qty only
+      const payloadItems = (cartItems || [])
+        .map((item: any) => {
+          const id = item.product?._id || item.productId
           const qty = Math.max(1, Number(item.quantity) || 1)
-          const price = Number(item.price ?? item.product?.price) || 0
-          const payload: Record<string, unknown> = {
+          return {
             productId: id,
             quantity: qty,
-            price,
             note: String(item.note || '')
               .trim()
               .slice(0, 120),
           }
-          if (item.variantId) payload.variantId = item.variantId
-          if (item.variantKey) payload.variantKey = item.variantKey
-          if (item.selectedOptions && typeof item.selectedOptions === 'object') {
-            payload.selectedOptions = item.selectedOptions
-          }
-          return payload
         })
-        .filter((i) => i.productId && Number(i.price) > 0 && Number(i.quantity) > 0)
+        .filter((i: any) => i.productId && i.quantity > 0)
 
-      if (!items.length) throw new Error('No valid products in bag')
-      if (!addressComplete(selectedAddress)) {
-        throw new Error('Delivery address is incomplete')
-      }
+      if (!payloadItems.length) throw new Error('No valid products in bag')
 
       const res = await api.post(
-        '/orders',
+        '/payments/checkout',
         {
           shippingAddress: {
             street: selectedAddress.street,
             city: selectedAddress.city,
-            state: selectedAddress.state,
-            zipCode: selectedAddress.zipCode,
+            state: selectedAddress.state || '',
+            zipCode: selectedAddress.zipCode || '',
             country: selectedAddress.country,
           },
-          paymentMethodId: selectedCard?._id,
           buyerNote: hasInternational
             ? 'International shipment — seller review may apply.'
             : '',
-          items,
+          items: payloadItems,
         },
         { headers: { Authorization: `Bearer ${token}` } },
       )
 
-      if (res.data?.success) {
+      const data = res.data
+
+      if (!data?.success) {
+        throw new Error(data?.message || 'Could not start payment')
+      }
+
+      // Paystack not configured yet — orders may still be created pending
+      if (data.code === 'PAYSTACK_NOT_CONFIGURED' || !data.authorization_url) {
         clearCart()
         setOrderPhase('success')
+        setToast({
+          title: 'Order created',
+          message:
+            data.message ||
+            'Payment gateway is not live yet. Your order is pending payment.',
+          tone: 'info',
+          durationMs: 8000,
+        })
+        return
+      }
+
+      // Open Paystack hosted checkout
+      const result = await WebBrowser.openAuthSessionAsync(
+        data.authorization_url,
+        data.callback_url || undefined,
+      )
+
+      if (result.type === 'success' || result.type === 'dismiss') {
+        // Verify on return
+        const ref = data.reference
+        if (ref) {
+          try {
+            const verify = await api.get(`/payments/verify/${ref}`, {
+              headers: { Authorization: `Bearer ${token}` },
+            })
+            if (verify.data?.success && verify.data?.paid) {
+              clearCart()
+              setOrderPhase('success')
+              return
+            }
+          } catch {
+            /* fall through */
+          }
+        }
+        // User may have paid; webhook will catch — still clear bag if reference exists
+        if (data.reference) {
+          clearCart()
+          setOrderPhase('success')
+        } else {
+          setOrderPhase('error')
+          setOrderError('Payment was not completed. You can try again.')
+        }
       } else {
         setOrderPhase('error')
-        setOrderError(
-          res.data?.message ||
-            'Could not place order. Please review your bag and try again.',
-        )
+        setOrderError('Payment window closed before completion.')
       }
     } catch (e: any) {
       setOrderPhase('error')
-      const msg =
+      setOrderError(
         e?.response?.data?.message ||
-        e?.message ||
-        'Something went wrong. Please try again.'
-      setOrderError(msg)
+          e?.message ||
+          'Something went wrong. Please try again.',
+      )
     } finally {
       placingLock.current = false
     }
@@ -832,45 +835,40 @@ export default function Checkout() {
 
   const placing = orderPhase === 'processing'
 
-  /* ── Empty bag: hard stop ── */
-  if (!pageLoading && !hasItems && orderPhase === 'idle') {
+  if (pageLoading) {
+    return (
+      <SafeAreaView style={styles.safe}>
+        <View style={styles.loadingWrap}>
+          <PlazoreOrb size={100} />
+        </View>
+      </SafeAreaView>
+    )
+  }
+
+  if (!hasItems && orderPhase === 'idle') {
     return (
       <SafeAreaView style={styles.safe} edges={['top']}>
         <View style={styles.header}>
           <TouchableOpacity
             onPress={() => router.back()}
             style={styles.backBtn}
-            hitSlop={8}
           >
             <Ionicons name="chevron-back" size={22} color={TEXT} />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Checkout</Text>
           <View style={styles.headerRight} />
         </View>
-        <LinearGradient
-          colors={[
-            'transparent',
-            'rgba(0,229,117,0.4)',
-            'rgba(37,99,235,0.3)',
-            'transparent',
-          ]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 0 }}
-          style={styles.headerRule}
-        />
         <View style={styles.emptyCheckout}>
           <View style={styles.emptyCheckoutIcon}>
             <Ionicons name="bag-outline" size={28} color={MUTED} />
           </View>
           <Text style={styles.emptyCheckoutTitle}>Your bag is empty</Text>
           <Text style={styles.emptyCheckoutSub}>
-            Checkout is only available when there is at least one product in
-            your bag. Nothing can be ordered until you add items.
+            Add products from the showroom before checkout.
           </Text>
           <TouchableOpacity
-            onPress={() => router.replace('/' as any)}
-            activeOpacity={0.88}
-            style={{ width: '100%', maxWidth: 280, marginTop: 28 }}
+            onPress={() => router.replace('/(tabs)' as any)}
+            style={styles.primaryCtaWrap}
           >
             <LinearGradient
               colors={[...GRAD]}
@@ -879,19 +877,8 @@ export default function Checkout() {
               style={styles.primaryCta}
             >
               <Text style={styles.primaryCtaText}>Go to Showroom</Text>
-              <Ionicons name="arrow-forward" size={16} color="#041412" />
             </LinearGradient>
           </TouchableOpacity>
-        </View>
-      </SafeAreaView>
-    )
-  }
-
-  if (pageLoading) {
-    return (
-      <SafeAreaView style={styles.safe}>
-        <View style={styles.loadingWrap}>
-          <PlazoreOrb size={88} />
         </View>
       </SafeAreaView>
     )
@@ -900,7 +887,6 @@ export default function Checkout() {
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       <TopToast state={toast} onDismiss={() => setToast(null)} />
-
       <OrderStatusModal
         phase={orderPhase}
         errorMessage={orderError}
@@ -911,17 +897,13 @@ export default function Checkout() {
         }}
         onShowroom={() => {
           setOrderPhase('idle')
-          router.replace('/' as any)
+          router.replace('/(tabs)' as any)
         }}
         onCloseError={() => setOrderPhase('idle')}
       />
 
       <View style={styles.header}>
-        <TouchableOpacity
-          onPress={() => router.back()}
-          style={styles.backBtn}
-          hitSlop={8}
-        >
+        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
           <Ionicons name="chevron-back" size={22} color={TEXT} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Checkout</Text>
@@ -930,10 +912,11 @@ export default function Checkout() {
       <LinearGradient
         colors={[
           'transparent',
-          'rgba(0,229,117,0.4)',
-          'rgba(37,99,235,0.3)',
+          'rgba(0,229,117,0.35)',
+          'rgba(37,99,235,0.25)',
           'transparent',
         ]}
+        locations={[0, 0.25, 0.75, 1]}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 0 }}
         style={styles.headerRule}
@@ -943,11 +926,10 @@ export default function Checkout() {
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
       >
         <Text style={styles.stepHint}>REVIEW · DELIVER · PAY</Text>
 
-        {/* Bag by seller */}
+        {/* Bag */}
         <View style={styles.card}>
           <View style={styles.cardHeader}>
             <View style={styles.cardHeaderLeft}>
@@ -967,8 +949,10 @@ export default function Checkout() {
           {routeGroups.map((group) => (
             <View key={group.key}>
               <View style={styles.sellerBar}>
-                <Ionicons name="storefront-outline" size={13} color={MUTED} />
-                <Text style={styles.sellerBarText}>{group.ship.storeName}</Text>
+                <Ionicons name="storefront-outline" size={14} color={MUTED} />
+                <Text style={styles.sellerBarText} numberOfLines={1}>
+                  {group.ship.storeName}
+                </Text>
                 {group.isInternational && (
                   <View style={styles.intlPill}>
                     <Ionicons name="globe-outline" size={10} color="#93C5FD" />
@@ -981,12 +965,11 @@ export default function Checkout() {
                   </View>
                 )}
               </View>
-
               {group.items.map((item: any, i: number) => {
-                const productRegion = resolveProductRegion(item.product)
-                const unit = Number(item.price ?? item.product?.price) || 0
+                const product = item.product
+                const region = resolveProductRegion(product)
+                const unit = Number(item.price ?? product?.price) || 0
                 const qty = Number(item.quantity) || 1
-                const img = item.product?.images?.[0]
                 return (
                   <View
                     key={item.id || `${group.key}-${i}`}
@@ -995,43 +978,31 @@ export default function Checkout() {
                       i < group.items.length - 1 && styles.itemBorder,
                     ]}
                   >
-                    {img ? (
-                      <Image source={{ uri: img }} style={styles.thumb} />
+                    {product?.images?.[0] ? (
+                      <Image
+                        source={{ uri: product.images[0] }}
+                        style={styles.thumb}
+                      />
                     ) : (
-                      <View style={[styles.thumb, styles.thumbPlaceholder]}>
-                        <Ionicons name="image-outline" size={18} color={MUTED} />
-                      </View>
+                      <View style={[styles.thumb, styles.thumbPlaceholder]} />
                     )}
                     <View style={styles.itemInfo}>
                       <Text style={styles.itemName} numberOfLines={2}>
-                        {item.product?.name || 'Product'}
+                        {product?.name || 'Product'}
                       </Text>
-                      {!!item.selectedOptions &&
-                        Object.keys(item.selectedOptions).length > 0 && (
-                          <Text style={styles.itemMeta} numberOfLines={2}>
-                            {Object.entries(item.selectedOptions)
-                              .map(([k, v]) => `${k}: ${v}`)
-                              .join(' · ')}
-                          </Text>
-                        )}
                       <Text style={styles.itemMeta}>
-                        Qty {qty} · {fmtProduct(unit, productRegion)} each
-                      </Text>
-                      <Text style={styles.itemFee}>
-                        Listed in {productRegion} · shown in your marketplace
-                        currency
+                        Qty {qty} · {fmtProduct(unit, region)} each
                       </Text>
                     </View>
                     <Text style={styles.itemTotal}>
-                      {fmtProduct(unit * qty, productRegion)}
+                      {fmtProduct(unit * qty, region)}
                     </Text>
                   </View>
                 )
               })}
-
               <View style={styles.routeSubtotal}>
                 <Text style={styles.routeSubtotalText}>
-                  Route subtotal · delivery {fmt(group.deliveryFeeDisplay)}
+                  Route · delivery {fmt(group.deliveryFeeDisplay)}
                 </Text>
                 <Text style={styles.routeSubtotalVal}>
                   {fmt(
@@ -1043,7 +1014,7 @@ export default function Checkout() {
           ))}
         </View>
 
-        {/* Deliver To */}
+        {/* Address */}
         <View style={styles.card}>
           <View style={styles.cardHeader}>
             <View style={styles.cardHeaderLeft}>
@@ -1052,13 +1023,15 @@ export default function Checkout() {
               </View>
               <Text style={styles.cardTitle}>Deliver To</Text>
             </View>
-            <TouchableOpacity onPress={() => router.push('/addresses' as any)}>
+            <TouchableOpacity
+              onPress={() => router.push('/addresses' as any)}
+            >
               <Text style={styles.link}>Change</Text>
             </TouchableOpacity>
           </View>
           {addresses.length > 0 ? (
             <View style={styles.listPad}>
-              {addresses.map((addr: any) => {
+              {addresses.map((addr) => {
                 const on = selectedAddress?._id === addr._id
                 return (
                   <TouchableOpacity
@@ -1105,90 +1078,46 @@ export default function Checkout() {
             <TouchableOpacity
               onPress={() => router.push('/addresses' as any)}
               style={styles.emptyBlock}
-              activeOpacity={0.85}
             >
               <View style={styles.emptyIcon}>
                 <Ionicons name="location-outline" size={24} color={MUTED} />
               </View>
               <Text style={styles.emptyTitle}>Add delivery address</Text>
               <Text style={styles.emptySub}>
-                Street, city and country are required to place an order.
+                Street, city and country are required.
               </Text>
             </TouchableOpacity>
           )}
         </View>
 
-        {/* Pay with Card */}
+        {/* Payment — Paystack */}
         <View style={styles.card}>
           <View style={styles.cardHeader}>
             <View style={styles.cardHeaderLeft}>
               <View style={styles.iconSquare}>
                 <Ionicons name="card-outline" size={15} color={SECONDARY} />
               </View>
-              <Text style={styles.cardTitle}>Pay with Card</Text>
-            </View>
-            <TouchableOpacity
-              onPress={() => router.push('/payment-methods' as any)}
-            >
-              <Text style={styles.link}>Change</Text>
-            </TouchableOpacity>
-          </View>
-          {cards.length > 0 ? (
-            <View style={styles.listPad}>
-              {cards.map((card: any) => {
-                const on = selectedCard?._id === card._id
-                return (
-                  <TouchableOpacity
-                    key={card._id}
-                    onPress={() => setSelectedCard(card)}
-                    style={[styles.selectItem, on && styles.selectItemActive]}
-                    activeOpacity={0.85}
-                  >
-                    <View style={[styles.radio, on && styles.radioActive]}>
-                      {on && <View style={styles.radioDot} />}
-                    </View>
-                    <View style={styles.selectContent}>
-                      <View style={styles.selectTop}>
-                        <Text style={styles.selectTitle}>
-                          {card.brand || 'Card'} {maskCard(card.last4)}
-                        </Text>
-                        {card.isDefault && (
-                          <View style={styles.defaultBadge}>
-                            <Text style={styles.defaultText}>Default</Text>
-                          </View>
-                        )}
-                      </View>
-                      <Text style={styles.selectSub}>
-                        Expires {card.expMonth}/{card.expYear}
-                        {card.name ? ` · ${card.name}` : ''}
-                      </Text>
-                    </View>
-                  </TouchableOpacity>
-                )
-              })}
-              <TouchableOpacity
-                onPress={() => router.push('/payment-methods' as any)}
-                style={styles.addBtn}
-              >
-                <Ionicons name="add" size={16} color={GREEN} />
-                <Text style={styles.addBtnText}>Add new card</Text>
-              </TouchableOpacity>
-            </View>
-          ) : (
-            <TouchableOpacity
-              onPress={() => router.push('/payment-methods' as any)}
-              style={styles.emptyBlock}
-              activeOpacity={0.85}
-            >
-              <View style={styles.emptyIcon}>
-                <Ionicons name="card-outline" size={24} color={MUTED} />
+              <View>
+                <Text style={styles.cardTitle}>Pay securely</Text>
+                <Text style={styles.cardSub}>Powered by Paystack</Text>
               </View>
-              <Text style={styles.emptyTitle}>Add a payment card</Text>
-              <Text style={styles.emptySub}>
-                A saved card is required before you can place an order.
+            </View>
+          </View>
+          <View style={styles.payBody}>
+            <View style={styles.payRow}>
+              <Ionicons name="shield-checkmark" size={18} color={GREEN} />
+              <Text style={styles.payText}>
+                Card details are entered on Paystack’s secure page. Plazore
+                never stores full card numbers.
               </Text>
-            </TouchableOpacity>
-          )}
+            </View>
+            <View style={styles.payRow}>
+              <Ionicons name="lock-closed-outline" size={18} color={MUTED} />
+              <Text style={styles.payText}>
+                Visa, Mastercard, Verve, bank transfer and USSD where available.
+              </Text>
+            </View>
+          </View>
         </View>
 
         {/* Shipping routes */}
@@ -1201,25 +1130,20 @@ export default function Checkout() {
               <View>
                 <Text style={styles.cardTitle}>Shipping routes</Text>
                 <Text style={styles.cardSub}>
-                  Each seller ships separately from their own origin
+                  Each seller ships from their origin
                 </Text>
               </View>
             </View>
-            {routeGroups.length > 1 && (
-              <Text style={styles.badge}>{routeGroups.length} routes</Text>
-            )}
           </View>
 
           {incompleteSellers.length > 0 && (
             <View style={styles.warningBox}>
-              <Ionicons name="alert-circle" size={18} color={AMBER} />
+              <Ionicons name="alert-circle-outline" size={18} color={AMBER} />
               <View style={{ flex: 1 }}>
                 <Text style={styles.warningTitle}>Shipping incomplete</Text>
                 <Text style={styles.warningText}>
                   {incompleteSellers.map((g) => g.ship.storeName).join(', ')}{' '}
-                  {incompleteSellers.length === 1 ? 'has' : 'have'} not set a
-                  ship-from location. Checkout stays locked until every seller
-                  on this order has a complete origin.
+                  must set a ship-from location before checkout.
                 </Text>
               </View>
             </View>
@@ -1231,18 +1155,14 @@ export default function Checkout() {
                 key={group.key}
                 style={[
                   styles.routeCard,
-                  idx > 0 && { marginTop: 12 },
                   group.missingShipFrom && styles.routeCardWarn,
-                  group.isInternational &&
-                    !group.missingShipFrom &&
-                    styles.routeCardIntl,
+                  group.isInternational && styles.routeCardIntl,
+                  idx > 0 && { marginTop: 10 },
                 ]}
               >
                 <View style={styles.routeHead}>
                   <LinearGradient
                     colors={[...GRAD]}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 1 }}
                     style={styles.routeNum}
                   >
                     <Text style={styles.routeNumText}>{idx + 1}</Text>
@@ -1252,46 +1172,21 @@ export default function Checkout() {
                     {group.items.length} item
                     {group.items.length !== 1 ? 's' : ''}
                   </Text>
-                  {group.isInternational && (
-                    <View style={styles.intlPill}>
-                      <Ionicons
-                        name="globe-outline"
-                        size={10}
-                        color="#93C5FD"
-                      />
-                      <Text style={styles.intlPillText}>Cross-border</Text>
-                    </View>
-                  )}
                 </View>
-
                 <Text style={styles.routeLabel}>Ships from</Text>
                 <Text style={styles.routeValue}>
                   {group.ship.hasShipFrom
                     ? group.ship.label
                     : 'Not set by seller'}
                 </Text>
-                {!!group.ship.country && (
-                  <Text style={styles.routeCountry}>
-                    Origin country: {group.ship.country}
-                  </Text>
-                )}
-
                 <View style={styles.routeConnector}>
                   <View style={styles.routeDash} />
                   <Ionicons name="arrow-down" size={12} color={MUTED} />
-                  <View style={styles.routeDash} />
                 </View>
-
                 <Text style={styles.routeLabel}>Delivering to</Text>
                 <Text style={styles.routeValue}>
                   {deliverToLabel || 'Select a delivery address'}
                 </Text>
-                {!!selectedAddress?.country && (
-                  <Text style={styles.routeCountry}>
-                    Destination country: {selectedAddress.country}
-                  </Text>
-                )}
-
                 <View style={styles.routeMoney}>
                   <Text style={styles.routeMoneyText}>
                     Products {fmt(group.productSubtotalDisplay)}
@@ -1300,14 +1195,6 @@ export default function Checkout() {
                     Delivery {fmt(group.deliveryFeeDisplay)}
                   </Text>
                 </View>
-
-                {group.isInternational && (
-                  <Text style={styles.routeIntlNote}>
-                    This route crosses countries. The seller may review the
-                    order before packing. Delivery times can differ from
-                    domestic routes.
-                  </Text>
-                )}
               </View>
             ))}
           </View>
@@ -1315,32 +1202,21 @@ export default function Checkout() {
 
         {hasInternational && selectedAddress && (
           <View style={styles.intlBox}>
-            <View style={{ flexDirection: 'row', gap: 10 }}>
-              <Ionicons name="globe-outline" size={18} color="#93C5FD" />
-              <View style={{ flex: 1 }}>
-                <Text style={styles.intlTitle}>International order</Text>
-                <Text style={styles.intlText}>
-                  {internationalRoutes.length === 1
-                    ? `${internationalRoutes[0].ship.storeName} ships from ${internationalRoutes[0].ship.country} to ${selectedAddress.country}.`
-                    : `${internationalRoutes.length} of ${routeGroups.length} routes are cross-border.`}{' '}
-                  Cross-border legs may require seller approval before
-                  shipment. Duties or extra carrier fees are not included in
-                  the delivery fee unless the seller listed them on the product.
-                </Text>
-                {internationalRoutes.map((g) => (
-                  <Text key={g.key} style={styles.intlRouteLine}>
-                    · {g.ship.storeName}: {g.ship.country || '?'} →{' '}
-                    {selectedAddress.country}
-                  </Text>
-                ))}
-              </View>
-            </View>
+            <Text style={styles.intlTitle}>International order</Text>
+            <Text style={styles.intlText}>
+              Cross-border legs may need seller approval. Duties or extra
+              carrier fees are not included unless listed on the product.
+            </Text>
           </View>
         )}
 
         {blockReason && hasItems && (
           <View style={styles.blockBox}>
-            <Ionicons name="information-circle-outline" size={18} color={MUTED} />
+            <Ionicons
+              name="information-circle-outline"
+              size={18}
+              color={MUTED}
+            />
             <Text style={styles.blockText}>{blockReason}</Text>
           </View>
         )}
@@ -1361,53 +1237,24 @@ export default function Checkout() {
               <Text style={styles.receiptValue}>{fmt(productPrice)}</Text>
             </View>
             <View style={styles.receiptRow}>
-              <Text style={styles.receiptLabel}>
-                Delivery
-                {routeGroups.length > 1
-                  ? ` (${routeGroups.length} routes)`
-                  : ''}
-              </Text>
+              <Text style={styles.receiptLabel}>Delivery</Text>
               <Text style={styles.receiptValue}>{fmt(deliveryFee)}</Text>
             </View>
-            {routeGroups.length > 1 && (
-              <View style={styles.receiptBreakdown}>
-                {routeGroups.map((g) => (
-                  <View key={g.key} style={styles.receiptBreakdownRow}>
-                    <Text style={styles.receiptBreakdownLabel} numberOfLines={1}>
-                      {g.ship.storeName}
-                    </Text>
-                    <Text style={styles.receiptBreakdownVal}>
-                      {fmt(g.productSubtotalDisplay)} +{' '}
-                      {fmt(g.deliveryFeeDisplay)} ship
-                    </Text>
-                  </View>
-                ))}
-              </View>
-            )}
             <View style={styles.receiptDivider} />
             <View style={styles.receiptRow}>
               <Text style={styles.totalLabel}>Total</Text>
               <Text style={styles.totalValue}>{fmt(totalAmount)}</Text>
             </View>
             <Text style={styles.receiptNote}>
-              Prices converted to your marketplace currency ({displayRegion}).
-              Each product keeps its original listing region for conversion.
+              Final charge is calculated on the server in listing currency.
+              Display above is converted to your marketplace ({displayRegion}).
             </Text>
-            {hasInternational && (
-              <Text style={[styles.receiptNote, { color: 'rgba(147,197,253,0.75)' }]}>
-                International routes may take longer and can require seller
-                review before ship.
-              </Text>
-            )}
           </View>
         </View>
 
-        <Text style={styles.footerBrand}>
-          Plazore · Digital Mall
-        </Text>
+        <Text style={styles.footerBrand}>Plazore · Digital Mall</Text>
       </ScrollView>
 
-      {/* Bottom bar */}
       <View style={styles.bottomBar}>
         <LinearGradient
           colors={[
@@ -1461,11 +1308,11 @@ export default function Checkout() {
                   : !canPlaceOrder
                     ? 'Unavailable'
                     : placing
-                      ? 'Placing…'
-                      : 'Place Order'}
+                      ? 'Opening Paystack…'
+                      : 'Pay with Paystack'}
               </Text>
               {canPlaceOrder && !placing && (
-                <Ionicons name="arrow-forward" size={16} color="#041412" />
+                <Ionicons name="lock-closed" size={14} color="#041412" />
               )}
             </LinearGradient>
           </TouchableOpacity>
@@ -1506,6 +1353,7 @@ const styles = StyleSheet.create({
     color: SECONDARY,
     textAlign: 'center',
     lineHeight: 19,
+    marginBottom: 20,
   },
 
   toastWrap: {
@@ -1715,7 +1563,12 @@ const styles = StyleSheet.create({
     borderBottomColor: LINE,
     backgroundColor: SURFACE_2,
   },
-  cardHeaderLeft: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 },
+  cardHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    flex: 1,
+  },
   iconSquare: {
     width: 30,
     height: 30,
@@ -1798,7 +1651,6 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   itemMeta: { fontSize: 11, color: SECONDARY, marginTop: 3 },
-  itemFee: { fontSize: 10, color: MUTED, marginTop: 2 },
   itemTotal: {
     fontSize: 13,
     fontWeight: '700',
@@ -1889,7 +1741,17 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   emptyTitle: { fontSize: 14, fontWeight: '700', color: TEXT },
-  emptySub: { fontSize: 12, color: MUTED, marginTop: 4, textAlign: 'center', paddingHorizontal: 24 },
+  emptySub: {
+    fontSize: 12,
+    color: MUTED,
+    marginTop: 4,
+    textAlign: 'center',
+    paddingHorizontal: 24,
+  },
+
+  payBody: { padding: 14, gap: 12 },
+  payRow: { flexDirection: 'row', gap: 10, alignItems: 'flex-start' },
+  payText: { flex: 1, fontSize: 12.5, color: SECONDARY, lineHeight: 18 },
 
   warningBox: {
     margin: 14,
@@ -1953,7 +1815,6 @@ const styles = StyleSheet.create({
     color: TEXT,
     lineHeight: 20,
   },
-  routeCountry: { fontSize: 11, color: MUTED, marginTop: 2 },
   routeConnector: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1972,12 +1833,6 @@ const styles = StyleSheet.create({
     borderTopColor: LINE,
   },
   routeMoneyText: { fontSize: 11, color: MUTED },
-  routeIntlNote: {
-    marginTop: 10,
-    fontSize: 11,
-    lineHeight: 16,
-    color: 'rgba(147,197,253,0.85)',
-  },
 
   receiptBody: { padding: 14 },
   receiptRow: {
@@ -1994,21 +1849,6 @@ const styles = StyleSheet.create({
     maxWidth: '50%',
     textAlign: 'right',
   },
-  receiptBreakdown: {
-    backgroundColor: '#0A0C10',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: LINE,
-    padding: 8,
-    marginBottom: 8,
-  },
-  receiptBreakdownRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: 8,
-    marginBottom: 4,
-  },
-  receiptBreakdownLabel: { fontSize: 10, color: MUTED, flex: 1 },
-  receiptBreakdownVal: { fontSize: 10, color: MUTED },
   receiptDivider: {
     height: StyleSheet.hairlineWidth,
     backgroundColor: LINE,
@@ -2038,11 +1878,6 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   intlText: { fontSize: 12, color: SECONDARY, lineHeight: 18 },
-  intlRouteLine: {
-    fontSize: 11,
-    color: MUTED,
-    marginTop: 4,
-  },
 
   blockBox: {
     flexDirection: 'row',
@@ -2096,10 +1931,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 20,
+    paddingHorizontal: 18,
     paddingVertical: 14,
     gap: 8,
-    minWidth: 140,
+    minWidth: 150,
   },
-  ctaText: { color: '#041412', fontWeight: '800', fontSize: 15 },
+  ctaText: { color: '#041412', fontWeight: '800', fontSize: 14 },
 })
