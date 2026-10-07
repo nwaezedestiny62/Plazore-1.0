@@ -10,6 +10,7 @@ import {
   initializePaymentForOrder,
   verifyPaymentByReference,
   handleChargeSuccessWebhook,
+  releaseStockForOrder,
 } from "../services/paymentService.js";
 import {
   processSellerPayout,
@@ -36,6 +37,10 @@ function generateReference(prefix = "PLZ"): string {
   return `${prefix}_${ts}_${rnd}`;
 }
 
+/**
+ * Mark unpaid orders as failed/cancelled AND release reserved stock.
+ * Never touches already-paid orders.
+ */
 async function markOrdersPaymentFailed(
   orders: any[],
   reasonLabel: string,
@@ -64,6 +69,12 @@ async function markOrdersPaymentFailed(
         blockedReason: reasonLabel,
       };
       await o.save();
+
+      // Put stock back so inventory is not stuck
+      await releaseStockForOrder(
+        o._id.toString(),
+        note || reasonLabel
+      ).catch(() => {});
     } catch (e) {
       console.error("[markOrdersPaymentFailed]", e);
     }
@@ -87,11 +98,13 @@ export const getPaymentConfig = async (_req: Request, res: Response) => {
 /**
  * POST /api/payments/checkout
  *
- * Payment gates the order:
- * - No Paystack keys → NO order, cart kept, success: false
- * - Payment init fails → pending rows cancelled as failed, success: false
- * - Init OK → return authorization_url only (order still NOT successful)
- * - Order is successful ONLY after verify/webhook marks payment paid
+ * Multi-seller:
+ * - Creates one order + one Paystack session per seller
+ * - Returns payments[] — client must complete ALL ready sessions sequentially
+ * - Paid sellers stay paid; failed sellers are cancelled + stock released
+ * - Cart is NOT cleared here (client clears after payments succeed)
+ *
+ * Order is successful ONLY after verify/webhook marks payment paid.
  */
 export const checkoutAndPay = async (req: Request, res: Response) => {
   try {
@@ -102,6 +115,7 @@ export const checkoutAndPay = async (req: Request, res: Response) => {
       phone,
       items: frontendItems,
       callbackUrl,
+      paymentMethodId,
     } = req.body;
 
     if (!isPaystackConfigured()) {
@@ -187,19 +201,31 @@ export const checkoutAndPay = async (req: Request, res: Response) => {
         payments.push({
           orderId: order._id,
           orderNumber: order.orderNumber,
+          sellerId: order.seller,
           amount: init.amount,
           currency: init.currency,
           authorizationUrl: init.authorizationUrl,
+          authorization_url: init.authorizationUrl,
           accessCode: init.accessCode,
           reference: init.reference,
           feeBreakdown: (order as any).feeBreakdown,
+          status: "ready",
         });
       } catch (err: any) {
         failedOrderIds.push(order._id.toString());
+        // Release stock for this failed seller immediately
+        await releaseStockForOrder(
+          order._id.toString(),
+          err.message || "Payment initialization failed"
+        ).catch(() => {});
+
         payments.push({
           orderId: order._id,
           orderNumber: order.orderNumber,
+          sellerId: order.seller,
           error: err.message || "Payment initialization failed",
+          needsManualInit: true,
+          status: "init_failed",
         });
       }
     }
@@ -232,16 +258,8 @@ export const checkoutAndPay = async (req: Request, res: Response) => {
       );
     }
 
-    try {
-      const cart = await Cart.findOne({ user: user._id });
-      if (cart) {
-        cart.items = [];
-        (cart as any).totalAmount = 0;
-        await cart.save();
-      }
-    } catch {
-      /* non-fatal */
-    }
+    // Do NOT clear cart here.
+    // Client clears only after sequential payments succeed (partial or full).
 
     const primary = viable[0];
 
@@ -251,8 +269,11 @@ export const checkoutAndPay = async (req: Request, res: Response) => {
       paymentRequired: true,
       paymentStatus: "pending",
       message:
-        "Complete payment to place your order. Your order is not confirmed until payment succeeds.",
+        viable.length > 1
+          ? `Complete payment for all ${viable.length} sellers. Order is not confirmed until each payment succeeds.`
+          : "Complete payment to place your order. Your order is not confirmed until payment succeeds.",
       data: {
+        // Single-seller convenience (first ready session)
         authorization_url: primary.authorizationUrl,
         authorizationUrl: primary.authorizationUrl,
         reference: primary.reference,
@@ -261,6 +282,7 @@ export const checkoutAndPay = async (req: Request, res: Response) => {
         currency: primary.currency,
         orderId: primary.orderId,
         orderNumber: primary.orderNumber,
+        // Multi-seller: client must open every ready payment sequentially
         orders: orders.map((o: any) => ({
           _id: o._id,
           orderNumber: o.orderNumber,
@@ -269,7 +291,11 @@ export const checkoutAndPay = async (req: Request, res: Response) => {
           region: o.region,
           currency: o.currency,
         })),
-        payments: viable,
+        payments, // includes ready + failed init rows
+        paymentsReady: viable.length,
+        paymentsFailed: failedOrderIds.length,
+        sellerCount: orders.length,
+        requiresSequentialPayment: viable.length > 1,
         publicKey: getPublicKey(),
         feePercent: 8,
       },

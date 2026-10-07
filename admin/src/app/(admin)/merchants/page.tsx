@@ -41,6 +41,181 @@ const PAGE_SIZE = 25;
 const Z_FLOAT = 90;
 const Z_MODAL = 9999;
 
+/** Exact match of server/config/payment.ts REGION_TO_CURRENCY */
+const REGION_TO_CURRENCY: Record<string, string> = {
+  NG: "NGN",
+  GH: "GHS",
+  BJ: "XOF",
+  TG: "XOF",
+  CI: "XOF",
+  SN: "XOF",
+  CM: "XAF",
+  KE: "KES",
+  ZA: "ZAR",
+  EG: "EGP",
+  UG: "UGX",
+  TZ: "TZS",
+  RW: "RWF",
+  US: "USD",
+  CA: "CAD",
+  GB: "GBP",
+  UK: "GBP",
+  DE: "EUR",
+  FR: "EUR",
+  NL: "EUR",
+  IT: "EUR",
+  ES: "EUR",
+  EU: "EUR",
+  AU: "AUD",
+};
+
+const KNOWN_CURRENCIES = new Set(Object.values(REGION_TO_CURRENCY));
+
+const REGION_NAME: Record<string, string> = {
+  NG: "Nigeria",
+  GH: "Ghana",
+  BJ: "Benin",
+  TG: "Togo",
+  CI: "Côte d'Ivoire",
+  SN: "Senegal",
+  CM: "Cameroon",
+  KE: "Kenya",
+  ZA: "South Africa",
+  EG: "Egypt",
+  UG: "Uganda",
+  TZ: "Tanzania",
+  RW: "Rwanda",
+  US: "United States",
+  CA: "Canada",
+  GB: "United Kingdom",
+  UK: "United Kingdom",
+  DE: "Germany",
+  FR: "France",
+  NL: "Netherlands",
+  IT: "Italy",
+  ES: "Spain",
+  EU: "Europe",
+  AU: "Australia",
+};
+
+function norm(s?: string | null) {
+  return String(s || "")
+    .trim()
+    .toUpperCase();
+}
+
+function isIsoCurrency(s?: string | null) {
+  const v = norm(s);
+  return v.length === 3 && /^[A-Z]{3}$/.test(v);
+}
+
+function currencyForRegion(region?: string | null): string {
+  const key = norm(region);
+  if (!key) return "";
+  if (REGION_TO_CURRENCY[key]) return REGION_TO_CURRENCY[key];
+  if (KNOWN_CURRENCIES.has(key)) return key;
+  const base = key.split(/[-_]/)[0];
+  if (REGION_TO_CURRENCY[base]) return REGION_TO_CURRENCY[base];
+  if (KNOWN_CURRENCIES.has(base)) return base;
+  return "";
+}
+
+function asRegionCode(raw?: string | null): string {
+  const key = norm(raw);
+  if (!key) return "";
+  if (REGION_TO_CURRENCY[key]) return key;
+  const base = key.split(/[-_]/)[0];
+  if (REGION_TO_CURRENCY[base]) return base;
+  if (key.length === 2) return key;
+  return "";
+}
+
+function pickCurrency(...cands: Array<string | undefined | null>): string {
+  for (const c of cands) {
+    const v = norm(c);
+    if (!v) continue;
+    if (REGION_TO_CURRENCY[v]) return REGION_TO_CURRENCY[v];
+    if (isIsoCurrency(v)) return v;
+  }
+  return "";
+}
+
+function regionName(code?: string | null) {
+  const k = asRegionCode(code) || norm(code);
+  if (!k) return "";
+  const hit = (REGION_LIST as { code?: string; name?: string }[]).find(
+    (r) => String(r.code).toUpperCase() === k
+  );
+  if (hit?.name) return hit.name;
+  return REGION_NAME[k] || k;
+}
+
+function fmtMoney(n?: number, currencyOrRegion?: string) {
+  const v = Number(n || 0);
+  const cur =
+    pickCurrency(currencyOrRegion) ||
+    currencyForRegion(currencyOrRegion) ||
+    "NGN";
+  try {
+    return new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency: cur,
+      maximumFractionDigits: 2,
+    }).format(v);
+  } catch {
+    return `${v.toLocaleString()} ${cur}`;
+  }
+}
+
+/** Listing currency for a product on this storefront. No live FX. */
+function listingCurrency(p: any, merchantRegion?: string) {
+  return (
+    pickCurrency(p?.currency) ||
+    currencyForRegion(p?.region) ||
+    currencyForRegion(merchantRegion) ||
+    "NGN"
+  );
+}
+
+function listingRegion(p: any, merchantRegion?: string) {
+  return (
+    asRegionCode(p?.region) ||
+    asRegionCode(p?.fulfillmentLocation?.countryCode) ||
+    asRegionCode(merchantRegion) ||
+    "—"
+  );
+}
+
+/** Frozen checkout currency on an order. */
+function orderCurrency(o: any) {
+  const frozen = pickCurrency(
+    o?.feeBreakdown?.currency,
+    o?.currency,
+    o?.items?.[0]?.currency
+  );
+  if (frozen) return frozen;
+  const mapped = currencyForRegion(
+    o?.feeBreakdown?.region || o?.region || o?.items?.[0]?.region
+  );
+  if (mapped) return mapped;
+  return "NGN";
+}
+
+function orderRegion(o: any) {
+  return (
+    asRegionCode(o?.feeBreakdown?.region) ||
+    asRegionCode(o?.region) ||
+    asRegionCode(o?.items?.[0]?.region) ||
+    "—"
+  );
+}
+
+function chargedTotal(o: any) {
+  const g = Number(o?.feeBreakdown?.grossAmount);
+  if (Number.isFinite(g) && g > 0) return g;
+  return Number(o?.totalAmount || 0);
+}
+
 type IntegrityFlag = {
   code: string;
   severity: "ok" | "warn" | "critical";
@@ -301,7 +476,6 @@ function ActivityFloat({
   );
 }
 
-
 type LocAddress = {
   street?: string;
   city?: string;
@@ -534,7 +708,6 @@ function BusinessLocationCard({
   );
 }
 
-
 function DetailModal({
   open,
   detail,
@@ -565,6 +738,10 @@ function DetailModal({
 
   const u = detail?.user;
   const integ = detail?.integrity;
+  const storeRegion =
+    asRegionCode(u?.marketplaceRegion) || u?.marketplaceRegion || "—";
+  const storeCurrency = currencyForRegion(storeRegion) || "NGN";
+  const storeCountry = regionName(storeRegion);
 
   return createPortal(
     <div className="fixed inset-0 z-[9999] flex items-end justify-center sm:items-center sm:p-6">
@@ -604,7 +781,6 @@ function DetailModal({
             </div>
           ) : detail ? (
             <div className="space-y-4">
-              {/* Banner + logo */}
               <div className="relative overflow-hidden rounded-2xl border border-white/[0.07] bg-[#11141A]">
                 {u?.storeBanner ? (
                   // eslint-disable-next-line @next/next/no-img-element
@@ -651,7 +827,8 @@ function DetailModal({
                         ? "Verified"
                         : "Unverified"}
                   </Badge>
-                  <Badge>{u?.marketplaceRegion || "—"}</Badge>
+                  <Badge tone="blue">{storeRegion}</Badge>
+                  <Badge tone="neutral">{storeCurrency}</Badge>
                   <span className="inline-flex items-center gap-1.5 text-[12px] text-white/50">
                     <SeverityIcon severity={integ?.severity} />
                     Integrity {integ?.score ?? "—"}
@@ -659,7 +836,20 @@ function DetailModal({
                 </div>
               </div>
 
-              {/* Integrity flags */}
+              <section className="rounded-2xl border border-[#00E575]/25 bg-[#00E575]/[0.06] p-4">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-white/40">
+                  Marketplace listing region
+                </p>
+                <p className="mt-1 text-lg font-semibold">
+                  {storeRegion}
+                  {storeCountry ? ` · ${storeCountry}` : ""}
+                </p>
+                <p className="mt-1 text-[12px] text-white/50">
+                  Listings on this store are priced in {storeCurrency}. Checkout
+                  charges that currency. No live conversion.
+                </p>
+              </section>
+
               {integ?.flags?.length ? (
                 <section className="rounded-2xl border border-white/[0.07] bg-white/[0.025] p-4">
                   <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.14em] text-white/40">
@@ -686,13 +876,17 @@ function DetailModal({
                 </section>
               )}
 
-              {/* Profile fields */}
               <section className="grid gap-3 sm:grid-cols-2">
                 {[
                   ["Store name", u?.storeName],
                   ["Owner", u?.name],
                   ["Phone", u?.phone],
-                  ["Region", u?.marketplaceRegion],
+                  [
+                    "Region",
+                    storeRegion !== "—"
+                      ? `${storeRegion}${storeCountry ? ` · ${storeCountry}` : ""} · ${storeCurrency}`
+                      : "—",
+                  ],
                   ["Business goal", u?.businessGoal],
                   [
                     "Bank",
@@ -754,7 +948,6 @@ function DetailModal({
                 </section>
               ) : null}
 
-              {/* Stats */}
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                 {[
                   ["Products", detail.stats.productCount, `${detail.stats.activeProductCount} active`],
@@ -775,7 +968,6 @@ function DetailModal({
                 ))}
               </div>
 
-              {/* Products */}
               <section className="rounded-2xl border border-white/[0.07] bg-white/[0.025] p-4">
                 <div className="mb-3 flex items-center gap-2">
                   <Package className="h-4 w-4 text-[#00E575]" />
@@ -788,39 +980,45 @@ function DetailModal({
                   <p className="text-[12px] text-white/40">No listings</p>
                 ) : (
                   <ul className="space-y-2">
-                    {detail.products.slice(0, 12).map((p: any) => (
-                      <li
-                        key={p._id}
-                        className="flex items-center gap-3 rounded-xl border border-white/[0.05] bg-[#0A0D12]/50 px-2.5 py-2"
-                      >
-                        {p.images?.[0] ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img
-                            src={p.images[0]}
-                            alt=""
-                            className="h-10 w-10 shrink-0 rounded-lg object-cover"
-                          />
-                        ) : (
-                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white/[0.05]">
-                            <Package className="h-4 w-4 text-white/30" />
+                    {detail.products.slice(0, 12).map((p: any) => {
+                      const cur = listingCurrency(p, u?.marketplaceRegion);
+                      const reg = listingRegion(p, u?.marketplaceRegion);
+                      return (
+                        <li
+                          key={p._id}
+                          className="flex items-center gap-3 rounded-xl border border-white/[0.05] bg-[#0A0D12]/50 px-2.5 py-2"
+                        >
+                          {p.images?.[0] ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={p.images[0]}
+                              alt=""
+                              className="h-10 w-10 shrink-0 rounded-lg object-cover"
+                            />
+                          ) : (
+                            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white/[0.05]">
+                              <Package className="h-4 w-4 text-white/30" />
+                            </div>
+                          )}
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-[13px] font-semibold">
+                              {p.name}
+                            </p>
+                            <p className="text-[11px] text-white/40">
+                              {p.isActive ? "Active" : "Inactive"} · stock{" "}
+                              {p.stock ?? "—"} · {reg} · {cur}
+                            </p>
                           </div>
-                        )}
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-[13px] font-semibold">
-                            {p.name}
+                          <p className="shrink-0 text-[13px] font-semibold tabular-nums text-[#00E575]">
+                            {fmtMoney(p.price, cur)}
                           </p>
-                          <p className="text-[11px] text-white/40">
-                            {p.isActive ? "Active" : "Inactive"} · stock{" "}
-                            {p.stock ?? "—"}
-                          </p>
-                        </div>
-                      </li>
-                    ))}
+                        </li>
+                      );
+                    })}
                   </ul>
                 )}
               </section>
 
-              {/* Orders */}
               <section className="rounded-2xl border border-white/[0.07] bg-white/[0.025] p-4">
                 <div className="mb-3 flex items-center gap-2">
                   <ShoppingBag className="h-4 w-4 text-[#00E575]" />
@@ -833,29 +1031,39 @@ function DetailModal({
                   <p className="text-[12px] text-white/40">No orders yet</p>
                 ) : (
                   <ul className="space-y-2">
-                    {detail.orders.slice(0, 12).map((o: any) => (
-                      <li
-                        key={o._id}
-                        className="flex items-center justify-between gap-2 rounded-xl border border-white/[0.05] bg-[#0A0D12]/50 px-3 py-2"
-                      >
-                        <div className="min-w-0">
-                          <p className="truncate text-[13px] font-semibold">
-                            {o.orderNumber}
-                          </p>
-                          <p className="text-[11px] text-white/40">
-                            {o.buyer?.name || o.buyer?.email || "Buyer"} ·{" "}
-                            {relTime(o.createdAt)}
-                            {o.isSellerOwnedPurchase ? " · self-purchase" : ""}
-                          </p>
-                        </div>
-                        <Badge>{o.orderStatus}</Badge>
-                      </li>
-                    ))}
+                    {detail.orders.slice(0, 12).map((o: any) => {
+                      const cur = orderCurrency(o);
+                      const reg = orderRegion(o);
+                      return (
+                        <li
+                          key={o._id}
+                          className="flex items-center justify-between gap-2 rounded-xl border border-white/[0.05] bg-[#0A0D12]/50 px-3 py-2"
+                        >
+                          <div className="min-w-0">
+                            <p className="truncate text-[13px] font-semibold">
+                              {o.orderNumber}
+                            </p>
+                            <p className="text-[11px] text-white/40">
+                              {o.buyer?.name || o.buyer?.email || "Buyer"} ·{" "}
+                              {relTime(o.createdAt)}
+                              {o.isSellerOwnedPurchase ? " · self-purchase" : ""}
+                              {reg !== "—" ? ` · ${reg}` : ""}
+                            </p>
+                            <p className="mt-0.5 text-[12px] font-semibold tabular-nums text-[#00E575]">
+                              {fmtMoney(chargedTotal(o), cur)}
+                              <span className="ml-1 font-normal text-white/35">
+                                {cur}
+                              </span>
+                            </p>
+                          </div>
+                          <Badge>{o.orderStatus}</Badge>
+                        </li>
+                      );
+                    })}
                   </ul>
                 )}
               </section>
 
-              {/* Conversations */}
               <section className="rounded-2xl border border-white/[0.07] bg-white/[0.025] p-4">
                 <div className="mb-3 flex items-center gap-2">
                   <MessageSquare className="h-4 w-4 text-[#00E575]" />
@@ -1061,7 +1269,8 @@ export default function MerchantsPage() {
             </p>
             <h1 className="text-2xl font-extrabold tracking-tight">Merchants</h1>
             <p className="mt-1 text-[13px] text-white/45">
-              Every storefront · live integrity · products, orders, messages
+              Prices use each listing’s region currency (US → USD, DE → EUR, NG
+              → NGN). Orders show the amount charged at checkout.
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -1101,7 +1310,7 @@ export default function MerchantsPage() {
             <option value="">All regions</option>
             {REGION_LIST.map((r: any) => (
               <option key={r.code || r} value={r.code || r}>
-                {r.code || r}
+                {r.name ? `${r.name} (${r.code})` : r.code || r}
               </option>
             ))}
           </select>
@@ -1153,12 +1362,17 @@ export default function MerchantsPage() {
           <ul className="space-y-2.5">
             {items.map((m) => {
               const sev = m.integrity?.severity || "ok";
+              const reg = asRegionCode(m.marketplaceRegion) || m.marketplaceRegion || "—";
+              const cur = currencyForRegion(reg) || "";
               return (
                 <li key={m._id}>
                   <button
                     type="button"
                     onClick={() => void openMerchant(m._id)}
-                    className="flex w-full items-center gap-3 rounded-2xl border border-white/[0.07] bg-[#11141A]/90 p-3.5 text-left transition hover:border-white/14 hover:bg-[#14181F]"
+                    className={cn(
+                      "flex w-full items-center gap-3 rounded-2xl border border-white/[0.07] bg-[#11141A]/90 p-3.5 text-left transition hover:border-white/14 hover:bg-[#14181F]",
+                      openId === m._id && modalOpen && "border-[#00E575]/35 bg-[#00E575]/[0.05]"
+                    )}
                   >
                     {m.storeLogo || m.image ? (
                       // eslint-disable-next-line @next/next/no-img-element
@@ -1189,9 +1403,9 @@ export default function MerchantsPage() {
                         ) : null}
                       </div>
                       <p className="mt-0.5 truncate text-[12px] text-white/45">
-                        {m.email || "—"} · {m.marketplaceRegion || "—"} ·{" "}
-                        {m.productStats?.active ?? 0} live ·{" "}
-                        {m.orderStats?.total ?? 0} orders
+                        {m.email || "—"} · {reg}
+                        {cur ? ` · ${cur}` : ""} · {m.productStats?.active ?? 0}{" "}
+                        live · {m.orderStats?.total ?? 0} orders
                       </p>
                       {m.integrity?.flags?.[0] ? (
                         <p className="mt-1 truncate text-[11px] text-white/35">

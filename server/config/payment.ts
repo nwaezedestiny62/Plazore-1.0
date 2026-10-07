@@ -9,6 +9,12 @@ export const DELIVERY_CONFIRMATION_WINDOW_MS = 17 * 60 * 60 * 1000;
 export const AUTO_CONFIRM_JOB_INTERVAL_MS = 5 * 60 * 1000;
 export const PAYOUT_JOB_INTERVAL_MS = 10 * 60 * 1000;
 
+/** Pending/processing payment older than this → stock released */
+export const ABANDONED_PAYMENT_TIMEOUT_MS = 45 * 60 * 1000; // 45 min
+
+/** How often the abandoned-payment cleaner runs */
+export const ABANDONED_PAYMENT_JOB_INTERVAL_MS = 5 * 60 * 1000; // 5 min
+
 export const PAYSTACK_BASE_URL =
   process.env.PAYSTACK_BASE_URL || "https://api.paystack.co";
 
@@ -46,8 +52,21 @@ export const REGION_TO_CURRENCY: Record<string, string> = {
 const ZERO_DECIMAL = new Set(["NGN", "XOF", "XAF", "KES", "JPY"]);
 
 const KNOWN_ISO = new Set([
-  "NGN", "USD", "EUR", "GBP", "GHS", "CAD", "AUD",
-  "ZAR", "KES", "EGP", "XOF", "XAF", "UGX", "TZS", "RWF",
+  "NGN",
+  "USD",
+  "EUR",
+  "GBP",
+  "GHS",
+  "CAD",
+  "AUD",
+  "ZAR",
+  "KES",
+  "EGP",
+  "XOF",
+  "XAF",
+  "UGX",
+  "TZS",
+  "RWF",
 ]);
 
 export function currencyForRegion(region?: string): string {

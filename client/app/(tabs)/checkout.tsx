@@ -1,8 +1,9 @@
 /**
- * Checkout — Paystack-gated
+ * Checkout — Paystack-gated (aligned with web)
  * - Order successful ONLY after payment verifies
  * - Saved cards UI (like addresses) — Paystack hosts card entry
- * - POST /api/payments/checkout → open authorization_url → verify
+ * - POST /api/payments/checkout → payments[] → open authorization_url → verify
+ * - Backend failure codes (PAYSTACK_NOT_CONFIGURED, 401, 402, etc.) surface clearly
  */
 
 import api from '@/constants/api'
@@ -87,6 +88,19 @@ type RouteGroup = {
   isInternational: boolean
   missingShipFrom: boolean
   invalidItems: string[]
+}
+
+type PaymentInitRow = {
+  orderId?: string
+  orderNumber?: string
+  authorizationUrl?: string
+  authorization_url?: string
+  accessCode?: string
+  reference?: string
+  amount?: number
+  currency?: string
+  error?: string
+  needsManualInit?: boolean
 }
 
 function resolveProductRegion(product: any): string {
@@ -175,6 +189,69 @@ function addressComplete(a: any): boolean {
     String(a.city || '').trim() &&
     String(a.country || '').trim()
   )
+}
+
+function maskCard(last4?: string) {
+  if (!last4) return '••••'
+  return `•••• ${last4}`
+}
+
+/** Pick the first usable Paystack authorization URL from backend response */
+function extractPaymentSession(data: any, body: any): {
+  authUrl: string
+  reference: string
+  payments: PaymentInitRow[]
+} {
+  const payments: PaymentInitRow[] = Array.isArray(data?.payments)
+    ? data.payments
+    : Array.isArray(body?.payments)
+      ? body.payments
+      : []
+
+  // Prefer first payment that has a URL and no error
+  for (const p of payments) {
+    const url = p.authorizationUrl || p.authorization_url || ''
+    if (url && !p.error) {
+      return {
+        authUrl: url,
+        reference: String(p.reference || ''),
+        payments,
+      }
+    }
+  }
+
+  // Fallback: top-level fields (single-order / older shape)
+  const authUrl =
+    data?.authorization_url ||
+    data?.authorizationUrl ||
+    body?.authorization_url ||
+    body?.authorizationUrl ||
+    ''
+  const reference = String(data?.reference || body?.reference || '')
+
+  return { authUrl, reference, payments }
+}
+
+function backendErrorMessage(
+  body: any,
+  status?: number,
+): string {
+  if (body?.message && typeof body.message === 'string') {
+    return body.message
+  }
+  if (status === 503 || body?.code === 'PAYSTACK_NOT_CONFIGURED') {
+    return 'Order unsuccessful. Payment is not available yet — Paystack is not connected. Nothing was charged.'
+  }
+  if (status === 402) {
+    return 'Order unsuccessful. Payment could not be started. Nothing was charged.'
+  }
+  if (status === 401) {
+    return 'Session expired. Sign in again.'
+  }
+  if (status === 400) {
+    return 'Order unsuccessful. Please review your bag and try again.'
+  }
+  return 'Order unsuccessful. Payment could not be completed. Nothing was charged.'
 }
 
 function PlazoreOrb({ size = 110 }: { size?: number }) {
@@ -608,18 +685,23 @@ export default function Checkout() {
       const res = await api.get('/payment-methods', {
         headers: { Authorization: `Bearer ${token}` },
       })
-      const list = res.data?.data || res.data || []
-      if (Array.isArray(list)) {
-        setCards(list)
-        setSelectedCardId((prev) => {
-          if (prev && list.some((c: SavedCard) => c._id === prev)) return prev
-          const def =
-            list.find((c: SavedCard) => c.isDefault) || list[0] || null
-          return def?._id || null
-        })
+      // Mirror web: accept success+data or raw data array
+      let list: SavedCard[] = []
+      if (res.data?.success && Array.isArray(res.data.data)) {
+        list = res.data.data
+      } else if (Array.isArray(res.data?.data)) {
+        list = res.data.data
+      } else if (Array.isArray(res.data)) {
+        list = res.data
       }
+      setCards(list)
+      setSelectedCardId((prev) => {
+        if (prev && list.some((c) => c._id === prev)) return prev
+        const def = list.find((c) => c.isDefault) || list[0] || null
+        return def?._id || null
+      })
     } catch {
-      /* ignore */
+      /* ignore — cards stay empty; user can still pay with new card */
     }
   }, [getToken])
 
@@ -648,13 +730,31 @@ export default function Checkout() {
       const unit = Number(item.price ?? product.price) || 0
       const qty = Math.max(1, Number(item.quantity) || 1)
       const lineDisplay = convertPrice(unit * qty, productRegion, displayRegion)
+
+      // Match web: respect feeMode (free / on_delivery → 0 display fee)
       const feeRaw = Number(product.shipping?.deliveryFee) || 0
-      const feeDisplay = convertPrice(feeRaw, productRegion, displayRegion)
+      const feeMode =
+        (product.shipping as { feeMode?: string } | undefined)?.feeMode ||
+        (feeRaw > 0 ? 'fixed' : 'free')
+      const feeDisplay =
+        feeMode === 'fixed'
+          ? convertPrice(feeRaw, productRegion, displayRegion)
+          : 0
 
       const invalid: string[] = []
       if (!(product._id || item.productId)) invalid.push('Missing product id')
       if (!(unit > 0)) invalid.push('Invalid price')
       if (!ship.hasShipFrom) invalid.push('No ship-from')
+      // Variant guard (aligned with web)
+      if (
+        product.hasVariants &&
+        Array.isArray(product.variants) &&
+        product.variants.length > 0 &&
+        !item.variantKey &&
+        !item.variantId
+      ) {
+        invalid.push('Missing variant selection')
+      }
 
       const existing = map.get(key)
       if (!existing) {
@@ -733,7 +833,7 @@ export default function Checkout() {
     if (!allRoutesShipReady)
       return 'One or more sellers have not set a shipping origin. Checkout is blocked until they complete it.'
     if (!noInvalidLines)
-      return 'One or more items have invalid price or product data. Remove them or re-add from the product page.'
+      return 'One or more items have invalid price, product data, or missing options. Remove them or re-add from the product page.'
     if (!addressOk)
       return 'Select a complete delivery address (street, city, country).'
     return null
@@ -749,6 +849,14 @@ export default function Checkout() {
 
   const placing = orderPhase === 'processing'
 
+  /**
+   * Multi-seller sequential Paystack:
+   * - Open each ready payment one after another
+   * - Verify each before moving on
+   * - Successful payments STAY paid & protected
+   * - Failed payments do NOT go through (stock released on server)
+   * - Clear failure reason always shown
+   */
   const handlePlaceOrder = async () => {
     if (placingLock.current || orderPhase === 'processing') return
 
@@ -782,6 +890,9 @@ export default function Checkout() {
           productId: item.product?._id || item.productId,
           quantity: Math.max(1, Number(item.quantity) || 1),
           note: String(item.note || '').trim().slice(0, 120),
+          variantId: item.variantId || '',
+          variantKey: item.variantKey || '',
+          selectedOptions: item.selectedOptions || {},
         }))
         .filter((i: any) => i.productId && i.quantity > 0)
 
@@ -792,6 +903,7 @@ export default function Checkout() {
         throw new Error('Delivery address is incomplete')
       }
 
+      // 1) Create orders + Paystack sessions (cart NOT cleared on server)
       const res = await api.post(
         '/payments/checkout',
         {
@@ -813,46 +925,97 @@ export default function Checkout() {
 
       const body = res.data || {}
       const data = body.data || body
+      const httpStatus = res.status
 
-      // Backend failure → order unsuccessful (no fake success)
       if (body.success === false) {
         setOrderPhase('error')
-        setOrderError(
-          body.message ||
-            'Order unsuccessful. Payment could not be completed. Nothing was charged.',
-        )
+        setOrderError(backendErrorMessage(body, httpStatus))
         return
       }
 
-      const authUrl =
-        data.authorization_url ||
-        data.authorizationUrl ||
-        body.authorization_url ||
-        body.authorizationUrl
+      type PayRow = {
+        orderId?: string
+        orderNumber?: string
+        authorizationUrl?: string
+        authorization_url?: string
+        reference?: string
+        error?: string
+        needsManualInit?: boolean
+        status?: string
+      }
 
-      const reference = data.reference || body.reference || ''
+      const payments: PayRow[] = Array.isArray(data.payments)
+        ? data.payments
+        : []
 
-      if (!authUrl) {
+      // Fallback single-order shape
+      if (payments.length === 0) {
+        const url =
+          data.authorizationUrl ||
+          data.authorization_url ||
+          body.authorizationUrl ||
+          body.authorization_url
+        const ref = data.reference || body.reference
+        if (url && ref) {
+          payments.push({
+            authorizationUrl: url,
+            reference: ref,
+            orderNumber: data.orderNumber,
+            status: 'ready',
+          })
+        }
+      }
+
+      const ready = payments.filter(
+        (p) =>
+          (p.authorizationUrl || p.authorization_url) &&
+          p.reference &&
+          !p.error &&
+          p.status !== 'init_failed',
+      )
+      const failedInit = payments.filter(
+        (p) => p.error || p.needsManualInit || p.status === 'init_failed',
+      )
+
+      if (ready.length === 0) {
         setOrderPhase('error')
         setOrderError(
-          body.message ||
+          failedInit[0]?.error ||
+            body.message ||
             'Order unsuccessful. Payment could not be started. Nothing was charged.',
         )
         return
       }
 
-      const browserResult = await WebBrowser.openAuthSessionAsync(authUrl)
+      const total = payments.length || ready.length
+      const paidNumbers: string[] = []
+      const failedLines: string[] = []
 
-      if (browserResult.type !== 'success') {
-        setOrderPhase('error')
-        setOrderError(
-          'Order unsuccessful. Payment was cancelled or not completed.',
-        )
-        return
-      }
+      // 2) Sequential: one Paystack window per seller, verify before next
+      for (let i = 0; i < ready.length; i++) {
+        const p = ready[i]
+        const authUrl = (p.authorizationUrl || p.authorization_url)!
+        const reference = p.reference!
+        const label = p.orderNumber || `seller ${i + 1} of ${ready.length}`
 
-      // Verify with backend — only then success
-      if (reference) {
+        const browserResult = await WebBrowser.openAuthSessionAsync(authUrl)
+
+        if (browserResult.type !== 'success') {
+          failedLines.push(
+            `${label}: payment cancelled on Paystack (nothing charged for this seller)`,
+          )
+          // Do not open remaining sessions if user cancelled — they can retry from Orders
+          // Already-paid ones stay protected
+          for (let j = i + 1; j < ready.length; j++) {
+            const skip = ready[j]
+            failedLines.push(
+              `${skip.orderNumber || `seller ${j + 1}`}: skipped after cancel`,
+            )
+          }
+          break
+        }
+
+        // 3) Verify this reference
         try {
           const v = await api.post(
             '/payments/verify',
@@ -860,32 +1023,75 @@ export default function Checkout() {
             { headers: { Authorization: `Bearer ${token}` } },
           )
           const vd = v.data?.data || v.data || {}
-          if (vd.verified === true || vd.orderPlaced === true) {
-            clearCart()
-            setOrderPhase('success')
-            return
+          const ok =
+            vd.verified === true ||
+            vd.orderPlaced === true ||
+            vd.status === 'success'
+
+          if (ok) {
+            paidNumbers.push(label)
+          } else {
+            const reason =
+              vd.failureReason ||
+              vd.message ||
+              (vd.status === 'abandoned'
+                ? 'abandoned on Paystack'
+                : 'declined, failed, or insufficient funds')
+            failedLines.push(`${label}: ${reason}`)
+            // Continue to next seller — paid ones already locked in
           }
-          setOrderPhase('error')
-          setOrderError(
-            vd.message ||
-              'Order unsuccessful. Payment failed, was declined, or insufficient funds.',
-          )
-          return
         } catch (ve: any) {
-          setOrderPhase('error')
-          setOrderError(
+          const reason =
             ve?.response?.data?.message ||
-              'Order unsuccessful. Could not verify payment. Check Orders or try again.',
-          )
-          return
+            ve?.message ||
+            'could not verify with server'
+          failedLines.push(`${label}: ${reason}`)
         }
       }
 
+      // Init failures never got a session (server already released their stock)
+      for (const f of failedInit) {
+        failedLines.push(
+          `${f.orderNumber || 'seller'}: ${f.error || 'payment session could not start'}`,
+        )
+      }
+
+      const paidCount = paidNumbers.length
+      const failCount = failedLines.length
+
+      // 4) Wise outcome
+      if (paidCount > 0 && failCount === 0) {
+        // Everyone who needed to pay, paid
+        clearCart()
+        setOrderPhase('success')
+        return
+      }
+
+      if (paidCount > 0 && failCount > 0) {
+        // PARTIAL: successful orders go through; failed ones do not
+        clearCart()
+        setOrderPhase('error')
+        setOrderError(
+          `${paidCount} of ${total} seller(s) paid successfully (${paidNumbers.join(', ')}). ` +
+            `Those orders are protected and will be fulfilled.\n\n` +
+            `Could not complete:\n• ${failedLines.join('\n• ')}\n\n` +
+            `Failed orders were not charged (stock released). Check Orders for paid ones.`,
+        )
+        return
+      }
+
+      // Nobody paid
       setOrderPhase('error')
-      setOrderError('Order unsuccessful. Payment was not confirmed.')
+      setOrderError(
+        failCount > 0
+          ? `Order unsuccessful. Nothing was charged.\n\n• ${failedLines.join('\n• ')}`
+          : 'Order unsuccessful. Payment was not confirmed. Nothing was charged.',
+      )
     } catch (e: any) {
+      const status = e?.response?.status
+      const body = e?.response?.data
       const msg =
-        e?.response?.data?.message ||
+        (body && backendErrorMessage(body, status)) ||
         e?.message ||
         'Order unsuccessful. Please try again.'
       setOrderPhase('error')
@@ -1032,6 +1238,13 @@ export default function Checkout() {
                 const unit = Number(item.price ?? product?.price) || 0
                 const qty = Number(item.quantity) || 1
                 const img = product?.images?.[0]
+                const optionLine =
+                  item.selectedOptions &&
+                  typeof item.selectedOptions === 'object'
+                    ? Object.entries(item.selectedOptions)
+                        .map(([k, v]) => `${k}: ${v}`)
+                        .join(' · ')
+                    : ''
                 return (
                   <View
                     key={item.id || `${group.key}-${i}`}
@@ -1053,6 +1266,7 @@ export default function Checkout() {
                       </Text>
                       <Text style={styles.itemMeta}>
                         Qty {qty} · {fmtProduct(unit, region)} each
+                        {optionLine ? ` · ${optionLine}` : ''}
                       </Text>
                     </View>
                     <Text style={styles.itemTotal} numberOfLines={1}>
@@ -1075,7 +1289,7 @@ export default function Checkout() {
           ))}
         </View>
 
-        {/* Address */}
+        {/* Address — same pattern as web */}
         <View style={styles.card}>
           <View style={styles.cardHeader}>
             <View style={styles.cardHeaderLeft}>
@@ -1151,7 +1365,7 @@ export default function Checkout() {
           )}
         </View>
 
-        {/* Payment method — saved cards (like addresses) */}
+        {/* Payment method — saved cards (same structure as web) */}
         <View style={styles.card}>
           <View style={styles.cardHeader}>
             <View style={styles.cardHeaderLeft}>
@@ -1173,6 +1387,7 @@ export default function Checkout() {
           </View>
 
           <View style={styles.listPad}>
+            {/* New card option — always available */}
             <TouchableOpacity
               onPress={() => setSelectedCardId(null)}
               style={[
@@ -1199,6 +1414,7 @@ export default function Checkout() {
               </View>
             </TouchableOpacity>
 
+            {/* Saved cards list */}
             {cards.map((card) => {
               const on = selectedCardId === card._id
               return (
@@ -1213,7 +1429,7 @@ export default function Checkout() {
                   <View style={styles.selectContent}>
                     <View style={styles.selectTop}>
                       <Text style={styles.selectTitle}>
-                        {card.brand || 'Card'} •••• {card.last4 || '····'}
+                        {card.brand || 'Card'} {maskCard(card.last4)}
                       </Text>
                       {card.isDefault && (
                         <View style={styles.defaultBadge}>

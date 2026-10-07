@@ -153,7 +153,7 @@ export async function createPendingOrders(params: {
       String(sellerItems[0]?.currency || "").trim().toUpperCase() ||
       currencyForRegion(region);
 
-    const fees = calculateSellerPayout(subtotal, shippingCost);
+    const fees = calculateSellerPayout(subtotal, shippingCost, currency);
 
     const order = await Order.create({
       buyer: params.buyer._id,
@@ -208,6 +208,109 @@ export async function createPendingOrders(params: {
   return createdOrders;
 }
 
+/**
+ * Restore stock for an order that never completed payment.
+ * Idempotent. Never releases if payment already succeeded.
+ */
+export async function releaseStockForOrder(
+  orderId: string,
+  reason: string = "payment_failed"
+): Promise<{ released: boolean; already?: boolean }> {
+  const order = await Order.findById(orderId);
+  if (!order) return { released: false };
+
+  const res = (order as any).stockReservation || {};
+  if (res.released === true) {
+    return { released: false, already: true };
+  }
+  if (order.paymentStatus === "paid" || res.committed === true) {
+    return { released: false, already: true };
+  }
+
+  for (const item of order.items || []) {
+    const productId = (item as any).product;
+    const qty = Number((item as any).quantity) || 0;
+    if (!productId || qty <= 0) continue;
+    await Product.findByIdAndUpdate(productId, {
+      $inc: { stock: qty },
+    });
+  }
+
+  (order as any).stockReservation = {
+    reserved: true,
+    committed: false,
+    released: true,
+  };
+
+  const life = String((order as any).paymentLifecycle || "");
+  if (
+    ["PENDING_PAYMENT", "PAYMENT_PROCESSING", "PAYMENT_FAILED"].includes(
+      life
+    ) ||
+    order.paymentStatus === "pending" ||
+    order.paymentStatus === "failed"
+  ) {
+    (order as any).paymentLifecycle = "CANCELLED";
+    order.orderStatus = "Cancelled";
+    (order as any).cancellation = {
+      cancelledBy: "system",
+      reasonCode: "other",
+      reasonLabel: reason,
+      note: reason,
+      cancelledAt: new Date(),
+      refundStatus: "not_applicable",
+    };
+  }
+
+  await order.save();
+
+  await writePaymentAudit({
+    order: order._id.toString(),
+    payment: (order as any).paymentRef?.toString?.() || null,
+    action: "stock.released",
+    actorType: "system",
+    toLifecycle: (order as any).paymentLifecycle,
+    note: reason,
+  }).catch(() => {});
+
+  return { released: true };
+}
+
+/** Mark payment failed and release stock. */
+export async function failPaymentAndReleaseStock(
+  payment: any,
+  order: any,
+  data: any,
+  source: "api" | "webhook" | "manual" | "job"
+) {
+  payment.status = data?.status === "abandoned" ? "abandoned" : "failed";
+  payment.lifecycle = "PAYMENT_FAILED";
+  payment.gatewayResponse = data?.gateway_response || data?.status || "failed";
+  payment.failureReason = data?.gateway_response || data?.status || "failed";
+  await payment.save();
+
+  (order as any).paymentLifecycle = "PAYMENT_FAILED";
+  order.paymentStatus = "failed";
+  await order.save();
+
+  await releaseStockForOrder(
+    order._id.toString(),
+    payment.status === "abandoned"
+      ? "Payment abandoned on Paystack"
+      : `Payment failed: ${payment.failureReason}`
+  );
+
+  await writePaymentAudit({
+    order: order._id.toString(),
+    payment: payment._id.toString(),
+    action: "payment.failed",
+    actorType: source === "webhook" ? "webhook" : "system",
+    toLifecycle: "PAYMENT_FAILED",
+    reference: payment.reference,
+    note: payment.failureReason,
+  }).catch(() => {});
+}
+
 export async function initializePaymentForOrder(params: {
   orderId: string;
   buyer: any;
@@ -257,7 +360,8 @@ export async function initializePaymentForOrder(params: {
 
   const fallbackFees = calculateSellerPayout(
     order.subtotal,
-    order.shippingCost
+    order.shippingCost,
+    currency
   );
   const platformFee = fb.platformFee ?? fallbackFees.platformFee;
   const sellerPayoutAmount =
@@ -278,7 +382,7 @@ export async function initializePaymentForOrder(params: {
       provider: "paystack",
       reference,
       amount,
-      amountMinor: toPaystackAmount(amount),
+      amountMinor: toPaystackAmount(amount, currency),
       currency,
       subtotal: order.subtotal,
       shippingCost: order.shippingCost,
@@ -291,7 +395,7 @@ export async function initializePaymentForOrder(params: {
   } else {
     payment.reference = reference;
     payment.amount = amount;
-    payment.amountMinor = toPaystackAmount(amount);
+    payment.amountMinor = toPaystackAmount(amount, currency);
     payment.currency = currency;
     payment.status = "pending";
     payment.lifecycle = "PENDING_PAYMENT";
@@ -420,26 +524,7 @@ export async function verifyPaymentByReference(
     return await markPaymentSuccess(payment, order, data, source);
   }
 
-  payment.status = data.status === "abandoned" ? "abandoned" : "failed";
-  payment.lifecycle = "PAYMENT_FAILED";
-  payment.gatewayResponse = data.gateway_response || data.status;
-  payment.failureReason = data.gateway_response || data.status;
-  await payment.save();
-
-  (order as any).paymentLifecycle = "PAYMENT_FAILED";
-  order.paymentStatus = "failed";
-  await order.save();
-
-  await writePaymentAudit({
-    order: order._id.toString(),
-    payment: payment._id.toString(),
-    action: "payment.failed",
-    actorType: source === "webhook" ? "webhook" : "system",
-    toLifecycle: "PAYMENT_FAILED",
-    reference,
-    note: payment.failureReason,
-  });
-
+  await failPaymentAndReleaseStock(payment, order, data, source);
   return { payment, order, alreadyVerified: false };
 }
 

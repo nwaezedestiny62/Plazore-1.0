@@ -200,6 +200,7 @@ export const createOrder = async (req: Request, res: Response) => {
       const currency =
         String(sellerItems[0]?.currency || "").trim().toUpperCase() ||
         currencyForRegion(region);
+      // 3-arg signature: (subtotal, shippingCost, currency)
       const fees = calculateSellerPayout(subtotal, shippingCost, currency);
 
       const order = await Order.create({
@@ -437,7 +438,8 @@ export const shipOrder = async (req: Request, res: Response) => {
           ? String(deliveryCompany || frozenCompany || "").trim()
           : "",
       trackingNumber:
-        method === "courier" ? String(trackingNumber || "").trim() : "",
+        method === "courier" ? String(trackingNumber || "").trim() : ""
+      ,
       estimatedDelivery: estimatedDelivery
         ? new Date(estimatedDelivery)
         : undefined,
@@ -638,6 +640,7 @@ export const confirmDelivery = async (req: Request, res: Response) => {
       String((order as any).currency || "").toUpperCase() ||
       currencyForRegion(String((order as any).region || "NG"));
 
+    // 3-arg: (subtotal, shippingCost, currency)
     const fees =
       (order as any).feeBreakdown?.sellerPayoutAmount != null
         ? (order as any).feeBreakdown

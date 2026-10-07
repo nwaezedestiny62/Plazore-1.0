@@ -34,6 +34,7 @@ import PaymentRouter from "./routes/paymentRoutes.js";
 import { paystackWebhook } from "./controllers/paymentController.js";
 import { startAutoConfirmDeliveryScheduler } from "./services/jobs/autoConfirmDelivery.js";
 import { startPayoutScheduler } from "./services/jobs/processEligiblePayouts.js";
+import { startAbandonedPaymentScheduler } from "./services/jobs/releaseAbandonedPayments.js";
 
 const app = express();
 
@@ -121,4 +122,5 @@ app.listen(port, () => {
   startBuyerConfidenceScheduler();
   startAutoConfirmDeliveryScheduler();
   startPayoutScheduler();
+  startAbandonedPaymentScheduler(); // stock release for abandoned payments
 });

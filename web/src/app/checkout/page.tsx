@@ -83,6 +83,20 @@ type RouteGroup = {
   invalidItems: string[];
 };
 
+type PayRow = {
+  orderId?: string;
+  orderNumber?: string;
+  sellerId?: string;
+  amount?: number;
+  currency?: string;
+  authorizationUrl?: string;
+  authorization_url?: string;
+  reference?: string;
+  error?: string;
+  needsManualInit?: boolean;
+  status?: string;
+};
+
 function productRegion(product: CartItem["product"]) {
   if (product?.region) return String(product.region);
   return DEFAULT_REGION;
@@ -153,7 +167,7 @@ function maskCard(last4?: string) {
   return `•••• ${last4}`;
 }
 
-async function apiAuth<T>(
+async function apiAuth(
   path: string,
   token: string,
   init?: RequestInit
@@ -175,6 +189,22 @@ async function apiAuth<T>(
   return { ok: res.ok, status: res.status, body };
 }
 
+/** Wait until a popup window is closed */
+function waitForPopupClose(win: Window | null): Promise<void> {
+  return new Promise((resolve) => {
+    if (!win) {
+      resolve();
+      return;
+    }
+    const t = setInterval(() => {
+      if (win.closed) {
+        clearInterval(t);
+        resolve();
+      }
+    }, 400);
+  });
+}
+
 export default function CheckoutPage() {
   const router = useRouter();
   const { getToken, isSignedIn } = useAuth();
@@ -190,6 +220,7 @@ export default function CheckoutPage() {
   const [phase, setPhase] = useState<Phase>("idle");
   const [orderError, setOrderError] = useState("");
   const [toast, setToast] = useState<Toast>(null);
+  const [processingHint, setProcessingHint] = useState("");
   const placingLock = useRef(false);
 
   useEffect(() => {
@@ -373,6 +404,13 @@ export default function CheckoutPage() {
       })
     : "";
 
+  /**
+   * Multi-seller sequential Paystack:
+   * - Ready sessions paid one after another
+   * - Successful ones stay paid & protected
+   * - Failed ones do NOT go through (stock released on server)
+   * - Clear message when partial
+   */
   const placeOrder = async () => {
     if (placingLock.current || phase === "processing") return;
 
@@ -395,6 +433,7 @@ export default function CheckoutPage() {
 
     placingLock.current = true;
     setOrderError("");
+    setProcessingHint("");
     setPhase("processing");
 
     try {
@@ -438,7 +477,6 @@ export default function CheckoutPage() {
             ? "International shipment — seller review may apply."
             : "",
           items: payloadItems,
-          // Optional hint for backend (tokenized charge later)
           paymentMethodId: selectedCardId || undefined,
           callbackUrl:
             typeof window !== "undefined"
@@ -450,7 +488,6 @@ export default function CheckoutPage() {
       const body = res.body || {};
       const data = body.data || body;
 
-      // Backend gate: fail = order unsuccessful
       if (!res.ok || body.success === false) {
         setPhase("error");
         setOrderError(
@@ -466,32 +503,176 @@ export default function CheckoutPage() {
         return;
       }
 
-      const authUrl =
-        data.authorization_url ||
-        data.authorizationUrl ||
-        body.authorization_url ||
-        body.authorizationUrl;
+      // Build payment list (multi-seller or single)
+      const payments: PayRow[] = Array.isArray(data.payments)
+        ? data.payments
+        : [];
 
-      const reference = data.reference || body.reference || "";
+      if (payments.length === 0) {
+        const url =
+          data.authorization_url ||
+          data.authorizationUrl ||
+          body.authorization_url ||
+          body.authorizationUrl;
+        const ref = data.reference || body.reference || "";
+        if (url && ref) {
+          payments.push({
+            authorizationUrl: url,
+            reference: ref,
+            orderNumber: data.orderNumber,
+            orderId: data.orderId,
+            status: "ready",
+          });
+        }
+      }
 
-      // No Paystack URL = order was NOT successfully paid / placed
-      if (!authUrl) {
+      const ready = payments.filter(
+        (p) =>
+          (p.authorizationUrl || p.authorization_url) &&
+          p.reference &&
+          !p.error &&
+          p.status !== "init_failed"
+      );
+      const failedInit = payments.filter(
+        (p) => p.error || p.needsManualInit || p.status === "init_failed"
+      );
+
+      if (ready.length === 0) {
         setPhase("error");
         setOrderError(
-          body.message ||
-            "Order unsuccessful. Payment could not be started. No charge was made."
+          failedInit[0]?.error ||
+            body.message ||
+            "Order unsuccessful. Payment could not be started. Nothing was charged."
         );
         return;
       }
 
-      try {
-        sessionStorage.setItem("plazore_pay_ref", reference);
-      } catch {
-        /* ignore */
+      const total = payments.length || ready.length;
+      const paidNumbers: string[] = [];
+      const failedLines: string[] = [];
+
+      // ——— Single seller: full-page redirect (best Paystack UX) ———
+      if (ready.length === 1 && failedInit.length === 0) {
+        const p = ready[0];
+        const authUrl = (p.authorizationUrl || p.authorization_url)!;
+        try {
+          sessionStorage.setItem("plazore_pay_ref", p.reference || "");
+          sessionStorage.setItem(
+            "plazore_pay_queue",
+            JSON.stringify([])
+          );
+        } catch {
+          /* ignore */
+        }
+        window.location.href = authUrl;
+        return;
       }
 
-      // Leave phase processing until browser navigates away
-      window.location.href = authUrl;
+      // ——— Multi-seller: sequential popups, verify each ———
+      for (let i = 0; i < ready.length; i++) {
+        const p = ready[i];
+        const authUrl = (p.authorizationUrl || p.authorization_url)!;
+        const reference = p.reference!;
+        const label = p.orderNumber || `seller ${i + 1} of ${ready.length}`;
+
+        setProcessingHint(
+          `Payment ${i + 1} of ${ready.length} · ${label}`
+        );
+
+        // Open Paystack in a popup (stays on checkout so we can continue)
+        const popup = window.open(
+          authUrl,
+          `plazore_pay_${i}`,
+          "width=480,height=720,scrollbars=yes"
+        );
+
+        if (!popup) {
+          // Popup blocked → fall back to queue + full redirect for remaining
+          try {
+            sessionStorage.setItem(
+              "plazore_pay_queue",
+              JSON.stringify(ready.slice(i))
+            );
+            sessionStorage.setItem("plazore_pay_ref", reference);
+            sessionStorage.setItem(
+              "plazore_pay_paid",
+              JSON.stringify(paidNumbers)
+            );
+          } catch {
+            /* ignore */
+          }
+          window.location.href = authUrl;
+          return;
+        }
+
+        await waitForPopupClose(popup);
+
+        // Verify this reference
+        try {
+          const v = await apiAuth("/payments/verify", token, {
+            method: "POST",
+            body: JSON.stringify({ reference }),
+          });
+          const vd = v.body?.data || v.body || {};
+          const ok =
+            vd.verified === true ||
+            vd.orderPlaced === true ||
+            vd.status === "success";
+
+          if (ok) {
+            paidNumbers.push(label);
+          } else {
+            const reason =
+              vd.failureReason ||
+              vd.message ||
+              (vd.status === "abandoned"
+                ? "abandoned on Paystack"
+                : "declined, failed, or insufficient funds");
+            failedLines.push(`${label}: ${reason}`);
+          }
+        } catch (ve: unknown) {
+          const reason =
+            ve instanceof Error ? ve.message : "could not verify with server";
+          failedLines.push(`${label}: ${reason}`);
+        }
+      }
+
+      for (const f of failedInit) {
+        failedLines.push(
+          `${f.orderNumber || "seller"}: ${f.error || "payment session could not start"}`
+        );
+      }
+
+      const paidCount = paidNumbers.length;
+      const failCount = failedLines.length;
+
+      if (paidCount > 0 && failCount === 0) {
+        clearCart();
+        setItems([]);
+        setPhase("success");
+        return;
+      }
+
+      if (paidCount > 0 && failCount > 0) {
+        // PARTIAL: successful orders go through; failed ones do not
+        clearCart();
+        setItems([]);
+        setPhase("error");
+        setOrderError(
+          `${paidCount} of ${total} seller(s) paid successfully (${paidNumbers.join(", ")}). ` +
+            `Those orders are protected and will be fulfilled.\n\n` +
+            `Could not complete:\n• ${failedLines.join("\n• ")}\n\n` +
+            `Failed orders were not charged (stock released). Check Orders for paid ones.`
+        );
+        return;
+      }
+
+      setPhase("error");
+      setOrderError(
+        failCount > 0
+          ? `Order unsuccessful. Nothing was charged.\n\n• ${failedLines.join("\n• ")}`
+          : "Order unsuccessful. Payment was not confirmed. Nothing was charged."
+      );
     } catch (e: unknown) {
       setPhase("error");
       setOrderError(
@@ -501,6 +682,7 @@ export default function CheckoutPage() {
       );
     } finally {
       placingLock.current = false;
+      setProcessingHint("");
     }
   };
 
@@ -594,9 +776,15 @@ export default function CheckoutPage() {
                   Preparing secure payment
                 </p>
                 <p className="mt-2 text-[13px] text-white/55">
-                  Opening Paystack. Your order is only confirmed after payment
-                  succeeds.
+                  {processingHint ||
+                    "Opening Paystack. Your order is only confirmed after payment succeeds."}
                 </p>
+                {routeGroups.length > 1 && (
+                  <p className="mt-2 text-[12px] text-white/40">
+                    Multiple sellers — each payment is confirmed before the
+                    next.
+                  </p>
+                )}
               </>
             )}
             {phase === "error" && (
@@ -605,9 +793,11 @@ export default function CheckoutPage() {
                   <X className="h-8 w-8 text-red-500" />
                 </div>
                 <p className="mt-6 text-lg font-extrabold">
-                  Order unsuccessful
+                  {orderError.includes("paid successfully")
+                    ? "Partial payment"
+                    : "Order unsuccessful"}
                 </p>
-                <p className="mt-2 text-[13px] text-white/55">
+                <p className="mt-2 whitespace-pre-line text-[13px] text-white/55">
                   {orderError ||
                     "Payment failed or could not be started. Nothing was charged."}
                 </p>
@@ -616,8 +806,18 @@ export default function CheckoutPage() {
                   onClick={() => setPhase("idle")}
                   className="mt-6 border border-white/8 bg-[#14181F] px-6 py-3 text-sm font-bold"
                 >
-                  Try again
+                  {orderError.includes("paid successfully")
+                    ? "Back to checkout"
+                    : "Try again"}
                 </button>
+                {orderError.includes("paid successfully") && (
+                  <Link
+                    href="/orders"
+                    className="mt-3 block w-full border border-white/8 bg-[#14181F] py-3 text-sm font-semibold"
+                  >
+                    View paid orders
+                  </Link>
+                )}
               </>
             )}
             {phase === "success" && (
@@ -683,7 +883,6 @@ export default function CheckoutPage() {
             REVIEW · DELIVER · PAY
           </p>
 
-          {/* Bag — same as before */}
           <section className="mb-3 overflow-hidden border border-white/8 bg-[#0E1116]">
             <div className="flex items-center justify-between border-b border-white/8 bg-[#14181F] px-3.5 py-3">
               <div className="flex items-center gap-2.5">
@@ -775,7 +974,6 @@ export default function CheckoutPage() {
             ))}
           </section>
 
-          {/* Address */}
           <section className="mb-3 overflow-hidden border border-white/8 bg-[#0E1116]">
             <div className="flex items-center justify-between border-b border-white/8 bg-[#14181F] px-3.5 py-3">
               <div className="flex items-center gap-2.5">
@@ -855,7 +1053,6 @@ export default function CheckoutPage() {
             )}
           </section>
 
-          {/* Saved cards — like addresses */}
           <section className="mb-3 overflow-hidden border border-white/8 bg-[#0E1116]">
             <div className="flex items-center justify-between border-b border-white/8 bg-[#14181F] px-3.5 py-3">
               <div className="flex items-center gap-2.5">
@@ -878,7 +1075,6 @@ export default function CheckoutPage() {
             </div>
 
             <div className="space-y-2 p-3">
-              {/* Always available: pay with new card on Paystack */}
               <button
                 type="button"
                 onClick={() => setSelectedCardId(null)}
@@ -967,7 +1163,6 @@ export default function CheckoutPage() {
             </div>
           </section>
 
-          {/* Shipping routes */}
           <section className="mb-3 overflow-hidden border border-white/8 bg-[#0E1116]">
             <div className="flex items-center gap-2.5 border-b border-white/8 bg-[#14181F] px-3.5 py-3">
               <span className="flex h-[30px] w-[30px] items-center justify-center border border-white/8 bg-[#0E1116]">
@@ -1075,7 +1270,9 @@ export default function CheckoutPage() {
               </span>
             </div>
             <p className="text-[11px] text-white/38">
-              Order is placed only after Paystack confirms payment.
+              {routeGroups.length > 1
+                ? "Multiple sellers — each is paid separately. Paid ones stay protected if another fails."
+                : "Order is placed only after Paystack confirms payment."}
             </p>
           </div>
           <div className="hidden border-t border-white/8 p-4 md:block">
@@ -1102,7 +1299,9 @@ export default function CheckoutPage() {
                   ? "Complete required steps"
                   : placing
                     ? "Opening Paystack…"
-                    : "Pay with Paystack"}
+                    : routeGroups.length > 1
+                      ? "Pay all sellers"
+                      : "Pay with Paystack"}
               {canPlaceOrder && !placing && <Lock className="h-4 w-4" />}
             </button>
           </div>
@@ -1135,7 +1334,9 @@ export default function CheckoutPage() {
                 ? "Unavailable"
                 : placing
                   ? "…"
-                  : "Pay with Paystack"}
+                  : routeGroups.length > 1
+                    ? "Pay all"
+                    : "Pay with Paystack"}
           </button>
         </div>
       </div>
