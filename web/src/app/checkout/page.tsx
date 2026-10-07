@@ -48,6 +48,15 @@ type Address = {
   isDefault?: boolean;
 };
 
+type SavedCard = {
+  _id: string;
+  brand?: string;
+  last4?: string;
+  expMonth?: string | number;
+  expYear?: string | number;
+  isDefault?: boolean;
+};
+
 type Phase = "idle" | "processing" | "success" | "error";
 type Toast = {
   title: string;
@@ -139,11 +148,16 @@ function addressComplete(a: Address | null): boolean {
   );
 }
 
+function maskCard(last4?: string) {
+  if (!last4) return "••••";
+  return `•••• ${last4}`;
+}
+
 async function apiAuth<T>(
   path: string,
   token: string,
   init?: RequestInit
-): Promise<{ ok: boolean; status: number; body: T }> {
+): Promise<{ ok: boolean; status: number; body: any }> {
   const res = await fetch(`${BASE}${path}`, {
     ...init,
     headers: {
@@ -152,9 +166,9 @@ async function apiAuth<T>(
       ...(init?.headers || {}),
     },
   });
-  let body = {} as T;
+  let body: any = {};
   try {
-    body = (await res.json()) as T;
+    body = await res.json();
   } catch {
     /* non-JSON */
   }
@@ -171,6 +185,8 @@ export default function CheckoutPage() {
   const [cartReady, setCartReady] = useState(false);
   const [addresses, setAddresses] = useState<Address[]>([]);
   const [selectedAddress, setSelectedAddress] = useState<Address | null>(null);
+  const [cards, setCards] = useState<SavedCard[]>([]);
+  const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
   const [phase, setPhase] = useState<Phase>("idle");
   const [orderError, setOrderError] = useState("");
   const [toast, setToast] = useState<Toast>(null);
@@ -187,14 +203,26 @@ export default function CheckoutPage() {
     const token = await getToken();
     if (!token) return;
     try {
-      const addr = await apiAuth<{ success?: boolean; data?: Address[] }>(
-        "/addresses",
-        token
-      );
+      const [addr, pm] = await Promise.all([
+        apiAuth("/addresses", token),
+        apiAuth("/payment-methods", token),
+      ]);
+
       if (addr.body?.success && Array.isArray(addr.body.data)) {
-        const list = addr.body.data;
+        const list = addr.body.data as Address[];
         setAddresses(list);
         setSelectedAddress(list.find((a) => a.isDefault) || list[0] || null);
+      }
+
+      if (pm.body?.success && Array.isArray(pm.body.data)) {
+        const list = pm.body.data as SavedCard[];
+        setCards(list);
+        const def = list.find((c) => c.isDefault) || list[0] || null;
+        setSelectedCardId(def?._id || null);
+      } else if (Array.isArray(pm.body?.data)) {
+        const list = pm.body.data as SavedCard[];
+        setCards(list);
+        setSelectedCardId(list[0]?._id || null);
       }
     } catch {
       /* keep empty */
@@ -312,7 +340,6 @@ export default function CheckoutPage() {
   const hasInternational = internationalRoutes.length > 0;
   const incompleteSellers = routeGroups.filter((g) => g.missingShipFrom);
 
-  // No saved card required — Paystack hosts card entry
   const canPlaceOrder =
     hasItems &&
     allRoutesShipReady &&
@@ -374,7 +401,6 @@ export default function CheckoutPage() {
       const token = await getToken();
       if (!token) throw new Error("Sign in required");
 
-      // Server recalculates prices — send productId + qty only
       const payloadItems = items
         .map((item) => {
           const id = item.product?._id;
@@ -398,14 +424,7 @@ export default function CheckoutPage() {
         throw new Error("Delivery address is incomplete");
       }
 
-      const res = await apiAuth<{
-        success?: boolean;
-        message?: string;
-        code?: string;
-        authorization_url?: string;
-        reference?: string;
-        callback_url?: string;
-      }>("/payments/checkout", token, {
+      const res = await apiAuth("/payments/checkout", token, {
         method: "POST",
         body: JSON.stringify({
           shippingAddress: {
@@ -419,58 +438,66 @@ export default function CheckoutPage() {
             ? "International shipment — seller review may apply."
             : "",
           items: payloadItems,
+          // Optional hint for backend (tokenized charge later)
+          paymentMethodId: selectedCardId || undefined,
+          callbackUrl:
+            typeof window !== "undefined"
+              ? `${window.location.origin}/checkout/callback`
+              : undefined,
         }),
       });
 
-      if (!res.ok || !res.body?.success) {
+      const body = res.body || {};
+      const data = body.data || body;
+
+      // Backend gate: fail = order unsuccessful
+      if (!res.ok || body.success === false) {
         setPhase("error");
         setOrderError(
-          res.body?.message ||
-            (res.status === 401
-              ? "Session expired. Sign in again."
-              : res.status >= 500
-                ? "Server error. Please try again in a moment."
-                : "Could not start payment. Please review your bag and try again.")
+          body.message ||
+            (res.status === 503 || body.code === "PAYSTACK_NOT_CONFIGURED"
+              ? "Order unsuccessful. Payment is not available yet — Paystack is not connected. Nothing was charged."
+              : res.status === 402
+                ? "Order unsuccessful. Payment could not be started. Nothing was charged."
+                : res.status === 401
+                  ? "Session expired. Sign in again."
+                  : "Order unsuccessful. Please review your bag and try again.")
         );
         return;
       }
 
-      // Paystack not configured yet — still treat as order created / pending
-      if (
-        res.body.code === "PAYSTACK_NOT_CONFIGURED" ||
-        !res.body.authorization_url
-      ) {
-        clearCart();
-        setItems([]);
-        setPhase("success");
-        setToast({
-          title: "Order created",
-          message:
-            res.body.message ||
-            "Payment gateway is not live yet. Your order is pending payment.",
-          tone: "info",
-        });
+      const authUrl =
+        data.authorization_url ||
+        data.authorizationUrl ||
+        body.authorization_url ||
+        body.authorizationUrl;
+
+      const reference = data.reference || body.reference || "";
+
+      // No Paystack URL = order was NOT successfully paid / placed
+      if (!authUrl) {
+        setPhase("error");
+        setOrderError(
+          body.message ||
+            "Order unsuccessful. Payment could not be started. No charge was made."
+        );
         return;
       }
 
-      // Redirect to Paystack hosted checkout
-      // Store reference so callback page can verify
       try {
-        sessionStorage.setItem(
-          "plazore_pay_ref",
-          res.body.reference || ""
-        );
+        sessionStorage.setItem("plazore_pay_ref", reference);
       } catch {
         /* ignore */
       }
 
-      window.location.href = res.body.authorization_url;
+      // Leave phase processing until browser navigates away
+      window.location.href = authUrl;
     } catch (e: unknown) {
       setPhase("error");
       setOrderError(
         e instanceof Error
           ? e.message
-          : "Something went wrong. Please try again."
+          : "Order unsuccessful. Something went wrong. Please try again."
       );
     } finally {
       placingLock.current = false;
@@ -510,7 +537,7 @@ export default function CheckoutPage() {
           <p className="mt-6 text-lg font-extrabold">Your bag is empty</p>
           <p className="mt-2 text-[13px] leading-relaxed text-white/50">
             Checkout is only available when there is at least one product in
-            your bag. Nothing can be ordered from this page until you add items.
+            your bag.
           </p>
           <Link
             href="/"
@@ -567,11 +594,8 @@ export default function CheckoutPage() {
                   Preparing secure payment
                 </p>
                 <p className="mt-2 text-[13px] text-white/55">
-                  Locking your bag and opening Paystack for{" "}
-                  {routeGroups.length > 1
-                    ? `${routeGroups.length} sellers`
-                    : "the seller"}
-                  …
+                  Opening Paystack. Your order is only confirmed after payment
+                  succeeds.
                 </p>
               </>
             )}
@@ -580,9 +604,12 @@ export default function CheckoutPage() {
                 <div className="mx-auto flex h-[72px] w-[72px] items-center justify-center border border-red-500/25 bg-red-500/12">
                   <X className="h-8 w-8 text-red-500" />
                 </div>
-                <p className="mt-6 text-lg font-extrabold">Payment failed</p>
+                <p className="mt-6 text-lg font-extrabold">
+                  Order unsuccessful
+                </p>
                 <p className="mt-2 text-[13px] text-white/55">
-                  {orderError || "Something went wrong. Please try again."}
+                  {orderError ||
+                    "Payment failed or could not be started. Nothing was charged."}
                 </p>
                 <button
                   type="button"
@@ -609,53 +636,9 @@ export default function CheckoutPage() {
                 <p className="mt-1.5 text-[13px] text-white/55">
                   Your order is paid and locked on Plazore.
                 </p>
-                <div className="mt-5 w-full border border-white/8 bg-[#14181F] p-3.5 text-left">
-                  <p className="mb-2.5 text-[10px] font-extrabold tracking-[0.14em] text-white/38">
-                    HOW YOUR ORDER WORKS
-                  </p>
-                  {(
-                    [
-                      [
-                        "1",
-                        "Paid & protected",
-                        "Funds are held securely. Sellers are notified to prepare.",
-                      ],
-                      [
-                        "2",
-                        "Seller prepares",
-                        "Items are packed. International routes may need a short review first.",
-                      ],
-                      [
-                        "3",
-                        "Shipped",
-                        "Tracking updates appear in Orders as each package moves.",
-                      ],
-                      [
-                        "4",
-                        "Confirm delivery",
-                        "Confirm within 17 hours after delivery, or we auto-confirm.",
-                      ],
-                    ] as const
-                  ).map(([n, t, d]) => (
-                    <div key={n} className="mb-3 flex gap-3">
-                      <span
-                        className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center text-[11px] font-extrabold text-[#041412]"
-                        style={{ backgroundImage: GRAD }}
-                      >
-                        {n}
-                      </span>
-                      <span>
-                        <span className="block text-[13px] font-bold">{t}</span>
-                        <span className="mt-0.5 block text-xs leading-[17px] text-white/55">
-                          {d}
-                        </span>
-                      </span>
-                    </div>
-                  ))}
-                </div>
                 <Link
                   href="/orders"
-                  className="mt-4 flex w-full items-center justify-center gap-2 py-3.5 text-[15px] font-extrabold text-[#041412]"
+                  className="mt-6 flex w-full items-center justify-center gap-2 py-3.5 text-[15px] font-extrabold text-[#041412]"
                   style={{ backgroundImage: GRAD }}
                 >
                   View Order <ArrowRight className="h-4 w-4" />
@@ -700,7 +683,7 @@ export default function CheckoutPage() {
             REVIEW · DELIVER · PAY
           </p>
 
-          {/* Bag */}
+          {/* Bag — same as before */}
           <section className="mb-3 overflow-hidden border border-white/8 bg-[#0E1116]">
             <div className="flex items-center justify-between border-b border-white/8 bg-[#14181F] px-3.5 py-3">
               <div className="flex items-center gap-2.5">
@@ -716,7 +699,6 @@ export default function CheckoutPage() {
                   : ""}
               </p>
             </div>
-
             {routeGroups.map((group) => (
               <div
                 key={group.key}
@@ -771,10 +753,6 @@ export default function CheckoutPage() {
                         ) : null}
                         <p className="mt-0.5 text-[11px] text-white/55">
                           Qty {qty} · {fmtProduct(unit, region)} each
-                        </p>
-                        <p className="text-[10px] text-white/35">
-                          Listed in {region} · shown in your marketplace
-                          currency
                         </p>
                       </div>
                       <p className="ml-2 text-[13px] font-bold">
@@ -871,13 +849,13 @@ export default function CheckoutPage() {
                 <MapPin className="mx-auto mb-3 h-6 w-6 text-white/38" />
                 <p className="text-sm font-bold">Add delivery address</p>
                 <p className="mt-1 text-xs text-white/38">
-                  Street, city and country are required to place an order.
+                  Street, city and country are required.
                 </p>
               </Link>
             )}
           </section>
 
-          {/* Paystack payment info — no card form */}
+          {/* Saved cards — like addresses */}
           <section className="mb-3 overflow-hidden border border-white/8 bg-[#0E1116]">
             <div className="flex items-center justify-between border-b border-white/8 bg-[#14181F] px-3.5 py-3">
               <div className="flex items-center gap-2.5">
@@ -885,25 +863,105 @@ export default function CheckoutPage() {
                   <CreditCard className="h-3.5 w-3.5 text-white/55" />
                 </span>
                 <div>
-                  <p className="text-sm font-extrabold">Pay securely</p>
-                  <p className="text-[10px] text-white/40">Powered by Paystack</p>
+                  <p className="text-sm font-extrabold">Payment method</p>
+                  <p className="text-[10px] text-white/40">
+                    Saved cards · Paystack hosts entry
+                  </p>
                 </div>
               </div>
+              <Link
+                href="/payment-methods"
+                className="text-[13px] font-bold text-green"
+              >
+                Manage
+              </Link>
             </div>
-            <div className="space-y-3 p-3.5">
-              <div className="flex gap-2.5">
+
+            <div className="space-y-2 p-3">
+              {/* Always available: pay with new card on Paystack */}
+              <button
+                type="button"
+                onClick={() => setSelectedCardId(null)}
+                className={`flex w-full gap-3 border p-3 text-left ${
+                  selectedCardId === null
+                    ? "border-green/50 bg-[#14181F]"
+                    : "border-white/8"
+                }`}
+              >
+                <span
+                  className={`mt-0.5 flex h-[18px] w-[18px] items-center justify-center border-2 ${
+                    selectedCardId === null ? "border-green" : "border-white/38"
+                  }`}
+                >
+                  {selectedCardId === null && (
+                    <span className="h-2 w-2 bg-green" />
+                  )}
+                </span>
+                <span>
+                  <span className="text-[13px] font-bold">
+                    New card on Paystack
+                  </span>
+                  <span className="mt-1 block text-xs text-white/55">
+                    Enter card securely on Paystack. Order only succeeds if the
+                    card is valid and funds are available.
+                  </span>
+                </span>
+              </button>
+
+              {cards.map((card) => {
+                const on = selectedCardId === card._id;
+                return (
+                  <button
+                    key={card._id}
+                    type="button"
+                    onClick={() => setSelectedCardId(card._id)}
+                    className={`flex w-full gap-3 border p-3 text-left ${
+                      on ? "border-green/50 bg-[#14181F]" : "border-white/8"
+                    }`}
+                  >
+                    <span
+                      className={`mt-0.5 flex h-[18px] w-[18px] items-center justify-center border-2 ${
+                        on ? "border-green" : "border-white/38"
+                      }`}
+                    >
+                      {on && <span className="h-2 w-2 bg-green" />}
+                    </span>
+                    <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
+                      <span>
+                        <span className="flex items-center gap-2">
+                          <span className="text-[13px] font-bold">
+                            {card.brand || "Card"} {maskCard(card.last4)}
+                          </span>
+                          {card.isDefault && (
+                            <span className="border border-white/8 px-1.5 py-0.5 text-[10px] text-white/55">
+                              Default
+                            </span>
+                          )}
+                        </span>
+                        <span className="mt-1 block text-xs text-white/55">
+                          Exp {card.expMonth || "—"}/{card.expYear || "—"}
+                        </span>
+                      </span>
+                    </span>
+                  </button>
+                );
+              })}
+
+              <Link
+                href="/payment-methods"
+                className="flex items-center justify-center gap-1.5 border border-white/8 bg-[#14181F] py-3 text-[13px] font-bold text-green"
+              >
+                <Plus className="h-4 w-4" /> Add / change cards
+              </Link>
+
+              <div className="flex gap-2.5 pt-1">
                 <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-green" />
-                <p className="text-[12.5px] leading-[18px] text-white/55">
-                  Card details are entered on Paystack’s secure page. Plazore
-                  never stores full card numbers.
-                </p>
-              </div>
-              <div className="flex gap-2.5">
-                <Lock className="mt-0.5 h-4 w-4 shrink-0 text-white/40" />
-                <p className="text-[12.5px] leading-[18px] text-white/55">
-                  Visa, Mastercard, Verve, bank transfer and USSD where
-                  available. After payment, a secure token may be saved for
-                  faster checkouts later.
+                <p className="text-[12px] leading-[18px] text-white/50">
+                  Declined cards, insufficient funds, or invalid details ={" "}
+                  <span className="font-semibold text-white/70">
+                    order unsuccessful
+                  </span>
+                  . Plazore never stores full card numbers.
                 </p>
               </div>
             </div>
@@ -918,14 +976,9 @@ export default function CheckoutPage() {
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-extrabold">Shipping routes</p>
                 <p className="text-[10px] text-white/40">
-                  Each seller ships separately from their own origin
+                  Each seller ships separately
                 </p>
               </div>
-              {routeGroups.length > 1 && (
-                <span className="text-[10px] font-bold text-white/45">
-                  {routeGroups.length} routes
-                </span>
-              )}
             </div>
 
             {incompleteSellers.length > 0 && (
@@ -937,9 +990,7 @@ export default function CheckoutPage() {
                   </p>
                   <p className="mt-1 text-xs leading-[18px] text-white/55">
                     {incompleteSellers.map((g) => g.ship.storeName).join(", ")}{" "}
-                    {incompleteSellers.length === 1 ? "has" : "have"} not set a
-                    ship-from location. Checkout stays locked until every seller
-                    on this order has a complete origin.
+                    missing ship-from. Checkout stays locked.
                   </p>
                 </div>
               </div>
@@ -967,18 +1018,7 @@ export default function CheckoutPage() {
                     <p className="text-[12px] font-extrabold">
                       {group.ship.storeName}
                     </p>
-                    <span className="text-[10px] text-white/40">
-                      {group.items.length} item
-                      {group.items.length !== 1 ? "s" : ""}
-                    </span>
-                    {group.isInternational && (
-                      <span className="flex items-center gap-1 border border-blue/30 px-1.5 py-0.5 text-[9px] font-bold uppercase text-blue-300">
-                        <Globe2 className="h-3 w-3" />
-                        Cross-border
-                      </span>
-                    )}
                   </div>
-
                   <p className="text-[10px] font-extrabold uppercase text-white/38">
                     Ships from
                   </p>
@@ -987,73 +1027,19 @@ export default function CheckoutPage() {
                       ? group.ship.label
                       : "Not set by seller"}
                   </p>
-                  {group.ship.country && (
-                    <p className="mt-0.5 text-[11px] text-white/40">
-                      Origin country: {group.ship.country}
-                    </p>
-                  )}
-
                   <div className="my-2 flex items-center gap-1 text-white/38">
-                    <span className="h-2.5 w-px bg-white/8" />
                     <ArrowDown className="h-3 w-3" />
                   </div>
-
                   <p className="text-[10px] font-extrabold uppercase text-white/38">
                     Delivering to
                   </p>
                   <p className="mt-1 text-sm font-semibold">
                     {deliverToLabel || "Select a delivery address"}
                   </p>
-                  {selectedAddress?.country && (
-                    <p className="mt-0.5 text-[11px] text-white/40">
-                      Destination country: {selectedAddress.country}
-                    </p>
-                  )}
-
-                  <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 border-t border-white/[0.06] pt-2 text-[11px] text-white/45">
-                    <span>Products {fmt(group.productSubtotalDisplay)}</span>
-                    <span>Delivery {fmt(group.deliveryFeeDisplay)}</span>
-                  </div>
-
-                  {group.isInternational && (
-                    <p className="mt-2 text-[11px] leading-[16px] text-blue-200/80">
-                      This route crosses countries. The seller may review the
-                      order before packing and shipping. Delivery times and
-                      carrier options can differ from domestic routes.
-                    </p>
-                  )}
                 </div>
               ))}
             </div>
           </section>
-
-          {hasInternational && selectedAddress && (
-            <div className="mb-3 border border-blue/25 bg-blue/8 p-3.5">
-              <div className="flex items-start gap-2.5">
-                <Globe2 className="mt-0.5 h-4 w-4 shrink-0 text-blue-300" />
-                <div>
-                  <p className="text-sm font-extrabold">International order</p>
-                  <p className="mt-1.5 text-xs leading-[18px] text-white/55">
-                    {internationalRoutes.length === 1
-                      ? `${internationalRoutes[0].ship.storeName} ships from ${internationalRoutes[0].ship.country} to ${selectedAddress.country}.`
-                      : `${internationalRoutes.length} of ${routeGroups.length} routes are cross-border.`}{" "}
-                    Cross-border legs may require seller approval before
-                    shipment. Duties, taxes, or extra carrier fees are not
-                    included in the delivery fee shown unless the seller listed
-                    them in product shipping.
-                  </p>
-                  <ul className="mt-2 list-inside list-disc text-[11px] leading-[17px] text-white/45">
-                    {internationalRoutes.map((g) => (
-                      <li key={g.key}>
-                        {g.ship.storeName}: {g.ship.country || "?"} →{" "}
-                        {selectedAddress.country}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              </div>
-            </div>
-          )}
 
           {blockReason && hasItems && (
             <div className="mb-3 flex gap-3 border border-white/10 bg-[#14181F] p-3.5">
@@ -1065,7 +1051,6 @@ export default function CheckoutPage() {
           )}
         </div>
 
-        {/* Receipt aside */}
         <aside className="h-fit border border-white/8 bg-[#0E1116] md:sticky md:top-6">
           <div className="flex items-center gap-2.5 border-b border-white/8 bg-[#14181F] px-3.5 py-3">
             <span className="flex h-[30px] w-[30px] items-center justify-center border border-white/8 bg-[#0E1116]">
@@ -1079,27 +1064,9 @@ export default function CheckoutPage() {
               <span className="font-bold">{fmt(productPrice)}</span>
             </div>
             <div className="flex justify-between text-[13px]">
-              <span className="text-white/55">
-                Delivery
-                {routeGroups.length > 1
-                  ? ` (${routeGroups.length} routes)`
-                  : ""}
-              </span>
+              <span className="text-white/55">Delivery</span>
               <span className="font-bold">{fmt(deliveryFee)}</span>
             </div>
-            {routeGroups.length > 1 && (
-              <div className="space-y-1 border border-white/[0.06] bg-[#0A0C10] p-2 text-[10px] text-white/40">
-                {routeGroups.map((g) => (
-                  <div key={g.key} className="flex justify-between gap-2">
-                    <span className="truncate">{g.ship.storeName}</span>
-                    <span>
-                      {fmt(g.productSubtotalDisplay)} +{" "}
-                      {fmt(g.deliveryFeeDisplay)} ship
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
             <div className="h-px bg-white/8" />
             <div className="flex justify-between">
               <span className="text-sm font-extrabold">Total</span>
@@ -1108,15 +1075,8 @@ export default function CheckoutPage() {
               </span>
             </div>
             <p className="text-[11px] text-white/38">
-              Final charge is calculated on the server. Display amounts are
-              converted to your marketplace currency ({displayRegion}).
+              Order is placed only after Paystack confirms payment.
             </p>
-            {hasInternational && (
-              <p className="text-[11px] text-blue-200/70">
-                International routes may take longer and can require seller
-                review before ship.
-              </p>
-            )}
           </div>
           <div className="hidden border-t border-white/8 p-4 md:block">
             <p className="text-[10px] font-extrabold tracking-[0.11em] text-white/38">
@@ -1143,15 +1103,12 @@ export default function CheckoutPage() {
                   : placing
                     ? "Opening Paystack…"
                     : "Pay with Paystack"}
-              {canPlaceOrder && !placing && (
-                <Lock className="h-4 w-4" />
-              )}
+              {canPlaceOrder && !placing && <Lock className="h-4 w-4" />}
             </button>
           </div>
         </aside>
       </div>
 
-      {/* Mobile bottom bar */}
       <div className="fixed inset-x-0 bottom-0 border-t border-white/8 bg-[#0E1116] md:hidden">
         <div className="flex items-center gap-3 px-4 py-3">
           <div className="min-w-0 flex-1">

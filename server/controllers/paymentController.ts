@@ -11,15 +11,60 @@ import {
   handleChargeSuccessWebhook,
   generateReference,
 } from "../services/paymentService.js";
-import { processSellerPayout, markPayoutSuccess } from "../services/payoutService.js";
+import {
+  processSellerPayout,
+  markPayoutSuccess,
+} from "../services/payoutService.js";
 import { createRefund } from "../services/paystack/refunds.js";
-import { verifyPaystackSignature, buildEventId } from "../services/paystack/webhook.js";
+import {
+  verifyPaystackSignature,
+  buildEventId,
+} from "../services/paystack/webhook.js";
 import { writePaymentAudit } from "../utils/paymentAudit.js";
-import { isPaystackConfigured, getPublicKey } from "../services/paystack/client.js";
-import { PLAZORE_TRANSACTION_FEE_RATE, toPaystackAmount } from "../config/payment.js";
+import {
+  isPaystackConfigured,
+  getPublicKey,
+} from "../services/paystack/client.js";
+import {
+  PLAZORE_TRANSACTION_FEE_RATE,
+} from "../config/payment.js";
 import PaymentEvent from "../models/PaymentEvent.js";
 
 const getUser = (req: Request) => (req as any).user;
+
+async function markOrdersPaymentFailed(
+  orders: any[],
+  reasonLabel: string,
+  note?: string
+) {
+  for (const order of orders) {
+    try {
+      const o = order?.save ? order : await Order.findById(order._id || order);
+      if (!o) continue;
+      if (String(o.paymentStatus) === "paid") continue;
+
+      o.paymentStatus = "failed";
+      (o as any).paymentLifecycle = "PAYMENT_FAILED";
+      o.orderStatus = "Cancelled";
+      (o as any).cancellation = {
+        cancelledBy: "system",
+        reasonCode: "other",
+        reasonLabel,
+        note: note || reasonLabel,
+        cancelledAt: new Date(),
+        refundStatus: "not_applicable",
+      };
+      (o as any).payout = {
+        ...(o as any).payout,
+        status: "not_eligible",
+        blockedReason: reasonLabel,
+      };
+      await o.save();
+    } catch (e) {
+      console.error("[markOrdersPaymentFailed]", e);
+    }
+  }
+}
 
 /** GET /api/payments/config — public key only */
 export const getPaymentConfig = async (_req: Request, res: Response) => {
@@ -37,27 +82,49 @@ export const getPaymentConfig = async (_req: Request, res: Response) => {
 
 /**
  * POST /api/payments/checkout
- * Body: { shippingAddress, buyerNote?, phone?, items? }
- * Creates pending order(s) + initializes payment for the first (or returns multi-order info).
  *
- * Multi-seller carts produce multiple orders; each needs its own payment.
- * For simplicity, initialize the first and return all order ids.
+ * Payment gates the order:
+ * - No Paystack keys → NO order, cart kept, success: false → "Order unsuccessful"
+ * - Payment init fails → pending rows cancelled as failed, success: false
+ * - Init OK → return authorization_url only (order still NOT successful)
+ * - Order is successful ONLY after verify/webhook marks payment paid
  */
 export const checkoutAndPay = async (req: Request, res: Response) => {
   try {
     const user = getUser(req);
-    const { shippingAddress, buyerNote, phone, items: frontendItems, callbackUrl } =
-      req.body;
+    const {
+      shippingAddress,
+      buyerNote,
+      phone,
+      items: frontendItems,
+      callbackUrl,
+    } = req.body;
+
+    // ── 1. HARD GATE: no Paystack = no order ──
+    if (!isPaystackConfigured()) {
+      return res.status(503).json({
+        success: false,
+        code: "PAYSTACK_NOT_CONFIGURED",
+        message:
+          "Order unsuccessful. Payment is not available — Paystack is not connected. No order was placed and nothing was charged.",
+        orderPlaced: false,
+        paymentStatus: "failed",
+      });
+    }
 
     if (!shippingAddress) {
       return res.status(400).json({
         success: false,
-        message: "Shipping address is required",
+        message: "Order unsuccessful. Shipping address is required.",
+        orderPlaced: false,
       });
     }
 
-    let rawItems: Array<{ productId: string; quantity: number; note?: string }> =
-      [];
+    let rawItems: Array<{
+      productId: string;
+      quantity: number;
+      note?: string;
+    }> = [];
 
     if (Array.isArray(frontendItems) && frontendItems.length > 0) {
       rawItems = frontendItems.map((i: any) => ({
@@ -66,9 +133,15 @@ export const checkoutAndPay = async (req: Request, res: Response) => {
         note: i.note,
       }));
     } else {
-      const cart = await Cart.findOne({ user: user._id }).populate("items.product");
+      const cart = await Cart.findOne({ user: user._id }).populate(
+        "items.product"
+      );
       if (!cart || cart.items.length === 0) {
-        return res.status(400).json({ success: false, message: "Cart is empty" });
+        return res.status(400).json({
+          success: false,
+          message: "Order unsuccessful. Cart is empty.",
+          orderPlaced: false,
+        });
       }
       rawItems = cart.items.map((item: any) => ({
         productId: String(item.product?._id || item.product),
@@ -77,6 +150,15 @@ export const checkoutAndPay = async (req: Request, res: Response) => {
       }));
     }
 
+    if (!rawItems.length) {
+      return res.status(400).json({
+        success: false,
+        message: "Order unsuccessful. No items to checkout.",
+        orderPlaced: false,
+      });
+    }
+
+    // ── 2. Create PENDING orders only (not paid) ──
     const orders = await createPendingOrders({
       buyer: user,
       shippingAddress,
@@ -85,20 +167,10 @@ export const checkoutAndPay = async (req: Request, res: Response) => {
       rawItems,
     });
 
-    // Clear cart
-    try {
-      const cart = await Cart.findOne({ user: user._id });
-      if (cart) {
-        cart.items = [];
-        (cart as any).totalAmount = 0;
-        await cart.save();
-      }
-    } catch {
-      /* non-fatal */
-    }
+    // ── 3. Initialize Paystack for each order ──
+    const payments: any[] = [];
+    const failedOrderIds: string[] = [];
 
-    // Initialize payment for each order (multi-seller = multiple Paystack sessions)
-    const payments = [];
     for (const order of orders) {
       try {
         const init = await initializePaymentForOrder({
@@ -106,6 +178,11 @@ export const checkoutAndPay = async (req: Request, res: Response) => {
           buyer: user,
           callbackUrl,
         });
+
+        if (!init?.authorizationUrl) {
+          throw new Error("No payment authorization URL returned");
+        }
+
         payments.push({
           orderId: order._id,
           orderNumber: order.orderNumber,
@@ -117,43 +194,131 @@ export const checkoutAndPay = async (req: Request, res: Response) => {
           feeBreakdown: (order as any).feeBreakdown,
         });
       } catch (err: any) {
+        failedOrderIds.push(order._id.toString());
         payments.push({
           orderId: order._id,
           orderNumber: order.orderNumber,
-          error: err.message,
-          needsManualInit: true,
+          error: err.message || "Payment initialization failed",
         });
       }
     }
 
-    res.status(201).json({
-      success: true,
-      message: "Order(s) created — complete payment",
-      data: {
+    const viable = payments.filter((p) => p.authorizationUrl);
+
+    // ── 4. Nothing payable → fail all, order unsuccessful ──
+    if (viable.length === 0) {
+      await markOrdersPaymentFailed(
         orders,
-        payments,
+        "Payment unsuccessful",
+        "Payment could not be started (gateway error, declined, or unavailable)"
+      );
+
+      return res.status(402).json({
+        success: false,
+        code: "PAYMENT_INIT_FAILED",
+        message:
+          "Order unsuccessful. Payment could not be started (declined, gateway error, or unavailable). No charge was made.",
+        orderPlaced: false,
+        paymentStatus: "failed",
+        data: { payments },
+      });
+    }
+
+    // ── 5. Cancel only the ones that failed to init ──
+    if (failedOrderIds.length) {
+      await markOrdersPaymentFailed(
+        failedOrderIds.map((id) => ({ _id: id })),
+        "Payment unsuccessful",
+        "Payment session could not be created for this order"
+      );
+    }
+
+    // ── 6. Clear cart only when at least one payment session is ready ──
+    try {
+      const cart = await Cart.findOne({ user: user._id });
+      if (cart) {
+        cart.items = [];
+        (cart as any).totalAmount = 0;
+        await cart.save();
+      }
+    } catch {
+      /* non-fatal */
+    }
+
+    // ── 7. NOT "order successful" — buyer must finish Paystack ──
+    const primary = viable[0];
+
+    return res.status(201).json({
+      success: true,
+      orderPlaced: false,
+      paymentRequired: true,
+      paymentStatus: "pending",
+      message:
+        "Complete payment to place your order. Your order is not confirmed until payment succeeds.",
+      data: {
+        authorization_url: primary.authorizationUrl,
+        authorizationUrl: primary.authorizationUrl,
+        reference: primary.reference,
+        accessCode: primary.accessCode,
+        amount: primary.amount,
+        currency: primary.currency,
+        orderId: primary.orderId,
+        orderNumber: primary.orderNumber,
+        orders: orders.map((o: any) => ({
+          _id: o._id,
+          orderNumber: o.orderNumber,
+          paymentStatus: o.paymentStatus,
+          totalAmount: o.totalAmount,
+        })),
+        payments: viable,
         publicKey: getPublicKey(),
         feePercent: 8,
       },
     });
   } catch (error: any) {
-    const code = error.statusCode || 500;
     console.error("checkoutAndPay:", error);
-    res.status(code).json({
-      success: false,
-      message: error.message || "Checkout failed",
-      code: error.name === "PaystackNotConfiguredError" ? "PAYSTACK_NOT_CONFIGURED" : undefined,
-    });
+    const isNotConfigured =
+      error.name === "PaystackNotConfiguredError" ||
+      String(error.message || "")
+        .toLowerCase()
+        .includes("paystack not");
+
+    return res
+      .status(error.statusCode || (isNotConfigured ? 503 : 500))
+      .json({
+        success: false,
+        code: isNotConfigured ? "PAYSTACK_NOT_CONFIGURED" : "CHECKOUT_FAILED",
+        message:
+          error.message ||
+          "Order unsuccessful. Something went wrong during checkout.",
+        orderPlaced: false,
+        paymentStatus: "failed",
+      });
   }
 };
 
 /** POST /api/payments/initialize — for an existing pending order */
 export const initializePayment = async (req: Request, res: Response) => {
   try {
+    if (!isPaystackConfigured()) {
+      return res.status(503).json({
+        success: false,
+        code: "PAYSTACK_NOT_CONFIGURED",
+        message:
+          "Order unsuccessful. Payment is not available — Paystack is not connected.",
+        orderPlaced: false,
+        paymentStatus: "failed",
+      });
+    }
+
     const user = getUser(req);
     const { orderId, callbackUrl } = req.body;
     if (!orderId) {
-      return res.status(400).json({ success: false, message: "orderId required" });
+      return res.status(400).json({
+        success: false,
+        message: "Order unsuccessful. orderId is required.",
+        orderPlaced: false,
+      });
     }
 
     const result = await initializePaymentForOrder({
@@ -162,10 +327,27 @@ export const initializePayment = async (req: Request, res: Response) => {
       callbackUrl,
     });
 
+    if (!result?.authorizationUrl) {
+      return res.status(402).json({
+        success: false,
+        code: "PAYMENT_INIT_FAILED",
+        message:
+          "Order unsuccessful. Payment could not be started. Please try again.",
+        orderPlaced: false,
+        paymentStatus: "failed",
+      });
+    }
+
     res.json({
       success: true,
+      orderPlaced: false,
+      paymentRequired: true,
+      paymentStatus: "pending",
+      message:
+        "Complete payment to confirm your order. Not successful until payment is verified.",
       data: {
         authorizationUrl: result.authorizationUrl,
+        authorization_url: result.authorizationUrl,
         accessCode: result.accessCode,
         reference: result.reference,
         amount: result.amount,
@@ -179,41 +361,65 @@ export const initializePayment = async (req: Request, res: Response) => {
     const code = error.statusCode || 500;
     res.status(code).json({
       success: false,
-      message: error.message,
-      code: error.name === "PaystackNotConfiguredError" ? "PAYSTACK_NOT_CONFIGURED" : undefined,
+      message:
+        error.message ||
+        "Order unsuccessful. Payment could not be started.",
+      code:
+        error.name === "PaystackNotConfiguredError"
+          ? "PAYSTACK_NOT_CONFIGURED"
+          : undefined,
+      orderPlaced: false,
+      paymentStatus: "failed",
     });
   }
 };
 
-/** POST /api/payments/verify — body: { reference } */
+/**
+ * POST /api/payments/verify — body: { reference }
+ * ONLY verified === true means order was successfully placed (paid).
+ */
 export const verifyPayment = async (req: Request, res: Response) => {
   try {
     const user = getUser(req);
     const { reference } = req.body;
     if (!reference) {
-      return res.status(400).json({ success: false, message: "reference required" });
+      return res.status(400).json({
+        success: false,
+        message: "Order unsuccessful. Payment reference is required.",
+        orderPlaced: false,
+      });
     }
 
     const payment = await Payment.findOne({ reference });
     if (!payment) {
-      return res.status(404).json({ success: false, message: "Payment not found" });
+      return res.status(404).json({
+        success: false,
+        message: "Order unsuccessful. Payment not found for this reference.",
+        orderPlaced: false,
+      });
     }
     if (
       payment.buyer.toString() !== user._id.toString() &&
       user.role !== "admin"
     ) {
-      return res.status(403).json({ success: false, message: "Not authorized" });
+      return res.status(403).json({
+        success: false,
+        message: "Not authorized",
+        orderPlaced: false,
+      });
     }
 
     const result = await verifyPaymentByReference(reference, "api");
+    const paid = result.payment.status === "success";
 
-    const success = result.payment.status === "success";
     res.json({
       success: true,
       data: {
-        verified: success,
+        verified: paid,
+        orderPlaced: paid,
         alreadyVerified: result.alreadyVerified,
         status: result.payment.status,
+        paymentStatus: paid ? "paid" : result.payment.status,
         lifecycle: result.payment.lifecycle,
         orderId: result.order?._id,
         orderNumber: result.order?.orderNumber,
@@ -221,19 +427,26 @@ export const verifyPayment = async (req: Request, res: Response) => {
         currency: result.payment.currency,
         paidAt: result.payment.paidAt,
         failureReason: result.payment.failureReason || null,
-        message: success
-          ? "Payment confirmed"
+        message: paid
+          ? "Payment confirmed. Order placed successfully."
           : result.payment.status === "abandoned"
-            ? "Payment was abandoned. You can try again."
-            : "Payment was unsuccessful. Please try again or use another method.",
+            ? "Order unsuccessful. Payment was abandoned. You can try again."
+            : "Order unsuccessful. Payment failed, was declined, or was not completed. Please try again.",
       },
     });
   } catch (error: any) {
     const code = error.statusCode || 500;
     res.status(code).json({
       success: false,
-      message: error.message || "Verification failed",
-      code: error.name === "PaystackNotConfiguredError" ? "PAYSTACK_NOT_CONFIGURED" : undefined,
+      message:
+        error.message ||
+        "Order unsuccessful. Payment verification failed.",
+      code:
+        error.name === "PaystackNotConfiguredError"
+          ? "PAYSTACK_NOT_CONFIGURED"
+          : undefined,
+      orderPlaced: false,
+      paymentStatus: "failed",
     });
   }
 };
@@ -243,18 +456,15 @@ export const verifyPayment = async (req: Request, res: Response) => {
  * Must be mounted with express.raw({ type: 'application/json' })
  */
 export const paystackWebhook = async (req: Request, res: Response) => {
-  // Always 200 quickly after accept to avoid Paystack retries storm — process async if needed
   const signature = req.headers["x-paystack-signature"] as string | undefined;
   const rawBody = (req as any).rawBody || req.body;
 
-  // If body was parsed as Buffer
   let bodyBuffer: Buffer;
   if (Buffer.isBuffer(rawBody)) {
     bodyBuffer = rawBody;
   } else if (typeof rawBody === "string") {
     bodyBuffer = Buffer.from(rawBody);
   } else {
-    // Fallback — less secure if already parsed
     bodyBuffer = Buffer.from(JSON.stringify(req.body));
   }
 
@@ -273,12 +483,46 @@ export const paystackWebhook = async (req: Request, res: Response) => {
   const event = payload?.event || "unknown";
   const eventId = buildEventId(event, payload?.data || {});
 
-  // Respond 200 immediately for valid structure; process below
   res.status(200).json({ received: true });
 
   try {
     if (event === "charge.success") {
       await handleChargeSuccessWebhook(eventId, payload, signatureValid);
+    } else if (event === "charge.failed") {
+      const ref = payload?.data?.reference;
+      if (ref && signatureValid) {
+        const payment = await Payment.findOne({ reference: ref });
+        if (payment && payment.status !== "success") {
+          payment.status = "failed";
+          payment.failureReason =
+            payload?.data?.gateway_response ||
+            payload?.data?.message ||
+            "Charge failed";
+          await payment.save();
+
+          const order = await Order.findById(payment.order);
+          if (order && String(order.paymentStatus) !== "paid") {
+            await markOrdersPaymentFailed(
+              [order],
+              "Payment unsuccessful",
+              payment.failureReason
+            );
+          }
+        }
+        await PaymentEvent.findOneAndUpdate(
+          { eventId },
+          {
+            eventId,
+            event,
+            reference: ref,
+            payload,
+            signatureValid,
+            processed: true,
+            processedAt: new Date(),
+          },
+          { upsert: true }
+        );
+      }
     } else if (event === "transfer.success") {
       const ref = payload?.data?.reference;
       if (ref && signatureValid) {
@@ -298,7 +542,6 @@ export const paystackWebhook = async (req: Request, res: Response) => {
         );
       }
     } else if (event === "transfer.failed" || event === "transfer.reversed") {
-      // Log for ops
       await PaymentEvent.findOneAndUpdate(
         { eventId },
         {
@@ -323,7 +566,8 @@ export const paystackWebhook = async (req: Request, res: Response) => {
         {
           eventId,
           event,
-          reference: payload?.data?.transaction_reference || payload?.data?.reference,
+          reference:
+            payload?.data?.transaction_reference || payload?.data?.reference,
           payload,
           signatureValid,
           processed: true,
@@ -331,7 +575,6 @@ export const paystackWebhook = async (req: Request, res: Response) => {
         },
         { upsert: true }
       );
-      // Optionally sync Refund document status here
     } else {
       await PaymentEvent.findOneAndUpdate(
         { eventId },
@@ -357,12 +600,16 @@ export const getPaymentForOrder = async (req: Request, res: Response) => {
     const user = getUser(req);
     const order = await Order.findById(req.params.orderId);
     if (!order) {
-      return res.status(404).json({ success: false, message: "Order not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Order not found" });
     }
     const isBuyer = order.buyer.toString() === user._id.toString();
     const isSeller = order.seller.toString() === user._id.toString();
     if (!isBuyer && !isSeller && user.role !== "admin") {
-      return res.status(403).json({ success: false, message: "Not authorized" });
+      return res
+        .status(403)
+        .json({ success: false, message: "Not authorized" });
     }
 
     const payment = await Payment.findOne({ order: order._id });
@@ -374,8 +621,12 @@ export const getPaymentForOrder = async (req: Request, res: Response) => {
         lifecycle: (order as any).paymentLifecycle || "PENDING_PAYMENT",
         paymentStatus: order.paymentStatus,
         orderStatus: order.orderStatus,
+        orderPlaced: order.paymentStatus === "paid",
         buyerConfirmation: (order as any).buyerConfirmation,
-        payout: isSeller || user.role === "admin" ? (order as any).payout : undefined,
+        payout:
+          isSeller || user.role === "admin"
+            ? (order as any).payout
+            : undefined,
         feeBreakdown:
           isSeller || user.role === "admin" || isBuyer
             ? {
@@ -383,9 +634,14 @@ export const getPaymentForOrder = async (req: Request, res: Response) => {
                 shippingCost: fb?.shippingCost ?? order.shippingCost,
                 grossAmount: fb?.grossAmount ?? order.totalAmount,
                 platformFeeRate: fb?.platformFeeRate ?? 0.08,
-                platformFee: isSeller || user.role === "admin" ? fb?.platformFee : undefined,
+                platformFee:
+                  isSeller || user.role === "admin"
+                    ? fb?.platformFee
+                    : undefined,
                 sellerPayoutAmount:
-                  isSeller || user.role === "admin" ? fb?.sellerPayoutAmount : undefined,
+                  isSeller || user.role === "admin"
+                    ? fb?.sellerPayoutAmount
+                    : undefined,
                 currency: fb?.currency,
               }
             : undefined,
@@ -415,11 +671,16 @@ export const openDispute = async (req: Request, res: Response) => {
     const user = getUser(req);
     const order = await Order.findById(req.params.orderId);
     if (!order) {
-      return res.status(404).json({ success: false, message: "Order not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Order not found" });
     }
 
     const existing = await OrderDispute.findOne({ order: order._id });
-    if (existing && !["closed", "resolved_buyer", "resolved_seller"].includes(existing.status)) {
+    if (
+      existing &&
+      !["closed", "resolved_buyer", "resolved_seller"].includes(existing.status)
+    ) {
       return res.json({ success: true, data: existing, alreadyOpen: true });
     }
 
@@ -477,12 +738,16 @@ export const adminRefundBuyer = async (req: Request, res: Response) => {
   try {
     const user = getUser(req);
     if (user.role !== "admin") {
-      return res.status(403).json({ success: false, message: "Admin only" });
+      return res
+        .status(403)
+        .json({ success: false, message: "Admin only" });
     }
 
     const order = await Order.findById(req.params.orderId);
     if (!order) {
-      return res.status(404).json({ success: false, message: "Order not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Order not found" });
     }
 
     const payment = await Payment.findOne({ order: order._id });
@@ -493,7 +758,6 @@ export const adminRefundBuyer = async (req: Request, res: Response) => {
       });
     }
 
-    // Block seller payout permanently for this order
     (order as any).payout = {
       ...(order as any).payout,
       status: "refunded",
@@ -523,11 +787,14 @@ export const adminRefundBuyer = async (req: Request, res: Response) => {
     try {
       const ps = await createRefund({
         transaction: payment.reference,
-        customer_note: req.body.reason || "Order dispute resolved in your favour",
+        customer_note:
+          req.body.reason || "Order dispute resolved in your favour",
         merchant_note: `Plazore admin refund ${refundRef}`,
       });
       refundDoc.status = "processing";
-      refundDoc.providerRefundId = String(ps?.id || ps?.transaction?.id || "");
+      refundDoc.providerRefundId = String(
+        ps?.id || ps?.transaction?.id || ""
+      );
       await refundDoc.save();
     } catch (err: any) {
       refundDoc.status = "failed";
@@ -584,12 +851,16 @@ export const adminSettleSeller = async (req: Request, res: Response) => {
   try {
     const user = getUser(req);
     if (user.role !== "admin") {
-      return res.status(403).json({ success: false, message: "Admin only" });
+      return res
+        .status(403)
+        .json({ success: false, message: "Admin only" });
     }
 
     const order = await Order.findById(req.params.orderId);
     if (!order) {
-      return res.status(404).json({ success: false, message: "Order not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Order not found" });
     }
 
     (order as any).paymentLifecycle = "SETTLED_SELLER_FAVOUR";
@@ -631,7 +902,6 @@ export const adminSettleSeller = async (req: Request, res: Response) => {
       note: req.body.note || "",
     });
 
-    // Attempt payout immediately
     let payoutResult = null;
     try {
       payoutResult = await processSellerPayout(order._id.toString(), {

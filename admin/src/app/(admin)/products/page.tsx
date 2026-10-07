@@ -105,6 +105,50 @@ function detectEnvFromApi(): EnvKind {
   return "unknown";
 }
 
+/** Region code → ISO currency (listing price currency) */
+function regionToCurrency(region?: string): string {
+  const r = String(region || "").toUpperCase().trim();
+  const map: Record<string, string> = {
+    NG: "NGN",
+    GH: "GHS",
+    KE: "KES",
+    ZA: "ZAR",
+    UG: "UGX",
+    TZ: "TZS",
+    RW: "RWF",
+    US: "USD",
+    GB: "GBP",
+    UK: "GBP",
+    EU: "EUR",
+    CA: "CAD",
+  };
+  if (map[r]) return map[r];
+  if (r.length === 3) return r;
+  return "NGN";
+}
+
+function regionName(code?: string): string {
+  if (!code) return "—";
+  const hit = (REGION_LIST as { code?: string; name?: string }[]).find(
+    (r) => String(r.code).toUpperCase() === String(code).toUpperCase()
+  );
+  return hit?.name || code;
+}
+
+function fmtListingPrice(price?: number, region?: string) {
+  const v = Number(price || 0);
+  const currency = regionToCurrency(region);
+  try {
+    return new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency,
+      maximumFractionDigits: 2,
+    }).format(v);
+  } catch {
+    return `${v.toLocaleString()} ${currency}`;
+  }
+}
+
 function locLabel(p: ProductRow) {
   return (
     p.fulfillmentLocation?.displayLabel ||
@@ -146,7 +190,7 @@ function DarkSelect({
       style={{ colorScheme: "dark" }}
       className={cn(
         "h-10 w-full rounded-xl border border-white/12 bg-[#14181F] px-3 text-[13px] text-[#F5F7FA] outline-none focus:border-[#00E575]/40 disabled:opacity-50",
-        className,
+        className
       )}
     >
       {children}
@@ -225,7 +269,7 @@ function ProductImageGallery({
                 "aspect-square overflow-hidden rounded-lg border bg-white/[0.03] transition",
                 i === active
                   ? "border-[#00E575] ring-1 ring-[#00E575]/40"
-                  : "border-white/10 hover:border-[#00E575]/35",
+                  : "border-white/10 hover:border-[#00E575]/35"
               )}
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -289,7 +333,7 @@ function ProductsGate({ children }: { children: ReactNode }) {
         <div
           className={cn(
             "rounded-2xl border border-white/10 bg-[#0E1116]/95 p-6 sm:p-8",
-            shake && "animate-[plazore-shake_0.4s_ease-in-out]",
+            shake && "animate-[plazore-shake_0.4s_ease-in-out]"
           )}
         >
           <div className="h-px bg-gradient-to-r from-[#00E575] via-[#14B8A6] to-[#3B82F6]" />
@@ -388,7 +432,7 @@ function ProductModal({
     <div
       className={cn(
         "flex items-end justify-center sm:items-center sm:p-6",
-        open ? "pointer-events-auto" : "pointer-events-none",
+        open ? "pointer-events-auto" : "pointer-events-none"
       )}
       style={{ position: "fixed", inset: 0, zIndex: Z_MODAL }}
       aria-hidden={!open}
@@ -399,19 +443,19 @@ function ProductModal({
         onClick={onClose}
         className={cn(
           "absolute inset-0 bg-black/70 transition-opacity duration-300",
-          open ? "opacity-100" : "opacity-0",
+          open ? "opacity-100" : "opacity-0"
         )}
       />
       <div
         role="dialog"
         aria-modal="true"
         className={cn(
-          "relative z-10 flex w-full max-w-lg flex-col max-h-[min(92dvh,900px)]",
+          "relative z-10 flex max-h-[min(92dvh,900px)] w-full max-w-lg flex-col",
           "rounded-t-3xl border border-white/10 bg-[#0A0D12] shadow-[0_40px_100px_rgba(0,0,0,0.7)] sm:rounded-3xl",
           "transition-all duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]",
           open
             ? "translate-y-0 scale-100 opacity-100"
-            : "translate-y-10 scale-[0.97] opacity-0",
+            : "translate-y-10 scale-[0.97] opacity-0"
         )}
       >
         <div className="h-[2px] shrink-0 bg-gradient-to-r from-[#00E575] via-[#14B8A6] to-[#3B82F6]" />
@@ -453,13 +497,47 @@ function ProductModal({
                   <Badge tone={selected.isActive ? "green" : "error"}>
                     {selected.isActive ? "Active" : "Inactive"}
                   </Badge>
+                  <Badge tone="blue">
+                    Region {selected.region || "—"}
+                  </Badge>
                   <Badge tone="neutral">
-                    {selected.region || "No region"}
+                    {regionToCurrency(selected.region)}
                   </Badge>
                   <Badge tone={(selected.stock ?? 0) > 0 ? "green" : "warn"}>
                     Stock {selected.stock ?? 0}
                   </Badge>
                 </div>
+              </div>
+
+              {/* Listing price + region (primary) */}
+              <div className="rounded-2xl border border-[#00E575]/25 bg-[#00E575]/[0.06] p-4">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/40">
+                  Listing price
+                </p>
+                <p className="mt-1 text-2xl font-semibold tabular-nums text-[#00E575]">
+                  {fmtListingPrice(selected.price, selected.region)}
+                </p>
+                <p className="mt-1.5 text-[12px] text-white/50">
+                  Region{" "}
+                  <span className="font-semibold text-white/80">
+                    {selected.region || "—"}
+                  </span>
+                  {selected.region ? (
+                    <>
+                      {" "}
+                      · {regionName(selected.region)} · currency{" "}
+                      <span className="font-semibold text-white/80">
+                        {regionToCurrency(selected.region)}
+                      </span>
+                    </>
+                  ) : (
+                    " · region not set"
+                  )}
+                </p>
+                <p className="mt-1 text-[11px] text-white/35">
+                  This is the frozen listing amount buyers pay in the product’s
+                  marketplace region.
+                </p>
               </div>
 
               <div>
@@ -511,21 +589,15 @@ function ProductModal({
                 })()}
               </div>
 
-              <div className="rounded-xl border border-white/[0.07] bg-white/[0.03] p-3">
-                <p className="text-[10px] uppercase tracking-[0.14em] text-white/40">
-                  Price
-                </p>
-                <p className="mt-1 text-2xl font-semibold tabular-nums">
-                  {Number(selected.price || 0).toLocaleString()}
-                </p>
-              </div>
-
               <div className="space-y-3 border-t border-white/[0.06] pt-4">
                 <SectionLabel>Seller</SectionLabel>
                 <Field label="Store">
                   {selected.seller?.storeName || selected.seller?.name || "—"}
                 </Field>
                 <Field label="Email">{selected.seller?.email || "—"}</Field>
+                <Field label="Seller region">
+                  {selected.seller?.marketplaceRegion || "—"}
+                </Field>
                 {selected.seller?.isSellerSuspended && (
                   <Badge tone="error">Seller suspended</Badge>
                 )}
@@ -542,6 +614,11 @@ function ProductModal({
                 </Field>
                 <Field label="Country">
                   {selected.fulfillmentLocation?.country || "—"}
+                </Field>
+                <Field label="Listing region">
+                  {selected.region
+                    ? `${selected.region} · ${regionName(selected.region)}`
+                    : "—"}
                 </Field>
               </div>
 
@@ -597,7 +674,7 @@ function ProductModal({
         </div>
       </div>
     </div>,
-    document.body,
+    document.body
   );
 }
 
@@ -664,7 +741,7 @@ function ProductsDirectory() {
   const cities = useMemo(() => {
     if (!country) {
       return FULFILLMENT_COUNTRIES.flatMap((c) =>
-        c.states.flatMap((s: any) => s.cities || []),
+        c.states.flatMap((s: any) => s.cities || [])
       );
     }
     return getStatesForCountry(country).flatMap((s: any) => s.cities || []);
@@ -695,7 +772,7 @@ function ProductsDirectory() {
           setPage(cacheRef.current.page);
           setStale(true);
           setError(
-            "You’re offline. Showing the last loaded catalog — reconnect to refresh.",
+            "You’re offline. Showing the last loaded catalog — reconnect to refresh."
           );
           setLoading(false);
           return;
@@ -761,7 +838,7 @@ function ProductsDirectory() {
           setError(
             e?.message
               ? `${e.message} — showing last successful load.`
-              : "Request failed — showing last successful load.",
+              : "Request failed — showing last successful load."
           );
         } else {
           setError(e?.message || "Failed to load products");
@@ -771,7 +848,7 @@ function ProductsDirectory() {
         setLoading(false);
       }
     },
-    [getToken, q, active, region, city, sort],
+    [getToken, q, active, region, city, sort]
   );
 
   useEffect(() => {
@@ -790,7 +867,7 @@ function ProductsDirectory() {
         try {
           const one = await adminFetch<{ data?: ProductRow }>(
             `/admin/products/${id}`,
-            token,
+            token
           );
           if (one?.data?._id) return one.data;
         } catch {
@@ -804,7 +881,7 @@ function ProductsDirectory() {
         });
         const json = await adminFetch<{ data?: ProductRow[] }>(
           `/admin/products?${params}`,
-          token,
+          token
         );
         const hit = (json.data || []).find((p) => p._id === id);
         return hit || null;
@@ -814,7 +891,7 @@ function ProductsDirectory() {
         setDetailLoading(false);
       }
     },
-    [getToken],
+    [getToken]
   );
 
   const openModal = useCallback(
@@ -835,7 +912,7 @@ function ProductsDirectory() {
       const fetched = await fetchProductById(id);
       if (fetched) setDetailOverride(fetched);
     },
-    [items, fetchProductById],
+    [items, fetchProductById]
   );
 
   const closeModal = useCallback(() => {
@@ -850,7 +927,6 @@ function ProductsDirectory() {
     }, 280);
   }, [deepProductId, pathname, router]);
 
-  // Auto-open from Reports / other pages: /products?productId=xxx
   useEffect(() => {
     if (!mounted || !deepProductId) return;
     if (deepOpenedRef.current === deepProductId) return;
@@ -944,8 +1020,8 @@ function ProductsDirectory() {
               Products
             </h1>
             <p className="mt-2 max-w-xl text-[13.5px] text-white/50">
-              Search, filter, and inspect listings. Deep links from Reports open
-              the product modal automatically.
+              Listing price always shows with its region currency. Deep links
+              from Reports open the product modal automatically.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -985,13 +1061,13 @@ function ProductsDirectory() {
               "inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] font-medium",
               showOffline
                 ? "border-amber-500/30 bg-amber-500/10 text-amber-200"
-                : "border-[#00E575]/25 bg-[#00E575]/10 text-[#00E575]",
+                : "border-[#00E575]/25 bg-[#00E575]/10 text-[#00E575]"
             )}
           >
             <span
               className={cn(
                 "h-1.5 w-1.5 rounded-full",
-                showOffline ? "bg-amber-400" : "bg-[#00E575]",
+                showOffline ? "bg-amber-400" : "bg-[#00E575]"
               )}
             />
             {showOffline ? "Offline" : "Live"}
@@ -1015,7 +1091,7 @@ function ProductsDirectory() {
               "rounded-2xl border px-3 py-3.5 text-left transition sm:px-4",
               active === value
                 ? "border-[#00E575]/35 bg-[#00E575]/10"
-                : "border-white/[0.08] bg-white/[0.03] hover:border-white/15",
+                : "border-white/[0.08] bg-white/[0.03] hover:border-white/15"
             )}
           >
             <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/40">
@@ -1069,7 +1145,7 @@ function ProductsDirectory() {
                   "flex h-10 w-10 items-center justify-center rounded-l-xl transition",
                   view === "list"
                     ? "bg-[#00E575] text-[#041412]"
-                    : "text-white/50 hover:text-[#F5F7FA]",
+                    : "text-white/50 hover:text-[#F5F7FA]"
                 )}
               >
                 <List className="h-4 w-4" />
@@ -1082,7 +1158,7 @@ function ProductsDirectory() {
                   "flex h-10 w-10 items-center justify-center rounded-r-xl transition",
                   view === "grid"
                     ? "bg-[#00E575] text-[#041412]"
-                    : "text-white/50 hover:text-[#F5F7FA]",
+                    : "text-white/50 hover:text-[#F5F7FA]"
                 )}
               >
                 <LayoutGrid className="h-4 w-4" />
@@ -1198,7 +1274,7 @@ function ProductsDirectory() {
                   "rounded-2xl border border-white/[0.08] bg-white/[0.03] p-4 text-left transition hover:border-[#00E575]/35",
                   openId === p._id &&
                     modalOpen &&
-                    "border-[#00E575]/45 bg-[#00E575]/[0.06]",
+                    "border-[#00E575]/45 bg-[#00E575]/[0.06]"
                 )}
               >
                 <div className="flex gap-3">
@@ -1217,8 +1293,11 @@ function ProductsDirectory() {
                     <p className="truncate text-xs text-white/40">
                       {p.seller?.storeName || p.seller?.name || "—"}
                     </p>
-                    <p className="mt-1 text-sm font-semibold tabular-nums">
-                      {Number(p.price || 0).toLocaleString()}
+                    <p className="mt-1 text-sm font-semibold tabular-nums text-[#00E575]">
+                      {fmtListingPrice(p.price, p.region)}
+                    </p>
+                    <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-wide text-white/40">
+                      {p.region || "—"} · {regionToCurrency(p.region)}
                     </p>
                   </div>
                 </div>
@@ -1226,7 +1305,7 @@ function ProductsDirectory() {
                   <Badge tone={p.isActive ? "green" : "error"}>
                     {p.isActive ? "Active" : "Off"}
                   </Badge>
-                  <Badge tone="neutral">{p.region || "—"}</Badge>
+                  <Badge tone="blue">{p.region || "—"}</Badge>
                   <Badge tone={(p.stock ?? 0) > 0 ? "green" : "warn"}>
                     Stock {p.stock ?? 0}
                   </Badge>
@@ -1243,18 +1322,19 @@ function ProductsDirectory() {
         </div>
       ) : items.length > 0 ? (
         <Panel className="overflow-x-auto rounded-2xl border-white/[0.08] bg-white/[0.03]">
-          <table className="w-full min-w-[1080px] text-left text-sm">
+          <table className="w-full min-w-[1120px] text-left text-sm">
             <thead className="border-b border-white/[0.06] text-[11px] uppercase tracking-[0.12em] text-white/40">
               <tr>
                 <th className="px-4 py-3 font-semibold">Product</th>
                 <th className="px-4 py-3 font-semibold">Seller</th>
                 <th className="px-4 py-3 font-semibold">Location</th>
+                <th className="px-4 py-3 font-semibold">Region</th>
                 <th className="px-4 py-3 font-semibold">Status</th>
                 <th className="px-4 py-3 font-semibold">Stock</th>
                 <th className="px-4 py-3 font-semibold">Views</th>
                 <th className="px-4 py-3 font-semibold">Carts</th>
                 <th className="px-4 py-3 font-semibold">Checkouts</th>
-                <th className="px-4 py-3 font-semibold">Price</th>
+                <th className="px-4 py-3 font-semibold">Listing price</th>
               </tr>
             </thead>
             <tbody>
@@ -1268,7 +1348,7 @@ function ProductsDirectory() {
                       "cursor-pointer border-b border-white/[0.05] transition-colors hover:bg-white/[0.03]",
                       openId === p._id &&
                         modalOpen &&
-                        "bg-[#00E575]/[0.06]",
+                        "bg-[#00E575]/[0.06]"
                     )}
                   >
                     <td className="px-4 py-3">
@@ -1288,9 +1368,6 @@ function ProductsDirectory() {
                           <p className="truncate text-xs text-white/40">
                             {p.category}
                             {p.brand ? ` · ${p.brand}` : ""}
-                            {(p.images?.length || 0) > 1
-                              ? ` · ${p.images!.length} imgs`
-                              : ""}
                           </p>
                         </div>
                       </div>
@@ -1305,8 +1382,11 @@ function ProductsDirectory() {
                     </td>
                     <td className="px-4 py-3 text-white/55">
                       <p className="truncate">{locLabel(p)}</p>
-                      <p className="text-[11px] text-white/35">
-                        {p.region || "—"}
+                    </td>
+                    <td className="px-4 py-3">
+                      <Badge tone="blue">{p.region || "—"}</Badge>
+                      <p className="mt-1 text-[10px] text-white/35">
+                        {regionToCurrency(p.region)}
                       </p>
                     </td>
                     <td className="px-4 py-3">
@@ -1328,8 +1408,13 @@ function ProductsDirectory() {
                     <td className="px-4 py-3 tabular-nums text-white/50">
                       {m.checkout.toLocaleString()}
                     </td>
-                    <td className="px-4 py-3 font-semibold tabular-nums">
-                      {Number(p.price || 0).toLocaleString()}
+                    <td className="px-4 py-3">
+                      <p className="font-semibold tabular-nums text-[#00E575]">
+                        {fmtListingPrice(p.price, p.region)}
+                      </p>
+                      <p className="text-[10px] text-white/35">
+                        {p.region || "—"} · {regionToCurrency(p.region)}
+                      </p>
                     </td>
                   </tr>
                 );

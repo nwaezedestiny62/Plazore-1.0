@@ -16,7 +16,10 @@ import {
   initializeTransaction,
   verifyTransaction,
 } from "./paystack/transactions.js";
-import { isPaystackConfigured, PaystackNotConfiguredError } from "./paystack/client.js";
+import {
+  isPaystackConfigured,
+  PaystackNotConfiguredError,
+} from "./paystack/client.js";
 import { writePaymentAudit } from "../utils/paymentAudit.js";
 import { sendNotification } from "../utils/sendNotification.js";
 
@@ -26,8 +29,18 @@ function generateReference(prefix = "PLZ"): string {
   return `${prefix}_${ts}_${rnd}`;
 }
 
+function resolveListingRegion(product: any): string {
+  const raw = String(
+    (product as any).region || (product as any).marketplaceRegion || ""
+  )
+    .trim()
+    .toUpperCase();
+  return raw || "NG";
+}
+
 /**
  * Recalculate line items from Product documents — NEVER trust client prices.
+ * Freezes listing region + currency + unit price per line.
  * Returns items grouped by seller with server prices and shipping.
  */
 export async function buildServerSideOrderItems(
@@ -44,9 +57,10 @@ export async function buildServerSideOrderItems(
     const productId = item.productId;
     const product = await Product.findById(productId);
     if (!product || !product.isActive) {
-      throw Object.assign(new Error(`Product not found or inactive: ${productId}`), {
-        statusCode: 400,
-      });
+      throw Object.assign(
+        new Error(`Product not found or inactive: ${productId}`),
+        { statusCode: 400 }
+      );
     }
     if (product.stock < item.quantity) {
       throw Object.assign(
@@ -57,14 +71,16 @@ export async function buildServerSideOrderItems(
 
     const sellerId = product.seller.toString();
     const isSellerOwnedPurchase = buyerId === sellerId;
-    const listingRegion = String((product as any).region || "").trim() || "NG";
+    const listingRegion = resolveListingRegion(product);
+    const listingCurrency = currencyForRegion(listingRegion);
 
-    // SERVER PRICE ONLY
+    // SERVER PRICE ONLY — in listing currency of product.region
     const unitPrice = Number(product.price);
     if (!Number.isFinite(unitPrice) || unitPrice < 0) {
-      throw Object.assign(new Error(`Invalid product price for ${product.name}`), {
-        statusCode: 400,
-      });
+      throw Object.assign(
+        new Error(`Invalid product price for ${product.name}`),
+        { statusCode: 400 }
+      );
     }
 
     if (!itemsBySeller[sellerId]) itemsBySeller[sellerId] = [];
@@ -74,8 +90,11 @@ export async function buildServerSideOrderItems(
       quantity: item.quantity,
       price: unitPrice,
       region: listingRegion,
+      currency: listingCurrency,
       image: product.images?.[0] || "",
-      note: String(item.note || "").trim().slice(0, 120),
+      note: String(item.note || "")
+        .trim()
+        .slice(0, 120),
       isSellerOwnedPurchase,
     });
 
@@ -84,15 +103,25 @@ export async function buildServerSideOrderItems(
     const feeMode = (product as any).shipping?.feeMode || "fixed";
     let fee = 0;
     if (feeMode === "free") fee = 0;
-    else if (feeMode === "on_delivery") fee = 0; // collected later — not charged at checkout
+    else if (feeMode === "on_delivery") fee = 0;
     else fee = Number((product as any).shipping?.deliveryFee) || 0;
 
-    const company = String((product as any).shipping?.courierCompany || "").trim();
+    const company = String(
+      (product as any).shipping?.courierCompany || ""
+    ).trim();
 
     if (!shippingBySeller[sellerId]) {
-      shippingBySeller[sellerId] = { method, courierCompany: company, deliveryFee: fee };
+      shippingBySeller[sellerId] = {
+        method,
+        courierCompany: company,
+        deliveryFee: fee,
+      };
     } else if (fee > shippingBySeller[sellerId].deliveryFee) {
-      shippingBySeller[sellerId] = { method, courierCompany: company, deliveryFee: fee };
+      shippingBySeller[sellerId] = {
+        method,
+        courierCompany: company,
+        deliveryFee: fee,
+      };
     }
   }
 
@@ -100,8 +129,8 @@ export async function buildServerSideOrderItems(
 }
 
 /**
- * Create order(s) with PENDING_PAYMENT — reserve stock but do not commit sales metrics until paid.
- * Returns orders ready for payment initialize.
+ * Create order(s) with PENDING_PAYMENT — reserve stock.
+ * Freezes region + currency on order and feeBreakdown for admin/Paystack.
  */
 export async function createPendingOrders(params: {
   buyer: any;
@@ -129,8 +158,12 @@ export async function createPendingOrders(params: {
       0
     );
     const shippingCost = snap?.deliveryFee || 0;
-    const region = String(sellerItems[0]?.region || "NG").trim();
-    const currency = currencyForRegion(region);
+    const region = String(sellerItems[0]?.region || "NG")
+      .trim()
+      .toUpperCase();
+    const currency =
+      String(sellerItems[0]?.currency || "").trim().toUpperCase() ||
+      currencyForRegion(region);
     const fees = calculateSellerPayout(subtotal, shippingCost);
 
     const order = await Order.create({
@@ -151,6 +184,7 @@ export async function createPendingOrders(params: {
       },
       orderStatus: "Preparing",
       region,
+      currency,
       subtotal,
       shippingCost,
       totalAmount: fees.grossAmount,
@@ -165,6 +199,7 @@ export async function createPendingOrders(params: {
         platformFee: fees.platformFee,
         sellerPayoutAmount: fees.sellerPayoutAmount,
         currency,
+        region,
       },
       buyerConfirmation: { status: "none" },
       payout: { status: "not_eligible" },
@@ -172,7 +207,6 @@ export async function createPendingOrders(params: {
       stockReservation: { reserved: true, committed: false, released: false },
     });
 
-    // Reserve stock (decrement). Released on cancel/payment fail.
     for (const row of sellerItems) {
       await Product.findByIdAndUpdate(row.product, {
         $inc: { stock: -row.quantity },
@@ -187,6 +221,7 @@ export async function createPendingOrders(params: {
 
 /**
  * Initialize Paystack payment for a single order.
+ * Charges in order.currency (listing currency of the product region).
  */
 export async function initializePaymentForOrder(params: {
   orderId: string;
@@ -207,9 +242,10 @@ export async function initializePaymentForOrder(params: {
     order.paymentStatus !== "pending" &&
     order.paymentStatus !== "failed"
   ) {
-    throw Object.assign(new Error("Order is not payable in its current state"), {
-      statusCode: 400,
-    });
+    throw Object.assign(
+      new Error("Order is not payable in its current state"),
+      { statusCode: 400 }
+    );
   }
 
   if (!isPaystackConfigured()) {
@@ -227,14 +263,23 @@ export async function initializePaymentForOrder(params: {
 
   const fb = (order as any).feeBreakdown || {};
   const amount = Number(order.totalAmount);
-  const currency =
-    fb.currency || currencyForRegion(String((order as any).region || "NG"));
+  const region = String((order as any).region || "NG").trim().toUpperCase();
+  // Prefer frozen order.currency → feeBreakdown → region map
+  const currency = String(
+    (order as any).currency ||
+      fb.currency ||
+      currencyForRegion(region)
+  )
+    .trim()
+    .toUpperCase();
+
   const platformFee =
     fb.platformFee ??
     calculateSellerPayout(order.subtotal, order.shippingCost).platformFee;
   const sellerPayoutAmount =
     fb.sellerPayoutAmount ??
-    calculateSellerPayout(order.subtotal, order.shippingCost).sellerPayoutAmount;
+    calculateSellerPayout(order.subtotal, order.shippingCost)
+      .sellerPayoutAmount;
 
   const reference = generateReference("PLZPAY");
 
@@ -272,9 +317,7 @@ export async function initializePaymentForOrder(params: {
   }
 
   const callbackUrl =
-    params.callbackUrl ||
-    process.env.PAYSTACK_CALLBACK_URL ||
-    undefined;
+    params.callbackUrl || process.env.PAYSTACK_CALLBACK_URL || undefined;
 
   const init = await initializeTransaction({
     email,
@@ -288,6 +331,8 @@ export async function initializePaymentForOrder(params: {
       paymentId: payment._id.toString(),
       buyerId: order.buyer.toString(),
       sellerId: order.seller.toString(),
+      region,
+      currency,
     },
   });
 
@@ -299,7 +344,12 @@ export async function initializePaymentForOrder(params: {
 
   (order as any).paymentLifecycle = "PAYMENT_PROCESSING";
   (order as any).paymentRef = payment._id;
+  // Keep frozen currency on order for admin / reports
+  if (!(order as any).currency) {
+    (order as any).currency = currency;
+  }
   order.paymentStatus = "pending";
+  order.paymentMethod = "paystack";
   await order.save();
 
   await writePaymentAudit({
@@ -322,13 +372,14 @@ export async function initializePaymentForOrder(params: {
     reference: init.reference,
     amount,
     currency,
+    region,
     publicKey: process.env.PAYSTACK_PUBLIC_KEY || null,
   };
 }
 
 /**
  * Verify a payment by reference (API poll from frontend after callback).
- * Idempotent: safe to call multiple times.
+ * Idempotent. Enforces amount + currency match against frozen order currency.
  */
 export async function verifyPaymentByReference(
   reference: string,
@@ -339,7 +390,6 @@ export async function verifyPaymentByReference(
     throw Object.assign(new Error("Payment not found"), { statusCode: 404 });
   }
 
-  // Already verified successfully
   if (payment.status === "success" && payment.verifiedAt) {
     const order = await Order.findById(payment.order);
     return { payment, order, alreadyVerified: true };
@@ -351,7 +401,6 @@ export async function verifyPaymentByReference(
 
   const data = await verifyTransaction(reference);
 
-  // Amount + currency must match
   if (data.amount !== payment.amountMinor) {
     await writePaymentAudit({
       order: payment.order.toString(),
@@ -361,23 +410,42 @@ export async function verifyPaymentByReference(
       reference,
       meta: { expected: payment.amountMinor, got: data.amount },
     });
-    throw Object.assign(new Error("Payment amount mismatch"), { statusCode: 400 });
+    throw Object.assign(new Error("Payment amount mismatch"), {
+      statusCode: 400,
+    });
   }
 
-  if (String(data.currency).toUpperCase() !== String(payment.currency).toUpperCase()) {
-    throw Object.assign(new Error("Payment currency mismatch"), { statusCode: 400 });
+  if (
+    String(data.currency).toUpperCase() !==
+    String(payment.currency).toUpperCase()
+  ) {
+    await writePaymentAudit({
+      order: payment.order.toString(),
+      payment: payment._id.toString(),
+      action: "payment.verify_currency_mismatch",
+      actorType: source === "webhook" ? "webhook" : "system",
+      reference,
+      meta: {
+        expected: payment.currency,
+        got: data.currency,
+      },
+    });
+    throw Object.assign(new Error("Payment currency mismatch"), {
+      statusCode: 400,
+    });
   }
 
   const order = await Order.findById(payment.order);
   if (!order) {
-    throw Object.assign(new Error("Order not found for payment"), { statusCode: 404 });
+    throw Object.assign(new Error("Order not found for payment"), {
+      statusCode: 404,
+    });
   }
 
   if (data.status === "success") {
     return await markPaymentSuccess(payment, order, data, source);
   }
 
-  // failed / abandoned
   payment.status = data.status === "abandoned" ? "abandoned" : "failed";
   payment.lifecycle = "PAYMENT_FAILED";
   payment.gatewayResponse = data.gateway_response || data.status;
@@ -407,7 +475,6 @@ async function markPaymentSuccess(
   data: any,
   source: "api" | "webhook" | "manual"
 ) {
-  // Atomic-ish guard
   if (payment.status === "success" && payment.verifiedAt) {
     return { payment, order, alreadyVerified: true };
   }
@@ -425,9 +492,11 @@ async function markPaymentSuccess(
     payment.verificationSource = source;
 
     if (data.authorization) {
-      payment.authorizationCode = data.authorization.authorization_code || null;
+      payment.authorizationCode =
+        data.authorization.authorization_code || null;
       payment.cardLast4 = data.authorization.last4 || null;
-      payment.cardBrand = data.authorization.brand || data.authorization.card_type || null;
+      payment.cardBrand =
+        data.authorization.brand || data.authorization.card_type || null;
       payment.cardExpMonth = data.authorization.exp_month || null;
       payment.cardExpYear = data.authorization.exp_year || null;
       payment.reusable = !!data.authorization.reusable;
@@ -438,10 +507,12 @@ async function markPaymentSuccess(
     order.paymentStatus = "paid";
     (order as any).paymentLifecycle = "PAYMENT_PROTECTED";
     (order as any).paymentRef = payment._id;
+    if (!(order as any).currency && payment.currency) {
+      (order as any).currency = payment.currency;
+    }
     if ((order as any).stockReservation) {
       (order as any).stockReservation.committed = true;
     }
-    // Seller can now process
     if (order.orderStatus === "Preparing") {
       (order as any).paymentLifecycle = "PROCESSING_ORDER";
     }
@@ -470,13 +541,12 @@ async function markPaymentSuccess(
     meta: { source, providerTransactionId: payment.providerTransactionId },
   });
 
-  // Notify seller only after verified payment
   if (!order.isSellerOwnedPurchase) {
     await sendNotification({
       userId: order.seller.toString(),
       type: "new_order",
       title: "New paid order",
-      message: `Payment confirmed for order ${order.orderNumber}. Please process it.`,
+      message: `Payment confirmed for order ${order.orderNumber} (${payment.currency}). Please process it.`,
       orderId: order._id.toString(),
       orderNumber: order.orderNumber,
     }).catch(() => {});

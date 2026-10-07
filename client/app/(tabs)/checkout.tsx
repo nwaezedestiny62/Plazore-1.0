@@ -1,8 +1,8 @@
 /**
- * Checkout — Paystack-ready
- * - Address + bag + shipping routes (unchanged business rules)
- * - No required saved card (Paystack collects card)
- * - POST /api/payments/checkout → open authorization_url
+ * Checkout — Paystack-gated
+ * - Order successful ONLY after payment verifies
+ * - Saved cards UI (like addresses) — Paystack hosts card entry
+ * - POST /api/payments/checkout → open authorization_url → verify
  */
 
 import api from '@/constants/api'
@@ -60,6 +60,15 @@ type OverlayState = {
 } | null
 
 type OrderPhase = 'idle' | 'processing' | 'success' | 'error'
+
+type SavedCard = {
+  _id: string
+  brand?: string
+  last4?: string
+  expMonth?: string | number
+  expYear?: string | number
+  isDefault?: boolean
+}
 
 type ShipFrom = {
   label: string
@@ -386,7 +395,8 @@ function OrderStatusModal({
                 Preparing secure payment
               </Text>
               <Text style={styles.modalProcessingSub}>
-                Locking your bag and opening Paystack for {sellerHint}…
+                Opening Paystack for {sellerHint}. Order is confirmed only after
+                payment succeeds.
               </Text>
             </View>
           )}
@@ -396,9 +406,12 @@ function OrderStatusModal({
               <View style={styles.errorIconWrap}>
                 <Ionicons name="close" size={32} color={DANGER} />
               </View>
-              <Text style={styles.modalProcessingTitle}>Payment failed</Text>
+              <Text style={styles.modalProcessingTitle}>
+                Order unsuccessful
+              </Text>
               <Text style={styles.modalProcessingSub}>
-                {errorMessage || 'Something went wrong. Please try again.'}
+                {errorMessage ||
+                  'Payment failed or could not be completed. Nothing was charged.'}
               </Text>
               <Pressable onPress={onCloseError} style={styles.errorCloseBtn}>
                 <Text style={styles.errorCloseText}>Try again</Text>
@@ -534,6 +547,8 @@ export default function Checkout() {
 
   const [addresses, setAddresses] = useState<any[]>([])
   const [selectedAddress, setSelectedAddress] = useState<any>(null)
+  const [cards, setCards] = useState<SavedCard[]>([])
+  const [selectedCardId, setSelectedCardId] = useState<string | null>(null)
 
   const placingLock = useRef(false)
   const displayRegion = buyerRegion || DEFAULT_REGION
@@ -586,15 +601,37 @@ export default function Checkout() {
     }
   }, [getToken])
 
+  const loadPaymentMethods = useCallback(async () => {
+    try {
+      const token = await getToken()
+      if (!token) return
+      const res = await api.get('/payment-methods', {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      const list = res.data?.data || res.data || []
+      if (Array.isArray(list)) {
+        setCards(list)
+        setSelectedCardId((prev) => {
+          if (prev && list.some((c: SavedCard) => c._id === prev)) return prev
+          const def =
+            list.find((c: SavedCard) => c.isDefault) || list[0] || null
+          return def?._id || null
+        })
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [getToken])
+
   useFocusEffect(
     useCallback(() => {
       const boot = async () => {
         refreshRegion()
-        await loadAddresses()
+        await Promise.all([loadAddresses(), loadPaymentMethods()])
         setPageLoading(false)
       }
       boot()
-    }, [refreshRegion, loadAddresses]),
+    }, [refreshRegion, loadAddresses, loadPaymentMethods]),
   )
 
   const routeGroups: RouteGroup[] = useMemo(() => {
@@ -710,9 +747,19 @@ export default function Checkout() {
       })
     : ''
 
+  const placing = orderPhase === 'processing'
+
   const handlePlaceOrder = async () => {
     if (placingLock.current || orderPhase === 'processing') return
 
+    if (!hasItems) {
+      setToast({
+        title: 'Empty bag',
+        message: 'There is nothing to checkout.',
+        tone: 'danger',
+      })
+      return
+    }
     if (!canPlaceOrder) {
       setToast({
         title: 'Cannot continue',
@@ -730,22 +777,20 @@ export default function Checkout() {
       const token = await getToken()
       if (!token) throw new Error('Sign in required')
 
-      // Server recalculates prices — send productId + qty only
       const payloadItems = (cartItems || [])
-        .map((item: any) => {
-          const id = item.product?._id || item.productId
-          const qty = Math.max(1, Number(item.quantity) || 1)
-          return {
-            productId: id,
-            quantity: qty,
-            note: String(item.note || '')
-              .trim()
-              .slice(0, 120),
-          }
-        })
+        .map((item: any) => ({
+          productId: item.product?._id || item.productId,
+          quantity: Math.max(1, Number(item.quantity) || 1),
+          note: String(item.note || '').trim().slice(0, 120),
+        }))
         .filter((i: any) => i.productId && i.quantity > 0)
 
-      if (!payloadItems.length) throw new Error('No valid products in bag')
+      if (!payloadItems.length) {
+        throw new Error('No valid products in bag')
+      }
+      if (!selectedAddress || !addressComplete(selectedAddress)) {
+        throw new Error('Delivery address is incomplete')
+      }
 
       const res = await api.post(
         '/payments/checkout',
@@ -753,93 +798,108 @@ export default function Checkout() {
           shippingAddress: {
             street: selectedAddress.street,
             city: selectedAddress.city,
-            state: selectedAddress.state || '',
-            zipCode: selectedAddress.zipCode || '',
+            state: selectedAddress.state,
+            zipCode: selectedAddress.zipCode,
             country: selectedAddress.country,
           },
           buyerNote: hasInternational
             ? 'International shipment — seller review may apply.'
             : '',
           items: payloadItems,
+          paymentMethodId: selectedCardId || undefined,
         },
         { headers: { Authorization: `Bearer ${token}` } },
       )
 
-      const data = res.data
+      const body = res.data || {}
+      const data = body.data || body
 
-      if (!data?.success) {
-        throw new Error(data?.message || 'Could not start payment')
-      }
-
-      // Paystack not configured yet — orders may still be created pending
-      if (data.code === 'PAYSTACK_NOT_CONFIGURED' || !data.authorization_url) {
-        clearCart()
-        setOrderPhase('success')
-        setToast({
-          title: 'Order created',
-          message:
-            data.message ||
-            'Payment gateway is not live yet. Your order is pending payment.',
-          tone: 'info',
-          durationMs: 8000,
-        })
+      // Backend failure → order unsuccessful (no fake success)
+      if (body.success === false) {
+        setOrderPhase('error')
+        setOrderError(
+          body.message ||
+            'Order unsuccessful. Payment could not be completed. Nothing was charged.',
+        )
         return
       }
 
-      // Open Paystack hosted checkout
-      const result = await WebBrowser.openAuthSessionAsync(
-        data.authorization_url,
-        data.callback_url || undefined,
-      )
+      const authUrl =
+        data.authorization_url ||
+        data.authorizationUrl ||
+        body.authorization_url ||
+        body.authorizationUrl
 
-      if (result.type === 'success' || result.type === 'dismiss') {
-        // Verify on return
-        const ref = data.reference
-        if (ref) {
-          try {
-            const verify = await api.get(`/payments/verify/${ref}`, {
-              headers: { Authorization: `Bearer ${token}` },
-            })
-            if (verify.data?.success && verify.data?.paid) {
-              clearCart()
-              setOrderPhase('success')
-              return
-            }
-          } catch {
-            /* fall through */
-          }
-        }
-        // User may have paid; webhook will catch — still clear bag if reference exists
-        if (data.reference) {
-          clearCart()
-          setOrderPhase('success')
-        } else {
-          setOrderPhase('error')
-          setOrderError('Payment was not completed. You can try again.')
-        }
-      } else {
+      const reference = data.reference || body.reference || ''
+
+      if (!authUrl) {
         setOrderPhase('error')
-        setOrderError('Payment window closed before completion.')
+        setOrderError(
+          body.message ||
+            'Order unsuccessful. Payment could not be started. Nothing was charged.',
+        )
+        return
       }
-    } catch (e: any) {
+
+      const browserResult = await WebBrowser.openAuthSessionAsync(authUrl)
+
+      if (browserResult.type !== 'success') {
+        setOrderPhase('error')
+        setOrderError(
+          'Order unsuccessful. Payment was cancelled or not completed.',
+        )
+        return
+      }
+
+      // Verify with backend — only then success
+      if (reference) {
+        try {
+          const v = await api.post(
+            '/payments/verify',
+            { reference },
+            { headers: { Authorization: `Bearer ${token}` } },
+          )
+          const vd = v.data?.data || v.data || {}
+          if (vd.verified === true || vd.orderPlaced === true) {
+            clearCart()
+            setOrderPhase('success')
+            return
+          }
+          setOrderPhase('error')
+          setOrderError(
+            vd.message ||
+              'Order unsuccessful. Payment failed, was declined, or insufficient funds.',
+          )
+          return
+        } catch (ve: any) {
+          setOrderPhase('error')
+          setOrderError(
+            ve?.response?.data?.message ||
+              'Order unsuccessful. Could not verify payment. Check Orders or try again.',
+          )
+          return
+        }
+      }
+
       setOrderPhase('error')
-      setOrderError(
+      setOrderError('Order unsuccessful. Payment was not confirmed.')
+    } catch (e: any) {
+      const msg =
         e?.response?.data?.message ||
-          e?.message ||
-          'Something went wrong. Please try again.',
-      )
+        e?.message ||
+        'Order unsuccessful. Please try again.'
+      setOrderPhase('error')
+      setOrderError(msg)
     } finally {
       placingLock.current = false
     }
   }
 
-  const placing = orderPhase === 'processing'
-
   if (pageLoading) {
     return (
       <SafeAreaView style={styles.safe}>
         <View style={styles.loadingWrap}>
-          <PlazoreOrb size={100} />
+          <PlazoreOrb size={96} />
         </View>
       </SafeAreaView>
     )
@@ -847,7 +907,7 @@ export default function Checkout() {
 
   if (!hasItems && orderPhase === 'idle') {
     return (
-      <SafeAreaView style={styles.safe} edges={['top']}>
+      <SafeAreaView style={styles.safe}>
         <View style={styles.header}>
           <TouchableOpacity
             onPress={() => router.back()}
@@ -864,10 +924,10 @@ export default function Checkout() {
           </View>
           <Text style={styles.emptyCheckoutTitle}>Your bag is empty</Text>
           <Text style={styles.emptyCheckoutSub}>
-            Add products from the showroom before checkout.
+            Add products from the Showroom before checking out.
           </Text>
           <TouchableOpacity
-            onPress={() => router.replace('/(tabs)' as any)}
+            onPress={() => router.replace('/')}
             style={styles.primaryCtaWrap}
           >
             <LinearGradient
@@ -887,17 +947,18 @@ export default function Checkout() {
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       <TopToast state={toast} onDismiss={() => setToast(null)} />
+
       <OrderStatusModal
         phase={orderPhase}
         errorMessage={orderError}
         sellerCount={routeGroups.length}
         onViewOrders={() => {
           setOrderPhase('idle')
-          router.replace('/orders' as any)
+          router.push('/orders')
         }}
         onShowroom={() => {
           setOrderPhase('idle')
-          router.replace('/(tabs)' as any)
+          router.replace('/')
         }}
         onCloseError={() => setOrderPhase('idle')}
       />
@@ -912,11 +973,10 @@ export default function Checkout() {
       <LinearGradient
         colors={[
           'transparent',
-          'rgba(0,229,117,0.35)',
-          'rgba(37,99,235,0.25)',
+          'rgba(0,229,117,0.4)',
+          'rgba(37,99,235,0.3)',
           'transparent',
         ]}
-        locations={[0, 0.25, 0.75, 1]}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 0 }}
         style={styles.headerRule}
@@ -926,6 +986,7 @@ export default function Checkout() {
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
       >
         <Text style={styles.stepHint}>REVIEW · DELIVER · PAY</Text>
 
@@ -956,7 +1017,7 @@ export default function Checkout() {
                 {group.isInternational && (
                   <View style={styles.intlPill}>
                     <Ionicons name="globe-outline" size={10} color="#93C5FD" />
-                    <Text style={styles.intlPillText}>International</Text>
+                    <Text style={styles.intlPillText}>Intl</Text>
                   </View>
                 )}
                 {group.missingShipFrom && (
@@ -970,6 +1031,7 @@ export default function Checkout() {
                 const region = resolveProductRegion(product)
                 const unit = Number(item.price ?? product?.price) || 0
                 const qty = Number(item.quantity) || 1
+                const img = product?.images?.[0]
                 return (
                   <View
                     key={item.id || `${group.key}-${i}`}
@@ -978,13 +1040,12 @@ export default function Checkout() {
                       i < group.items.length - 1 && styles.itemBorder,
                     ]}
                   >
-                    {product?.images?.[0] ? (
-                      <Image
-                        source={{ uri: product.images[0] }}
-                        style={styles.thumb}
-                      />
+                    {img ? (
+                      <Image source={{ uri: img }} style={styles.thumb} />
                     ) : (
-                      <View style={[styles.thumb, styles.thumbPlaceholder]} />
+                      <View style={[styles.thumb, styles.thumbPlaceholder]}>
+                        <Ionicons name="image-outline" size={18} color={MUTED} />
+                      </View>
                     )}
                     <View style={styles.itemInfo}>
                       <Text style={styles.itemName} numberOfLines={2}>
@@ -994,7 +1055,7 @@ export default function Checkout() {
                         Qty {qty} · {fmtProduct(unit, region)} each
                       </Text>
                     </View>
-                    <Text style={styles.itemTotal}>
+                    <Text style={styles.itemTotal} numberOfLines={1}>
                       {fmtProduct(unit * qty, region)}
                     </Text>
                   </View>
@@ -1023,9 +1084,7 @@ export default function Checkout() {
               </View>
               <Text style={styles.cardTitle}>Deliver To</Text>
             </View>
-            <TouchableOpacity
-              onPress={() => router.push('/addresses' as any)}
-            >
+            <TouchableOpacity onPress={() => router.push('/addresses')}>
               <Text style={styles.link}>Change</Text>
             </TouchableOpacity>
           </View>
@@ -1037,11 +1096,13 @@ export default function Checkout() {
                   <TouchableOpacity
                     key={addr._id}
                     onPress={() => setSelectedAddress(addr)}
-                    style={[styles.selectItem, on && styles.selectItemActive]}
-                    activeOpacity={0.85}
+                    style={[
+                      styles.selectItem,
+                      on && styles.selectItemActive,
+                    ]}
                   >
                     <View style={[styles.radio, on && styles.radioActive]}>
-                      {on && <View style={styles.radioDot} />}
+                      {on ? <View style={styles.radioDot} /> : null}
                     </View>
                     <View style={styles.selectContent}>
                       <View style={styles.selectTop}>
@@ -1067,7 +1128,7 @@ export default function Checkout() {
                 )
               })}
               <TouchableOpacity
-                onPress={() => router.push('/addresses' as any)}
+                onPress={() => router.push('/addresses')}
                 style={styles.addBtn}
               >
                 <Ionicons name="add" size={16} color={GREEN} />
@@ -1076,11 +1137,11 @@ export default function Checkout() {
             </View>
           ) : (
             <TouchableOpacity
-              onPress={() => router.push('/addresses' as any)}
+              onPress={() => router.push('/addresses')}
               style={styles.emptyBlock}
             >
               <View style={styles.emptyIcon}>
-                <Ionicons name="location-outline" size={24} color={MUTED} />
+                <Ionicons name="location-outline" size={22} color={MUTED} />
               </View>
               <Text style={styles.emptyTitle}>Add delivery address</Text>
               <Text style={styles.emptySub}>
@@ -1090,31 +1151,101 @@ export default function Checkout() {
           )}
         </View>
 
-        {/* Payment — Paystack */}
+        {/* Payment method — saved cards (like addresses) */}
         <View style={styles.card}>
           <View style={styles.cardHeader}>
             <View style={styles.cardHeaderLeft}>
               <View style={styles.iconSquare}>
                 <Ionicons name="card-outline" size={15} color={SECONDARY} />
               </View>
-              <View>
-                <Text style={styles.cardTitle}>Pay securely</Text>
-                <Text style={styles.cardSub}>Powered by Paystack</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.cardTitle}>Payment method</Text>
+                <Text style={styles.cardSub}>
+                  Saved cards · Paystack hosts entry
+                </Text>
               </View>
             </View>
+            <TouchableOpacity
+              onPress={() => router.push('/payment-methods')}
+            >
+              <Text style={styles.link}>Manage</Text>
+            </TouchableOpacity>
           </View>
-          <View style={styles.payBody}>
+
+          <View style={styles.listPad}>
+            <TouchableOpacity
+              onPress={() => setSelectedCardId(null)}
+              style={[
+                styles.selectItem,
+                selectedCardId === null && styles.selectItemActive,
+              ]}
+            >
+              <View
+                style={[
+                  styles.radio,
+                  selectedCardId === null && styles.radioActive,
+                ]}
+              >
+                {selectedCardId === null ? (
+                  <View style={styles.radioDot} />
+                ) : null}
+              </View>
+              <View style={styles.selectContent}>
+                <Text style={styles.selectTitle}>New card on Paystack</Text>
+                <Text style={styles.selectSub}>
+                  Valid card + available funds required. Otherwise order is
+                  unsuccessful.
+                </Text>
+              </View>
+            </TouchableOpacity>
+
+            {cards.map((card) => {
+              const on = selectedCardId === card._id
+              return (
+                <TouchableOpacity
+                  key={card._id}
+                  onPress={() => setSelectedCardId(card._id)}
+                  style={[styles.selectItem, on && styles.selectItemActive]}
+                >
+                  <View style={[styles.radio, on && styles.radioActive]}>
+                    {on ? <View style={styles.radioDot} /> : null}
+                  </View>
+                  <View style={styles.selectContent}>
+                    <View style={styles.selectTop}>
+                      <Text style={styles.selectTitle}>
+                        {card.brand || 'Card'} •••• {card.last4 || '····'}
+                      </Text>
+                      {card.isDefault && (
+                        <View style={styles.defaultBadge}>
+                          <Text style={styles.defaultText}>Default</Text>
+                        </View>
+                      )}
+                    </View>
+                    <Text style={styles.selectSub}>
+                      Exp {card.expMonth || '—'}/{card.expYear || '—'}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              )
+            })}
+
+            <TouchableOpacity
+              onPress={() => router.push('/payment-methods')}
+              style={styles.addBtn}
+            >
+              <Ionicons name="add" size={16} color={GREEN} />
+              <Text style={styles.addBtnText}>Add / change cards</Text>
+            </TouchableOpacity>
+
             <View style={styles.payRow}>
-              <Ionicons name="shield-checkmark" size={18} color={GREEN} />
+              <Ionicons
+                name="shield-checkmark-outline"
+                size={16}
+                color={GREEN}
+              />
               <Text style={styles.payText}>
-                Card details are entered on Paystack’s secure page. Plazore
-                never stores full card numbers.
-              </Text>
-            </View>
-            <View style={styles.payRow}>
-              <Ionicons name="lock-closed-outline" size={18} color={MUTED} />
-              <Text style={styles.payText}>
-                Visa, Mastercard, Verve, bank transfer and USSD where available.
+                Declined cards, insufficient funds, or cancelled payment =
+                order unsuccessful. Plazore never stores full card numbers.
               </Text>
             </View>
           </View>
@@ -1127,10 +1258,10 @@ export default function Checkout() {
               <View style={styles.iconSquare}>
                 <Ionicons name="navigate-outline" size={15} color={SECONDARY} />
               </View>
-              <View>
+              <View style={{ flex: 1 }}>
                 <Text style={styles.cardTitle}>Shipping routes</Text>
                 <Text style={styles.cardSub}>
-                  Each seller ships from their origin
+                  Each seller ships from their own origin
                 </Text>
               </View>
             </View>
@@ -1143,7 +1274,7 @@ export default function Checkout() {
                 <Text style={styles.warningTitle}>Shipping incomplete</Text>
                 <Text style={styles.warningText}>
                   {incompleteSellers.map((g) => g.ship.storeName).join(', ')}{' '}
-                  must set a ship-from location before checkout.
+                  missing ship-from. Checkout stays locked.
                 </Text>
               </View>
             </View>
@@ -1157,14 +1288,11 @@ export default function Checkout() {
                   styles.routeCard,
                   group.missingShipFrom && styles.routeCardWarn,
                   group.isInternational && styles.routeCardIntl,
-                  idx > 0 && { marginTop: 10 },
+                  idx > 0 && { marginTop: 12 },
                 ]}
               >
                 <View style={styles.routeHead}>
-                  <LinearGradient
-                    colors={[...GRAD]}
-                    style={styles.routeNum}
-                  >
+                  <LinearGradient colors={[...GRAD]} style={styles.routeNum}>
                     <Text style={styles.routeNumText}>{idx + 1}</Text>
                   </LinearGradient>
                   <Text style={styles.routeStore}>{group.ship.storeName}</Text>
@@ -1246,8 +1374,8 @@ export default function Checkout() {
               <Text style={styles.totalValue}>{fmt(totalAmount)}</Text>
             </View>
             <Text style={styles.receiptNote}>
-              Final charge is calculated on the server in listing currency.
-              Display above is converted to your marketplace ({displayRegion}).
+              Order is placed only after Paystack confirms payment. Display is
+              converted to your marketplace ({displayRegion}).
             </Text>
           </View>
         </View>
@@ -1749,8 +1877,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
   },
 
-  payBody: { padding: 14, gap: 12 },
-  payRow: { flexDirection: 'row', gap: 10, alignItems: 'flex-start' },
+  payRow: {
+    flexDirection: 'row',
+    gap: 10,
+    alignItems: 'flex-start',
+    marginTop: 8,
+  },
   payText: { flex: 1, fontSize: 12.5, color: SECONDARY, lineHeight: 18 },
 
   warningBox: {

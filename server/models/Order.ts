@@ -8,9 +8,27 @@ const orderItemSchema = new mongoose.Schema({
   },
   name: { type: String, required: true },
   quantity: { type: Number, required: true, min: 1 },
+  /**
+   * Listing unit price frozen at checkout (server product.price / variant).
+   * Always in the currency of `region` / `currency` — never client-sent.
+   */
   price: { type: Number, required: true },
-  /** Listing region currency this line price was frozen in (product.region at checkout) */
-  region: { type: String, default: "", trim: true, index: true },
+  /**
+   * Product listing region code at checkout (e.g. NG, US, DE, GH).
+   * Same semantics as product.region.
+   */
+  region: { type: String, default: "", trim: true, uppercase: true, index: true },
+  /**
+   * ISO 4217 currency for this line’s frozen price (derived from region).
+   * e.g. NGN, USD, EUR, GHS — what the buyer was charged for this line.
+   */
+  currency: {
+    type: String,
+    default: "",
+    trim: true,
+    uppercase: true,
+    index: true,
+  },
   image: { type: String },
   note: {
     type: String,
@@ -20,7 +38,6 @@ const orderItemSchema = new mongoose.Schema({
   /**
    * Set only by the backend at order creation when the authenticated buyer
    * is the same user as the product's seller. Never accept from the client.
-   * Used to exclude self-purchases from Buyer Confidence / demand metrics.
    */
   isSellerOwnedPurchase: {
     type: Boolean,
@@ -125,10 +142,28 @@ const orderSchema = new mongoose.Schema(
     },
 
     /**
-     * Primary currency region for this order's frozen amounts (product listing region).
-     * Snapshot at createOrder — same semantics as product.region.
+     * Primary listing region for this order’s frozen amounts
+     * (from first item / product.region at create).
      */
-    region: { type: String, default: "", trim: true, index: true },
+    region: {
+      type: String,
+      default: "",
+      trim: true,
+      uppercase: true,
+      index: true,
+    },
+
+    /**
+     * ISO 4217 currency the buyer must pay (and was charged) for this order.
+     * Derived from region via currencyForRegion — used by Paystack initialize.
+     */
+    currency: {
+      type: String,
+      default: "",
+      trim: true,
+      uppercase: true,
+      index: true,
+    },
 
     subtotal: { type: Number, required: true },
     shippingCost: { type: Number, default: 0 },
@@ -145,7 +180,6 @@ const orderSchema = new mongoose.Schema(
       default: "pending",
     },
 
-    // ========== PAYMENT LIFECYCLE (Paystack-ready) ==========
     paymentLifecycle: {
       type: String,
       enum: [
@@ -177,7 +211,10 @@ const orderSchema = new mongoose.Schema(
       index: true,
     },
 
-    /** Frozen fee breakdown — platform fee is always 8% of subtotal */
+    /**
+     * Frozen fee breakdown — platform fee always 8% of subtotal.
+     * All amounts in `currency` (listing currency).
+     */
     feeBreakdown: {
       subtotal: { type: Number, default: 0 },
       shippingCost: { type: Number, default: 0 },
@@ -185,7 +222,9 @@ const orderSchema = new mongoose.Schema(
       platformFeeRate: { type: Number, default: 0.08 },
       platformFee: { type: Number, default: 0 },
       sellerPayoutAmount: { type: Number, default: 0 },
-      currency: { type: String, default: "NGN" },
+      currency: { type: String, default: "NGN", uppercase: true },
+      /** Listing region frozen with this breakdown (admin / reports) */
+      region: { type: String, default: "", uppercase: true },
     },
 
     stockReservation: {
@@ -196,7 +235,6 @@ const orderSchema = new mongoose.Schema(
 
     deliveredAt: { type: Date },
 
-    // After seller marks Delivered — buyer confirms or 17h auto-confirm
     buyerConfirmation: {
       status: {
         type: String,
@@ -216,11 +254,9 @@ const orderSchema = new mongoose.Schema(
         ref: "ContactMessage",
         default: null,
       },
-      /** Server-side deadline — set when seller marks Delivered (now + 17h) */
       confirmationDeadline: { type: Date, default: null },
     },
 
-    // Payout gate (Paystack transfer)
     payout: {
       status: {
         type: String,
@@ -249,13 +285,6 @@ const orderSchema = new mongoose.Schema(
       },
     },
 
-    /**
-     * True when the authenticated buyer is the same user as this order's seller.
-     * Set only by the backend (createOrder). Because Plazore splits carts into
-     * one Order document per seller, this is reliable at order level; items also
-     * carry the same flag for future multi-item analytics.
-     * Missing/false on legacy orders → treated as independent unless buyer===seller.
-     */
     isSellerOwnedPurchase: {
       type: Boolean,
       default: false,
@@ -273,6 +302,8 @@ orderSchema.index({ "buyerConfirmation.confirmationDeadline": 1 });
 orderSchema.index({ "payout.status": 1 });
 orderSchema.index({ paymentLifecycle: 1 });
 orderSchema.index({ seller: 1, isSellerOwnedPurchase: 1, orderStatus: 1 });
+orderSchema.index({ region: 1, currency: 1 });
+orderSchema.index({ currency: 1, paymentStatus: 1 });
 
 const Order = mongoose.model("Order", orderSchema);
 export default Order;

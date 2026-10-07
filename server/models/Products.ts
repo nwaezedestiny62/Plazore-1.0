@@ -42,6 +42,7 @@ const productOptionSchema = new Schema(
 /**
  * Concrete combination of option values.
  * Inventory and optional price live here when hasVariants is true.
+ * Variant price (if set) is in the same currency as product.region.
  */
 const productVariantSchema = new Schema(
   {
@@ -54,7 +55,7 @@ const productVariantSchema = new Schema(
       default: {},
     },
     stock: { type: Number, required: true, default: 0, min: 0 },
-    /** null / undefined = use product.price */
+    /** null / undefined = use product.price (same listing currency) */
     price: { type: Number, default: null, min: 0 },
     available: { type: Boolean, default: true },
   },
@@ -65,21 +66,33 @@ const productSchema = new Schema<IProduct>(
   {
     name: { type: String, required: true, trim: true },
     description: { type: String, required: true },
+    /**
+     * Listing unit price in the currency of `region`
+     * (e.g. NGN for NG, USD for US, EUR for DE).
+     * Frozen onto order items at checkout — admin shows this, not live conversion.
+     */
     price: { type: Number, required: true, min: 0 },
     images: [{ type: String }],
     category: { type: String, required: true, trim: true },
     subCategory: { type: String, default: "", trim: true },
     brand: { type: String, default: "", trim: true },
-    /** Simple-product inventory. When hasVariants is true, purchases use variants[].stock instead. */
+    /** Simple-product inventory. When hasVariants is true, purchases use variants[].stock. */
     stock: { type: Number, required: true, default: 0, min: 0 },
     isFeatured: { type: Boolean, default: false },
     isActive: { type: Boolean, default: true },
 
+    /**
+     * Listing marketplace region code (NG, US, DE, GH…).
+     * Determines currency via currencyForRegion(region).
+     * Required for regional Plazore — Paystack charges in that currency.
+     */
     region: {
       type: String,
       required: true,
       index: true,
       default: "NG",
+      uppercase: true,
+      trim: true,
     },
 
     seller: {
@@ -103,6 +116,7 @@ const productSchema = new Schema<IProduct>(
         default: "courier",
       },
       courierCompany: { type: String, default: "" },
+      /** Delivery fee in the same currency as product.region */
       deliveryFee: { type: Number, default: 0, min: 0 },
       deliveryNote: { type: String, default: "", trim: true },
     },
@@ -112,14 +126,12 @@ const productSchema = new Schema<IProduct>(
       required: false,
     },
 
-    // Category-specific structured specs (key → value) — factual product info
     specifications: {
       type: Map,
       of: String,
       default: {},
     },
 
-    // Cloudinary metadata only — never file buffers
     verificationDocuments: {
       type: [verificationDocumentSchema],
       default: [],
@@ -131,7 +143,6 @@ const productSchema = new Schema<IProduct>(
       min: 0,
     },
 
-    // ——— Product options & variants (optional; existing products stay simple) ———
     hasVariants: {
       type: Boolean,
       default: false,
@@ -149,7 +160,8 @@ const productSchema = new Schema<IProduct>(
       type: [productVariantSchema],
       default: [],
       validate: {
-        validator: (arr: unknown[]) => Array.isArray(arr) && arr.length <= 200,
+        validator: (arr: unknown[]) =>
+          Array.isArray(arr) && arr.length <= 200,
         message: "A product may have at most 200 variants",
       },
     },

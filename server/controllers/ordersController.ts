@@ -27,16 +27,24 @@ const CANCEL_REASONS: Record<string, string> = {
 function hasShipFromLocation(product: any, seller: any): boolean {
   const fl = product?.fulfillmentLocation;
   if (fl && (fl.city || fl.state) && fl.country) return true;
-
   const addr = seller?.shippingDefaults?.address;
   if (addr && (addr.city || addr.state) && addr.country) return true;
-
   return false;
+}
+
+function resolveListingRegion(product: any): string {
+  const raw = String(
+    (product as any).region ||
+      (product as any).marketplaceRegion ||
+      ""
+  )
+    .trim()
+    .toUpperCase();
+  return raw || "NG";
 }
 
 // ====================== CREATE ORDER ======================
 // Prefer POST /api/payments/checkout for Paystack.
-// This path still works: server-side prices only + PENDING_PAYMENT.
 export const createOrder = async (req: Request, res: Response) => {
   try {
     const user = getUser(req);
@@ -109,7 +117,7 @@ export const createOrder = async (req: Request, res: Response) => {
       const sellerId = product.seller.toString();
 
       const sellerUser = await User.findById(sellerId)
-        .select("storeName shippingDefaults")
+        .select("storeName shippingDefaults marketplaceRegion")
         .lean();
 
       if (!hasShipFromLocation(product, sellerUser)) {
@@ -123,7 +131,8 @@ export const createOrder = async (req: Request, res: Response) => {
       if (!itemsBySeller[sellerId]) itemsBySeller[sellerId] = [];
 
       const isSellerOwnedPurchase = user._id.toString() === sellerId;
-      const listingRegion = String((product as any).region || "").trim();
+      const listingRegion = resolveListingRegion(product);
+      const listingCurrency = currencyForRegion(listingRegion);
 
       // SERVER PRICE ONLY — never trust client item.price
       const unitPrice = Number(product.price);
@@ -140,6 +149,7 @@ export const createOrder = async (req: Request, res: Response) => {
         quantity: item.quantity,
         price: unitPrice,
         region: listingRegion,
+        currency: listingCurrency,
         image: product.images?.[0] || "",
         note: String(item.note || "")
           .trim()
@@ -189,8 +199,10 @@ export const createOrder = async (req: Request, res: Response) => {
         0
       );
       const shippingCost = snap?.deliveryFee || 0;
-      const region = String(sellerItems[0]?.region || "").trim() || "NG";
-      const currency = currencyForRegion(region);
+      const region = String(sellerItems[0]?.region || "NG").trim().toUpperCase();
+      const currency =
+        String(sellerItems[0]?.currency || "").trim().toUpperCase() ||
+        currencyForRegion(region);
       const fees = calculateSellerPayout(subtotal, shippingCost);
 
       const order = await Order.create({
@@ -211,6 +223,7 @@ export const createOrder = async (req: Request, res: Response) => {
         },
         orderStatus: "Preparing",
         region,
+        currency,
         subtotal,
         shippingCost,
         totalAmount: fees.grossAmount,
@@ -225,6 +238,7 @@ export const createOrder = async (req: Request, res: Response) => {
           platformFee: fees.platformFee,
           sellerPayoutAmount: fees.sellerPayoutAmount,
           currency,
+          region,
         },
         buyerConfirmation: { status: "none" },
         payout: { status: "not_eligible" },
@@ -261,7 +275,7 @@ export const createOrder = async (req: Request, res: Response) => {
           : "New Order Received",
         message: isSellerOwnedPurchase
           ? `You placed a test/self order: ${order.orderNumber}. It will not count toward customer demand metrics.`
-          : `A new order has been placed. Order: ${order.orderNumber}. Awaiting payment.`,
+          : `A new order has been placed. Order: ${order.orderNumber}. Awaiting payment (${currency}).`,
         orderId: order._id.toString(),
         orderNumber: order.orderNumber,
       });
@@ -282,7 +296,7 @@ export const createOrder = async (req: Request, res: Response) => {
 
     res.status(201).json({
       success: true,
-      message: "Order(s) placed successfully — complete payment to confirm",
+      message: "Order(s) placed — complete payment to confirm",
       data: createdOrders,
     });
   } catch (error: any) {
@@ -501,7 +515,6 @@ export const deliverOrder = async (req: Request, res: Response) => {
     order.orderStatus = "Delivered";
     order.deliveredAt = new Date();
 
-    // 17-hour server-side confirmation window
     (order as any).buyerConfirmation = {
       status: "pending",
       confirmedAt: undefined,
@@ -538,10 +551,12 @@ export const deliverOrder = async (req: Request, res: Response) => {
 // ====================== ADMIN: Get all orders ======================
 export const getAllOrders = async (req: Request, res: Response) => {
   try {
-    const { page = 1, limit = 20, status } = req.query;
+    const { page = 1, limit = 20, status, region, currency } = req.query;
     const query: any = {};
 
     if (status) query.orderStatus = status;
+    if (region) query.region = String(region).toUpperCase();
+    if (currency) query.currency = String(currency).toUpperCase();
 
     const total = await Order.countDocuments(query);
 
@@ -804,7 +819,6 @@ export const cancelOrderBySeller = async (req: Request, res: Response) => {
       });
     }
 
-    // Paid orders must use refund/dispute flow — not simple cancel
     if (String(order.paymentStatus) === "paid") {
       return res.status(400).json({
         success: false,
@@ -824,11 +838,9 @@ export const cancelOrderBySeller = async (req: Request, res: Response) => {
       reasonLabel,
       note: extraNote,
       cancelledAt: new Date(),
-      // Unpaid only at this point
       refundStatus: "not_applicable",
     };
 
-    // Release reserved stock
     for (const row of order.items) {
       await Product.findByIdAndUpdate(row.product, {
         $inc: { stock: row.quantity },
