@@ -9,18 +9,23 @@ const orderItemSchema = new mongoose.Schema({
   name: { type: String, required: true },
   quantity: { type: Number, required: true, min: 1 },
   /**
-   * Listing unit price frozen at checkout (server product.price / variant).
+   * Listing unit price frozen at checkout (server product.price).
    * Always in the currency of `region` / `currency` — never client-sent.
    */
   price: { type: Number, required: true },
   /**
-   * Product listing region code at checkout (e.g. NG, US, DE, GH).
+   * Product listing region at checkout (e.g. NG, US, DE).
    * Same semantics as product.region.
    */
-  region: { type: String, default: "", trim: true, uppercase: true, index: true },
+  region: {
+    type: String,
+    default: "",
+    trim: true,
+    uppercase: true,
+    index: true,
+  },
   /**
-   * ISO 4217 currency for this line’s frozen price (derived from region).
-   * e.g. NGN, USD, EUR, GHS — what the buyer was charged for this line.
+   * ISO 4217 for this line’s frozen price (from currencyForRegion(region)).
    */
   currency: {
     type: String,
@@ -36,8 +41,8 @@ const orderItemSchema = new mongoose.Schema({
     default: "",
   },
   /**
-   * Set only by the backend at order creation when the authenticated buyer
-   * is the same user as the product's seller. Never accept from the client.
+   * Set only by the backend when buyer === product seller.
+   * Never accept from the client.
    */
   isSellerOwnedPurchase: {
     type: Boolean,
@@ -141,10 +146,7 @@ const orderSchema = new mongoose.Schema(
       },
     },
 
-    /**
-     * Primary listing region for this order’s frozen amounts
-     * (from first item / product.region at create).
-     */
+    /** Listing region frozen at create (product.region). */
     region: {
       type: String,
       default: "",
@@ -154,8 +156,8 @@ const orderSchema = new mongoose.Schema(
     },
 
     /**
-     * ISO 4217 currency the buyer must pay (and was charged) for this order.
-     * Derived from region via currencyForRegion — used by Paystack initialize.
+     * ISO 4217 the buyer was / will be charged.
+     * Set via currencyForRegion(region) at order create — never live FX.
      */
     currency: {
       type: String,
@@ -212,8 +214,8 @@ const orderSchema = new mongoose.Schema(
     },
 
     /**
-     * Frozen fee breakdown — platform fee always 8% of subtotal.
-     * All amounts in `currency` (listing currency).
+     * Frozen fee snapshot — all amounts in `currency`.
+     * platformFeeRate always 0.08 (8% of subtotal only).
      */
     feeBreakdown: {
       subtotal: { type: Number, default: 0 },
@@ -223,7 +225,6 @@ const orderSchema = new mongoose.Schema(
       platformFee: { type: Number, default: 0 },
       sellerPayoutAmount: { type: Number, default: 0 },
       currency: { type: String, default: "NGN", uppercase: true },
-      /** Listing region frozen with this breakdown (admin / reports) */
       region: { type: String, default: "", uppercase: true },
     },
 

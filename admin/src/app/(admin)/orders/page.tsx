@@ -41,6 +41,67 @@ const GATE_KEY = "plazore.admin.ordersGate.v1";
 const EXPECTED_PASSWORD =
   process.env.NEXT_PUBLIC_ADMIN_ORDERS_PASSWORD || "plazore@order1999";
 const Z_MODAL = 9999;
+const FEE_RATE = 0.08;
+
+/**
+ * Exact match of server/config/payment.ts REGION_TO_CURRENCY.
+ * Do not invent FX. Admin only formats frozen checkout amounts.
+ */
+const REGION_TO_CURRENCY: Record<string, string> = {
+  NG: "NGN",
+  GH: "GHS",
+  BJ: "XOF",
+  TG: "XOF",
+  CI: "XOF",
+  SN: "XOF",
+  CM: "XAF",
+  KE: "KES",
+  ZA: "ZAR",
+  EG: "EGP",
+  UG: "UGX",
+  TZ: "TZS",
+  RW: "RWF",
+  US: "USD",
+  CA: "CAD",
+  GB: "GBP",
+  UK: "GBP",
+  DE: "EUR",
+  FR: "EUR",
+  NL: "EUR",
+  IT: "EUR",
+  ES: "EUR",
+  EU: "EUR",
+  AU: "AUD",
+};
+
+const KNOWN_CURRENCIES = new Set(Object.values(REGION_TO_CURRENCY));
+
+const REGION_NAME: Record<string, string> = {
+  NG: "Nigeria",
+  GH: "Ghana",
+  BJ: "Benin",
+  TG: "Togo",
+  CI: "Côte d'Ivoire",
+  SN: "Senegal",
+  CM: "Cameroon",
+  KE: "Kenya",
+  ZA: "South Africa",
+  EG: "Egypt",
+  UG: "Uganda",
+  TZ: "Tanzania",
+  RW: "Rwanda",
+  US: "United States",
+  CA: "Canada",
+  GB: "United Kingdom",
+  UK: "United Kingdom",
+  DE: "Germany",
+  FR: "France",
+  NL: "Netherlands",
+  IT: "Italy",
+  ES: "Spain",
+  EU: "Europe",
+  AU: "Australia",
+};
 
 type OrderItem = {
   product?:
@@ -54,10 +115,9 @@ type OrderItem = {
       };
   name?: string;
   quantity?: number;
-  /** Unit price frozen at checkout */
   price?: number;
-  /** Listing region frozen at checkout */
   region?: string;
+  currency?: string;
   image?: string;
   note?: string;
 };
@@ -70,6 +130,7 @@ type FeeBreakdown = {
   platformFee?: number;
   sellerPayoutAmount?: number;
   currency?: string;
+  region?: string;
 };
 
 type OrderRow = {
@@ -82,8 +143,8 @@ type OrderRow = {
   totalAmount?: number;
   subtotal?: number;
   shippingCost?: number;
-  /** Primary settlement / listing region for this order */
   region?: string;
+  currency?: string;
   createdAt?: string;
   updatedAt?: string;
   deliveredAt?: string;
@@ -159,6 +220,116 @@ type Counts = {
   Cancelled: number;
 };
 
+function norm(s?: string | null) {
+  return String(s || "")
+    .trim()
+    .toUpperCase();
+}
+
+function isIsoCurrency(s?: string | null) {
+  const v = norm(s);
+  return v.length === 3 && /^[A-Z]{3}$/.test(v);
+}
+
+/** Same rules as backend currencyForRegion — never treat NG as NGN field mix-up. */
+function currencyForRegion(region?: string | null): string {
+  const key = norm(region);
+  if (!key) return "";
+  if (REGION_TO_CURRENCY[key]) return REGION_TO_CURRENCY[key];
+  if (KNOWN_CURRENCIES.has(key)) return key;
+  const base = key.split(/[-_]/)[0];
+  if (REGION_TO_CURRENCY[base]) return REGION_TO_CURRENCY[base];
+  if (KNOWN_CURRENCIES.has(base)) return base;
+  return "";
+}
+
+function asRegionCode(raw?: string | null): string {
+  const key = norm(raw);
+  if (!key) return "";
+  if (REGION_TO_CURRENCY[key]) return key;
+  const base = key.split(/[-_]/)[0];
+  if (REGION_TO_CURRENCY[base]) return base;
+  if (key.length === 2) return key;
+  return "";
+}
+
+function pickCurrency(...cands: Array<string | undefined | null>): string {
+  for (const c of cands) {
+    const v = norm(c);
+    if (!v) continue;
+    if (REGION_TO_CURRENCY[v]) return REGION_TO_CURRENCY[v];
+    if (isIsoCurrency(v)) return v;
+  }
+  return "";
+}
+
+function firstItem(o?: OrderRow | null): OrderItem | undefined {
+  return o?.items?.[0];
+}
+
+function productRegion(it?: OrderItem) {
+  if (!it) return "";
+  if (typeof it.product === "object") return asRegionCode(it.product?.region);
+  return "";
+}
+
+/** Listing region frozen at checkout (matches Order.region / item.region). */
+function orderRegion(o?: OrderRow | null): string {
+  if (!o) return "—";
+  const it = firstItem(o);
+  return (
+    asRegionCode(o.feeBreakdown?.region) ||
+    asRegionCode(o.region) ||
+    asRegionCode(it?.region) ||
+    productRegion(it) ||
+    asRegionCode(o.seller?.marketplaceRegion) ||
+    "—"
+  );
+}
+
+/**
+ * Currency the buyer was charged in.
+ * Prefer frozen feeBreakdown.currency → order.currency → item.currency
+ * then map listing region. Never live-convert.
+ */
+function orderCurrency(o?: OrderRow | null): string {
+  if (!o) return "NGN";
+  const frozen = pickCurrency(
+    o.feeBreakdown?.currency,
+    o.currency,
+    firstItem(o)?.currency
+  );
+  if (frozen) return frozen;
+  const mapped = currencyForRegion(orderRegion(o));
+  if (mapped) return mapped;
+  const sellerCur = currencyForRegion(o.seller?.marketplaceRegion);
+  if (sellerCur) return sellerCur;
+  return "NGN";
+}
+
+function itemRegion(it: OrderItem, order?: OrderRow | null) {
+  return (
+    asRegionCode(it.region) ||
+    productRegion(it) ||
+    (order ? orderRegion(order) : "") ||
+    "—"
+  );
+}
+
+function itemCurrency(it: OrderItem, order?: OrderRow | null) {
+  const frozen = pickCurrency(it.currency);
+  if (frozen) return frozen;
+  const fromLine = currencyForRegion(itemRegion(it, order));
+  if (fromLine) return fromLine;
+  return orderCurrency(order);
+}
+
+function regionLabel(code?: string) {
+  const k = asRegionCode(code) || norm(code);
+  if (!k || k === "—") return "—";
+  return REGION_NAME[k] || k;
+}
+
 function formatPlz(order: OrderRow | null | undefined) {
   if (!order) return "PLZ#—";
   const raw = (order.orderNumber || "").trim();
@@ -180,20 +351,13 @@ function fmtDate(d?: string) {
   }
 }
 
-/** ISO currency codes only — region labels like "NG" fall back to NGN */
-function resolveCurrency(...candidates: (string | undefined)[]) {
-  for (const c of candidates) {
-    const s = String(c || "")
-      .trim()
-      .toUpperCase();
-    if (s.length === 3 && /^[A-Z]{3}$/.test(s)) return s;
-  }
-  return "NGN";
-}
-
+/** Format frozen major units in the given ISO currency. No FX. */
 function fmtMoney(n?: number, currency = "NGN") {
   const v = Number(n || 0);
-  const cur = resolveCurrency(currency);
+  const cur =
+    pickCurrency(currency) ||
+    currencyForRegion(currency) ||
+    "NGN";
   try {
     return new Intl.NumberFormat(undefined, {
       style: "currency",
@@ -205,14 +369,6 @@ function fmtMoney(n?: number, currency = "NGN") {
   }
 }
 
-function itemRegion(it: OrderItem, order?: OrderRow | null) {
-  if (it.region) return String(it.region);
-  if (typeof it.product === "object" && it.product?.region)
-    return String(it.product.region);
-  if (order?.region) return String(order.region);
-  return "—";
-}
-
 function itemUnitPrice(it: OrderItem) {
   return Number(it.price || 0);
 }
@@ -222,12 +378,48 @@ function itemLineTotal(it: OrderItem) {
   return itemUnitPrice(it) * qty;
 }
 
-function orderCurrency(o?: OrderRow | null) {
-  return resolveCurrency(
-    o?.feeBreakdown?.currency,
-    o?.region,
-    "NGN"
-  );
+/** Matches backend calculatePlatformFee */
+function platformFeeOf(subtotal?: number) {
+  const s = Number(subtotal || 0);
+  if (!Number.isFinite(s) || s < 0) return 0;
+  return Math.round(s * FEE_RATE * 100) / 100;
+}
+
+/** Matches backend calculateSellerPayout */
+function sellerPayoutOf(subtotal?: number, shipping?: number) {
+  const sub = Number(subtotal || 0);
+  const ship = Number(shipping || 0);
+  const gross = Math.round((sub + ship) * 100) / 100;
+  const fee = platformFeeOf(sub);
+  return Math.round((gross - fee) * 100) / 100;
+}
+
+function chargedTotal(o?: OrderRow | null) {
+  if (!o) return 0;
+  const g = Number(o.feeBreakdown?.grossAmount);
+  if (Number.isFinite(g) && g > 0) return g;
+  return Number(o.totalAmount || 0);
+}
+
+function parseOrdersList(json: any): OrderRow[] {
+  if (Array.isArray(json?.data)) return json.data;
+  if (Array.isArray(json?.orders)) return json.orders;
+  if (Array.isArray(json?.items)) return json.items;
+  if (Array.isArray(json)) return json;
+  return [];
+}
+
+function parseOrderDetail(json: any): OrderRow | null {
+  if (!json || typeof json !== "object") return null;
+  const row =
+    json.data && typeof json.data === "object" && json.data._id
+      ? json.data
+      : json.order && typeof json.order === "object" && json.order._id
+        ? json.order
+        : json._id
+          ? json
+          : null;
+  return row as OrderRow | null;
 }
 
 function statusTone(
@@ -623,7 +815,14 @@ function OrderModal({
 
   const fee = selected?.feeBreakdown;
   const currency = orderCurrency(selected);
-  const orderRegion = selected?.region || "—";
+  const listingRegion = orderRegion(selected);
+  const subtotal = fee?.subtotal ?? selected?.subtotal ?? 0;
+  const shipping = fee?.shippingCost ?? selected?.shippingCost ?? 0;
+  const platformFee = fee?.platformFee ?? platformFeeOf(subtotal);
+  const sellerPayout =
+    fee?.sellerPayoutAmount ??
+    selected?.payout?.amount ??
+    sellerPayoutOf(subtotal, shipping);
 
   return createPortal(
     <div
@@ -699,14 +898,35 @@ function OrderModal({
                     {lifecycleLabel(selected.paymentLifecycle)}
                   </Badge>
                 ) : null}
-                <Badge tone="neutral">{orderRegion}</Badge>
+                <Badge tone="blue">{listingRegion}</Badge>
                 <Badge tone="neutral">{currency}</Badge>
                 {selected.paymentMethod ? (
                   <Badge tone="neutral">{selected.paymentMethod}</Badge>
                 ) : null}
               </div>
 
-              {/* Payment & fees */}
+              <div className="rounded-2xl border border-[#00E575]/25 bg-[#00E575]/[0.06] p-4">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/40">
+                  Amount charged (frozen at checkout)
+                </p>
+                <p className="mt-1 text-2xl font-semibold tabular-nums text-[#00E575]">
+                  {fmtMoney(chargedTotal(selected), currency)}
+                </p>
+                <p className="mt-1.5 text-[12px] text-white/50">
+                  Listed in{" "}
+                  <span className="font-semibold text-white/80">
+                    {listingRegion}
+                  </span>
+                  {listingRegion !== "—" ? ` · ${regionLabel(listingRegion)}` : ""}
+                  {" · paid as "}
+                  <span className="font-semibold text-white/80">{currency}</span>
+                </p>
+                <p className="mt-1 text-[11px] text-white/35">
+                  No live conversion. These are the listing amounts locked when
+                  the order was created.
+                </p>
+              </div>
+
               <div className="space-y-3 border-t border-white/[0.06] pt-4">
                 <SectionLabel>
                   <span className="inline-flex items-center gap-1.5">
@@ -716,13 +936,18 @@ function OrderModal({
                 <div className="grid grid-cols-2 gap-2">
                   <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
                     <p className="text-[10px] uppercase tracking-[0.14em] text-white/35">
-                      Gross paid
+                      Subtotal
                     </p>
                     <p className="mt-1 text-sm font-semibold tabular-nums">
-                      {fmtMoney(
-                        fee?.grossAmount ?? selected.totalAmount,
-                        currency
-                      )}
+                      {fmtMoney(subtotal, currency)}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+                    <p className="text-[10px] uppercase tracking-[0.14em] text-white/35">
+                      Shipping
+                    </p>
+                    <p className="mt-1 text-sm font-semibold tabular-nums">
+                      {fmtMoney(shipping, currency)}
                     </p>
                   </div>
                   <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
@@ -730,11 +955,7 @@ function OrderModal({
                       Platform fee 8%
                     </p>
                     <p className="mt-1 text-sm font-semibold tabular-nums text-[#00E575]">
-                      {fmtMoney(
-                        fee?.platformFee ??
-                          Number(selected.subtotal || 0) * 0.08,
-                        currency
-                      )}
+                      {fmtMoney(platformFee, currency)}
                     </p>
                   </div>
                   <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
@@ -742,201 +963,43 @@ function OrderModal({
                       Seller payout
                     </p>
                     <p className="mt-1 text-sm font-semibold tabular-nums">
-                      {fmtMoney(
-                        fee?.sellerPayoutAmount ??
-                          selected.payout?.amount ??
-                          Number(selected.subtotal || 0) * 0.92 +
-                            Number(selected.shippingCost || 0),
-                        currency
-                      )}
-                    </p>
-                  </div>
-                  <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
-                    <p className="text-[10px] uppercase tracking-[0.14em] text-white/35">
-                      Payout status
-                    </p>
-                    <p className="mt-1 text-sm font-semibold">
-                      {selected.payout?.status || "not_eligible"}
+                      {fmtMoney(sellerPayout, currency)}
                     </p>
                   </div>
                 </div>
-                {selected.buyerConfirmation?.status ? (
-                  <Field label="Buyer confirmation">
-                    {selected.buyerConfirmation.status}
-                    {selected.buyerConfirmation.confirmationDeadline
-                      ? ` · deadline ${fmtDate(selected.buyerConfirmation.confirmationDeadline)}`
-                      : ""}
-                  </Field>
-                ) : null}
               </div>
 
-              <div className="border-t border-white/[0.06] pt-4">
-                <SectionLabel>Fulfillment flow</SectionLabel>
-                <div className="mt-3">
-                  <OrderFlow order={selected} />
-                </div>
-              </div>
-
-              {/* Resolve */}
-              <div className="space-y-2 border-t border-white/[0.06] pt-4">
+              <div className="space-y-3 border-t border-white/[0.06] pt-4">
                 <SectionLabel>
                   <span className="inline-flex items-center gap-1.5">
-                    <Scale className="h-3 w-3" /> Resolve
+                    <Package className="h-3 w-3" /> Items (listed & paid)
                   </span>
                 </SectionLabel>
-                <p className="text-[11px] text-white/40">
-                  Admin settlement — refund buyer or settle in seller’s favour.
-                </p>
-                {actionMsg ? (
-                  <p className="text-xs text-white/50">{actionMsg}</p>
-                ) : null}
-                <div className="grid grid-cols-1 gap-2">
-                  <button
-                    type="button"
-                    disabled={
-                      actionBusy || selected.paymentStatus !== "paid"
-                    }
-                    onClick={onRefund}
-                    className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-white/12 bg-white/[0.03] px-4 text-xs font-semibold text-white/70 transition hover:border-[#00E575]/40 hover:text-[#00E575] disabled:opacity-40"
-                  >
-                    <Shield className="h-3.5 w-3.5" />
-                    Refund buyer (full)
-                  </button>
-                  <button
-                    type="button"
-                    disabled={
-                      actionBusy ||
-                      String(selected.paymentLifecycle) !== "DISPUTED"
-                    }
-                    onClick={onSellerFavour}
-                    className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-white/12 bg-white/[0.03] px-4 text-xs font-semibold text-white/70 transition hover:border-[#00E575]/40 hover:text-[#00E575] disabled:opacity-40"
-                  >
-                    <Banknote className="h-3.5 w-3.5" />
-                    Settle seller favour
-                  </button>
-                </div>
-              </div>
-
-              {/* Buyer */}
-              <div className="space-y-3 border-t border-white/[0.06] pt-4">
-                <SectionLabel>Buyer</SectionLabel>
-                <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-full border border-white/10 bg-white/[0.04]">
-                    <User className="h-4 w-4 text-white/50" />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-medium">
-                      {selected.buyer?.name ||
-                        selected.buyerContact?.name ||
-                        "—"}
-                    </p>
-                    <p className="truncate text-xs text-white/40">
-                      {selected.buyer?.email || "—"}
-                    </p>
-                  </div>
-                </div>
-                {selected.buyer?._id ? (
-                  <Link
-                    href={`/users?userId=${encodeURIComponent(selected.buyer._id)}&role=buyer`}
-                    className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-white/12 bg-white/[0.03] px-3 text-xs font-medium text-white/55 transition hover:border-[#00E575]/40 hover:text-[#00E575]"
-                  >
-                    Open buyer on Users
-                  </Link>
-                ) : null}
-              </div>
-
-              {/* Seller */}
-              <div className="space-y-3 border-t border-white/[0.06] pt-4">
-                <SectionLabel>Seller</SectionLabel>
-                <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-full border border-white/10 bg-white/[0.04]">
-                    <Store className="h-4 w-4 text-[#00E575]" />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-medium">
-                      {selected.seller?.storeName ||
-                        selected.seller?.name ||
-                        "—"}
-                    </p>
-                    <p className="truncate text-xs text-white/40">
-                      {selected.seller?.email || "—"}
-                    </p>
-                  </div>
-                </div>
-                {selected.seller?.isSellerSuspended ? (
-                  <Badge tone="error">Seller suspended</Badge>
-                ) : null}
-                {selected.seller?._id ? (
-                  <Link
-                    href={`/users?userId=${encodeURIComponent(selected.seller._id)}&role=seller`}
-                    className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-[#00E575]/25 bg-[#00E575]/10 px-3 text-xs font-semibold text-[#00E575] transition hover:border-[#00E575]/45"
-                  >
-                    Open seller on Users
-                  </Link>
-                ) : null}
-              </div>
-
-              {/* Ship to */}
-              <div className="space-y-3 border-t border-white/[0.06] pt-4">
-                <SectionLabel>Ship to</SectionLabel>
-                <Field label="Street">
-                  {selected.shippingAddress?.street || "—"}
-                </Field>
-                <Field label="City">
-                  {selected.shippingAddress?.city || "—"}
-                  {selected.shippingAddress?.state
-                    ? `, ${selected.shippingAddress.state}`
-                    : ""}
-                </Field>
-                <Field label="Country">
-                  {selected.shippingAddress?.country || "—"}
-                </Field>
-                <Field label="Courier">
-                  {selected.shipping?.deliveryCompany ||
-                    selected.productShipping?.courierCompany ||
-                    "—"}
-                </Field>
-                <Field label="Tracking">
-                  {selected.shipping?.trackingNumber ? (
-                    <span className="font-mono">
-                      {selected.shipping.trackingNumber}
-                    </span>
-                  ) : (
-                    "—"
-                  )}
-                </Field>
-              </div>
-
-              {/* Line items — price + region as sold */}
-              <div className="space-y-2 border-t border-white/[0.06] pt-4">
-                <SectionLabel>Line items · listed & paid</SectionLabel>
-                <p className="text-[11px] text-white/40">
-                  Unit price is locked at checkout in the product listing
-                  region.
-                </p>
-                {(selected.items || []).map((it, i) => {
-                  const img =
-                    it.image ||
-                    (typeof it.product === "object"
-                      ? it.product?.images?.[0]
-                      : undefined);
-                  const title =
-                    it.name ||
-                    (typeof it.product === "object"
-                      ? it.product?.name
-                      : undefined) ||
-                    "Item";
-                  const region = itemRegion(it, selected);
-                  const unit = itemUnitPrice(it);
-                  const qty = Math.max(1, Number(it.quantity) || 1);
-                  const line = itemLineTotal(it);
-                  const lineCur = resolveCurrency(region, currency);
-                  return (
-                    <div
-                      key={i}
-                      className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-3"
-                    >
-                      <div className="flex items-start gap-3">
+                <div className="space-y-2">
+                  {(selected.items || []).map((it, idx) => {
+                    const reg = itemRegion(it, selected);
+                    const cur = itemCurrency(it, selected);
+                    const unit = itemUnitPrice(it);
+                    const line = itemLineTotal(it);
+                    const qty = Math.max(1, Number(it.quantity) || 1);
+                    const live =
+                      typeof it.product === "object"
+                        ? Number(it.product?.price)
+                        : NaN;
+                    const liveReg =
+                      typeof it.product === "object"
+                        ? asRegionCode(it.product?.region)
+                        : "";
+                    const img =
+                      it.image ||
+                      (typeof it.product === "object"
+                        ? it.product?.images?.[0]
+                        : undefined);
+                    return (
+                      <div
+                        key={idx}
+                        className="flex gap-3 rounded-xl border border-white/10 bg-white/[0.03] p-3"
+                      >
                         <div className="h-12 w-12 shrink-0 overflow-hidden rounded-lg border border-white/10 bg-white/[0.04]">
                           {img ? (
                             // eslint-disable-next-line @next/next/no-img-element
@@ -945,131 +1008,188 @@ function OrderModal({
                               alt=""
                               className="h-full w-full object-cover"
                             />
-                          ) : (
-                            <div className="flex h-full w-full items-center justify-center">
-                              <Package className="h-4 w-4 text-white/25" />
-                            </div>
-                          )}
+                          ) : null}
                         </div>
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-sm font-medium">
-                            {title}
+                            {it.name ||
+                              (typeof it.product === "object"
+                                ? it.product?.name
+                                : "Item")}
                           </p>
-                          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                            <span className="rounded-md border border-white/12 bg-white/[0.04] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white/55">
-                              {region}
+                          <p className="mt-0.5 text-[11px] text-white/40">
+                            Qty {qty} · listed unit{" "}
+                            <span className="tabular-nums text-white/70">
+                              {fmtMoney(unit, cur)}
                             </span>
-                            <span className="text-[11px] text-white/40">
-                              Qty {qty}
+                          </p>
+                          {Number.isFinite(live) &&
+                            live > 0 &&
+                            Math.abs(live - unit) > 0.009 && (
+                              <p className="mt-0.5 text-[11px] text-white/30">
+                                Current listing{" "}
+                                {fmtMoney(
+                                  live,
+                                  currencyForRegion(liveReg) || cur
+                                )}
+                                {liveReg ? ` · ${liveReg}` : ""}
+                              </p>
+                            )}
+                          <div className="mt-1 flex flex-wrap gap-1.5">
+                            <span className="rounded border border-white/12 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-white/55">
+                              {reg}
                             </span>
-                            {it.note ? (
-                              <span className="text-[11px] text-white/35">
-                                · {it.note}
+                            <span className="rounded border border-white/12 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-white/55">
+                              {cur}
+                            </span>
+                            {reg !== "—" && (
+                              <span className="rounded border border-white/12 px-1.5 py-0.5 text-[10px] text-white/40">
+                                {regionLabel(reg)}
                               </span>
-                            ) : null}
+                            )}
                           </div>
-                          <div className="mt-2 flex flex-wrap items-baseline justify-between gap-2">
-                            <p className="text-[12px] text-white/50">
-                              Unit{" "}
-                              <span className="font-semibold tabular-nums text-[#F5F7FA]">
-                                {fmtMoney(unit, lineCur)}
-                              </span>
+                          {it.note ? (
+                            <p className="mt-1 text-[11px] text-white/35">
+                              Note: {it.note}
                             </p>
-                            <p className="text-sm font-semibold tabular-nums text-[#00E575]">
-                              {fmtMoney(line, lineCur)}
-                            </p>
-                          </div>
+                          ) : null}
+                        </div>
+                        <div className="shrink-0 text-right">
+                          <p className="text-sm font-semibold tabular-nums text-[#00E575]">
+                            {fmtMoney(line, cur)}
+                          </p>
+                          <p className="text-[10px] text-white/35">paid</p>
                         </div>
                       </div>
-                    </div>
-                  );
-                })}
-                {!selected.items?.length && (
-                  <p className="text-xs text-white/35">No line items.</p>
-                )}
-              </div>
-
-              {/* Totals */}
-              <div className="space-y-1.5 border-t border-white/[0.06] pt-4 text-sm">
-                <div className="mb-2 flex flex-wrap items-center gap-2">
-                  <span className="rounded-md border border-[#00E575]/30 bg-[#00E575]/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#00E575]">
-                    {orderRegion}
-                  </span>
-                  <span className="rounded-md border border-white/12 px-2 py-0.5 text-[10px] font-semibold uppercase text-white/50">
-                    {currency}
-                  </span>
-                  <span className="text-[11px] text-white/40">
-                    Charged at listing / settlement currency
-                  </span>
-                </div>
-                <div className="flex justify-between text-white/50">
-                  <span>Subtotal (products)</span>
-                  <span className="tabular-nums">
-                    {fmtMoney(selected.subtotal, currency)}
-                  </span>
-                </div>
-                <div className="flex justify-between text-white/50">
-                  <span>Shipping</span>
-                  <span className="tabular-nums">
-                    {fmtMoney(selected.shippingCost, currency)}
-                  </span>
-                </div>
-                <div className="flex justify-between font-semibold text-[#F5F7FA]">
-                  <span>Total paid</span>
-                  <span className="tabular-nums text-[#00E575]">
-                    {fmtMoney(selected.totalAmount, currency)}
-                  </span>
-                </div>
-                <div className="mt-2 rounded-xl border border-white/10 bg-white/[0.03] p-2.5 text-[11px] text-white/45">
-                  Platform fee 8%:{" "}
-                  <span className="font-semibold text-[#00E575]">
-                    {fmtMoney(
-                      fee?.platformFee ??
-                        Number(selected.subtotal || 0) * 0.08,
-                      currency
-                    )}
-                  </span>
-                  {" · "}
-                  Seller net:{" "}
-                  <span className="font-semibold text-[#F5F7FA]">
-                    {fmtMoney(
-                      fee?.sellerPayoutAmount ??
-                        selected.payout?.amount ??
-                        Number(selected.subtotal || 0) * 0.92 +
-                          Number(selected.shippingCost || 0),
-                      currency
-                    )}
-                  </span>
+                    );
+                  })}
+                  {!(selected.items || []).length && (
+                    <p className="text-sm text-white/40">No line items</p>
+                  )}
                 </div>
               </div>
 
-              {selected.orderStatus === "Cancelled" &&
-                selected.cancellation && (
-                  <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">
-                    <p className="font-semibold">Cancellation</p>
-                    <p className="mt-1 text-xs opacity-90">
-                      By {selected.cancellation.cancelledBy || "—"}
-                      {selected.cancellation.reasonLabel
-                        ? ` · ${selected.cancellation.reasonLabel}`
-                        : ""}
-                    </p>
-                    {selected.cancellation.refundStatus &&
-                      selected.cancellation.refundStatus !==
-                        "not_applicable" && (
-                        <p className="mt-1 text-xs">
-                          Refund: {selected.cancellation.refundStatus}
-                        </p>
-                      )}
-                  </div>
-                )}
+              <div className="space-y-3 border-t border-white/[0.06] pt-4">
+                <SectionLabel>Order flow</SectionLabel>
+                <OrderFlow order={selected} />
+              </div>
 
-              <p className="font-mono text-[11px] text-white/30">
-                ID {selected._id}
-              </p>
-              <p className="text-[11px] text-white/30">
-                Placed {fmtDate(selected.createdAt)} · Updated{" "}
-                {fmtDate(selected.updatedAt)}
-              </p>
+              <div className="space-y-3 border-t border-white/[0.06] pt-4">
+                <SectionLabel>
+                  <span className="inline-flex items-center gap-1.5">
+                    <User className="h-3 w-3" /> Buyer
+                  </span>
+                </SectionLabel>
+                <Field label="Name">
+                  {selected.buyer?.name ||
+                    selected.buyerContact?.name ||
+                    "—"}
+                </Field>
+                <Field label="Email">{selected.buyer?.email || "—"}</Field>
+                <Field label="Phone">
+                  {selected.buyer?.phone ||
+                    selected.buyerContact?.phone ||
+                    "—"}
+                </Field>
+                {selected.buyer?._id && (
+                  <Link
+                    href={`/users?userId=${encodeURIComponent(selected.buyer._id)}`}
+                    className="text-xs text-[#00E575] hover:underline"
+                  >
+                    Open buyer
+                  </Link>
+                )}
+              </div>
+
+              <div className="space-y-3 border-t border-white/[0.06] pt-4">
+                <SectionLabel>
+                  <span className="inline-flex items-center gap-1.5">
+                    <Store className="h-3 w-3" /> Seller
+                  </span>
+                </SectionLabel>
+                <Field label="Store">
+                  {selected.seller?.storeName || selected.seller?.name || "—"}
+                </Field>
+                <Field label="Email">{selected.seller?.email || "—"}</Field>
+                {selected.seller?.isSellerSuspended && (
+                  <Badge tone="error">Seller suspended</Badge>
+                )}
+                {selected.seller?._id && (
+                  <Link
+                    href={`/users?userId=${encodeURIComponent(selected.seller._id)}&role=seller`}
+                    className="text-xs text-[#00E575] hover:underline"
+                  >
+                    Open seller
+                  </Link>
+                )}
+              </div>
+
+              <div className="space-y-3 border-t border-white/[0.06] pt-4">
+                <SectionLabel>Ship to</SectionLabel>
+                <Field label="Address">
+                  {[
+                    selected.shippingAddress?.street,
+                    selected.shippingAddress?.city,
+                    selected.shippingAddress?.state,
+                    selected.shippingAddress?.zipCode,
+                    selected.shippingAddress?.country,
+                  ]
+                    .filter(Boolean)
+                    .join(", ") || "—"}
+                </Field>
+              </div>
+
+              {selected.cancellation && (
+                <div className="space-y-2 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">
+                  <p className="font-semibold">Cancellation</p>
+                  <p className="text-xs opacity-90">
+                    By {selected.cancellation.cancelledBy || "—"}
+                    {selected.cancellation.reasonLabel
+                      ? ` · ${selected.cancellation.reasonLabel}`
+                      : ""}
+                  </p>
+                  {selected.cancellation.refundStatus &&
+                    selected.cancellation.refundStatus !==
+                      "not_applicable" && (
+                      <p className="text-xs">
+                        Refund: {selected.cancellation.refundStatus}
+                      </p>
+                    )}
+                </div>
+              )}
+
+              <div className="flex flex-col gap-2 border-t border-white/[0.06] pt-4">
+                <SectionLabel>
+                  <span className="inline-flex items-center gap-1.5">
+                    <Shield className="h-3 w-3" /> Admin actions
+                  </span>
+                </SectionLabel>
+                {actionMsg && (
+                  <p className="text-xs text-white/50">{actionMsg}</p>
+                )}
+                <Button
+                  className="h-11 rounded-xl"
+                  disabled={actionBusy}
+                  onClick={onRefund}
+                >
+                  <Scale className="mr-2 h-3.5 w-3.5" />
+                  {actionBusy ? "Working…" : "Refund buyer"}
+                </Button>
+                <Button
+                  tone="ghost"
+                  className="h-11 rounded-xl border border-white/12"
+                  disabled={actionBusy}
+                  onClick={onSellerFavour}
+                >
+                  Settle seller favour
+                </Button>
+              </div>
+
+              <div className="space-y-1 border-t border-white/[0.06] pt-4 text-[11px] text-white/35">
+                <p className="font-mono">ID {selected._id}</p>
+                <p>Placed {fmtDate(selected.createdAt)}</p>
+                <p>Updated {fmtDate(selected.updatedAt)}</p>
+              </div>
             </div>
           )}
         </div>
@@ -1082,20 +1202,14 @@ function OrderModal({
 function OrdersDirectory() {
   const { getToken } = useAuth();
   const searchParams = useSearchParams();
-  const deepOrderId = searchParams.get("orderId");
+  const deepOrderId =
+    searchParams.get("orderId") || searchParams.get("id") || "";
 
   const [mounted, setMounted] = useState(false);
-  const [offline, setOffline] = useState(false);
-
-  const [status, setStatus] = useState("");
-  const [payment, setPayment] = useState("");
-  const [lifecycle, setLifecycle] = useState("");
-  const [city, setCity] = useState("");
-  const [sort, setSort] = useState("newest");
-  const [q, setQ] = useState("");
-  const [view, setView] = useState<"list" | "grid">("list");
-
   const [items, setItems] = useState<OrderRow[]>([]);
+  const [page, setPage] = useState(1);
+  const [pages, setPages] = useState(1);
+  const [total, setTotal] = useState(0);
   const [counts, setCounts] = useState<Counts>({
     all: 0,
     Preparing: 0,
@@ -1103,19 +1217,23 @@ function OrdersDirectory() {
     Delivered: 0,
     Cancelled: 0,
   });
-  const [page, setPage] = useState(1);
-  const [pages, setPages] = useState(1);
-  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [stale, setStale] = useState(false);
-  const [actionBusy, setActionBusy] = useState(false);
-  const [actionMsg, setActionMsg] = useState("");
-
+  const [q, setQ] = useState("");
+  const [status, setStatus] = useState("");
+  const [payment, setPayment] = useState("");
+  const [lifecycle, setLifecycle] = useState("");
+  const [city, setCity] = useState("");
+  const [sort, setSort] = useState("newest");
+  const [view, setView] = useState<"list" | "grid">("list");
   const [openId, setOpenId] = useState<string | null>(null);
+  const [modalOpen, setModalOpen] = useState(false);
   const [selected, setSelected] = useState<OrderRow | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
-  const [modalOpen, setModalOpen] = useState(false);
+  const [actionBusy, setActionBusy] = useState(false);
+  const [actionMsg, setActionMsg] = useState("");
+  const [online, setOnline] = useState(true);
+  const [stale, setStale] = useState(false);
 
   const cacheRef = useRef<{
     items: OrderRow[];
@@ -1126,25 +1244,25 @@ function OrdersDirectory() {
   } | null>(null);
   const deepOpened = useRef(false);
 
-  const showOffline = mounted && offline;
+  const showOffline = !online;
+
+  useEffect(() => setMounted(true), []);
 
   useEffect(() => {
-    setMounted(true);
-    const sync = () =>
-      setOffline(typeof navigator !== "undefined" && !navigator.onLine);
-    sync();
-    window.addEventListener("online", sync);
-    window.addEventListener("offline", sync);
+    const on = () => setOnline(true);
+    const off = () => setOnline(false);
+    setOnline(typeof navigator !== "undefined" ? navigator.onLine : true);
+    window.addEventListener("online", on);
+    window.addEventListener("offline", off);
     return () => {
-      window.removeEventListener("online", sync);
-      window.removeEventListener("offline", sync);
+      window.removeEventListener("online", on);
+      window.removeEventListener("offline", off);
     };
   }, []);
 
   const load = useCallback(
     async (p = 1) => {
       if (typeof navigator !== "undefined" && !navigator.onLine) {
-        setOffline(true);
         if (cacheRef.current) {
           setItems(cacheRef.current.items);
           setCounts(cacheRef.current.counts);
@@ -1153,7 +1271,7 @@ function OrdersDirectory() {
           setPage(cacheRef.current.page);
           setStale(true);
           setError(
-            "You’re offline. Showing the last loaded orders — reconnect to refresh."
+            "You’re offline — showing last successful load. Reconnect to refresh."
           );
           setLoading(false);
           return;
@@ -1185,22 +1303,25 @@ function OrdersDirectory() {
         if (q.trim()) params.set("q", q.trim());
 
         const json = await adminFetch<any>(`/admin/orders?${params}`, token);
-        const nextItems: OrderRow[] = json.data || [];
-        const nextTotal = json.pagination?.total || 0;
-        const nextPages = json.pagination?.pages || 1;
-        const nextPage = json.pagination?.page || p;
+        const nextItems: OrderRow[] = parseOrdersList(json);
+        const nextTotal = Number(
+          json?.pagination?.total ?? json?.total ?? nextItems.length
+        );
+        const nextPages = Number(json?.pagination?.pages || 1);
+        const nextPage = Number(json?.pagination?.page || p);
 
-        const nextCounts: Counts = json.counts || {
+        const nextCounts: Counts = json?.counts || {
           all: nextTotal,
           Preparing: nextItems.filter((o) => o.orderStatus === "Preparing")
             .length,
-          Shipped: nextItems.filter((o) => o.orderStatus === "Shipped").length,
+          Shipped: nextItems.filter((o) => o.orderStatus === "Shipped")
+            .length,
           Delivered: nextItems.filter((o) => o.orderStatus === "Delivered")
             .length,
           Cancelled: nextItems.filter((o) => o.orderStatus === "Cancelled")
             .length,
         };
-        if (!json.counts) nextCounts.all = nextTotal;
+        if (!json?.counts) nextCounts.all = nextTotal;
 
         setItems(nextItems);
         setCounts(nextCounts);
@@ -1215,7 +1336,11 @@ function OrdersDirectory() {
           pages: nextPages,
           page: nextPage,
         };
-      } catch (e: any) {
+      } catch (e: unknown) {
+        const msg =
+          e && typeof e === "object" && "message" in e
+            ? String((e as { message?: string }).message)
+            : "Failed to load orders";
         if (cacheRef.current) {
           setItems(cacheRef.current.items);
           setCounts(cacheRef.current.counts);
@@ -1223,13 +1348,9 @@ function OrdersDirectory() {
           setPages(cacheRef.current.pages);
           setPage(cacheRef.current.page);
           setStale(true);
-          setError(
-            e?.message
-              ? `${e.message} — showing last successful load.`
-              : "Request failed — showing last successful load."
-          );
+          setError(`${msg} — showing last successful load.`);
         } else {
-          setError(e?.message || "Failed to load orders");
+          setError(msg);
           setItems([]);
         }
       } finally {
@@ -1248,18 +1369,21 @@ function OrdersDirectory() {
   const openModal = useCallback(
     async (row: OrderRow | { _id: string }) => {
       setOpenId(row._id);
-      if ("orderNumber" in row) setSelected(row as OrderRow);
+      if ("orderNumber" in row || "items" in row) {
+        setSelected(row as OrderRow);
+      }
       setModalOpen(true);
       setActionMsg("");
       if (showOffline) return;
       try {
         setDetailLoading(true);
         const token = await getToken();
-        const json = await adminFetch<{ data: OrderRow }>(
+        const json = await adminFetch<any>(
           `/admin/orders/${row._id}`,
           token
         );
-        setSelected(json.data);
+        const detail = parseOrderDetail(json);
+        if (detail && detail._id) setSelected(detail);
       } catch {
         /* keep list row */
       } finally {
@@ -1293,15 +1417,30 @@ function OrdersDirectory() {
       setActionBusy(true);
       setActionMsg("");
       const token = await getToken();
-      await adminFetch(path, token, {
-        method: "POST",
-        body: JSON.stringify(body || {}),
-      });
+      try {
+        await adminFetch(path, token, {
+          method: "POST",
+          body: JSON.stringify(body || {}),
+        });
+      } catch {
+        const alt =
+          path.includes("/refund")
+            ? `/payments/admin/disputes/${selected._id}/refund-buyer`
+            : `/payments/admin/disputes/${selected._id}/settle-seller`;
+        await adminFetch(alt, token, {
+          method: "POST",
+          body: JSON.stringify(body || {}),
+        });
+      }
       setActionMsg("Action completed");
       await openModal(selected);
       await load(page);
-    } catch (e: any) {
-      setActionMsg(e?.message || "Action failed");
+    } catch (e: unknown) {
+      const msg =
+        e && typeof e === "object" && "message" in e
+          ? String((e as { message?: string }).message)
+          : "Action failed";
+      setActionMsg(msg);
     } finally {
       setActionBusy(false);
     }
@@ -1325,10 +1464,10 @@ function OrdersDirectory() {
         );
       }
       if (sort === "totalHigh") {
-        return Number(b.totalAmount || 0) - Number(a.totalAmount || 0);
+        return chargedTotal(b) - chargedTotal(a);
       }
       if (sort === "totalLow") {
-        return Number(a.totalAmount || 0) - Number(b.totalAmount || 0);
+        return chargedTotal(a) - chargedTotal(b);
       }
       return (
         new Date(b.createdAt || 0).getTime() -
@@ -1365,8 +1504,8 @@ function OrdersDirectory() {
               Orders
             </h1>
             <p className="mt-2 max-w-xl text-[13.5px] text-white/50">
-              PLZ# codes, listing region, locked prices, 8% fee, payouts,
-              disputes and refunds.
+              Amounts are frozen at checkout in the listing region currency
+              (US → USD, DE → EUR, NG → NGN). Nothing is live-converted.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -1549,6 +1688,7 @@ function OrdersDirectory() {
             const plz = formatPlz(o);
             const active = openId === o._id && modalOpen;
             const cur = orderCurrency(o);
+            const reg = orderRegion(o);
             return (
               <button
                 key={o._id}
@@ -1584,14 +1724,17 @@ function OrdersDirectory() {
                 <div className="mt-3 flex items-center justify-between gap-2 text-xs text-white/40">
                   <span className="flex min-w-0 items-center gap-1.5">
                     <span className="shrink-0 rounded border border-white/12 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-white/55">
-                      {o.region || "—"}
+                      {reg}
                     </span>
                     <span className="truncate">
                       {o.shippingAddress?.city || "—"}
                     </span>
                   </span>
-                  <span className="shrink-0 font-semibold tabular-nums text-[#F5F7FA]">
-                    {fmtMoney(o.totalAmount, cur)}
+                  <span className="shrink-0 text-right">
+                    <span className="block font-semibold tabular-nums text-[#F5F7FA]">
+                      {fmtMoney(chargedTotal(o), cur)}
+                    </span>
+                    <span className="text-[10px] text-white/35">{cur}</span>
                   </span>
                 </div>
               </button>
@@ -1607,7 +1750,7 @@ function OrdersDirectory() {
                 <th className="px-4 py-3 font-semibold">Buyer</th>
                 <th className="px-4 py-3 font-semibold">Seller</th>
                 <th className="px-4 py-3 font-semibold">Ship to</th>
-                <th className="px-4 py-3 font-semibold">Region</th>
+                <th className="px-4 py-3 font-semibold">Listed / paid</th>
                 <th className="px-4 py-3 font-semibold">Status</th>
                 <th className="px-4 py-3 font-semibold">Payment</th>
                 <th className="px-4 py-3 font-semibold">Lifecycle</th>
@@ -1620,6 +1763,7 @@ function OrdersDirectory() {
                 const plz = formatPlz(o);
                 const active = openId === o._id && modalOpen;
                 const cur = orderCurrency(o);
+                const reg = orderRegion(o);
                 return (
                   <tr
                     key={o._id}
@@ -1656,8 +1800,12 @@ function OrdersDirectory() {
                     </td>
                     <td className="px-4 py-3">
                       <span className="rounded-md border border-white/12 bg-white/[0.04] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white/55">
-                        {o.region || "—"}
+                        {reg}
                       </span>
+                      <p className="mt-1 text-[10px] text-white/35">
+                        {cur}
+                        {reg !== "—" ? ` · ${regionLabel(reg)}` : ""}
+                      </p>
                     </td>
                     <td className="px-4 py-3">
                       <Badge tone={statusTone(o.orderStatus)}>
@@ -1674,8 +1822,11 @@ function OrdersDirectory() {
                         {lifecycleLabel(o.paymentLifecycle)}
                       </Badge>
                     </td>
-                    <td className="px-4 py-3 font-semibold tabular-nums">
-                      {fmtMoney(o.totalAmount, cur)}
+                    <td className="px-4 py-3">
+                      <p className="font-semibold tabular-nums">
+                        {fmtMoney(chargedTotal(o), cur)}
+                      </p>
+                      <p className="text-[10px] text-white/35">{cur}</p>
                     </td>
                     <td className="px-4 py-3 text-xs text-white/45">
                       {fmtDate(o.createdAt)}

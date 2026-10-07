@@ -2,14 +2,12 @@ import crypto from "crypto";
 import mongoose from "mongoose";
 import Order from "../models/Order.js";
 import Product from "../models/Products.js";
-import User from "../models/User.js";
 import Payment from "../models/Payment.js";
 import PaymentEvent from "../models/PaymentEvent.js";
 import {
   calculateSellerPayout,
   currencyForRegion,
   toPaystackAmount,
-  fromPaystackAmount,
   PLAZORE_TRANSACTION_FEE_RATE,
 } from "../config/payment.js";
 import {
@@ -23,7 +21,8 @@ import {
 import { writePaymentAudit } from "../utils/paymentAudit.js";
 import { sendNotification } from "../utils/sendNotification.js";
 
-function generateReference(prefix = "PLZ"): string {
+/** Exported — paymentController imports this for refund refs. */
+export function generateReference(prefix = "PLZ"): string {
   const ts = Date.now().toString(36).toUpperCase();
   const rnd = crypto.randomBytes(4).toString("hex").toUpperCase();
   return `${prefix}_${ts}_${rnd}`;
@@ -38,11 +37,6 @@ function resolveListingRegion(product: any): string {
   return raw || "NG";
 }
 
-/**
- * Recalculate line items from Product documents — NEVER trust client prices.
- * Freezes listing region + currency + unit price per line.
- * Returns items grouped by seller with server prices and shipping.
- */
 export async function buildServerSideOrderItems(
   rawItems: Array<{ productId: string; quantity: number; note?: string }>,
   buyerId: string
@@ -63,10 +57,9 @@ export async function buildServerSideOrderItems(
       );
     }
     if (product.stock < item.quantity) {
-      throw Object.assign(
-        new Error(`Insufficient stock for ${product.name}`),
-        { statusCode: 400 }
-      );
+      throw Object.assign(new Error(`Insufficient stock for ${product.name}`), {
+        statusCode: 400,
+      });
     }
 
     const sellerId = product.seller.toString();
@@ -74,7 +67,6 @@ export async function buildServerSideOrderItems(
     const listingRegion = resolveListingRegion(product);
     const listingCurrency = currencyForRegion(listingRegion);
 
-    // SERVER PRICE ONLY — in listing currency of product.region
     const unitPrice = Number(product.price);
     if (!Number.isFinite(unitPrice) || unitPrice < 0) {
       throw Object.assign(
@@ -128,10 +120,6 @@ export async function buildServerSideOrderItems(
   return { itemsBySeller, shippingBySeller };
 }
 
-/**
- * Create order(s) with PENDING_PAYMENT — reserve stock.
- * Freezes region + currency on order and feeBreakdown for admin/Paystack.
- */
 export async function createPendingOrders(params: {
   buyer: any;
   shippingAddress: any;
@@ -164,6 +152,7 @@ export async function createPendingOrders(params: {
     const currency =
       String(sellerItems[0]?.currency || "").trim().toUpperCase() ||
       currencyForRegion(region);
+
     const fees = calculateSellerPayout(subtotal, shippingCost);
 
     const order = await Order.create({
@@ -219,10 +208,6 @@ export async function createPendingOrders(params: {
   return createdOrders;
 }
 
-/**
- * Initialize Paystack payment for a single order.
- * Charges in order.currency (listing currency of the product region).
- */
 export async function initializePaymentForOrder(params: {
   orderId: string;
   buyer: any;
@@ -264,22 +249,19 @@ export async function initializePaymentForOrder(params: {
   const fb = (order as any).feeBreakdown || {};
   const amount = Number(order.totalAmount);
   const region = String((order as any).region || "NG").trim().toUpperCase();
-  // Prefer frozen order.currency → feeBreakdown → region map
   const currency = String(
-    (order as any).currency ||
-      fb.currency ||
-      currencyForRegion(region)
+    (order as any).currency || fb.currency || currencyForRegion(region)
   )
     .trim()
     .toUpperCase();
 
-  const platformFee =
-    fb.platformFee ??
-    calculateSellerPayout(order.subtotal, order.shippingCost).platformFee;
+  const fallbackFees = calculateSellerPayout(
+    order.subtotal,
+    order.shippingCost
+  );
+  const platformFee = fb.platformFee ?? fallbackFees.platformFee;
   const sellerPayoutAmount =
-    fb.sellerPayoutAmount ??
-    calculateSellerPayout(order.subtotal, order.shippingCost)
-      .sellerPayoutAmount;
+    fb.sellerPayoutAmount ?? fallbackFees.sellerPayoutAmount;
 
   const reference = generateReference("PLZPAY");
 
@@ -344,7 +326,6 @@ export async function initializePaymentForOrder(params: {
 
   (order as any).paymentLifecycle = "PAYMENT_PROCESSING";
   (order as any).paymentRef = payment._id;
-  // Keep frozen currency on order for admin / reports
   if (!(order as any).currency) {
     (order as any).currency = currency;
   }
@@ -377,10 +358,6 @@ export async function initializePaymentForOrder(params: {
   };
 }
 
-/**
- * Verify a payment by reference (API poll from frontend after callback).
- * Idempotent. Enforces amount + currency match against frozen order currency.
- */
 export async function verifyPaymentByReference(
   reference: string,
   source: "api" | "webhook" | "manual" = "api"
@@ -425,10 +402,7 @@ export async function verifyPaymentByReference(
       action: "payment.verify_currency_mismatch",
       actorType: source === "webhook" ? "webhook" : "system",
       reference,
-      meta: {
-        expected: payment.currency,
-        got: data.currency,
-      },
+      meta: { expected: payment.currency, got: data.currency },
     });
     throw Object.assign(new Error("Payment currency mismatch"), {
       statusCode: 400,
@@ -555,9 +529,6 @@ async function markPaymentSuccess(
   return { payment, order, alreadyVerified: false };
 }
 
-/**
- * Process charge.success from webhook (idempotent via PaymentEvent).
- */
 export async function handleChargeSuccessWebhook(
   eventId: string,
   payload: any,
@@ -614,5 +585,3 @@ export async function handleChargeSuccessWebhook(
     throw err;
   }
 }
-
-export { generateReference, fromPaystackAmount };

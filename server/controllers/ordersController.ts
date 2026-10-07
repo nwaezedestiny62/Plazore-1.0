@@ -34,17 +34,13 @@ function hasShipFromLocation(product: any, seller: any): boolean {
 
 function resolveListingRegion(product: any): string {
   const raw = String(
-    (product as any).region ||
-      (product as any).marketplaceRegion ||
-      ""
+    (product as any).region || (product as any).marketplaceRegion || ""
   )
     .trim()
     .toUpperCase();
   return raw || "NG";
 }
 
-// ====================== CREATE ORDER ======================
-// Prefer POST /api/payments/checkout for Paystack.
 export const createOrder = async (req: Request, res: Response) => {
   try {
     const user = getUser(req);
@@ -134,7 +130,6 @@ export const createOrder = async (req: Request, res: Response) => {
       const listingRegion = resolveListingRegion(product);
       const listingCurrency = currencyForRegion(listingRegion);
 
-      // SERVER PRICE ONLY — never trust client item.price
       const unitPrice = Number(product.price);
       if (!Number.isFinite(unitPrice) || unitPrice < 0) {
         return res.status(400).json({
@@ -199,11 +194,13 @@ export const createOrder = async (req: Request, res: Response) => {
         0
       );
       const shippingCost = snap?.deliveryFee || 0;
-      const region = String(sellerItems[0]?.region || "NG").trim().toUpperCase();
+      const region = String(sellerItems[0]?.region || "NG")
+        .trim()
+        .toUpperCase();
       const currency =
         String(sellerItems[0]?.currency || "").trim().toUpperCase() ||
         currencyForRegion(region);
-      const fees = calculateSellerPayout(subtotal, shippingCost);
+      const fees = calculateSellerPayout(subtotal, shippingCost, currency);
 
       const order = await Order.create({
         buyer: user._id,
@@ -305,23 +302,19 @@ export const createOrder = async (req: Request, res: Response) => {
   }
 };
 
-// ====================== BUYER: Get my orders ======================
 export const getMyOrders = async (req: Request, res: Response) => {
   try {
     const user = getUser(req);
-
     const orders = await Order.find({ buyer: user._id })
       .populate("seller", "name storeName storeLogo")
       .populate("items.product", "name images region price")
       .sort({ createdAt: -1 });
-
     res.json({ success: true, data: orders });
   } catch (error: any) {
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// ====================== Get single order ======================
 export const getOrder = async (req: Request, res: Response) => {
   try {
     const user = getUser(req);
@@ -370,23 +363,19 @@ export const getOrder = async (req: Request, res: Response) => {
   }
 };
 
-// ====================== SELLER: Get my orders ======================
 export const getSellerOrders = async (req: Request, res: Response) => {
   try {
     const user = getUser(req);
-
     const orders = await Order.find({ seller: user._id })
       .populate("buyer", "name phone")
       .populate("items.product", "name images region price")
       .sort({ createdAt: -1 });
-
     res.json({ success: true, data: orders });
   } catch (error: any) {
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// ====================== SELLER: Ship order ======================
 export const shipOrder = async (req: Request, res: Response) => {
   try {
     const user = getUser(req);
@@ -405,7 +394,6 @@ export const shipOrder = async (req: Request, res: Response) => {
     }
 
     const order = await Order.findById(id);
-
     if (!order) {
       return res
         .status(404)
@@ -476,7 +464,6 @@ export const shipOrder = async (req: Request, res: Response) => {
   }
 };
 
-// ====================== SELLER: Mark as Delivered ======================
 export const deliverOrder = async (req: Request, res: Response) => {
   try {
     const user = getUser(req);
@@ -489,7 +476,6 @@ export const deliverOrder = async (req: Request, res: Response) => {
     }
 
     const order = await Order.findById(id);
-
     if (!order) {
       return res
         .status(404)
@@ -514,7 +500,6 @@ export const deliverOrder = async (req: Request, res: Response) => {
 
     order.orderStatus = "Delivered";
     order.deliveredAt = new Date();
-
     (order as any).buyerConfirmation = {
       status: "pending",
       confirmedAt: undefined,
@@ -530,7 +515,6 @@ export const deliverOrder = async (req: Request, res: Response) => {
       blockedReason: "",
     };
     (order as any).paymentLifecycle = "DELIVERED";
-
     await order.save();
 
     await sendNotification({
@@ -548,18 +532,15 @@ export const deliverOrder = async (req: Request, res: Response) => {
   }
 };
 
-// ====================== ADMIN: Get all orders ======================
 export const getAllOrders = async (req: Request, res: Response) => {
   try {
     const { page = 1, limit = 20, status, region, currency } = req.query;
     const query: any = {};
-
     if (status) query.orderStatus = status;
     if (region) query.region = String(region).toUpperCase();
     if (currency) query.currency = String(currency).toUpperCase();
 
     const total = await Order.countDocuments(query);
-
     const orders = await Order.find(query)
       .populate("buyer", "name email phone")
       .populate("seller", "name storeName")
@@ -582,7 +563,6 @@ export const getAllOrders = async (req: Request, res: Response) => {
   }
 };
 
-// ====================== BUYER: Confirm delivery ======================
 export const confirmDelivery = async (req: Request, res: Response) => {
   try {
     const user = getUser(req);
@@ -653,10 +633,15 @@ export const confirmDelivery = async (req: Request, res: Response) => {
       });
     }
 
+    const cur =
+      String((order as any).feeBreakdown?.currency || "").toUpperCase() ||
+      String((order as any).currency || "").toUpperCase() ||
+      currencyForRegion(String((order as any).region || "NG"));
+
     const fees =
       (order as any).feeBreakdown?.sellerPayoutAmount != null
         ? (order as any).feeBreakdown
-        : calculateSellerPayout(order.subtotal, order.shippingCost);
+        : calculateSellerPayout(order.subtotal, order.shippingCost, cur);
 
     (order as any).buyerConfirmation = {
       ...(order as any).buyerConfirmation,
@@ -674,7 +659,6 @@ export const confirmDelivery = async (req: Request, res: Response) => {
       platformFee: fees.platformFee,
     };
     (order as any).paymentLifecycle = "DELIVERY_CONFIRMED";
-
     await order.save();
 
     await sendNotification({
@@ -692,7 +676,6 @@ export const confirmDelivery = async (req: Request, res: Response) => {
   }
 };
 
-// ====================== BUYER: Report delivery issue ======================
 export const reportDeliveryIssue = async (req: Request, res: Response) => {
   try {
     const user = getUser(req);
@@ -754,7 +737,6 @@ export const reportDeliveryIssue = async (req: Request, res: Response) => {
       blockedReason: "Buyer reported a delivery issue",
     };
     (order as any).paymentLifecycle = "DISPUTED";
-
     await order.save();
 
     res.json({ success: true, data: order });
@@ -763,7 +745,6 @@ export const reportDeliveryIssue = async (req: Request, res: Response) => {
   }
 };
 
-// ====================== SELLER: Cancel order ======================
 export const cancelOrderBySeller = async (req: Request, res: Response) => {
   try {
     const user = getUser(req);
@@ -796,7 +777,6 @@ export const cancelOrderBySeller = async (req: Request, res: Response) => {
     }
 
     const order = await Order.findById(id);
-
     if (!order) {
       return res
         .status(404)

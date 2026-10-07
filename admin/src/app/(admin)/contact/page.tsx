@@ -6,7 +6,6 @@ import { useSearchParams } from "next/navigation";
 import {
   useCallback,
   useEffect,
-  useMemo,
   useRef,
   useState,
   type ReactNode,
@@ -41,6 +40,41 @@ const EXPECTED_PASSWORD =
 const Z_MODAL = 9999;
 
 type EnvKind = "development" | "production" | "unknown";
+
+type RelatedOrder = {
+  _id?: string;
+  orderNumber?: string;
+  orderStatus?: string;
+  totalAmount?: number;
+  subtotal?: number;
+  shippingCost?: number;
+  paymentStatus?: string;
+  paymentLifecycle?: string;
+  region?: string;
+  currency?: string;
+  feeBreakdown?: {
+    currency?: string;
+    region?: string;
+    platformFee?: number;
+    sellerPayoutAmount?: number;
+    grossAmount?: number;
+    subtotal?: number;
+    shippingCost?: number;
+  };
+  items?: Array<{ region?: string; currency?: string; price?: number }>;
+  deliveredAt?: string;
+  buyerConfirmation?: {
+    status?: "none" | "pending" | "confirmed" | "issue_reported";
+    confirmedAt?: string;
+    issueReportedAt?: string;
+  };
+  payout?: {
+    status?: string;
+    eligibleAt?: string;
+    blockedReason?: string;
+    amount?: number;
+  };
+};
 
 type ContactRow = {
   _id: string;
@@ -77,25 +111,9 @@ type ContactRow = {
     name?: string;
     storeName?: string;
     email?: string;
+    marketplaceRegion?: string;
   };
-  relatedOrder?: {
-    _id?: string;
-    orderNumber?: string;
-    orderStatus?: string;
-    totalAmount?: number;
-    paymentStatus?: string;
-    deliveredAt?: string;
-    buyerConfirmation?: {
-      status?: "none" | "pending" | "confirmed" | "issue_reported";
-      confirmedAt?: string;
-      issueReportedAt?: string;
-    };
-    payout?: {
-      status?: string;
-      eligibleAt?: string;
-      blockedReason?: string;
-    };
-  };
+  relatedOrder?: RelatedOrder;
   assignedAdmin?: { _id?: string; name?: string; email?: string };
   messages?: Array<{
     _id?: string;
@@ -128,6 +146,58 @@ type Counts = {
   high: number;
 };
 
+type ThreadMsg = {
+  who: string;
+  body: string;
+  at?: string;
+  side: "user" | "admin";
+};
+
+/** Exact match of server/config/payment.ts */
+const REGION_TO_CURRENCY: Record<string, string> = {
+  NG: "NGN",
+  GH: "GHS",
+  BJ: "XOF",
+  TG: "XOF",
+  CI: "XOF",
+  SN: "XOF",
+  CM: "XAF",
+  KE: "KES",
+  ZA: "ZAR",
+  EG: "EGP",
+  UG: "UGX",
+  TZ: "TZS",
+  RW: "RWF",
+  US: "USD",
+  CA: "CAD",
+  GB: "GBP",
+  UK: "GBP",
+  DE: "EUR",
+  FR: "EUR",
+  NL: "EUR",
+  IT: "EUR",
+  ES: "EUR",
+  EU: "EUR",
+  AU: "AUD",
+};
+
+const KNOWN_CURRENCIES = new Set(Object.values(REGION_TO_CURRENCY));
+
+const REGION_NAME: Record<string, string> = {
+  NG: "Nigeria",
+  GH: "Ghana",
+  US: "United States",
+  GB: "United Kingdom",
+  UK: "United Kingdom",
+  DE: "Germany",
+  FR: "France",
+  CA: "Canada",
+  KE: "Kenya",
+  ZA: "South Africa",
+  EU: "Europe",
+  AU: "Australia",
+};
+
 function detectEnvFromApi(): EnvKind {
   const base =
     process.env.NEXT_PUBLIC_API_URL ||
@@ -147,6 +217,100 @@ function detectEnvFromApi(): EnvKind {
   return "unknown";
 }
 
+function norm(s?: string | null) {
+  return String(s || "")
+    .trim()
+    .toUpperCase();
+}
+
+function isIsoCurrency(s?: string | null) {
+  const v = norm(s);
+  return v.length === 3 && /^[A-Z]{3}$/.test(v);
+}
+
+function currencyForRegion(region?: string | null): string {
+  const key = norm(region);
+  if (!key) return "";
+  if (REGION_TO_CURRENCY[key]) return REGION_TO_CURRENCY[key];
+  if (KNOWN_CURRENCIES.has(key)) return key;
+  const base = key.split(/[-_]/)[0];
+  if (REGION_TO_CURRENCY[base]) return REGION_TO_CURRENCY[base];
+  if (KNOWN_CURRENCIES.has(base)) return base;
+  return "";
+}
+
+function asRegionCode(raw?: string | null): string {
+  const key = norm(raw);
+  if (!key) return "";
+  if (REGION_TO_CURRENCY[key]) return key;
+  const base = key.split(/[-_]/)[0];
+  if (REGION_TO_CURRENCY[base]) return base;
+  if (key.length === 2) return key;
+  return "";
+}
+
+function pickCurrency(...cands: Array<string | undefined | null>): string {
+  for (const c of cands) {
+    const v = norm(c);
+    if (!v) continue;
+    if (REGION_TO_CURRENCY[v]) return REGION_TO_CURRENCY[v];
+    if (isIsoCurrency(v)) return v;
+  }
+  return "";
+}
+
+function orderRegion(o?: RelatedOrder | null): string {
+  if (!o) return "—";
+  return (
+    asRegionCode(o.feeBreakdown?.region) ||
+    asRegionCode(o.region) ||
+    asRegionCode(o.items?.[0]?.region) ||
+    "—"
+  );
+}
+
+/** Frozen checkout currency — never live FX. */
+function orderCurrency(o?: RelatedOrder | null): string {
+  if (!o) return "NGN";
+  const frozen = pickCurrency(
+    o.feeBreakdown?.currency,
+    o.currency,
+    o.items?.[0]?.currency
+  );
+  if (frozen) return frozen;
+  const mapped = currencyForRegion(orderRegion(o));
+  if (mapped) return mapped;
+  return "NGN";
+}
+
+function regionLabel(code?: string) {
+  const k = asRegionCode(code) || norm(code);
+  if (!k || k === "—") return "";
+  return REGION_NAME[k] || "";
+}
+
+function fmtMoney(n?: number, currency = "NGN") {
+  const v = Number(n || 0);
+  const cur =
+    pickCurrency(currency) || currencyForRegion(currency) || "NGN";
+  try {
+    return new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency: cur,
+      maximumFractionDigits: 2,
+    }).format(v);
+  } catch {
+    return `${v.toLocaleString()} ${cur}`;
+  }
+}
+
+function chargedTotal(o?: RelatedOrder | null) {
+  if (!o) return 0;
+  const g = Number(o.feeBreakdown?.grossAmount);
+  if (Number.isFinite(g) && g > 0) return g;
+  return Number(o.totalAmount || 0);
+}
+
 function fmt(d?: string) {
   if (!d) return "—";
   try {
@@ -156,8 +320,28 @@ function fmt(d?: string) {
   }
 }
 
+function parseContactDetail(json: unknown): ContactRow | null {
+  if (!json || typeof json !== "object") return null;
+  const body = json as Record<string, unknown>;
+  if (typeof body._id === "string") return body as unknown as ContactRow;
+  const data = body.data;
+  if (data && typeof data === "object" && !Array.isArray(data)) {
+    const d = data as Record<string, unknown>;
+    if (typeof d._id === "string") return d as unknown as ContactRow;
+  }
+  return null;
+}
+
+function parseContactsList(json: any): ContactRow[] {
+  if (Array.isArray(json?.data)) return json.data;
+  if (Array.isArray(json?.contacts)) return json.contacts;
+  if (Array.isArray(json?.items)) return json.items;
+  if (Array.isArray(json)) return json;
+  return [];
+}
+
 function statusTone(
-  s?: string,
+  s?: string
 ): "green" | "error" | "blue" | "warn" | "neutral" {
   if (s === "resolved") return "green";
   if (s === "closed") return "neutral";
@@ -172,6 +356,7 @@ function isDeliveryIssue(row: ContactRow) {
   return (
     row.contextType === "order" ||
     row.category === "delivery" ||
+    row.category === "order_payment" ||
     !!row.relatedOrder
   );
 }
@@ -197,7 +382,7 @@ function DarkSelect({
       style={{ colorScheme: "dark" }}
       className={cn(
         "h-10 w-full rounded-xl border border-white/12 bg-[#14181F] px-3 text-[13px] text-[#F5F7FA] outline-none focus:border-[#00E575]/40 disabled:opacity-50",
-        className,
+        className
       )}
     >
       {children}
@@ -277,7 +462,7 @@ function ContactsGate({ children }: { children: ReactNode }) {
         <div
           className={cn(
             "rounded-2xl border border-white/10 bg-[#0E1116]/95 p-6 sm:p-8",
-            shake && "animate-[plazore-shake_0.4s_ease-in-out]",
+            shake && "animate-[plazore-shake_0.4s_ease-in-out]"
           )}
         >
           <div className="h-px bg-gradient-to-r from-[#00E575] via-[#14B8A6] to-[#3B82F6]" />
@@ -334,6 +519,7 @@ function ContactModal({
   confStatus,
   payoutStatus,
   isIssueOpen,
+  actionMsg,
   onPatch,
   onResolveDelivery,
 }: {
@@ -349,14 +535,15 @@ function ContactModal({
   resolveBusy: boolean;
   showOffline: boolean;
   canReply: boolean;
-  thread: Array<{ who: string; body: string; at?: string; side: "user" | "admin" }>;
-  order: ContactRow["relatedOrder"];
+  thread: ThreadMsg[];
+  order: RelatedOrder | undefined;
   confStatus?: string;
   payoutStatus?: string;
   isIssueOpen: boolean;
+  actionMsg: string;
   onPatch: (body: Record<string, unknown>) => void;
   onResolveDelivery: (
-    action: "refund_buyer" | "seller_favour" | "authorize_payout",
+    action: "refund_buyer" | "seller_favour" | "authorize_payout"
   ) => void;
 }) {
   const [mounted, setMounted] = useState(false);
@@ -390,11 +577,15 @@ function ContactModal({
 
   if (!mounted) return null;
 
+  const cur = orderCurrency(order);
+  const listingReg = orderRegion(order);
+  const country = regionLabel(listingReg);
+
   return createPortal(
     <div
       className={cn(
         "flex items-end justify-center sm:items-center sm:p-6",
-        open ? "pointer-events-auto" : "pointer-events-none",
+        open ? "pointer-events-auto" : "pointer-events-none"
       )}
       style={{ position: "fixed", inset: 0, zIndex: Z_MODAL }}
       aria-hidden={!open}
@@ -405,19 +596,19 @@ function ContactModal({
         onClick={onClose}
         className={cn(
           "absolute inset-0 bg-black/70 transition-opacity duration-300",
-          open ? "opacity-100" : "opacity-0",
+          open ? "opacity-100" : "opacity-0"
         )}
       />
       <div
         role="dialog"
         aria-modal="true"
         className={cn(
-          "relative z-10 flex w-full max-w-lg flex-col max-h-[min(92dvh,920px)]",
+          "relative z-10 flex max-h-[min(92dvh,920px)] w-full max-w-lg flex-col",
           "rounded-t-3xl border border-white/10 bg-[#0A0D12] shadow-[0_40px_100px_rgba(0,0,0,0.7)] sm:rounded-3xl",
           "transition-all duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]",
           open
             ? "translate-y-0 scale-100 opacity-100"
-            : "translate-y-10 scale-[0.97] opacity-0",
+            : "translate-y-10 scale-[0.97] opacity-0"
         )}
       >
         <div className="h-[2px] shrink-0 bg-gradient-to-r from-[#00E575] via-[#14B8A6] to-[#3B82F6]" />
@@ -548,7 +739,7 @@ function ContactModal({
                       {selected.relatedOrder._id && (
                         <div>
                           <Link
-                            href={`/orders?q=${encodeURIComponent(selected.relatedOrder.orderNumber || selected.relatedOrder._id)}`}
+                            href={`/orders?orderId=${encodeURIComponent(selected.relatedOrder._id)}`}
                             className="text-xs text-[#00E575] hover:underline"
                           >
                             Open order
@@ -565,7 +756,7 @@ function ContactModal({
                   <SectionLabel>Delivery confirmation & payout</SectionLabel>
 
                   {order ? (
-                    <div className="space-y-2 rounded-xl border border-white/[0.07] bg-white/[0.03] p-3 text-xs">
+                    <div className="space-y-3 rounded-xl border border-white/[0.07] bg-white/[0.03] p-3">
                       <div className="flex flex-wrap gap-2">
                         <Badge tone="neutral">
                           Status: {order.orderStatus || "—"}
@@ -595,13 +786,44 @@ function ContactModal({
                         >
                           Payout: {payoutStatus || "—"}
                         </Badge>
+                        <Badge tone="blue">{listingReg}</Badge>
+                        <Badge tone="neutral">{cur}</Badge>
                       </div>
-                      <p className="text-white/50">
-                        Total: {Number(order.totalAmount || 0).toLocaleString()}{" "}
-                        · Delivered: {fmt(order.deliveredAt)}
+
+                      <div className="rounded-xl border border-[#00E575]/25 bg-[#00E575]/[0.06] p-3">
+                        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-white/40">
+                          Order total (as charged)
+                        </p>
+                        <p className="mt-1 text-xl font-semibold tabular-nums text-[#00E575]">
+                          {fmtMoney(chargedTotal(order), cur)}
+                        </p>
+                        <p className="mt-1 text-[11px] text-white/40">
+                          Listed {listingReg}
+                          {country ? ` · ${country}` : ""} · paid as {cur}
+                          {order.feeBreakdown?.platformFee != null && (
+                            <>
+                              {" · Fee 8% "}
+                              {fmtMoney(order.feeBreakdown.platformFee, cur)}
+                            </>
+                          )}
+                          {order.feeBreakdown?.sellerPayoutAmount != null && (
+                            <>
+                              {" · Seller "}
+                              {fmtMoney(
+                                order.feeBreakdown.sellerPayoutAmount,
+                                cur
+                              )}
+                            </>
+                          )}
+                        </p>
+                      </div>
+
+                      <p className="text-xs text-white/50">
+                        Delivered: {fmt(order.deliveredAt)} · Payment:{" "}
+                        {order.paymentStatus || "—"}
                       </p>
                       {order.payout?.blockedReason && (
-                        <p className="text-amber-200/90">
+                        <p className="text-xs text-amber-200/90">
                           {order.payout.blockedReason}
                         </p>
                       )}
@@ -621,6 +843,10 @@ function ContactModal({
                     </div>
                   )}
 
+                  {actionMsg && (
+                    <p className="text-xs text-white/55">{actionMsg}</p>
+                  )}
+
                   <div className="grid grid-cols-1 gap-2">
                     <Button
                       tone="ghost"
@@ -628,11 +854,14 @@ function ContactModal({
                       disabled={
                         resolveBusy ||
                         showOffline ||
-                        selected.status === "resolved"
+                        selected.status === "resolved" ||
+                        !order?._id
                       }
                       onClick={() => onResolveDelivery("seller_favour")}
                     >
-                      Resolve in seller’s favour
+                      {resolveBusy
+                        ? "Working…"
+                        : "Resolve in seller’s favour"}
                     </Button>
                     <Button
                       tone="ghost"
@@ -640,11 +869,12 @@ function ContactModal({
                       disabled={
                         resolveBusy ||
                         showOffline ||
-                        selected.status === "resolved"
+                        selected.status === "resolved" ||
+                        !order?._id
                       }
                       onClick={() => onResolveDelivery("authorize_payout")}
                     >
-                      Authorize seller payout
+                      {resolveBusy ? "Working…" : "Authorize seller payout"}
                     </Button>
                     <Button
                       tone="ghost"
@@ -652,16 +882,19 @@ function ContactModal({
                       disabled={
                         resolveBusy ||
                         showOffline ||
-                        selected.status === "resolved"
+                        selected.status === "resolved" ||
+                        !order?._id
                       }
                       onClick={() => onResolveDelivery("refund_buyer")}
                     >
-                      Refund buyer
+                      {resolveBusy ? "Working…" : "Refund buyer"}
                     </Button>
                   </div>
                   <p className="text-[11px] leading-relaxed text-white/30">
-                    These actions update the linked order’s confirmation and
-                    payout state on the server.
+                    Refund / seller favour call the payment APIs
+                    (`/admin/orders/…` then `/payments/admin/disputes/…`), then
+                    mark this ticket resolved. Amounts stay in the charged
+                    currency.
                   </p>
                 </div>
               )}
@@ -682,88 +915,71 @@ function ContactModal({
               <div className="space-y-3 border-t border-white/[0.06] pt-4">
                 <SectionLabel>Thread</SectionLabel>
                 <div className="space-y-2">
-                  {thread.map((m, i) => (
-                    <div
-                      key={i}
-                      className={cn(
-                        "rounded-xl border px-3 py-2 text-sm",
-                        m.side === "admin"
-                          ? "border-[#00E575]/25 bg-[#00E575]/5"
-                          : "border-white/[0.07] bg-white/[0.03]",
-                      )}
-                    >
-                      <p className="text-[10px] font-semibold uppercase tracking-wider text-white/40">
-                        {m.who} · {fmt(m.at)}
-                      </p>
-                      <p className="mt-1 whitespace-pre-wrap text-[#F5F7FA]">
-                        {m.body}
-                      </p>
-                    </div>
-                  ))}
-                  {thread.length === 0 && (
-                    <p className="text-xs text-white/35">No messages yet.</p>
+                  {thread.length === 0 ? (
+                    <p className="text-sm text-white/40">No messages yet.</p>
+                  ) : (
+                    thread.map((m, i) => (
+                      <div
+                        key={i}
+                        className={cn(
+                          "rounded-xl border px-3 py-2 text-sm",
+                          m.side === "admin"
+                            ? "ml-4 border-[#00E575]/25 bg-[#00E575]/[0.06]"
+                            : "mr-4 border-white/10 bg-white/[0.03]"
+                        )}
+                      >
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-white/40">
+                          {m.who}
+                          {m.at ? ` · ${fmt(m.at)}` : ""}
+                        </p>
+                        <p className="mt-1 whitespace-pre-wrap text-white/80">
+                          {m.body}
+                        </p>
+                      </div>
+                    ))
                   )}
                 </div>
               </div>
 
-              {(selected.internalNotes?.length || 0) > 0 && (
+              {canReply && (
                 <div className="space-y-2 border-t border-white/[0.06] pt-4">
-                  <SectionLabel>Internal notes</SectionLabel>
-                  {selected.internalNotes!.map((n, i) => (
-                    <div
-                      key={i}
-                      className="rounded-xl border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-xs text-amber-100"
-                    >
-                      <p className="text-[10px] opacity-70">
-                        {n.admin?.name || "Admin"} · {fmt(n.createdAt)}
-                      </p>
-                      <p className="mt-1">{n.body}</p>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {canReply ? (
-                <div className="space-y-3 border-t border-white/[0.06] pt-4">
                   <SectionLabel>Reply to user</SectionLabel>
                   <textarea
                     value={reply}
                     onChange={(e) => setReply(e.target.value)}
-                    rows={4}
-                    placeholder="Write a reply visible to the user…"
-                    className="w-full rounded-xl border border-white/12 bg-[#14181F] px-3 py-2 text-sm text-[#F5F7FA] outline-none focus:border-[#00E575]/40"
+                    rows={3}
+                    placeholder="Write a reply…"
                     disabled={busy || showOffline}
+                    className="w-full rounded-xl border border-white/12 bg-[#14181F] px-3 py-2 text-sm text-[#F5F7FA] outline-none placeholder:text-white/30 focus:border-[#00E575]/40 disabled:opacity-50"
                   />
                   <Button
-                    className="rounded-xl"
+                    className="h-10 rounded-xl"
                     disabled={busy || showOffline || !reply.trim()}
-                    onClick={() => onPatch({ reply: reply.trim() })}
+                    onClick={() =>
+                      onPatch({
+                        response: reply.trim(),
+                        status: "awaiting_user",
+                      })
+                    }
                   >
-                    Send reply
+                    {busy ? "Sending…" : "Send reply"}
                   </Button>
-                </div>
-              ) : (
-                <div className="space-y-2 border-t border-white/[0.06] pt-4">
-                  <SectionLabel>Reply to user</SectionLabel>
-                  <p className="text-xs text-white/35">
-                    Disabled — this thread is one-way (no text back).
-                  </p>
                 </div>
               )}
 
-              <div className="space-y-3 border-t border-white/[0.06] pt-4">
+              <div className="space-y-2 border-t border-white/[0.06] pt-4">
                 <SectionLabel>Internal note</SectionLabel>
                 <textarea
                   value={note}
                   onChange={(e) => setNote(e.target.value)}
-                  rows={3}
-                  placeholder="Admin-only note (never shown to users)…"
-                  className="w-full rounded-xl border border-white/12 bg-[#14181F] px-3 py-2 text-sm text-[#F5F7FA] outline-none focus:border-[#00E575]/40"
+                  rows={2}
+                  placeholder="Note for team only…"
                   disabled={busy || showOffline}
+                  className="w-full rounded-xl border border-white/12 bg-[#14181F] px-3 py-2 text-sm text-[#F5F7FA] outline-none placeholder:text-white/30 focus:border-[#00E575]/40 disabled:opacity-50"
                 />
                 <Button
                   tone="ghost"
-                  className="rounded-xl"
+                  className="h-10 rounded-xl border border-white/12"
                   disabled={busy || showOffline || !note.trim()}
                   onClick={() => onPatch({ internalNote: note.trim() })}
                 >
@@ -771,66 +987,75 @@ function ContactModal({
                 </Button>
               </div>
 
-              <div className="grid grid-cols-1 gap-2 border-t border-white/[0.06] pt-4 sm:grid-cols-2">
-                <DarkSelect
-                  value={selected.status || ""}
+              <div className="flex flex-wrap gap-2 border-t border-white/[0.06] pt-4">
+                <Button
+                  tone="ghost"
+                  className="h-9 rounded-xl border border-white/12 text-xs"
                   disabled={busy || showOffline}
-                  onChange={(v) => onPatch({ status: v })}
+                  onClick={() => onPatch({ status: "resolved" })}
                 >
-                  <option value="new">New</option>
-                  <option value="open">Open</option>
-                  <option value="awaiting_user">Awaiting user</option>
-                  <option value="awaiting_plazore">Awaiting Plazore</option>
-                  <option value="resolved">Resolved</option>
-                  <option value="closed">Closed</option>
-                </DarkSelect>
-                <DarkSelect
-                  value={selected.priority || "normal"}
+                  Mark resolved
+                </Button>
+                <Button
+                  tone="ghost"
+                  className="h-9 rounded-xl border border-white/12 text-xs"
                   disabled={busy || showOffline}
-                  onChange={(v) => onPatch({ priority: v })}
+                  onClick={() => onPatch({ status: "closed" })}
                 >
-                  <option value="normal">Normal</option>
-                  <option value="high">High</option>
-                  <option value="critical">Critical</option>
-                </DarkSelect>
+                  Close
+                </Button>
+                <Button
+                  tone="ghost"
+                  className="h-9 rounded-xl border border-white/12 text-xs"
+                  disabled={busy || showOffline}
+                  onClick={() => onPatch({ status: "open" })}
+                >
+                  Reopen
+                </Button>
+              </div>
+
+              {(selected.internalNotes || []).length > 0 && (
+                <div className="space-y-2 border-t border-white/[0.06] pt-4">
+                  <SectionLabel>Internal notes</SectionLabel>
+                  {selected.internalNotes!.map((n, i) => (
+                    <div
+                      key={i}
+                      className="rounded-lg border border-white/8 bg-white/[0.02] px-3 py-2 text-xs text-white/55"
+                    >
+                      <p className="text-white/35">
+                        {n.admin?.name || "Admin"} · {fmt(n.createdAt)}
+                      </p>
+                      <p className="mt-1 whitespace-pre-wrap">{n.body}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="space-y-1 border-t border-white/[0.06] pt-4 text-[11px] text-white/35">
+                <p className="font-mono">ID {selected._id}</p>
+                <p>Created {fmt(selected.createdAt)}</p>
               </div>
             </div>
           )}
         </div>
       </div>
     </div>,
-    document.body,
+    document.body
   );
 }
 
 function ContactsDirectory() {
   const { getToken } = useAuth();
   const searchParams = useSearchParams();
-  const deepUserId = (searchParams.get("userId") || "").trim();
-
-  const clientEnv = useMemo(() => detectEnvFromApi(), []);
-  const env: EnvKind = clientEnv;
-  const envTone =
-    env === "production" ? "error" : env === "development" ? "warn" : "neutral";
-  const envLabel =
-    env === "production"
-      ? "Production data"
-      : env === "development"
-        ? "Development data"
-        : "Environment unknown";
+  const deepUserId = searchParams.get("userId") || "";
+  const deepContactId =
+    searchParams.get("contactId") || searchParams.get("id") || "";
 
   const [mounted, setMounted] = useState(false);
-  const [offline, setOffline] = useState(false);
-  const [status, setStatus] = useState("");
-  const [contactAs, setContactAs] = useState("");
-  const [category, setCategory] = useState("");
-  const [contextType, setContextType] = useState("");
-  const [priority, setPriority] = useState("");
-  const [unreadOnly, setUnreadOnly] = useState(false);
-  const [q, setQ] = useState("");
-  const [view, setView] = useState<"list" | "grid">("list");
-
   const [items, setItems] = useState<ContactRow[]>([]);
+  const [page, setPage] = useState(1);
+  const [pages, setPages] = useState(1);
+  const [total, setTotal] = useState(0);
   const [counts, setCounts] = useState<Counts>({
     all: 0,
     new: 0,
@@ -842,22 +1067,27 @@ function ContactsDirectory() {
     unread: 0,
     high: 0,
   });
-  const [page, setPage] = useState(1);
-  const [pages, setPages] = useState(1);
-  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [stale, setStale] = useState(false);
-
+  const [q, setQ] = useState("");
+  const [status, setStatus] = useState("");
+  const [contactAs, setContactAs] = useState("");
+  const [category, setCategory] = useState("");
+  const [contextType, setContextType] = useState("");
+  const [priority, setPriority] = useState("");
+  const [unreadOnly, setUnreadOnly] = useState(false);
+  const [view, setView] = useState<"list" | "grid">("list");
   const [openId, setOpenId] = useState<string | null>(null);
+  const [modalOpen, setModalOpen] = useState(false);
   const [selected, setSelected] = useState<ContactRow | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
-  const [modalOpen, setModalOpen] = useState(false);
-
   const [reply, setReply] = useState("");
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [resolveBusy, setResolveBusy] = useState(false);
+  const [actionMsg, setActionMsg] = useState("");
+  const [online, setOnline] = useState(true);
+  const [stale, setStale] = useState(false);
 
   const cacheRef = useRef<{
     items: ContactRow[];
@@ -866,26 +1096,40 @@ function ContactsDirectory() {
     pages: number;
     page: number;
   } | null>(null);
+  const deepOpened = useRef(false);
 
-  const showOffline = mounted && offline;
+  const env = detectEnvFromApi();
+  const envLabel =
+    env === "development"
+      ? "Dev API"
+      : env === "production"
+        ? "Prod API"
+        : "API";
+  const envTone =
+    env === "production"
+      ? "green"
+      : env === "development"
+        ? "warn"
+        : "neutral";
+  const showOffline = !online;
+
+  useEffect(() => setMounted(true), []);
 
   useEffect(() => {
-    setMounted(true);
-    const sync = () =>
-      setOffline(typeof navigator !== "undefined" && !navigator.onLine);
-    sync();
-    window.addEventListener("online", sync);
-    window.addEventListener("offline", sync);
+    const on = () => setOnline(true);
+    const off = () => setOnline(false);
+    setOnline(typeof navigator !== "undefined" ? navigator.onLine : true);
+    window.addEventListener("online", on);
+    window.addEventListener("offline", off);
     return () => {
-      window.removeEventListener("online", sync);
-      window.removeEventListener("offline", sync);
+      window.removeEventListener("online", on);
+      window.removeEventListener("offline", off);
     };
   }, []);
 
   const load = useCallback(
     async (p = 1) => {
       if (typeof navigator !== "undefined" && !navigator.onLine) {
-        setOffline(true);
         if (cacheRef.current) {
           setItems(cacheRef.current.items);
           setCounts(cacheRef.current.counts);
@@ -893,9 +1137,6 @@ function ContactsDirectory() {
           setPages(cacheRef.current.pages);
           setPage(cacheRef.current.page);
           setStale(true);
-          setError("You’re offline. Showing last loaded inbox.");
-          setLoading(false);
-          return;
         }
         setError("You’re offline. Connect to load contacts.");
         setLoading(false);
@@ -927,11 +1168,23 @@ function ContactsDirectory() {
         if (deepUserId) params.set("userId", deepUserId);
 
         const json = await adminFetch<any>(`/admin/contacts?${params}`, token);
-        const nextItems = json.data || [];
-        const nextCounts = json.counts || counts;
-        const nextTotal = json.pagination?.total || 0;
-        const nextPages = json.pagination?.pages || 1;
-        const nextPage = json.pagination?.page || p;
+        const nextItems: ContactRow[] = parseContactsList(json);
+        const nextCounts = (json?.counts || {
+          all: Number(json?.pagination?.total || nextItems.length),
+          new: 0,
+          open: 0,
+          awaiting_user: 0,
+          awaiting_plazore: 0,
+          resolved: 0,
+          closed: 0,
+          unread: 0,
+          high: 0,
+        }) as Counts;
+        const nextTotal = Number(
+          json?.pagination?.total ?? json?.total ?? nextItems.length
+        );
+        const nextPages = Number(json?.pagination?.pages || 1);
+        const nextPage = Number(json?.pagination?.page || p);
 
         setItems(nextItems);
         setCounts(nextCounts);
@@ -945,7 +1198,11 @@ function ContactsDirectory() {
           pages: nextPages,
           page: nextPage,
         };
-      } catch (e: any) {
+      } catch (e: unknown) {
+        const msg =
+          e && typeof e === "object" && "message" in e
+            ? String((e as { message?: string }).message)
+            : "Failed to load contacts";
         if (cacheRef.current) {
           setItems(cacheRef.current.items);
           setCounts(cacheRef.current.counts);
@@ -953,19 +1210,14 @@ function ContactsDirectory() {
           setPages(cacheRef.current.pages);
           setPage(cacheRef.current.page);
           setStale(true);
-          setError(
-            e?.message
-              ? `${e.message} — showing last load.`
-              : "Request failed — showing last load.",
-          );
+          setError(`${msg} — showing last load.`);
         } else {
-          setError(e?.message || "Failed to load contacts");
+          setError(msg);
         }
       } finally {
         setLoading(false);
       }
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [
       getToken,
       status,
@@ -976,12 +1228,12 @@ function ContactsDirectory() {
       unreadOnly,
       q,
       deepUserId,
-    ],
+    ]
   );
 
   useEffect(() => {
     if (!mounted) return;
-    load(1);
+    void load(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     mounted,
@@ -994,21 +1246,51 @@ function ContactsDirectory() {
     deepUserId,
   ]);
 
-  const openModal = async (row: ContactRow) => {
+  const mergeOrderSnapshot = async (
+    row: ContactRow,
+    token: string | null
+  ): Promise<ContactRow> => {
+    const orderId = row.relatedOrder?._id;
+    if (!orderId || !token) return row;
+    const thin =
+      !row.relatedOrder?.currency &&
+      !row.relatedOrder?.feeBreakdown?.currency &&
+      !row.relatedOrder?.region;
+    if (!thin && row.relatedOrder?.feeBreakdown) return row;
+    try {
+      const json = await adminFetch<any>(`/admin/orders/${orderId}`, token);
+      const order =
+        json?.data && typeof json.data === "object" && json.data._id
+          ? json.data
+          : json?.order && json.order._id
+            ? json.order
+            : json?._id
+              ? json
+              : null;
+      if (!order?._id) return row;
+      return { ...row, relatedOrder: { ...row.relatedOrder, ...order } };
+    } catch {
+      return row;
+    }
+  };
+
+  const openModal = async (row: ContactRow | { _id: string }) => {
     setOpenId(row._id);
-    setSelected(row);
+    if ("status" in row || "email" in row) setSelected(row as ContactRow);
     setModalOpen(true);
     setReply("");
     setNote("");
+    setActionMsg("");
     if (showOffline) return;
     try {
       setDetailLoading(true);
       const token = await getToken();
-      const json = await adminFetch<{ data: ContactRow }>(
-        `/admin/contacts/${row._id}`,
-        token,
-      );
-      setSelected(json.data);
+      const json = await adminFetch<any>(`/admin/contacts/${row._id}`, token);
+      let detail = parseContactDetail(json) || (row as ContactRow);
+      if (detail._id) {
+        detail = await mergeOrderSnapshot(detail, token);
+        setSelected(detail);
+      }
       await adminFetch(`/admin/contacts/${row._id}`, token, {
         method: "PATCH",
         body: JSON.stringify({ markRead: true }),
@@ -1020,11 +1302,19 @@ function ContactsDirectory() {
     }
   };
 
+  useEffect(() => {
+    if (!mounted || !deepContactId || deepOpened.current) return;
+    deepOpened.current = true;
+    void openModal({ _id: deepContactId });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mounted, deepContactId]);
+
   const closeModal = () => {
     setModalOpen(false);
-    setTimeout(() => {
+    window.setTimeout(() => {
       setOpenId(null);
       setSelected(null);
+      setActionMsg("");
     }, 280);
   };
 
@@ -1033,31 +1323,90 @@ function ContactsDirectory() {
     try {
       setBusy(true);
       const token = await getToken();
-      const json = await adminFetch<{ data: ContactRow }>(
+      const json = await adminFetch<any>(
         `/admin/contacts/${selected._id}`,
         token,
-        { method: "PATCH", body: JSON.stringify(body) },
+        { method: "PATCH", body: JSON.stringify(body) }
       );
-      setSelected(json.data);
+      const detail = parseContactDetail(json);
+      if (detail && detail._id) setSelected(detail);
       setReply("");
       setNote("");
       await load(page);
-    } catch (e: any) {
-      setError(e?.message || "Update failed");
+    } catch (e: unknown) {
+      const msg =
+        e && typeof e === "object" && "message" in e
+          ? String((e as { message?: string }).message)
+          : "Update failed";
+      setError(msg);
     } finally {
       setBusy(false);
     }
   };
 
+  /**
+   * Real payment resolution:
+   * 1) POST /admin/orders/:id/refund or /settle-seller
+   * 2) If that 404s, POST /payments/admin/disputes/:id/refund-buyer | settle-seller
+   * 3) PATCH contact ticket resolved
+   */
   const resolveDeliveryIssue = async (
-    action: "refund_buyer" | "seller_favour" | "authorize_payout",
+    action: "refund_buyer" | "seller_favour" | "authorize_payout"
   ) => {
     if (!selected || showOffline || resolveBusy) return;
+    const orderId = selected.relatedOrder?._id;
+    if (!orderId) {
+      setActionMsg("No linked order — cannot run payment action.");
+      return;
+    }
+
     try {
       setResolveBusy(true);
       setError("");
+      setActionMsg("");
       const token = await getToken();
-      const json = await adminFetch<{ data: ContactRow }>(
+
+      const body = {
+        reason:
+          action === "refund_buyer"
+            ? "admin_buyer_refund"
+            : action === "seller_favour"
+              ? "admin_seller_favour"
+              : "admin_authorize_payout",
+        contactId: selected._id,
+        note: note.trim() || undefined,
+      };
+
+      const primary =
+        action === "refund_buyer"
+          ? `/admin/orders/${orderId}/refund`
+          : `/admin/orders/${orderId}/settle-seller`;
+      const fallback =
+        action === "refund_buyer"
+          ? `/payments/admin/disputes/${orderId}/refund-buyer`
+          : `/payments/admin/disputes/${orderId}/settle-seller`;
+
+      try {
+        await adminFetch(primary, token, {
+          method: "POST",
+          body: JSON.stringify(body),
+        });
+      } catch {
+        await adminFetch(fallback, token, {
+          method: "POST",
+          body: JSON.stringify(body),
+        });
+      }
+
+      setActionMsg(
+        action === "refund_buyer"
+          ? "Buyer refund initiated on order."
+          : action === "seller_favour"
+            ? "Settled in seller’s favour; payout queued."
+            : "Seller payout authorized."
+      );
+
+      const json = await adminFetch<any>(
         `/admin/contacts/${selected._id}`,
         token,
         {
@@ -1066,12 +1415,22 @@ function ContactsDirectory() {
             resolveDeliveryIssue: action,
             status: "resolved",
           }),
-        },
+        }
       );
-      setSelected(json.data);
+      let detail = parseContactDetail(json);
+      if (detail?._id) {
+        detail = await mergeOrderSnapshot(detail, token);
+        setSelected(detail);
+      }
+
       await load(page);
-    } catch (e: any) {
-      setError(e?.message || "Resolution failed");
+    } catch (e: unknown) {
+      const msg =
+        e && typeof e === "object" && "message" in e
+          ? String((e as { message?: string }).message)
+          : "Resolution failed";
+      setError(msg);
+      setActionMsg(msg);
     } finally {
       setResolveBusy(false);
     }
@@ -1097,14 +1456,8 @@ function ContactsDirectory() {
     q.trim()
   );
 
-  const thread = (() => {
-    if (!selected)
-      return [] as Array<{
-        who: string;
-        body: string;
-        at?: string;
-        side: "user" | "admin";
-      }>;
+  const thread: ThreadMsg[] = (() => {
+    if (!selected) return [];
     if (selected.messages?.length) {
       return selected.messages.map((m) => ({
         who:
@@ -1118,12 +1471,7 @@ function ContactsDirectory() {
           | "admin",
       }));
     }
-    const out: Array<{
-      who: string;
-      body: string;
-      at?: string;
-      side: "user" | "admin";
-    }> = [];
+    const out: ThreadMsg[] = [];
     if (selected.message) {
       out.push({
         who: selected.user?.name || "User",
@@ -1175,16 +1523,15 @@ function ContactsDirectory() {
               Contact
             </h1>
             <p className="mt-2 max-w-xl text-[13.5px] text-white/50">
-              Conversations from Plazore users — general, store, product, and
-              order context. One-way notices show as “No reply”. Delivery
-              issues control seller payout here.
+              Delivery issues show the order total in the currency charged at
+              checkout. Refund and seller-favour call the real payment APIs.
             </p>
           </div>
           <Button
             tone="ghost"
             className="h-10 gap-1.5 rounded-full border border-white/12 bg-[#14181F] text-xs"
             disabled={loading || showOffline}
-            onClick={() => load(page)}
+            onClick={() => void load(page)}
           >
             <RefreshCw
               className={cn("h-3.5 w-3.5", loading && "animate-spin")}
@@ -1193,7 +1540,7 @@ function ContactsDirectory() {
           </Button>
         </div>
         <div className="mt-4 flex flex-wrap items-center gap-2">
-          <Badge tone={envTone as any}>
+          <Badge tone={envTone as "green" | "warn" | "neutral"}>
             <Database className="mr-1 inline h-3 w-3" />
             {envLabel}
           </Badge>
@@ -1237,9 +1584,11 @@ function ContactsDirectory() {
               ((value === "__unread" && unreadOnly) ||
                 (value !== "__unread" && status === value && !unreadOnly)) &&
                 "border-[#00E575]/35 bg-[#00E575]/10",
-              !((value === "__unread" && unreadOnly) ||
-                (value !== "__unread" && status === value && !unreadOnly)) &&
-                "border-white/[0.08] bg-white/[0.03] hover:border-white/15",
+              !(
+                (value === "__unread" && unreadOnly) ||
+                (value !== "__unread" && status === value && !unreadOnly)
+              ) &&
+                "border-white/[0.08] bg-white/[0.03] hover:border-white/15"
             )}
           >
             <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-white/40">
@@ -1273,12 +1622,14 @@ function ContactsDirectory() {
               placeholder="Search email, subject, message…"
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && !showOffline && load(1)}
+              onKeyDown={(e) =>
+                e.key === "Enter" && !showOffline && void load(1)
+              }
               className="rounded-xl border-white/12 bg-[#14181F] lg:max-w-md"
             />
             <Button
               className="rounded-xl"
-              onClick={() => load(1)}
+              onClick={() => void load(1)}
               disabled={loading || showOffline}
             >
               Search
@@ -1291,7 +1642,7 @@ function ContactsDirectory() {
                   "flex h-10 w-10 items-center justify-center rounded-l-xl",
                   view === "list"
                     ? "bg-[#00E575] text-[#041412]"
-                    : "text-white/50",
+                    : "text-white/50"
                 )}
               >
                 <List className="h-4 w-4" />
@@ -1303,7 +1654,7 @@ function ContactsDirectory() {
                   "flex h-10 w-10 items-center justify-center rounded-r-xl",
                   view === "grid"
                     ? "bg-[#00E575] text-[#041412]"
-                    : "text-white/50",
+                    : "text-white/50"
                 )}
               >
                 <LayoutGrid className="h-4 w-4" />
@@ -1367,12 +1718,12 @@ function ContactsDirectory() {
             <button
               key={row._id}
               type="button"
-              onClick={() => openModal(row)}
+              onClick={() => void openModal(row)}
               className={cn(
                 "rounded-2xl border border-white/[0.08] bg-white/[0.03] p-4 text-left transition hover:border-[#00E575]/35",
                 openId === row._id &&
                   modalOpen &&
-                  "border-[#00E575]/45 bg-[#00E575]/[0.06]",
+                  "border-[#00E575]/45 bg-[#00E575]/[0.06]"
               )}
             >
               <div className="flex flex-wrap gap-1.5">
@@ -1397,6 +1748,16 @@ function ContactsDirectory() {
               <p className="mt-2 line-clamp-2 text-xs text-white/50">
                 {row.message || "—"}
               </p>
+              {row.relatedOrder && (
+                <p className="mt-2 text-[11px] tabular-nums text-white/35">
+                  {row.relatedOrder.orderNumber || "Order"} ·{" "}
+                  {fmtMoney(
+                    chargedTotal(row.relatedOrder),
+                    orderCurrency(row.relatedOrder)
+                  )}{" "}
+                  · {orderRegion(row.relatedOrder)}
+                </p>
+              )}
               <p className="mt-2 text-[11px] text-white/30">
                 {fmt(row.lastMessageAt || row.createdAt)}
               </p>
@@ -1420,12 +1781,12 @@ function ContactsDirectory() {
               {items.map((row) => (
                 <tr
                   key={row._id}
-                  onClick={() => openModal(row)}
+                  onClick={() => void openModal(row)}
                   className={cn(
                     "cursor-pointer border-b border-white/[0.05] transition hover:bg-white/[0.03]",
                     openId === row._id &&
                       modalOpen &&
-                      "bg-[#00E575]/[0.06]",
+                      "bg-[#00E575]/[0.06]"
                   )}
                 >
                   <td className="px-4 py-3">
@@ -1453,6 +1814,12 @@ function ContactsDirectory() {
                         : ""}
                       {row.relatedSeller?.storeName
                         ? ` · ${row.relatedSeller.storeName}`
+                        : ""}
+                      {row.relatedOrder
+                        ? ` · ${fmtMoney(
+                            chargedTotal(row.relatedOrder),
+                            orderCurrency(row.relatedOrder)
+                          )}`
                         : ""}
                     </div>
                   </td>
@@ -1493,7 +1860,7 @@ function ContactsDirectory() {
             tone="ghost"
             className="rounded-xl"
             disabled={page <= 1 || loading || showOffline}
-            onClick={() => load(page - 1)}
+            onClick={() => void load(page - 1)}
           >
             Previous
           </Button>
@@ -1504,7 +1871,7 @@ function ContactsDirectory() {
             tone="ghost"
             className="rounded-xl"
             disabled={page >= pages || loading || showOffline}
-            onClick={() => load(page + 1)}
+            onClick={() => void load(page + 1)}
           >
             Next
           </Button>
@@ -1529,6 +1896,7 @@ function ContactsDirectory() {
         confStatus={confStatus}
         payoutStatus={payoutStatus}
         isIssueOpen={isIssueOpen}
+        actionMsg={actionMsg}
         onPatch={patch}
         onResolveDelivery={resolveDeliveryIssue}
       />

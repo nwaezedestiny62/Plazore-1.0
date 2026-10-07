@@ -55,6 +55,7 @@ type ProductRow = {
   stock?: number;
   isActive?: boolean;
   region?: string;
+  currency?: string;
   wishlistCount?: number;
   views?: number;
   cartAdds?: number;
@@ -86,6 +87,63 @@ type ProductRow = {
 
 type Counts = { all: number; active: number; inactive: number };
 
+/** Exact match of server/config/payment.ts REGION_TO_CURRENCY */
+const REGION_TO_CURRENCY: Record<string, string> = {
+  NG: "NGN",
+  GH: "GHS",
+  BJ: "XOF",
+  TG: "XOF",
+  CI: "XOF",
+  SN: "XOF",
+  CM: "XAF",
+  KE: "KES",
+  ZA: "ZAR",
+  EG: "EGP",
+  UG: "UGX",
+  TZ: "TZS",
+  RW: "RWF",
+  US: "USD",
+  CA: "CAD",
+  GB: "GBP",
+  UK: "GBP",
+  DE: "EUR",
+  FR: "EUR",
+  NL: "EUR",
+  IT: "EUR",
+  ES: "EUR",
+  EU: "EUR",
+  AU: "AUD",
+};
+
+const KNOWN_CURRENCIES = new Set(Object.values(REGION_TO_CURRENCY));
+
+const REGION_NAME: Record<string, string> = {
+  NG: "Nigeria",
+  GH: "Ghana",
+  BJ: "Benin",
+  TG: "Togo",
+  CI: "Côte d'Ivoire",
+  SN: "Senegal",
+  CM: "Cameroon",
+  KE: "Kenya",
+  ZA: "South Africa",
+  EG: "Egypt",
+  UG: "Uganda",
+  TZ: "Tanzania",
+  RW: "Rwanda",
+  US: "United States",
+  CA: "Canada",
+  GB: "United Kingdom",
+  UK: "United Kingdom",
+  DE: "Germany",
+  FR: "France",
+  NL: "Netherlands",
+  IT: "Italy",
+  ES: "Spain",
+  EU: "Europe",
+  AU: "Australia",
+};
+
 function detectEnvFromApi(): EnvKind {
   const base =
     process.env.NEXT_PUBLIC_API_URL ||
@@ -105,39 +163,86 @@ function detectEnvFromApi(): EnvKind {
   return "unknown";
 }
 
-/** Region code → ISO currency (listing price currency) */
-function regionToCurrency(region?: string): string {
-  const r = String(region || "").toUpperCase().trim();
-  const map: Record<string, string> = {
-    NG: "NGN",
-    GH: "GHS",
-    KE: "KES",
-    ZA: "ZAR",
-    UG: "UGX",
-    TZ: "TZS",
-    RW: "RWF",
-    US: "USD",
-    GB: "GBP",
-    UK: "GBP",
-    EU: "EUR",
-    CA: "CAD",
-  };
-  if (map[r]) return map[r];
-  if (r.length === 3) return r;
+function norm(s?: string | null) {
+  return String(s || "")
+    .trim()
+    .toUpperCase();
+}
+
+function isIsoCurrency(s?: string | null) {
+  const v = norm(s);
+  return v.length === 3 && /^[A-Z]{3}$/.test(v);
+}
+
+/** Same rules as backend currencyForRegion */
+function currencyForRegion(region?: string | null): string {
+  const key = norm(region);
+  if (!key) return "";
+  if (REGION_TO_CURRENCY[key]) return REGION_TO_CURRENCY[key];
+  if (KNOWN_CURRENCIES.has(key)) return key;
+  const base = key.split(/[-_]/)[0];
+  if (REGION_TO_CURRENCY[base]) return REGION_TO_CURRENCY[base];
+  if (KNOWN_CURRENCIES.has(base)) return base;
+  return "";
+}
+
+function asRegionCode(raw?: string | null): string {
+  const key = norm(raw);
+  if (!key) return "";
+  if (REGION_TO_CURRENCY[key]) return key;
+  const base = key.split(/[-_]/)[0];
+  if (REGION_TO_CURRENCY[base]) return base;
+  if (key.length === 2) return key;
+  return "";
+}
+
+function pickCurrency(...cands: Array<string | undefined | null>): string {
+  for (const c of cands) {
+    const v = norm(c);
+    if (!v) continue;
+    if (REGION_TO_CURRENCY[v]) return REGION_TO_CURRENCY[v];
+    if (isIsoCurrency(v)) return v;
+  }
+  return "";
+}
+
+/** Listing region the product was created in — never ship-to. */
+function listingRegion(p?: ProductRow | null): string {
+  if (!p) return "—";
+  return (
+    asRegionCode(p.region) ||
+    asRegionCode(p.fulfillmentLocation?.countryCode) ||
+    asRegionCode(p.seller?.marketplaceRegion) ||
+    "—"
+  );
+}
+
+/** ISO currency this listing is priced in. No live FX. */
+function listingCurrency(p?: ProductRow | null): string {
+  if (!p) return "NGN";
+  const frozen = pickCurrency(p.currency);
+  if (frozen) return frozen;
+  const mapped = currencyForRegion(listingRegion(p));
+  if (mapped) return mapped;
   return "NGN";
 }
 
 function regionName(code?: string): string {
-  if (!code) return "—";
+  const k = asRegionCode(code) || norm(code);
+  if (!k) return "—";
   const hit = (REGION_LIST as { code?: string; name?: string }[]).find(
-    (r) => String(r.code).toUpperCase() === String(code).toUpperCase()
+    (r) => String(r.code).toUpperCase() === k
   );
-  return hit?.name || code;
+  if (hit?.name) return hit.name;
+  return REGION_NAME[k] || k;
 }
 
-function fmtListingPrice(price?: number, region?: string) {
-  const v = Number(price || 0);
-  const currency = regionToCurrency(region);
+function fmtListingPrice(price?: number, regionOrCurrency?: string) {
+  const v = Number(price ?? 0);
+  const currency =
+    pickCurrency(regionOrCurrency) ||
+    currencyForRegion(regionOrCurrency) ||
+    "NGN";
   try {
     return new Intl.NumberFormat(undefined, {
       style: "currency",
@@ -152,7 +257,12 @@ function fmtListingPrice(price?: number, region?: string) {
 function locLabel(p: ProductRow) {
   return (
     p.fulfillmentLocation?.displayLabel ||
-    [p.fulfillmentLocation?.city, p.fulfillmentLocation?.state, p.region]
+    [
+      p.fulfillmentLocation?.city,
+      p.fulfillmentLocation?.state,
+      p.fulfillmentLocation?.country,
+      listingRegion(p) !== "—" ? listingRegion(p) : p.region,
+    ]
       .filter(Boolean)
       .join(", ") ||
     p.region ||
@@ -167,6 +277,107 @@ function fmtDate(d?: string) {
   } catch {
     return "—";
   }
+}
+
+function parseProductsResponse(res: unknown): {
+  list: ProductRow[];
+  page: number;
+  pages: number;
+  total: number;
+  counts: Counts;
+} {
+  const body =
+    res && typeof res === "object" ? (res as Record<string, unknown>) : {};
+  const rawData = body.data;
+  const inner =
+    rawData && typeof rawData === "object" && !Array.isArray(rawData)
+      ? (rawData as Record<string, unknown>)
+      : body;
+
+  let list: ProductRow[] = [];
+  if (Array.isArray(inner)) {
+    list = inner as ProductRow[];
+  } else if (Array.isArray(inner.products)) {
+    list = inner.products as ProductRow[];
+  } else if (Array.isArray(inner.data)) {
+    list = inner.data as ProductRow[];
+  } else if (Array.isArray(body.products)) {
+    list = body.products as ProductRow[];
+  } else if (Array.isArray(body.data)) {
+    list = body.data as ProductRow[];
+  }
+
+  const pagination =
+    (inner.pagination && typeof inner.pagination === "object"
+      ? (inner.pagination as Record<string, unknown>)
+      : null) ||
+    (body.pagination && typeof body.pagination === "object"
+      ? (body.pagination as Record<string, unknown>)
+      : null) ||
+    {};
+
+  const total = Number(
+    pagination.total ?? inner.total ?? body.total ?? list.length ?? 0
+  );
+  const page = Number(pagination.page ?? inner.page ?? body.page ?? 1);
+  const pages = Number(
+    pagination.pages ??
+      inner.pages ??
+      body.pages ??
+      Math.max(1, Math.ceil(total / 24) || 1)
+  );
+
+  const rawCounts =
+    (inner.counts as Counts | undefined) ||
+    (body.counts as Counts | undefined) ||
+    null;
+
+  const counts: Counts = {
+    all: Number(rawCounts?.all ?? total ?? list.length),
+    active: Number(
+      rawCounts?.active ??
+        list.filter((x) => x && x.isActive !== false).length
+    ),
+    inactive: Number(
+      rawCounts?.inactive ??
+        list.filter((x) => x && x.isActive === false).length
+    ),
+  };
+
+  return { list, page, pages, total, counts };
+}
+
+function parseProductDetail(res: unknown): ProductRow | null {
+  if (!res || typeof res !== "object") return null;
+  const body = res as Record<string, unknown>;
+
+  if (typeof body._id === "string" && body.name != null) {
+    return body as unknown as ProductRow;
+  }
+
+  const data = body.data;
+  if (data && typeof data === "object" && !Array.isArray(data)) {
+    const d = data as Record<string, unknown>;
+    if (typeof d._id === "string") return d as unknown as ProductRow;
+    const nested = d.product;
+    if (nested && typeof nested === "object" && !Array.isArray(nested)) {
+      const p = nested as Record<string, unknown>;
+      if (typeof p._id === "string") return p as unknown as ProductRow;
+    }
+  }
+
+  if (Array.isArray(data) && data[0] && typeof data[0] === "object") {
+    const first = data[0] as Record<string, unknown>;
+    if (typeof first._id === "string") return first as unknown as ProductRow;
+  }
+
+  const product = body.product;
+  if (product && typeof product === "object" && !Array.isArray(product)) {
+    const p = product as Record<string, unknown>;
+    if (typeof p._id === "string") return p as unknown as ProductRow;
+  }
+
+  return null;
 }
 
 function DarkSelect({
@@ -377,7 +588,6 @@ function ProductModal({
   onClose,
   selected,
   detailLoading,
-  openId,
   busyId,
   showOffline,
   onToggleActive,
@@ -386,7 +596,6 @@ function ProductModal({
   onClose: () => void;
   selected: ProductRow | null;
   detailLoading: boolean;
-  openId: string | null;
   busyId: string;
   showOffline: boolean;
   onToggleActive: (p: ProductRow) => void;
@@ -427,6 +636,9 @@ function ProductModal({
     cart: p.cartAdds ?? p.metrics?.cartAdds ?? 0,
     checkout: p.checkouts ?? p.metrics?.purchases ?? 0,
   });
+
+  const region = listingRegion(selected);
+  const currency = listingCurrency(selected);
 
   return createPortal(
     <div
@@ -497,46 +709,36 @@ function ProductModal({
                   <Badge tone={selected.isActive ? "green" : "error"}>
                     {selected.isActive ? "Active" : "Inactive"}
                   </Badge>
-                  <Badge tone="blue">
-                    Region {selected.region || "—"}
-                  </Badge>
-                  <Badge tone="neutral">
-                    {regionToCurrency(selected.region)}
-                  </Badge>
+                  <Badge tone="blue">Region {region}</Badge>
+                  <Badge tone="neutral">{currency}</Badge>
                   <Badge tone={(selected.stock ?? 0) > 0 ? "green" : "warn"}>
                     Stock {selected.stock ?? 0}
                   </Badge>
                 </div>
               </div>
 
-              {/* Listing price + region (primary) */}
               <div className="rounded-2xl border border-[#00E575]/25 bg-[#00E575]/[0.06] p-4">
                 <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/40">
-                  Listing price
+                  Listing price (as listed)
                 </p>
                 <p className="mt-1 text-2xl font-semibold tabular-nums text-[#00E575]">
-                  {fmtListingPrice(selected.price, selected.region)}
+                  {fmtListingPrice(selected.price, currency)}
                 </p>
-                <p className="mt-1.5 text-[12px] text-white/50">
-                  Region{" "}
-                  <span className="font-semibold text-white/80">
-                    {selected.region || "—"}
-                  </span>
-                  {selected.region ? (
-                    <>
-                      {" "}
-                      · {regionName(selected.region)} · currency{" "}
-                      <span className="font-semibold text-white/80">
-                        {regionToCurrency(selected.region)}
-                      </span>
-                    </>
-                  ) : (
-                    " · region not set"
-                  )}
-                </p>
-                <p className="mt-1 text-[11px] text-white/35">
-                  This is the frozen listing amount buyers pay in the product’s
-                  marketplace region.
+                <div className="mt-2 grid grid-cols-2 gap-2 text-[12px]">
+                  <div>
+                    <p className="text-white/40">Listed in</p>
+                    <p className="font-semibold text-white/85">
+                      {region}
+                      {region !== "—" ? ` · ${regionName(region)}` : ""}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-white/40">Currency</p>
+                    <p className="font-semibold text-white/85">{currency}</p>
+                  </div>
+                </div>
+                <p className="mt-2 text-[11px] text-white/35">
+                  Checkout charges this amount in {currency}. No conversion.
                 </p>
               </div>
 
@@ -596,7 +798,12 @@ function ProductModal({
                 </Field>
                 <Field label="Email">{selected.seller?.email || "—"}</Field>
                 <Field label="Seller region">
-                  {selected.seller?.marketplaceRegion || "—"}
+                  {selected.seller?.marketplaceRegion
+                    ? `${norm(selected.seller.marketplaceRegion)} · ${
+                        currencyForRegion(selected.seller.marketplaceRegion) ||
+                        "—"
+                      }`
+                    : "—"}
                 </Field>
                 {selected.seller?.isSellerSuspended && (
                   <Badge tone="error">Seller suspended</Badge>
@@ -606,18 +813,9 @@ function ProductModal({
               <div className="space-y-3 border-t border-white/[0.06] pt-4">
                 <SectionLabel>Fulfillment</SectionLabel>
                 <Field label="Location">{locLabel(selected)}</Field>
-                <Field label="City">
-                  {selected.fulfillmentLocation?.city || "—"}
-                </Field>
-                <Field label="State">
-                  {selected.fulfillmentLocation?.state || "—"}
-                </Field>
-                <Field label="Country">
-                  {selected.fulfillmentLocation?.country || "—"}
-                </Field>
                 <Field label="Listing region">
-                  {selected.region
-                    ? `${selected.region} · ${regionName(selected.region)}`
+                  {region !== "—"
+                    ? `${region} · ${regionName(region)} · ${currency}`
                     : "—"}
                 </Field>
               </div>
@@ -635,9 +833,6 @@ function ProductModal({
                 <p className="font-mono">ID {selected._id}</p>
                 <p>Listed {fmtDate(selected.createdAt)}</p>
                 <p>Updated {fmtDate(selected.updatedAt)}</p>
-                {(selected.wishlistCount ?? 0) > 0 && (
-                  <p>Wishlist saves: {selected.wishlistCount}</p>
-                )}
               </div>
 
               <div className="flex flex-col gap-2 border-t border-white/[0.06] pt-4">
@@ -650,26 +845,23 @@ function ProductModal({
                   </Link>
                 )}
                 <Button
-                  className="rounded-xl"
-                  tone={selected.isActive ? "danger" : "primary"}
+                  className="h-11 rounded-xl"
                   disabled={busyId === selected._id || showOffline}
                   onClick={() => onToggleActive(selected)}
                 >
-                  {selected.isActive
-                    ? "Deactivate product"
-                    : "Activate product"}
+                  {busyId === selected._id
+                    ? "Updating…"
+                    : selected.isActive
+                      ? "Deactivate listing"
+                      : "Activate listing"}
                 </Button>
               </div>
             </div>
           ) : (
-            <div className="py-16 text-center">
-              <p className="text-sm text-white/50">
-                Product not found in catalog.
-              </p>
-              <p className="mt-1 font-mono text-[11px] text-white/30">
-                {openId}
-              </p>
-            </div>
+            <EmptyState
+              title="Product not found"
+              body="It may have been removed."
+            />
           )}
         </div>
       </div>
@@ -680,27 +872,25 @@ function ProductModal({
 
 function ProductsDirectory() {
   const { getToken } = useAuth();
-  const searchParams = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
+  const searchParams = useSearchParams();
 
-  const clientEnv = useMemo(() => detectEnvFromApi(), []);
-  const env: EnvKind = clientEnv;
-  const envTone =
-    env === "production" ? "error" : env === "development" ? "warn" : "neutral";
-  const envLabel =
-    env === "production"
-      ? "Production data"
-      : env === "development"
-        ? "Development data"
-        : "Environment unknown";
-
-  const deepProductId = (searchParams.get("productId") || "").trim();
-  const deepOpenedRef = useRef<string | null>(null);
+  const deepProductId =
+    searchParams.get("productId") || searchParams.get("id") || "";
 
   const [mounted, setMounted] = useState(false);
-  const [offline, setOffline] = useState(false);
-
+  const [items, setItems] = useState<ProductRow[]>([]);
+  const [page, setPage] = useState(1);
+  const [pages, setPages] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [counts, setCounts] = useState<Counts>({
+    all: 0,
+    active: 0,
+    inactive: 0,
+  });
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const [q, setQ] = useState("");
   const [active, setActive] = useState("");
   const [region, setRegion] = useState("");
@@ -708,211 +898,155 @@ function ProductsDirectory() {
   const [city, setCity] = useState("");
   const [sort, setSort] = useState("newest");
   const [view, setView] = useState<"list" | "grid">("list");
-
-  const [items, setItems] = useState<ProductRow[]>([]);
-  const [counts, setCounts] = useState<Counts>({
-    all: 0,
-    active: 0,
-    inactive: 0,
-  });
-  const [page, setPage] = useState(1);
-  const [pages, setPages] = useState(1);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [stale, setStale] = useState(false);
-  const [busyId, setBusyId] = useState("");
-
   const [openId, setOpenId] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
-  const [detailOverride, setDetailOverride] = useState<ProductRow | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [detailOverride, setDetailOverride] = useState<ProductRow | null>(
+    null
+  );
+  const [busyId, setBusyId] = useState("");
+  const [online, setOnline] = useState(true);
+  const [stale, setStale] = useState(false);
 
   const cacheRef = useRef<{
     items: ProductRow[];
-    counts: Counts;
     total: number;
     pages: number;
-    page: number;
+    counts: Counts;
   } | null>(null);
+  const deepOpenedRef = useRef<string | null>(null);
 
-  const showOffline = mounted && offline;
+  const env = detectEnvFromApi();
+  const envLabel =
+    env === "development"
+      ? "Dev API"
+      : env === "production"
+        ? "Prod API"
+        : "API";
+  const envTone =
+    env === "production"
+      ? "green"
+      : env === "development"
+        ? "warn"
+        : "neutral";
+  const showOffline = !online;
 
-  const cities = useMemo(() => {
-    if (!country) {
-      return FULFILLMENT_COUNTRIES.flatMap((c) =>
-        c.states.flatMap((s: any) => s.cities || [])
-      );
-    }
-    return getStatesForCountry(country).flatMap((s: any) => s.cities || []);
-  }, [country]);
+  useEffect(() => setMounted(true), []);
 
   useEffect(() => {
-    setMounted(true);
-    const sync = () =>
-      setOffline(typeof navigator !== "undefined" && !navigator.onLine);
-    sync();
-    window.addEventListener("online", sync);
-    window.addEventListener("offline", sync);
+    const on = () => setOnline(true);
+    const off = () => setOnline(false);
+    setOnline(typeof navigator !== "undefined" ? navigator.onLine : true);
+    window.addEventListener("online", on);
+    window.addEventListener("offline", off);
     return () => {
-      window.removeEventListener("online", sync);
-      window.removeEventListener("offline", sync);
+      window.removeEventListener("online", on);
+      window.removeEventListener("offline", off);
     };
   }, []);
+
+  const cities = useMemo(() => {
+    if (!country) return [] as string[];
+    try {
+      const states = getStatesForCountry(country) || [];
+      return states
+        .flatMap((s: { cities?: string[]; cityNames?: string[] }) =>
+          s.cities || s.cityNames || []
+        )
+        .filter(Boolean);
+    } catch {
+      return [];
+    }
+  }, [country]);
 
   const load = useCallback(
     async (p = 1) => {
       if (typeof navigator !== "undefined" && !navigator.onLine) {
-        setOffline(true);
         if (cacheRef.current) {
           setItems(cacheRef.current.items);
-          setCounts(cacheRef.current.counts);
           setTotal(cacheRef.current.total);
           setPages(cacheRef.current.pages);
-          setPage(cacheRef.current.page);
+          setCounts(cacheRef.current.counts);
           setStale(true);
-          setError(
-            "You’re offline. Showing the last loaded catalog — reconnect to refresh."
-          );
           setLoading(false);
-          return;
         }
-        setError("You’re offline. Connect to load products.");
-        setLoading(false);
+        setError("You’re offline.");
         return;
       }
-
       try {
         setLoading(true);
         setError("");
-        setStale(false);
         const token = await getToken();
-        if (!token) {
-          setError("Session expired. Sign in again.");
-          setLoading(false);
-          return;
-        }
-
-        const params = new URLSearchParams({
-          page: String(p),
-          limit: "20",
-          sort,
-        });
+        const params = new URLSearchParams();
+        params.set("page", String(p));
+        params.set("limit", "24");
         if (q.trim()) params.set("q", q.trim());
         if (active) params.set("active", active);
         if (region) params.set("region", region);
+        if (country) params.set("country", country);
         if (city) params.set("city", city);
+        if (sort) params.set("sort", sort);
 
-        const json = await adminFetch<any>(`/admin/products?${params}`, token);
-        const nextItems = json.data || [];
-        const nextCounts = json.counts || {
-          all: 0,
-          active: 0,
-          inactive: 0,
-        };
-        const nextTotal = json.pagination?.total || 0;
-        const nextPages = json.pagination?.pages || 1;
-        const nextPage = json.pagination?.page || p;
+        const res = await adminFetch(
+          `/admin/products?${params.toString()}`,
+          token
+        );
 
-        setItems(nextItems);
-        setCounts(nextCounts);
-        setTotal(nextTotal);
-        setPages(nextPages);
-        setPage(nextPage);
-
+        const parsed = parseProductsResponse(res);
+        setItems(parsed.list);
+        setPage(parsed.page);
+        setPages(parsed.pages);
+        setTotal(parsed.total);
+        setCounts(parsed.counts);
         cacheRef.current = {
-          items: nextItems,
-          counts: nextCounts,
-          total: nextTotal,
-          pages: nextPages,
-          page: nextPage,
+          items: parsed.list,
+          total: parsed.total,
+          pages: parsed.pages,
+          counts: parsed.counts,
         };
-      } catch (e: any) {
+        setStale(false);
+      } catch (e: unknown) {
+        const msg =
+          e && typeof e === "object" && "message" in e
+            ? String((e as { message?: string }).message)
+            : "Failed to load products";
+        setError(msg);
         if (cacheRef.current) {
           setItems(cacheRef.current.items);
-          setCounts(cacheRef.current.counts);
-          setTotal(cacheRef.current.total);
-          setPages(cacheRef.current.pages);
-          setPage(cacheRef.current.page);
           setStale(true);
-          setError(
-            e?.message
-              ? `${e.message} — showing last successful load.`
-              : "Request failed — showing last successful load."
-          );
-        } else {
-          setError(e?.message || "Failed to load products");
-          setItems([]);
         }
       } finally {
         setLoading(false);
       }
     },
-    [getToken, q, active, region, city, sort]
+    [getToken, q, active, region, country, city, sort]
   );
 
   useEffect(() => {
     if (!mounted) return;
-    load(1);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mounted, active, region, city, sort]);
-
-  const fetchProductById = useCallback(
-    async (id: string) => {
-      try {
-        setDetailLoading(true);
-        const token = await getToken();
-        if (!token) return null;
-
-        try {
-          const one = await adminFetch<{ data?: ProductRow }>(
-            `/admin/products/${id}`,
-            token
-          );
-          if (one?.data?._id) return one.data;
-        } catch {
-          /* fall through */
-        }
-
-        const params = new URLSearchParams({
-          page: "1",
-          limit: "5",
-          q: id,
-        });
-        const json = await adminFetch<{ data?: ProductRow[] }>(
-          `/admin/products?${params}`,
-          token
-        );
-        const hit = (json.data || []).find((p) => p._id === id);
-        return hit || null;
-      } catch {
-        return null;
-      } finally {
-        setDetailLoading(false);
-      }
-    },
-    [getToken]
-  );
+    void load(1);
+  }, [mounted, load]);
 
   const openModal = useCallback(
     async (id: string) => {
       setOpenId(id);
       setModalOpen(true);
-
-      const inList =
-        items.find((p) => p._id === id) ||
-        cacheRef.current?.items.find((p) => p._id === id);
-
-      if (inList) {
-        setDetailOverride(null);
-        return;
-      }
-
       setDetailOverride(null);
-      const fetched = await fetchProductById(id);
-      if (fetched) setDetailOverride(fetched);
+      const inList = items.find((p) => p._id === id);
+      if (inList) return;
+      try {
+        setDetailLoading(true);
+        const token = await getToken();
+        const res = await adminFetch(`/admin/products/${id}`, token);
+        const row = parseProductDetail(res);
+        if (row) setDetailOverride(row);
+      } catch {
+        /* keep null */
+      } finally {
+        setDetailLoading(false);
+      }
     },
-    [items, fetchProductById]
+    [getToken, items]
   );
 
   const closeModal = useCallback(() => {
@@ -962,8 +1096,12 @@ function ProductsDirectory() {
           isActive: !product.isActive,
         });
       }
-    } catch (e: any) {
-      setError(e.message || "Update failed");
+    } catch (e: unknown) {
+      const msg =
+        e && typeof e === "object" && "message" in e
+          ? String((e as { message?: string }).message)
+          : "Update failed";
+      setError(msg);
     } finally {
       setBusyId("");
     }
@@ -1020,8 +1158,8 @@ function ProductsDirectory() {
               Products
             </h1>
             <p className="mt-2 max-w-xl text-[13.5px] text-white/50">
-              Listing price always shows with its region currency. Deep links
-              from Reports open the product modal automatically.
+              Price is the listed amount in that product’s region currency (US
+              → USD, DE → EUR, NG → NGN). No live conversion.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -1048,7 +1186,7 @@ function ProductsDirectory() {
           </div>
         </div>
         <div className="mt-4 flex flex-wrap items-center gap-2">
-          <Badge tone={envTone as any}>
+          <Badge tone={envTone as "green" | "warn" | "neutral"}>
             <Database className="mr-1 inline h-3 w-3" />
             {envLabel}
           </Badge>
@@ -1056,22 +1194,6 @@ function ProductsDirectory() {
             <Package className="mr-1 inline h-3 w-3" />
             Catalog
           </Badge>
-          <span
-            className={cn(
-              "inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] font-medium",
-              showOffline
-                ? "border-amber-500/30 bg-amber-500/10 text-amber-200"
-                : "border-[#00E575]/25 bg-[#00E575]/10 text-[#00E575]"
-            )}
-          >
-            <span
-              className={cn(
-                "h-1.5 w-1.5 rounded-full",
-                showOffline ? "bg-amber-400" : "bg-[#00E575]"
-              )}
-            />
-            {showOffline ? "Offline" : "Live"}
-          </span>
         </div>
       </header>
 
@@ -1173,7 +1295,7 @@ function ProductsDirectory() {
               disabled={showOffline && !cacheRef.current}
             >
               <option value="">All regions</option>
-              {REGION_LIST.map((r: any) => (
+              {(REGION_LIST || []).map((r: { code: string; name: string }) => (
                 <option key={r.code} value={r.code}>
                   {r.name} ({r.code})
                 </option>
@@ -1189,7 +1311,7 @@ function ProductsDirectory() {
               disabled={showOffline && !cacheRef.current}
             >
               <option value="">All countries</option>
-              {FULFILLMENT_COUNTRIES.map((c) => (
+              {(FULFILLMENT_COUNTRIES || []).map((c) => (
                 <option key={c.code} value={c.code}>
                   {c.name}
                 </option>
@@ -1221,12 +1343,6 @@ function ProductsDirectory() {
               <option value="stockHigh">Stock high → low</option>
               <option value="stockLow">Stock low → high</option>
               <option value="name">Name A–Z</option>
-              <option value="viewsHigh">Views high → low</option>
-              <option value="viewsLow">Views low → high</option>
-              <option value="cartHigh">Cart adds high → low</option>
-              <option value="cartLow">Cart adds low → high</option>
-              <option value="checkoutHigh">Checkouts high → low</option>
-              <option value="checkoutLow">Checkouts low → high</option>
             </DarkSelect>
 
             <DarkSelect
@@ -1265,6 +1381,8 @@ function ProductsDirectory() {
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {items.map((p) => {
             const m = metric(p);
+            const reg = listingRegion(p);
+            const cur = listingCurrency(p);
             return (
               <button
                 key={p._id}
@@ -1294,10 +1412,10 @@ function ProductsDirectory() {
                       {p.seller?.storeName || p.seller?.name || "—"}
                     </p>
                     <p className="mt-1 text-sm font-semibold tabular-nums text-[#00E575]">
-                      {fmtListingPrice(p.price, p.region)}
+                      {fmtListingPrice(p.price, cur)}
                     </p>
                     <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-wide text-white/40">
-                      {p.region || "—"} · {regionToCurrency(p.region)}
+                      {reg} · {cur}
                     </p>
                   </div>
                 </div>
@@ -1305,16 +1423,10 @@ function ProductsDirectory() {
                   <Badge tone={p.isActive ? "green" : "error"}>
                     {p.isActive ? "Active" : "Off"}
                   </Badge>
-                  <Badge tone="blue">{p.region || "—"}</Badge>
-                  <Badge tone={(p.stock ?? 0) > 0 ? "green" : "warn"}>
-                    Stock {p.stock ?? 0}
-                  </Badge>
+                  <Badge tone="blue">{reg}</Badge>
                 </div>
                 <p className="mt-3 text-[11px] tabular-nums text-white/35">
                   {m.views} views · {m.cart} carts · {m.checkout} checkouts
-                  {(p.images?.length || 0) > 1
-                    ? ` · ${p.images!.length} photos`
-                    : ""}
                 </p>
               </button>
             );
@@ -1322,24 +1434,21 @@ function ProductsDirectory() {
         </div>
       ) : items.length > 0 ? (
         <Panel className="overflow-x-auto rounded-2xl border-white/[0.08] bg-white/[0.03]">
-          <table className="w-full min-w-[1120px] text-left text-sm">
+          <table className="w-full min-w-[1000px] text-left text-sm">
             <thead className="border-b border-white/[0.06] text-[11px] uppercase tracking-[0.12em] text-white/40">
               <tr>
                 <th className="px-4 py-3 font-semibold">Product</th>
                 <th className="px-4 py-3 font-semibold">Seller</th>
-                <th className="px-4 py-3 font-semibold">Location</th>
-                <th className="px-4 py-3 font-semibold">Region</th>
+                <th className="px-4 py-3 font-semibold">Listed in</th>
                 <th className="px-4 py-3 font-semibold">Status</th>
                 <th className="px-4 py-3 font-semibold">Stock</th>
-                <th className="px-4 py-3 font-semibold">Views</th>
-                <th className="px-4 py-3 font-semibold">Carts</th>
-                <th className="px-4 py-3 font-semibold">Checkouts</th>
                 <th className="px-4 py-3 font-semibold">Listing price</th>
               </tr>
             </thead>
             <tbody>
               {items.map((p) => {
-                const m = metric(p);
+                const reg = listingRegion(p);
+                const cur = listingCurrency(p);
                 return (
                   <tr
                     key={p._id}
@@ -1367,7 +1476,6 @@ function ProductsDirectory() {
                           <p className="truncate font-medium">{p.name}</p>
                           <p className="truncate text-xs text-white/40">
                             {p.category}
-                            {p.brand ? ` · ${p.brand}` : ""}
                           </p>
                         </div>
                       </div>
@@ -1376,17 +1484,12 @@ function ProductsDirectory() {
                       <p className="truncate">
                         {p.seller?.storeName || p.seller?.name || "—"}
                       </p>
-                      <p className="truncate text-xs text-white/40">
-                        {p.seller?.email}
-                      </p>
-                    </td>
-                    <td className="px-4 py-3 text-white/55">
-                      <p className="truncate">{locLabel(p)}</p>
                     </td>
                     <td className="px-4 py-3">
-                      <Badge tone="blue">{p.region || "—"}</Badge>
+                      <Badge tone="blue">{reg}</Badge>
                       <p className="mt-1 text-[10px] text-white/35">
-                        {regionToCurrency(p.region)}
+                        {cur}
+                        {reg !== "—" ? ` · ${regionName(reg)}` : ""}
                       </p>
                     </td>
                     <td className="px-4 py-3">
@@ -1394,26 +1497,13 @@ function ProductsDirectory() {
                         {p.isActive ? "Active" : "Inactive"}
                       </Badge>
                     </td>
-                    <td className="px-4 py-3 tabular-nums">
-                      <Badge tone={(p.stock ?? 0) > 0 ? "green" : "warn"}>
-                        {p.stock ?? 0}
-                      </Badge>
-                    </td>
-                    <td className="px-4 py-3 tabular-nums text-white/50">
-                      {m.views.toLocaleString()}
-                    </td>
-                    <td className="px-4 py-3 tabular-nums text-white/50">
-                      {m.cart.toLocaleString()}
-                    </td>
-                    <td className="px-4 py-3 tabular-nums text-white/50">
-                      {m.checkout.toLocaleString()}
-                    </td>
+                    <td className="px-4 py-3 tabular-nums">{p.stock ?? 0}</td>
                     <td className="px-4 py-3">
                       <p className="font-semibold tabular-nums text-[#00E575]">
-                        {fmtListingPrice(p.price, p.region)}
+                        {fmtListingPrice(p.price, cur)}
                       </p>
                       <p className="text-[10px] text-white/35">
-                        {p.region || "—"} · {regionToCurrency(p.region)}
+                        {reg} · {cur}
                       </p>
                     </td>
                   </tr>
@@ -1453,7 +1543,6 @@ function ProductsDirectory() {
         onClose={closeModal}
         selected={selected}
         detailLoading={detailLoading}
-        openId={openId}
         busyId={busyId}
         showOffline={showOffline}
         onToggleActive={toggleActive}
