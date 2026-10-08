@@ -1,9 +1,10 @@
 /**
- * Checkout — Paystack-gated (aligned with web)
+ * Checkout — Paystack-gated (multi-seller sequential)
  * - Order successful ONLY after payment verifies
- * - Saved cards UI (like addresses) — Paystack hosts card entry
- * - POST /api/payments/checkout → payments[] → open authorization_url → verify
- * - Backend failure codes (PAYSTACK_NOT_CONFIGURED, 401, 402, etc.) surface clearly
+ * - One order + one Paystack session per seller
+ * - Sequential: open → verify → next
+ * - Partial success supported (paid sellers stay protected)
+ * - Cart cleared only after payments succeed (client-side)
  */
 
 import api from '@/constants/api'
@@ -60,7 +61,7 @@ type OverlayState = {
   durationMs?: number
 } | null
 
-type OrderPhase = 'idle' | 'processing' | 'success' | 'error'
+type OrderPhase = 'idle' | 'processing' | 'success' | 'error' | 'partial'
 
 type SavedCard = {
   _id: string
@@ -90,17 +91,17 @@ type RouteGroup = {
   invalidItems: string[]
 }
 
-type PaymentInitRow = {
+type PayRow = {
   orderId?: string
   orderNumber?: string
   authorizationUrl?: string
   authorization_url?: string
-  accessCode?: string
   reference?: string
-  amount?: number
-  currency?: string
   error?: string
   needsManualInit?: boolean
+  status?: string
+  amount?: number
+  currency?: string
 }
 
 function resolveProductRegion(product: any): string {
@@ -196,58 +197,15 @@ function maskCard(last4?: string) {
   return `•••• ${last4}`
 }
 
-/** Pick the first usable Paystack authorization URL from backend response */
-function extractPaymentSession(data: any, body: any): {
-  authUrl: string
-  reference: string
-  payments: PaymentInitRow[]
-} {
-  const payments: PaymentInitRow[] = Array.isArray(data?.payments)
-    ? data.payments
-    : Array.isArray(body?.payments)
-      ? body.payments
-      : []
-
-  // Prefer first payment that has a URL and no error
-  for (const p of payments) {
-    const url = p.authorizationUrl || p.authorization_url || ''
-    if (url && !p.error) {
-      return {
-        authUrl: url,
-        reference: String(p.reference || ''),
-        payments,
-      }
-    }
-  }
-
-  // Fallback: top-level fields (single-order / older shape)
-  const authUrl =
-    data?.authorization_url ||
-    data?.authorizationUrl ||
-    body?.authorization_url ||
-    body?.authorizationUrl ||
-    ''
-  const reference = String(data?.reference || body?.reference || '')
-
-  return { authUrl, reference, payments }
-}
-
-function backendErrorMessage(
-  body: any,
-  status?: number,
-): string {
-  if (body?.message && typeof body.message === 'string') {
-    return body.message
-  }
+function backendErrorMessage(body: any, status?: number): string {
+  if (body?.message && typeof body.message === 'string') return body.message
   if (status === 503 || body?.code === 'PAYSTACK_NOT_CONFIGURED') {
     return 'Order unsuccessful. Payment is not available yet — Paystack is not connected. Nothing was charged.'
   }
   if (status === 402) {
     return 'Order unsuccessful. Payment could not be started. Nothing was charged.'
   }
-  if (status === 401) {
-    return 'Session expired. Sign in again.'
-  }
+  if (status === 401) return 'Session expired. Sign in again.'
   if (status === 400) {
     return 'Order unsuccessful. Please review your bag and try again.'
   }
@@ -407,6 +365,9 @@ function OrderStatusModal({
   phase,
   errorMessage,
   sellerCount,
+  progressLabel,
+  paidCount,
+  totalCount,
   onViewOrders,
   onShowroom,
   onCloseError,
@@ -414,18 +375,24 @@ function OrderStatusModal({
   phase: OrderPhase
   errorMessage?: string
   sellerCount?: number
+  progressLabel?: string
+  paidCount?: number
+  totalCount?: number
   onViewOrders: () => void
   onShowroom: () => void
   onCloseError: () => void
 }) {
   const visible =
-    phase === 'processing' || phase === 'success' || phase === 'error'
+    phase === 'processing' ||
+    phase === 'success' ||
+    phase === 'error' ||
+    phase === 'partial'
   const tickScale = useRef(new Animated.Value(0)).current
   const contentOpacity = useRef(new Animated.Value(0)).current
   const contentLift = useRef(new Animated.Value(16)).current
 
   useEffect(() => {
-    if (phase === 'success') {
+    if (phase === 'success' || phase === 'partial') {
       tickScale.setValue(0)
       contentOpacity.setValue(0)
       contentLift.setValue(16)
@@ -456,28 +423,28 @@ function OrderStatusModal({
 
   if (!visible) return null
 
-  const sellerHint =
-    sellerCount && sellerCount > 1
-      ? `${sellerCount} sellers`
-      : 'the seller'
+  const multi = (sellerCount || 0) > 1
 
   return (
     <Modal visible transparent animationType="fade" statusBarTranslucent>
       <View style={styles.modalRoot}>
         <View style={styles.modalCard}>
+          {/* PROCESSING */}
           {phase === 'processing' && (
             <View style={styles.modalCenter}>
               <PlazoreOrb size={120} />
               <Text style={styles.modalProcessingTitle}>
-                Preparing secure payment
+                {progressLabel || 'Preparing secure payment'}
               </Text>
               <Text style={styles.modalProcessingSub}>
-                Opening Paystack for {sellerHint}. Order is confirmed only after
-                payment succeeds.
+                {multi
+                  ? 'Each seller is paid separately on Paystack. Already successful payments stay protected.'
+                  : 'Opening Paystack. Order is confirmed only after payment succeeds.'}
               </Text>
             </View>
           )}
 
+          {/* FULL ERROR */}
           {phase === 'error' && (
             <View style={styles.modalCenter}>
               <View style={styles.errorIconWrap}>
@@ -496,6 +463,78 @@ function OrderStatusModal({
             </View>
           )}
 
+          {/* PARTIAL SUCCESS */}
+          {phase === 'partial' && (
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={styles.successScroll}
+            >
+              <View style={styles.modalCenter}>
+                <Animated.View
+                  style={[
+                    styles.tickWrap,
+                    { transform: [{ scale: tickScale }] },
+                  ]}
+                >
+                  <View style={styles.partialIconWrap}>
+                    <Ionicons name="checkmark" size={28} color={GREEN} />
+                  </View>
+                </Animated.View>
+
+                <Animated.View
+                  style={{
+                    opacity: contentOpacity,
+                    transform: [{ translateY: contentLift }],
+                    width: '100%',
+                    alignItems: 'center',
+                  }}
+                >
+                  <Text style={styles.successTitle}>
+                    {paidCount} of {totalCount} sellers paid
+                  </Text>
+                  <Text style={styles.successSub}>
+                    Successful orders are protected and will be fulfilled.
+                    Failed ones were not charged.
+                  </Text>
+
+                  {!!errorMessage && (
+                    <View style={styles.partialBox}>
+                      <Text style={styles.partialBoxText}>{errorMessage}</Text>
+                    </View>
+                  )}
+
+                  <Pressable
+                    onPress={onViewOrders}
+                    style={styles.primaryCtaWrap}
+                  >
+                    <LinearGradient
+                      colors={[...GRAD]}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 0 }}
+                      style={styles.primaryCta}
+                    >
+                      <Text style={styles.primaryCtaText}>
+                        View paid orders
+                      </Text>
+                      <Ionicons
+                        name="arrow-forward"
+                        size={16}
+                        color="#041412"
+                      />
+                    </LinearGradient>
+                  </Pressable>
+
+                  <Pressable onPress={onCloseError} style={styles.secondaryCta}>
+                    <Text style={styles.secondaryCtaText}>
+                      Back to checkout
+                    </Text>
+                  </Pressable>
+                </Animated.View>
+              </View>
+            </ScrollView>
+          )}
+
+          {/* FULL SUCCESS */}
           {phase === 'success' && (
             <ScrollView
               showsVerticalScrollIndicator={false}
@@ -528,7 +567,9 @@ function OrderStatusModal({
                 >
                   <Text style={styles.successTitle}>Payment confirmed</Text>
                   <Text style={styles.successSub}>
-                    Your order is paid and locked on Plazore.
+                    {multi
+                      ? `All ${sellerCount} sellers paid. Your orders are locked on Plazore.`
+                      : 'Your order is paid and locked on Plazore.'}
                   </Text>
 
                   <View style={styles.infoBlock}>
@@ -620,6 +661,9 @@ export default function Checkout() {
   const [pageLoading, setPageLoading] = useState(true)
   const [orderPhase, setOrderPhase] = useState<OrderPhase>('idle')
   const [orderError, setOrderError] = useState('')
+  const [progressLabel, setProgressLabel] = useState('')
+  const [paidCount, setPaidCount] = useState(0)
+  const [totalCount, setTotalCount] = useState(0)
   const [toast, setToast] = useState<OverlayState>(null)
 
   const [addresses, setAddresses] = useState<any[]>([])
@@ -685,7 +729,6 @@ export default function Checkout() {
       const res = await api.get('/payment-methods', {
         headers: { Authorization: `Bearer ${token}` },
       })
-      // Mirror web: accept success+data or raw data array
       let list: SavedCard[] = []
       if (res.data?.success && Array.isArray(res.data.data)) {
         list = res.data.data
@@ -701,7 +744,7 @@ export default function Checkout() {
         return def?._id || null
       })
     } catch {
-      /* ignore — cards stay empty; user can still pay with new card */
+      /* ignore */
     }
   }, [getToken])
 
@@ -731,7 +774,6 @@ export default function Checkout() {
       const qty = Math.max(1, Number(item.quantity) || 1)
       const lineDisplay = convertPrice(unit * qty, productRegion, displayRegion)
 
-      // Match web: respect feeMode (free / on_delivery → 0 display fee)
       const feeRaw = Number(product.shipping?.deliveryFee) || 0
       const feeMode =
         (product.shipping as { feeMode?: string } | undefined)?.feeMode ||
@@ -745,7 +787,6 @@ export default function Checkout() {
       if (!(product._id || item.productId)) invalid.push('Missing product id')
       if (!(unit > 0)) invalid.push('Invalid price')
       if (!ship.hasShipFrom) invalid.push('No ship-from')
-      // Variant guard (aligned with web)
       if (
         product.hasVariants &&
         Array.isArray(product.variants) &&
@@ -849,14 +890,6 @@ export default function Checkout() {
 
   const placing = orderPhase === 'processing'
 
-  /**
-   * Multi-seller sequential Paystack:
-   * - Open each ready payment one after another
-   * - Verify each before moving on
-   * - Successful payments STAY paid & protected
-   * - Failed payments do NOT go through (stock released on server)
-   * - Clear failure reason always shown
-   */
   const handlePlaceOrder = async () => {
     if (placingLock.current || orderPhase === 'processing') return
 
@@ -879,7 +912,14 @@ export default function Checkout() {
 
     placingLock.current = true
     setOrderError('')
+    setProgressLabel(
+      routeGroups.length > 1
+        ? `Preparing ${routeGroups.length} payments…`
+        : 'Preparing secure payment',
+    )
     setOrderPhase('processing')
+    setPaidCount(0)
+    setTotalCount(0)
 
     try {
       const token = await getToken()
@@ -896,14 +936,12 @@ export default function Checkout() {
         }))
         .filter((i: any) => i.productId && i.quantity > 0)
 
-      if (!payloadItems.length) {
-        throw new Error('No valid products in bag')
-      }
+      if (!payloadItems.length) throw new Error('No valid products in bag')
       if (!selectedAddress || !addressComplete(selectedAddress)) {
         throw new Error('Delivery address is incomplete')
       }
 
-      // 1) Create orders + Paystack sessions (cart NOT cleared on server)
+      // 1) Create orders + Paystack sessions (server does NOT clear cart)
       const res = await api.post(
         '/payments/checkout',
         {
@@ -931,17 +969,6 @@ export default function Checkout() {
         setOrderPhase('error')
         setOrderError(backendErrorMessage(body, httpStatus))
         return
-      }
-
-      type PayRow = {
-        orderId?: string
-        orderNumber?: string
-        authorizationUrl?: string
-        authorization_url?: string
-        reference?: string
-        error?: string
-        needsManualInit?: boolean
-        status?: string
       }
 
       const payments: PayRow[] = Array.isArray(data.payments)
@@ -987,29 +1014,33 @@ export default function Checkout() {
         return
       }
 
-      const total = payments.length || ready.length
+      const total = ready.length + failedInit.length
+      setTotalCount(total)
       const paidNumbers: string[] = []
       const failedLines: string[] = []
 
-      // 2) Sequential: one Paystack window per seller, verify before next
+      // 2) Sequential: one Paystack window per seller
       for (let i = 0; i < ready.length; i++) {
         const p = ready[i]
         const authUrl = (p.authorizationUrl || p.authorization_url)!
         const reference = p.reference!
-        const label = p.orderNumber || `seller ${i + 1} of ${ready.length}`
+        const label = p.orderNumber || `Seller ${i + 1}`
+
+        setProgressLabel(
+          ready.length > 1
+            ? `Paying ${i + 1} of ${ready.length} · ${label}`
+            : 'Opening Paystack…',
+        )
 
         const browserResult = await WebBrowser.openAuthSessionAsync(authUrl)
 
         if (browserResult.type !== 'success') {
-          failedLines.push(
-            `${label}: payment cancelled on Paystack (nothing charged for this seller)`,
-          )
-          // Do not open remaining sessions if user cancelled — they can retry from Orders
-          // Already-paid ones stay protected
+          failedLines.push(`${label}: cancelled`)
+          // Skip remaining — already-paid ones stay protected
           for (let j = i + 1; j < ready.length; j++) {
             const skip = ready[j]
             failedLines.push(
-              `${skip.orderNumber || `seller ${j + 1}`}: skipped after cancel`,
+              `${skip.orderNumber || `Seller ${j + 1}`}: skipped`,
             )
           }
           break
@@ -1030,52 +1061,47 @@ export default function Checkout() {
 
           if (ok) {
             paidNumbers.push(label)
+            setPaidCount(paidNumbers.length)
           } else {
             const reason =
               vd.failureReason ||
               vd.message ||
               (vd.status === 'abandoned'
-                ? 'abandoned on Paystack'
-                : 'declined, failed, or insufficient funds')
+                ? 'abandoned'
+                : 'declined or failed')
             failedLines.push(`${label}: ${reason}`)
-            // Continue to next seller — paid ones already locked in
           }
         } catch (ve: any) {
           const reason =
             ve?.response?.data?.message ||
             ve?.message ||
-            'could not verify with server'
+            'could not verify'
           failedLines.push(`${label}: ${reason}`)
         }
       }
 
-      // Init failures never got a session (server already released their stock)
       for (const f of failedInit) {
         failedLines.push(
-          `${f.orderNumber || 'seller'}: ${f.error || 'payment session could not start'}`,
+          `${f.orderNumber || 'Seller'}: ${f.error || 'session failed'}`,
         )
       }
 
-      const paidCount = paidNumbers.length
-      const failCount = failedLines.length
+      const paid = paidNumbers.length
+      const failed = failedLines.length
+      setPaidCount(paid)
 
-      // 4) Wise outcome
-      if (paidCount > 0 && failCount === 0) {
-        // Everyone who needed to pay, paid
+      // 4) Outcomes
+      if (paid > 0 && failed === 0) {
         clearCart()
         setOrderPhase('success')
         return
       }
 
-      if (paidCount > 0 && failCount > 0) {
-        // PARTIAL: successful orders go through; failed ones do not
+      if (paid > 0 && failed > 0) {
         clearCart()
-        setOrderPhase('error')
+        setOrderPhase('partial')
         setOrderError(
-          `${paidCount} of ${total} seller(s) paid successfully (${paidNumbers.join(', ')}). ` +
-            `Those orders are protected and will be fulfilled.\n\n` +
-            `Could not complete:\n• ${failedLines.join('\n• ')}\n\n` +
-            `Failed orders were not charged (stock released). Check Orders for paid ones.`,
+          `Paid: ${paidNumbers.join(', ')}\n\nCould not complete:\n• ${failedLines.join('\n• ')}`,
         )
         return
       }
@@ -1083,9 +1109,9 @@ export default function Checkout() {
       // Nobody paid
       setOrderPhase('error')
       setOrderError(
-        failCount > 0
-          ? `Order unsuccessful. Nothing was charged.\n\n• ${failedLines.join('\n• ')}`
-          : 'Order unsuccessful. Payment was not confirmed. Nothing was charged.',
+        failed > 0
+          ? `Nothing was charged.\n\n• ${failedLines.join('\n• ')}`
+          : 'Payment was not confirmed. Nothing was charged.',
       )
     } catch (e: any) {
       const status = e?.response?.status
@@ -1158,6 +1184,9 @@ export default function Checkout() {
         phase={orderPhase}
         errorMessage={orderError}
         sellerCount={routeGroups.length}
+        progressLabel={progressLabel}
+        paidCount={paidCount}
+        totalCount={totalCount}
         onViewOrders={() => {
           setOrderPhase('idle')
           router.push('/orders')
@@ -1195,6 +1224,16 @@ export default function Checkout() {
         keyboardShouldPersistTaps="handled"
       >
         <Text style={styles.stepHint}>REVIEW · DELIVER · PAY</Text>
+
+        {routeGroups.length > 1 && (
+          <View style={styles.multiHint}>
+            <Ionicons name="information-circle-outline" size={16} color={BLUE} />
+            <Text style={styles.multiHintText}>
+              {routeGroups.length} sellers · each is paid separately on
+              Paystack. Successful payments stay protected.
+            </Text>
+          </View>
+        )}
 
         {/* Bag */}
         <View style={styles.card}>
@@ -1289,7 +1328,7 @@ export default function Checkout() {
           ))}
         </View>
 
-        {/* Address — same pattern as web */}
+        {/* Address */}
         <View style={styles.card}>
           <View style={styles.cardHeader}>
             <View style={styles.cardHeaderLeft}>
@@ -1365,7 +1404,7 @@ export default function Checkout() {
           )}
         </View>
 
-        {/* Payment method — saved cards (same structure as web) */}
+        {/* Payment method */}
         <View style={styles.card}>
           <View style={styles.cardHeader}>
             <View style={styles.cardHeaderLeft}>
@@ -1387,7 +1426,6 @@ export default function Checkout() {
           </View>
 
           <View style={styles.listPad}>
-            {/* New card option — always available */}
             <TouchableOpacity
               onPress={() => setSelectedCardId(null)}
               style={[
@@ -1408,13 +1446,11 @@ export default function Checkout() {
               <View style={styles.selectContent}>
                 <Text style={styles.selectTitle}>New card on Paystack</Text>
                 <Text style={styles.selectSub}>
-                  Valid card + available funds required. Otherwise order is
-                  unsuccessful.
+                  Valid card + available funds required.
                 </Text>
               </View>
             </TouchableOpacity>
 
-            {/* Saved cards list */}
             {cards.map((card) => {
               const on = selectedCardId === card._id
               return (
@@ -1460,8 +1496,8 @@ export default function Checkout() {
                 color={GREEN}
               />
               <Text style={styles.payText}>
-                Declined cards, insufficient funds, or cancelled payment =
-                order unsuccessful. Plazore never stores full card numbers.
+                Declined, insufficient funds, or cancelled = that seller’s
+                order is unsuccessful. Already paid sellers stay protected.
               </Text>
             </View>
           </View>
@@ -1590,8 +1626,10 @@ export default function Checkout() {
               <Text style={styles.totalValue}>{fmt(totalAmount)}</Text>
             </View>
             <Text style={styles.receiptNote}>
-              Order is placed only after Paystack confirms payment. Display is
-              converted to your marketplace ({displayRegion}).
+              {routeGroups.length > 1
+                ? `You will complete ${routeGroups.length} separate Paystack payments (one per seller).`
+                : 'Order is placed only after Paystack confirms payment.'}{' '}
+              Display is converted to your marketplace ({displayRegion}).
             </Text>
           </View>
         </View>
@@ -1652,8 +1690,10 @@ export default function Checkout() {
                   : !canPlaceOrder
                     ? 'Unavailable'
                     : placing
-                      ? 'Opening Paystack…'
-                      : 'Pay with Paystack'}
+                      ? progressLabel || 'Opening Paystack…'
+                      : routeGroups.length > 1
+                        ? `Pay ${routeGroups.length} sellers`
+                        : 'Pay with Paystack'}
               </Text>
               {canPlaceOrder && !placing && (
                 <Ionicons name="lock-closed" size={14} color="#041412" />
@@ -1750,6 +1790,7 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: TEXT,
     letterSpacing: -0.3,
+    textAlign: 'center',
   },
   modalProcessingSub: {
     marginTop: 8,
@@ -1785,19 +1826,42 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  partialIconWrap: {
+    width: 72,
+    height: 72,
+    backgroundColor: 'rgba(0,229,117,0.12)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(0,229,117,0.3)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   successTitle: {
     marginTop: 16,
     fontSize: 22,
     fontWeight: '800',
     color: TEXT,
     letterSpacing: -0.4,
+    textAlign: 'center',
   },
   successSub: {
     marginTop: 6,
     fontSize: 13,
     color: SECONDARY,
     textAlign: 'center',
-    marginBottom: 20,
+    marginBottom: 16,
+  },
+  partialBox: {
+    width: '100%',
+    backgroundColor: SURFACE_2,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: LINE,
+    padding: 14,
+    marginBottom: 16,
+  },
+  partialBoxText: {
+    fontSize: 12.5,
+    color: SECONDARY,
+    lineHeight: 19,
   },
   infoBlock: {
     width: '100%',
@@ -1888,6 +1952,22 @@ const styles = StyleSheet.create({
     letterSpacing: 1.6,
     fontWeight: '700',
     marginBottom: 14,
+  },
+
+  multiHint: {
+    flexDirection: 'row',
+    gap: 10,
+    padding: 12,
+    marginBottom: 12,
+    backgroundColor: 'rgba(37,99,235,0.08)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(37,99,235,0.25)',
+  },
+  multiHintText: {
+    flex: 1,
+    fontSize: 12.5,
+    color: SECONDARY,
+    lineHeight: 18,
   },
 
   card: {

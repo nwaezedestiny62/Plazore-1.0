@@ -1,3 +1,4 @@
+
 "use client";
 
 import Link from "next/link";
@@ -220,6 +221,9 @@ type Counts = {
   Cancelled: number;
 };
 
+/** Zero-decimal currencies — matches server/config/payment.ts */
+const ZERO_DECIMAL = new Set(["NGN", "XOF", "XAF", "KES", "JPY"]);
+
 function norm(s?: string | null) {
   return String(s || "")
     .trim()
@@ -228,37 +232,54 @@ function norm(s?: string | null) {
 
 function isIsoCurrency(s?: string | null) {
   const v = norm(s);
-  return v.length === 3 && /^[A-Z]{3}$/.test(v);
+  return v.length === 3 && /^[A-Z]{3}$/.test(v) && KNOWN_CURRENCIES.has(v);
 }
 
-/** Same rules as backend currencyForRegion — never treat NG as NGN field mix-up. */
+/**
+ * Same rules as backend currencyForRegion.
+ * Never treat region code NG as if it were currency NGN in the wrong field.
+ */
 function currencyForRegion(region?: string | null): string {
   const key = norm(region);
   if (!key) return "";
-  if (REGION_TO_CURRENCY[key]) return REGION_TO_CURRENCY[key];
+  // If someone passed ISO currency already
   if (KNOWN_CURRENCIES.has(key)) return key;
+  if (REGION_TO_CURRENCY[key]) return REGION_TO_CURRENCY[key];
   const base = key.split(/[-_]/)[0];
   if (REGION_TO_CURRENCY[base]) return REGION_TO_CURRENCY[base];
   if (KNOWN_CURRENCIES.has(base)) return base;
   return "";
 }
 
+/** Normalize to a 2-letter region code (NG, US, DE…). Never return a currency here. */
 function asRegionCode(raw?: string | null): string {
   const key = norm(raw);
   if (!key) return "";
+  // If raw is already a known region code
   if (REGION_TO_CURRENCY[key]) return key;
   const base = key.split(/[-_]/)[0];
   if (REGION_TO_CURRENCY[base]) return base;
+  // Reject pure currency codes masquerading as region (e.g. "NGN", "USD")
+  if (KNOWN_CURRENCIES.has(key) && key.length === 3) return "";
   if (key.length === 2) return key;
   return "";
 }
 
+/**
+ * Pick a real ISO currency from candidates.
+ * Rejects region codes (NG, US) unless mapped via REGION_TO_CURRENCY.
+ */
 function pickCurrency(...cands: Array<string | undefined | null>): string {
   for (const c of cands) {
     const v = norm(c);
     if (!v) continue;
+    // Already ISO currency
+    if (KNOWN_CURRENCIES.has(v)) return v;
+    // Region code → map to currency
     if (REGION_TO_CURRENCY[v]) return REGION_TO_CURRENCY[v];
-    if (isIsoCurrency(v)) return v;
+    const base = v.split(/[-_]/)[0];
+    if (REGION_TO_CURRENCY[base]) return REGION_TO_CURRENCY[base];
+    if (KNOWN_CURRENCIES.has(base)) return base;
   }
   return "";
 }
@@ -273,24 +294,36 @@ function productRegion(it?: OrderItem) {
   return "";
 }
 
-/** Listing region frozen at checkout (matches Order.region / item.region). */
+/**
+ * Listing region frozen at checkout.
+ * Priority: feeBreakdown.region → order.region → item.region → product.region
+ * Never falls back to buyer marketplace region (that is not listing region).
+ */
 function orderRegion(o?: OrderRow | null): string {
   if (!o) return "—";
   const it = firstItem(o);
-  return (
-    asRegionCode(o.feeBreakdown?.region) ||
-    asRegionCode(o.region) ||
-    asRegionCode(it?.region) ||
-    productRegion(it) ||
-    asRegionCode(o.seller?.marketplaceRegion) ||
-    "—"
-  );
+  const fromFee = asRegionCode(o.feeBreakdown?.region);
+  if (fromFee) return fromFee;
+  const fromOrder = asRegionCode(o.region);
+  if (fromOrder) return fromOrder;
+  const fromItem = asRegionCode(it?.region);
+  if (fromItem) return fromItem;
+  const fromProduct = productRegion(it);
+  if (fromProduct) return fromProduct;
+  // Seller store region as last resort only
+  const fromSeller = asRegionCode(o.seller?.marketplaceRegion);
+  if (fromSeller) return fromSeller;
+  return "—";
 }
 
 /**
- * Currency the buyer was charged in.
- * Prefer frozen feeBreakdown.currency → order.currency → item.currency
- * then map listing region. Never live-convert.
+ * Currency the buyer was charged in (frozen at checkout).
+ * Priority:
+ *  1. feeBreakdown.currency (best — written at order create)
+ *  2. order.currency
+ *  3. item.currency
+ *  4. map from listing region
+ * Never live-convert. Never use buyer region for money.
  */
 function orderCurrency(o?: OrderRow | null): string {
   if (!o) return "NGN";
@@ -300,10 +333,13 @@ function orderCurrency(o?: OrderRow | null): string {
     firstItem(o)?.currency
   );
   if (frozen) return frozen;
-  const mapped = currencyForRegion(orderRegion(o));
-  if (mapped) return mapped;
-  const sellerCur = currencyForRegion(o.seller?.marketplaceRegion);
-  if (sellerCur) return sellerCur;
+
+  // Derive strictly from listing region, not buyer/seller marketplace alone
+  const reg = orderRegion(o);
+  if (reg && reg !== "—") {
+    const mapped = currencyForRegion(reg);
+    if (mapped) return mapped;
+  }
   return "NGN";
 }
 
@@ -327,6 +363,8 @@ function itemCurrency(it: OrderItem, order?: OrderRow | null) {
 function regionLabel(code?: string) {
   const k = asRegionCode(code) || norm(code);
   if (!k || k === "—") return "—";
+  // If someone passed currency by mistake, don't show as region name
+  if (KNOWN_CURRENCIES.has(k) && !REGION_TO_CURRENCY[k]) return k;
   return REGION_NAME[k] || k;
 }
 
@@ -351,18 +389,32 @@ function fmtDate(d?: string) {
   }
 }
 
-/** Format frozen major units in the given ISO currency. No FX. */
+/** Round major units like backend roundMoney */
+function roundMoney(amount: number, currency?: string): number {
+  const n = Number(amount);
+  if (!Number.isFinite(n)) return 0;
+  const cur = pickCurrency(currency) || "NGN";
+  if (ZERO_DECIMAL.has(cur)) return Math.round(n);
+  return Math.round(n * 100) / 100;
+}
+
+/**
+ * Format frozen major units in the given ISO currency.
+ * No FX. Zero-decimal currencies show 0 fraction digits.
+ */
 function fmtMoney(n?: number, currency = "NGN") {
-  const v = Number(n || 0);
   const cur =
     pickCurrency(currency) ||
     currencyForRegion(currency) ||
     "NGN";
+  const v = roundMoney(Number(n || 0), cur);
+  const fractionDigits = ZERO_DECIMAL.has(cur) ? 0 : 2;
   try {
     return new Intl.NumberFormat(undefined, {
       style: "currency",
       currency: cur,
-      maximumFractionDigits: 2,
+      minimumFractionDigits: fractionDigits,
+      maximumFractionDigits: fractionDigits,
     }).format(v);
   } catch {
     return `${v.toLocaleString()} ${cur}`;
@@ -378,27 +430,40 @@ function itemLineTotal(it: OrderItem) {
   return itemUnitPrice(it) * qty;
 }
 
-/** Matches backend calculatePlatformFee */
-function platformFeeOf(subtotal?: number) {
+/** Matches backend calculatePlatformFee (8% of product subtotal only) */
+function platformFeeOf(subtotal?: number, currency?: string) {
   const s = Number(subtotal || 0);
   if (!Number.isFinite(s) || s < 0) return 0;
-  return Math.round(s * FEE_RATE * 100) / 100;
+  return roundMoney(s * FEE_RATE, currency);
 }
 
 /** Matches backend calculateSellerPayout */
-function sellerPayoutOf(subtotal?: number, shipping?: number) {
+function sellerPayoutOf(
+  subtotal?: number,
+  shipping?: number,
+  currency?: string
+) {
   const sub = Number(subtotal || 0);
   const ship = Number(shipping || 0);
-  const gross = Math.round((sub + ship) * 100) / 100;
-  const fee = platformFeeOf(sub);
-  return Math.round((gross - fee) * 100) / 100;
+  const gross = roundMoney(sub + ship, currency);
+  const fee = platformFeeOf(sub, currency);
+  return roundMoney(gross - fee, currency);
 }
 
+/**
+ * Amount buyer was charged — always prefer frozen feeBreakdown.grossAmount,
+ * then totalAmount. Never recompute from display region.
+ */
 function chargedTotal(o?: OrderRow | null) {
   if (!o) return 0;
   const g = Number(o.feeBreakdown?.grossAmount);
-  if (Number.isFinite(g) && g > 0) return g;
-  return Number(o.totalAmount || 0);
+  if (Number.isFinite(g) && g >= 0) return g;
+  const t = Number(o.totalAmount);
+  if (Number.isFinite(t) && t >= 0) return t;
+  // Last resort: sum frozen line items + shipping (still no FX)
+  const sub = Number(o.feeBreakdown?.subtotal ?? o.subtotal ?? 0);
+  const ship = Number(o.feeBreakdown?.shippingCost ?? o.shippingCost ?? 0);
+  return roundMoney(sub + ship, orderCurrency(o));
 }
 
 function parseOrdersList(json: any): OrderRow[] {
@@ -818,11 +883,19 @@ function OrderModal({
   const listingRegion = orderRegion(selected);
   const subtotal = fee?.subtotal ?? selected?.subtotal ?? 0;
   const shipping = fee?.shippingCost ?? selected?.shippingCost ?? 0;
-  const platformFee = fee?.platformFee ?? platformFeeOf(subtotal);
+  // Prefer frozen feeBreakdown values; only recompute with same currency rules
+  const platformFee =
+    fee?.platformFee != null && Number.isFinite(Number(fee.platformFee))
+      ? Number(fee.platformFee)
+      : platformFeeOf(subtotal, currency);
   const sellerPayout =
-    fee?.sellerPayoutAmount ??
-    selected?.payout?.amount ??
-    sellerPayoutOf(subtotal, shipping);
+    fee?.sellerPayoutAmount != null &&
+    Number.isFinite(Number(fee.sellerPayoutAmount))
+      ? Number(fee.sellerPayoutAmount)
+      : selected?.payout?.amount != null &&
+          Number.isFinite(Number(selected.payout.amount))
+        ? Number(selected.payout.amount)
+        : sellerPayoutOf(subtotal, shipping, currency);
 
   return createPortal(
     <div
