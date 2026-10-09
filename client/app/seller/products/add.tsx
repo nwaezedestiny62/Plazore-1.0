@@ -9,6 +9,10 @@ import {
   CATEGORY_LIST,
   PLAN_FEES,
   PLAN_IMAGE_LIMITS,
+  normalizePlanId,
+  planDisplayName,
+  planFeePct,
+  planImageLimit,
   PRODUCT_CATEGORIES,
 } from '@/constants/productCatalog'
 import {
@@ -43,7 +47,7 @@ import {
 } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
-const CURRENT_PLAN: keyof typeof PLAN_IMAGE_LIMITS = 'free'
+/* plan loaded dynamically */
 const WIN_W = Dimensions.get('window').width
 const PHONE_W = Math.min(WIN_W - 56, 320)
 const PHONE_H = Math.min(PHONE_W * 2.12, 600)
@@ -937,8 +941,43 @@ export default function AddProduct() {
   const { getToken, isLoaded, isSignedIn } = useAuth()
   const { region, formatProduct } = useMarketplace()
 
-  const maxImages = PLAN_IMAGE_LIMITS[CURRENT_PLAN] ?? 6
-  const feePct = PLAN_FEES[CURRENT_PLAN] ?? 8
+  const [activePlan, setActivePlan] = useState('free')
+  const maxImages = planImageLimit(activePlan)
+  const feePct = planFeePct(activePlan)
+  const planLabel = planDisplayName(activePlan)
+
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const token = await getToken()
+        if (!token || cancelled) return
+        const headers = { Authorization: `Bearer ${token}` }
+        try {
+          const sub = await api.get('/seller/subscription', { headers })
+          const plan =
+            sub?.data?.data?.planId ||
+            sub?.data?.data?.plan ||
+            sub?.data?.data?.subscription?.planId
+          if (plan && !cancelled) {
+            setActivePlan(normalizePlanId(plan))
+            return
+          }
+        } catch {}
+        try {
+          const dash = await api.get('/seller/dashboard', { headers })
+          const p =
+            dash?.data?.data?.plan ||
+            dash?.data?.data?.subscription?.planId ||
+            'free'
+          if (!cancelled) setActivePlan(normalizePlanId(p))
+        } catch {}
+      } catch {}
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [getToken])
 
   const [overlay, setOverlay] = useState<OverlayState>(null)
   const [loading, setLoading] = useState(false)
@@ -2279,7 +2318,7 @@ const toast = useCallback(
                 textTransform: 'capitalize',
               }}
             >
-              {CURRENT_PLAN}
+              {planLabel}
             </Text>
           </View>
           <View style={[styles.feeRow, { marginBottom: 4 }]}>

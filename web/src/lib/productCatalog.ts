@@ -442,14 +442,76 @@ export const PRODUCT_CATEGORIES: Record<string, string[]> = {
 
 export const CATEGORY_LIST = Object.keys(PRODUCT_CATEGORIES)
 
+/**
+ * Canonical seller plan keys (must match server/config/plans.ts)
+ * free | dominant_niche | business_plus | global_reach
+ */
+export type SellerPlanId =
+  | "free"
+  | "dominant_niche"
+  | "business_plus"
+  | "global_reach";
+
 export const PLAN_IMAGE_LIMITS: Record<string, number> = {
   free: 6,
+  dominant_niche: 12,
+  business_plus: 20,
+  global_reach: 20,
+  // legacy aliases (older UI / dash responses)
   pro: 12,
   business: 20,
-}
+  starter: 6,
+  growth: 12,
+};
 
+/** Transaction fee % of product price (delivery fee excluded server-side) */
 export const PLAN_FEES: Record<string, number> = {
   free: 8,
+  dominant_niche: 5,
+  business_plus: 3.5,
+  global_reach: 2,
+  // legacy
   pro: 5,
-  business: 3,
+  business: 3.5,
+  starter: 8,
+  growth: 5,
+};
+
+export const PLAN_DISPLAY_NAMES: Record<string, string> = {
+  free: "Free Seller",
+  dominant_niche: "Dominant Niche",
+  business_plus: "Business Plus",
+  global_reach: "Global Reach",
+  pro: "Dominant Niche",
+  business: "Business Plus",
+  starter: "Free Seller",
+  growth: "Dominant Niche",
+};
+
+/** Normalize any plan string from API / dashboard into a known key */
+export function normalizePlanId(raw?: string | null): SellerPlanId {
+  const k = String(raw || "free")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
+  if (k === "dominant" || k === "dominant_niche" || k === "pro" || k === "growth")
+    return "dominant_niche";
+  if (k === "business" || k === "business_plus" || k === "plus")
+    return "business_plus";
+  if (k === "global" || k === "global_reach" || k === "enterprise")
+    return "global_reach";
+  return "free";
+}
+
+export function planImageLimit(plan?: string | null): number {
+  return PLAN_IMAGE_LIMITS[normalizePlanId(plan)] ?? 6;
+}
+
+export function planFeePct(plan?: string | null): number {
+  return PLAN_FEES[normalizePlanId(plan)] ?? 8;
+}
+
+export function planDisplayName(plan?: string | null): string {
+  const id = normalizePlanId(plan);
+  return PLAN_DISPLAY_NAMES[id] || "Free Seller";
 }

@@ -100,20 +100,32 @@ export function calculatePlatformFee(
 export function calculateSellerPayout(
   subtotal: number,
   shippingCost: number,
-  currency?: string
+  currency?: string,
+  opts?: { feeRate?: number; planId?: string | null }
 ): {
   platformFee: number;
   sellerPayoutAmount: number;
   grossAmount: number;
+  platformFeeRate: number;
 } {
   const cur = currency || "NGN";
+  const rate =
+    opts?.feeRate != null && Number.isFinite(opts.feeRate)
+      ? Number(opts.feeRate)
+      : PLAZORE_TRANSACTION_FEE_RATE;
   const grossAmount = roundMoney(
     (Number(subtotal) || 0) + (Number(shippingCost) || 0),
     cur
   );
-  const platformFee = calculatePlatformFee(subtotal, cur);
+  // Fee is on product subtotal only — shipping never included
+  const platformFee = roundMoney((Number(subtotal) || 0) * rate, cur);
   const sellerPayoutAmount = roundMoney(grossAmount - platformFee, cur);
-  return { platformFee, sellerPayoutAmount, grossAmount };
+  return {
+    platformFee,
+    sellerPayoutAmount,
+    grossAmount,
+    platformFeeRate: rate,
+  };
 }
 
 /** Convert major units → minor units for the given currency (works for both providers) */

@@ -21,6 +21,15 @@ import {
   updateProduct,
   deleteProduct,
 } from "../controllers/productController.js";
+import {
+  getSellerPlans,
+  getMySubscription,
+  initiateSubscription,
+  verifySubscription,
+  activatePromo,
+  activateFree,
+  onboardingCompleteHook,
+} from "../controllers/subscriptionController.js";
 import upload from "../middleware/upload.js";
 
 const SellerRouter = express.Router();
@@ -54,6 +63,57 @@ SellerRouter.put(
   protect,
   authorize("seller", "admin"),
   updateBusinessLocation
+);
+
+// Promo slot claim after onboarding (does not auto-switch plan)
+SellerRouter.post(
+  "/onboarding/promo-claim",
+  protect,
+  authorize("seller", "admin"),
+  onboardingCompleteHook
+);
+
+// ——— Subscriptions (business-location currency, not browse region) ———
+SellerRouter.get(
+  "/plans",
+  protect,
+  authorize("seller", "admin"),
+  getSellerPlans
+);
+
+SellerRouter.get(
+  "/subscription",
+  protect,
+  authorize("seller", "admin"),
+  getMySubscription
+);
+
+SellerRouter.post(
+  "/subscriptions/initiate",
+  protect,
+  authorize("seller", "admin"),
+  initiateSubscription
+);
+
+SellerRouter.post(
+  "/subscriptions/verify",
+  protect,
+  authorize("seller", "admin"),
+  verifySubscription
+);
+
+SellerRouter.post(
+  "/subscriptions/activate-promo",
+  protect,
+  authorize("seller", "admin"),
+  activatePromo
+);
+
+SellerRouter.post(
+  "/subscriptions/activate-free",
+  protect,
+  authorize("seller", "admin"),
+  activateFree
 );
 
 SellerRouter.get(

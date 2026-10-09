@@ -46,7 +46,7 @@ export const getPerformanceOverview = async (req: Request, res: Response) => {
       await Promise.all([
         getPlatformHealth(environment),
         detectSimpleAnomalies(environment),
-        Incident.find({ environment }).sort({ lastDetected: -1 }).limit(30).lean(),
+        (Incident as any).find({ environment }).sort({ lastDetected: -1 }).limit(30).lean(),
         getSlowRoutes(environment, since),
         getRecentErrors(environment, since),
         getSeries(environment, "all", "requests", since),
@@ -172,12 +172,28 @@ export const getPerformanceHealthSummary = async (req: Request, res: Response) =
 export const updateIncidentStatus = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { status } = req.body;
-    const allowed = ["detected", "investigating", "monitoring", "resolved", "ignored"];
-    if (!allowed.includes(status)) {
-      return res.status(400).json({ success: false, message: "Invalid status" });
+    const status = String(req.body?.status || "").toLowerCase();
+    const allowed = [
+      "detected",
+      "investigating",
+      "monitoring",
+      "resolved",
+      "ignored",
+    ] as const;
+    type IncidentStatus = (typeof allowed)[number];
+    if (!allowed.includes(status as IncidentStatus)) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid status" });
     }
-    const doc = await Incident.findByIdAndUpdate(id, { status }, { new: true });
+    if (!id || !mongoose.isValidObjectId(id)) {
+      return res.status(400).json({ success: false, message: "Invalid id" });
+    }
+    const doc = await (Incident as any).findByIdAndUpdate(
+      id,
+      { status: status as IncidentStatus },
+      { new: true }
+    );
     if (!doc) return res.status(404).json({ success: false, message: "Not found" });
     res.json({ success: true, data: doc });
   } catch (error: any) {

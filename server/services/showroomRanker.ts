@@ -27,6 +27,11 @@ import Product from "../models/Products.js";
 import ProductPerformance from "../models/ProductPerformance.js";
 import ShowroomSession from "../models/ShowroomSession.js";
 import ShowroomEvent from "../models/ShowroomEvent.js";
+import SellerSubscription from "../models/SellerSubscription.js";
+import {
+  getPlanBenefits,
+  type PlanId,
+} from "../config/plans.js";
 
 export const ROOM_CAPACITY = {
   1: 50,
@@ -158,6 +163,52 @@ async function buildInterestProfile(
   return profile;
 }
 
+
+/** Batch load discoveryPriority + visibility for seller IDs (one query). */
+async function loadSellerPlanBoosts(
+  sellerIds: string[]
+): Promise<Map<string, { priority: number; visibility: string }>> {
+  const map = new Map<string, { priority: number; visibility: string }>();
+  const unique = [...new Set(sellerIds.map(String).filter(Boolean))];
+  if (!unique.length) return map;
+
+  try {
+    const subs = await SellerSubscription.find({
+      seller: { $in: unique },
+      status: { $in: ["active", "pending_payment"] },
+    })
+      .select("seller planId status expiresAt isPromotional")
+      .lean();
+
+    const now = Date.now();
+    for (const sub of subs as any[]) {
+      let planId = String(sub.planId || "free") as PlanId;
+      // Expired paid/promo → treat as free for ranking
+      if (
+        planId !== "free" &&
+        sub.expiresAt &&
+        new Date(sub.expiresAt).getTime() < now
+      ) {
+        planId = "free";
+      }
+      // pending_payment keeps previous active planId on doc; if still pending and free default ok
+      if (sub.status === "pending_payment" && planId === "free") {
+        // no boost until paid
+      }
+      const benefits = getPlanBenefits(planId);
+      map.set(String(sub.seller), {
+        priority: benefits.discoveryPriority ?? 10,
+        visibility: benefits.showroomVisibility || "standard",
+      });
+    }
+  } catch (e) {
+    // Ranking must never fail hard if subscriptions collection missing
+    console.error("[showroomRanker] plan boost load failed", e);
+  }
+
+  return map;
+}
+
 function scoreProduct(opts: {
   product: any;
   perf: any | null;
@@ -166,6 +217,9 @@ function scoreProduct(opts: {
   exposureCount: number;
   searchQuery?: string;
   softInterest?: boolean;
+  /** 0–100 from seller active plan (free=10 … global_reach=100) */
+  planDiscoveryPriority?: number;
+  planVisibility?: string;
 }): ScoredProduct {
   const {
     product,
@@ -175,6 +229,8 @@ function scoreProduct(opts: {
     exposureCount,
     searchQuery,
     softInterest = true,
+    planDiscoveryPriority = 10,
+    planVisibility = "standard",
   } = opts;
   const reasons: string[] = [];
   let score = 0;
@@ -262,6 +318,27 @@ function scoreProduct(opts: {
     if (desc.includes(q)) searchHit += 0.25;
     score += searchHit * 1.8;
     if (searchHit > 0) reasons.push("search_match");
+  }
+
+  // ★ Seller plan discovery / visibility (from active subscription)
+  // free=10, dominant=40, business_plus=70, global_reach=100
+  const planPri = Number(planDiscoveryPriority) || 10;
+  const planBoost = clamp(planPri / 100) * 1.45;
+  score += planBoost;
+  if (planPri >= 100) {
+    reasons.push("plan_global_reach");
+  } else if (planPri >= 70) {
+    reasons.push("plan_business_plus");
+  } else if (planPri >= 40) {
+    reasons.push("plan_dominant");
+  }
+  if (planVisibility === "maximum" || planVisibility === "high") {
+    score += 0.2;
+    reasons.push("plan_visibility_" + planVisibility);
+  }
+  if (planVisibility === "increased") {
+    score += 0.1;
+    reasons.push("plan_visibility_increased");
   }
 
   const positiveSignal = purchases * 3 + carts * 2 + wishlist;
@@ -352,7 +429,10 @@ function hasReuseReason(s: ScoredProduct): boolean {
     s.reasons.includes("local_region") ||
     s.reasons.includes("fresh") ||
     s.reasons.includes("exploration_new") ||
-    s.reasons.includes("search_match")
+    s.reasons.includes("search_match") ||
+    s.reasons.includes("plan_global_reach") ||
+    s.reasons.includes("plan_business_plus") ||
+    s.reasons.includes("plan_dominant")
   );
 }
 
@@ -654,9 +734,20 @@ export async function generateShowroom(opts: {
 
   const adaptiveOn = eligibleCount >= ADAPTIVE_THRESHOLD;
 
+  // Batch seller plan boosts (discovery priority + visibility)
+  const sellerIds = candidates.map((p: any) =>
+    String(p.seller?._id || p.seller || "")
+  );
+  const planBoostMap = await loadSellerPlanBoosts(sellerIds);
+
   const scored = candidates
-    .map((product: any) =>
-      scoreProduct({
+    .map((product: any) => {
+      const sid = String(product.seller?._id || product.seller || "");
+      const boost = planBoostMap.get(sid) || {
+        priority: 10,
+        visibility: "standard",
+      };
+      return scoreProduct({
         product,
         perf: perfMap.get(String(product._id)) || null,
         region,
@@ -664,8 +755,10 @@ export async function generateShowroom(opts: {
         exposureCount: Number(exposureCounts[String(product._id)] || 0),
         searchQuery,
         softInterest: true,
-      })
-    )
+        planDiscoveryPriority: boost.priority,
+        planVisibility: boost.visibility,
+      });
+    })
     .sort((a, b) => b.score - a.score);
 
   const { room1, room2, room3, room4 } = adaptiveOn
@@ -728,6 +821,7 @@ export async function generateShowroom(opts: {
       eligibleCount,
       adaptiveThreshold: ADAPTIVE_THRESHOLD,
       localCount: localProducts.length,
+      planBoostEnabled: true,
       roomSizes: {
         1: room1.length,
         2: final2.length,
@@ -757,9 +851,19 @@ export async function rankProductsForSearch(opts: {
     .lean();
   const perfMap = new Map(perfs.map((p: any) => [String(p.product), p]));
 
+  const sellerIds = opts.products.map((p) =>
+    String(p.seller?._id || p.seller || "")
+  );
+  const planBoostMap = await loadSellerPlanBoosts(sellerIds);
+
   const scored = opts.products
-    .map((product) =>
-      scoreProduct({
+    .map((product) => {
+      const sid = String(product.seller?._id || product.seller || "");
+      const boost = planBoostMap.get(sid) || {
+        priority: 10,
+        visibility: "standard",
+      };
+      return scoreProduct({
         product,
         perf: perfMap.get(String(product._id)) || null,
         region,
@@ -767,8 +871,10 @@ export async function rankProductsForSearch(opts: {
         exposureCount: 0,
         searchQuery: opts.searchQuery,
         softInterest: true,
-      })
-    )
+        planDiscoveryPriority: boost.priority,
+        planVisibility: boost.visibility,
+      });
+    })
     .sort((a, b) => b.score - a.score);
 
   return scored.map((s) => s.product);

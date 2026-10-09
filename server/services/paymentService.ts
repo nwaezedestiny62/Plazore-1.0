@@ -10,6 +10,7 @@ import {
   toMinorUnits,
   PLAZORE_TRANSACTION_FEE_RATE,
 } from "../config/payment.js";
+import { feeBreakdownForSellerOrder } from "../utils/planEnforcement.js";
 import {
   initializeTransaction,
   verifyTransaction,
@@ -29,6 +30,20 @@ import {
 } from "./stripe/paymentIntents.js";
 import { writePaymentAudit } from "../utils/paymentAudit.js";
 import { sendNotification } from "../utils/sendNotification.js";
+
+
+/** Snapshot frozen on Order.feeBreakdown (includes planId from planEnforcement). */
+type FeeBreakdownSnap = {
+  subtotal?: number;
+  shippingCost?: number;
+  grossAmount?: number;
+  platformFeeRate?: number;
+  platformFee?: number;
+  sellerPayoutAmount?: number;
+  currency?: string;
+  region?: string;
+  planId?: string | null;
+};
 
 export type PaymentProvider = "paystack" | "stripe";
 
@@ -136,6 +151,11 @@ export async function buildServerSideOrderItems(
   return { itemsBySeller, shippingBySeller };
 }
 
+/**
+ * Create one pending order per seller.
+ * Platform fee = seller's ACTIVE PLAN rate on product subtotal only.
+ * Delivery / shipping is NEVER included in the fee base.
+ */
 export async function createPendingOrders(params: {
   buyer: any;
   shippingAddress: any;
@@ -169,7 +189,15 @@ export async function createPendingOrders(params: {
       String(sellerItems[0]?.currency || "").trim().toUpperCase() ||
       currencyForRegion(region);
 
-    const fees = calculateSellerPayout(subtotal, shippingCost, currency);
+    // ★ Dynamic plan fee — Free 8%, Dominant 5%, Business Plus 3.5%, Global Reach 2%
+    // Shipping excluded from fee calculation inside feeBreakdownForSellerOrder
+    const feeBreakdown = await feeBreakdownForSellerOrder(
+      sellerId,
+      subtotal,
+      shippingCost,
+      currency,
+      region
+    );
 
     const order = await Order.create({
       buyer: params.buyer._id,
@@ -192,19 +220,20 @@ export async function createPendingOrders(params: {
       currency,
       subtotal,
       shippingCost,
-      totalAmount: fees.grossAmount,
+      totalAmount: feeBreakdown.grossAmount,
       paymentStatus: "pending",
       paymentMethod: "pending",
       paymentLifecycle: "PENDING_PAYMENT",
       feeBreakdown: {
-        subtotal,
-        shippingCost,
-        grossAmount: fees.grossAmount,
-        platformFeeRate: PLAZORE_TRANSACTION_FEE_RATE,
-        platformFee: fees.platformFee,
-        sellerPayoutAmount: fees.sellerPayoutAmount,
-        currency,
-        region,
+        subtotal: feeBreakdown.subtotal,
+        shippingCost: feeBreakdown.shippingCost,
+        grossAmount: feeBreakdown.grossAmount,
+        platformFeeRate: feeBreakdown.platformFeeRate,
+        platformFee: feeBreakdown.platformFee,
+        sellerPayoutAmount: feeBreakdown.sellerPayoutAmount,
+        currency: feeBreakdown.currency,
+        region: feeBreakdown.region,
+        planId: (feeBreakdown as any).planId ?? null,
       },
       buyerConfirmation: { status: "none" },
       payout: { status: "not_eligible" },
@@ -334,6 +363,7 @@ export async function failPaymentAndReleaseStock(
 /**
  * Initialize payment for an order.
  * provider: "paystack" | "stripe" (default paystack for backward compatibility)
+ * Uses frozen feeBreakdown from order (plan rate locked at createPendingOrders).
  */
 export async function initializePaymentForOrder(params: {
   orderId: string;
@@ -381,7 +411,7 @@ export async function initializePaymentForOrder(params: {
     });
   }
 
-  const fb = (order as any).feeBreakdown || {};
+  const fb = ((order as any).feeBreakdown || {}) as FeeBreakdownSnap;
   const amount = Number(order.totalAmount);
   const region = String((order as any).region || "NG").trim().toUpperCase();
   const currency = String(
@@ -390,14 +420,17 @@ export async function initializePaymentForOrder(params: {
     .trim()
     .toUpperCase();
 
-  const fallbackFees = calculateSellerPayout(
-    order.subtotal,
-    order.shippingCost,
-    currency
-  );
+  // Prefer frozen plan fee from order; fallback recalculates with default only
+  const lockedRate =
+    typeof fb.platformFeeRate === "number"
+      ? fb.platformFeeRate
+      : PLAZORE_TRANSACTION_FEE_RATE;
+
+  const fallbackFees = calculateSellerPayout(order.subtotal, order.shippingCost, currency);
   const platformFee = fb.platformFee ?? fallbackFees.platformFee;
   const sellerPayoutAmount =
     fb.sellerPayoutAmount ?? fallbackFees.sellerPayoutAmount;
+  const platformFeeRate = lockedRate;
 
   const reference = generateReference("PLZPAY");
   const amountMinor = toMinorUnits(amount, currency);
@@ -420,10 +453,14 @@ export async function initializePaymentForOrder(params: {
       subtotal: order.subtotal,
       shippingCost: order.shippingCost,
       platformFee,
-      platformFeeRate: PLAZORE_TRANSACTION_FEE_RATE,
+      platformFeeRate,
       sellerPayoutAmount,
       status: "pending",
       lifecycle: "PENDING_PAYMENT",
+      metadata: {
+        type: "marketplace_order",
+        planId: (fb as any).planId ?? null,
+      },
     });
   } else {
     payment.provider = provider;
@@ -431,6 +468,9 @@ export async function initializePaymentForOrder(params: {
     payment.amount = amount;
     payment.amountMinor = amountMinor;
     payment.currency = currency;
+    payment.platformFee = platformFee;
+    payment.platformFeeRate = platformFeeRate;
+    payment.sellerPayoutAmount = sellerPayoutAmount;
     payment.status = "pending";
     payment.lifecycle = "PENDING_PAYMENT";
     if (provider === "stripe") {
@@ -487,6 +527,8 @@ export async function initializePaymentForOrder(params: {
       meta: {
         provider: "stripe",
         paymentIntentId: intent.paymentIntentId,
+        planId: (fb as any).planId ?? null,
+        platformFeeRate,
       },
     });
 
@@ -517,6 +559,7 @@ export async function initializePaymentForOrder(params: {
     reference,
     callbackUrl,
     metadata: {
+      type: "marketplace_order",
       orderId: order._id.toString(),
       orderNumber: order.orderNumber,
       paymentId: payment._id.toString(),
@@ -524,6 +567,8 @@ export async function initializePaymentForOrder(params: {
       sellerId: order.seller.toString(),
       region,
       currency,
+      planId: (fb as any).planId ?? null,
+      platformFeeRate,
     },
   });
 
@@ -554,7 +599,7 @@ export async function initializePaymentForOrder(params: {
     amount,
     currency,
     reference,
-    meta: { provider: "paystack" },
+    meta: { provider: "paystack", planId: (fb as any).planId ?? null, platformFeeRate },
   });
 
   return {

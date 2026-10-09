@@ -22,12 +22,41 @@ import { useMarketplace } from "@/context/MarketplaceContext";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com/api";
 
+/** Must stay in sync with web/src/lib/productCatalog.ts + server plans */
 const PLAN_FEES: Record<string, number> = {
   free: 8,
-  starter: 6,
-  growth: 4,
-  pro: 3,
+  dominant_niche: 5,
+  business_plus: 3.5,
+  global_reach: 2,
+  // legacy aliases from older dash responses
+  pro: 5,
+  business: 3.5,
+  starter: 8,
+  growth: 5,
 };
+
+const PLAN_DISPLAY: Record<string, string> = {
+  free: "Free Seller",
+  dominant_niche: "Dominant Niche",
+  business_plus: "Business Plus",
+  global_reach: "Global Reach",
+  pro: "Dominant Niche",
+  business: "Business Plus",
+  starter: "Free Seller",
+  growth: "Dominant Niche",
+};
+
+function normalizePlan(raw?: string | null): string {
+  const k = String(raw || "free")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
+  if (k === "dominant" || k === "dominant_niche" || k === "pro" || k === "growth")
+    return "dominant_niche";
+  if (k === "business" || k === "business_plus" || k === "plus") return "business_plus";
+  if (k === "global" || k === "global_reach" || k === "enterprise") return "global_reach";
+  return "free";
+}
 
 const SELLER_TIPS = [
   {
@@ -355,7 +384,9 @@ export default function SellerDashboardPage() {
     "Seller";
   const greeting = useMemo(() => getGreeting(new Date().getHours()), []);
 
-  const feePct = PLAN_FEES[overview.plan] ?? PLAN_FEES.free ?? 8;
+  const planId = normalizePlan(overview.plan);
+  const feePct = PLAN_FEES[planId] ?? 8;
+  const planLabel = PLAN_DISPLAY[planId] || "Free Seller";
 
   const loadDashboard = useCallback(async () => {
     try {
@@ -408,7 +439,7 @@ export default function SellerDashboardPage() {
         completedOrders: completed,
         storeName: dash?.storeName || "",
         isVerified: !!dash?.isVerified,
-        plan: dash?.plan || "free",
+        plan: normalizePlan(dash?.plan || dash?.subscription?.planId || dash?.subscription?.plan || "free"),
         revenue,
       });
 
@@ -540,7 +571,7 @@ export default function SellerDashboardPage() {
                   Revenue
                 </p>
                 <span className="bg-white/[0.06] px-2 py-0.5 text-[9px] font-extrabold tracking-wide text-[#A7ADB8] sm:text-[10px]">
-                  {(overview.plan || "free").toUpperCase()}
+                  {planLabel}
                 </span>
               </div>
               <p className="mt-2 text-3xl font-extrabold tracking-tight sm:mt-2.5 sm:text-4xl md:text-5xl">

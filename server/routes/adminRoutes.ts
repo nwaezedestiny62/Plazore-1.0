@@ -50,7 +50,6 @@ import {
   setAdminBannerActive,
   getAdminPersonalDiagnostics,
 } from "../controllers/contentController.js";
-
 import {
   getAdminAnnouncements,
   getAdminAnnouncement,
@@ -60,6 +59,10 @@ import {
   archiveAdminAnnouncement,
   uploadAnnouncementMediaHandler,
 } from "../controllers/announcementController.js";
+import {
+  adminSubscriptionsOverview,
+  adminSetPromo,
+} from "../controllers/subscriptionController.js";
 
 const AdminRouter = express.Router();
 
@@ -105,8 +108,16 @@ AdminRouter.get("/showroom", ...adminOnly, getAdminShowroom);
 AdminRouter.post("/showroom/refresh", ...adminOnly, refreshAdminShowroom);
 
 AdminRouter.get("/currency/rates", ...adminOnly, getAdminCurrencyRates);
-AdminRouter.get("/currency/rates/:code/history", ...adminOnly, getAdminCurrencyHistory);
-AdminRouter.patch("/currency/rates/:code", ...adminOnly, patchAdminCurrencyRate);
+AdminRouter.get(
+  "/currency/rates/:code/history",
+  ...adminOnly,
+  getAdminCurrencyHistory
+);
+AdminRouter.patch(
+  "/currency/rates/:code",
+  ...adminOnly,
+  patchAdminCurrencyRate
+);
 
 AdminRouter.get("/intelligence", ...adminOnly, getAdminIntelligence);
 AdminRouter.get(
@@ -126,7 +137,11 @@ AdminRouter.post("/announcements", ...adminOnly, createAdminAnnouncement);
 AdminRouter.get("/announcements/:id", ...adminOnly, getAdminAnnouncement);
 AdminRouter.patch("/announcements/:id", ...adminOnly, updateAdminAnnouncement);
 AdminRouter.get("/performance", ...adminOnly, getPerformanceOverview);
-AdminRouter.get("/performance/summary", ...adminOnly, getPerformanceHealthSummary);
+AdminRouter.get(
+  "/performance/summary",
+  ...adminOnly,
+  getPerformanceHealthSummary
+);
 AdminRouter.patch(
   "/performance/incidents/:id",
   ...adminOnly,
@@ -174,6 +189,14 @@ AdminRouter.get(
   ...adminOnly,
   getAdminPersonalDiagnostics
 );
+
+// ─── Subscriptions / Dominant Niche promo ───
+AdminRouter.get(
+  "/subscriptions/overview",
+  ...adminOnly,
+  adminSubscriptionsOverview
+);
+AdminRouter.post("/subscriptions/promo", ...adminOnly, adminSetPromo);
 
 AdminRouter.post("/me/presence", protect, pingPresence);
 

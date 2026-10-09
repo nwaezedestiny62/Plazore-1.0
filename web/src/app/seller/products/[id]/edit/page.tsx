@@ -27,6 +27,10 @@ import {
   PLAN_FEES,
   PLAN_IMAGE_LIMITS,
   PRODUCT_CATEGORIES,
+  normalizePlanId,
+  planDisplayName,
+  planFeePct,
+  planImageLimit,
 } from "@/lib/productCatalog";
 import {
   categoryNeedsDocs,
@@ -42,7 +46,7 @@ import {
 
 const API = process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com/api";
 const API_ORIGIN = API.replace(/\/api\/?$/, "");
-const CURRENT_PLAN = "free" as keyof typeof PLAN_IMAGE_LIMITS;
+/* plan loaded dynamically from /seller/subscription or /seller/dashboard */
 
 type OverlayTone = "info" | "success" | "danger";
 type Overlay = { title: string; message?: string; tone?: OverlayTone } | null;
@@ -536,8 +540,10 @@ export default function EditProductPage() {
   const { region, formatProduct, ratesToNgn } = useMarketplace();
   const router = useRouter();
 
-  const maxImages = PLAN_IMAGE_LIMITS[CURRENT_PLAN] ?? 6;
-  const feePct = PLAN_FEES[CURRENT_PLAN] ?? 8;
+  const [activePlan, setActivePlan] = useState("free");
+  const maxImages = planImageLimit(activePlan);
+  const feePct = planFeePct(activePlan);
+  const planLabel = planDisplayName(activePlan);
   const sellerRegion = resolveRegionCode(region);
   const sellerRegionConfig = getRegion(sellerRegion);
 
@@ -763,6 +769,33 @@ export default function EditProductPage() {
           const storeJson = await storeRes.json();
           if (storeJson?.success && storeJson.data?.storeName) {
             setStoreName(storeJson.data.storeName);
+          }
+          try {
+            const subRes = await fetch(`${API}/seller/subscription`, {
+              headers: { Authorization: `Bearer ${token}` },
+            });
+            const subJson = await subRes.json();
+            const plan =
+              subJson?.data?.planId ||
+              subJson?.data?.plan ||
+              subJson?.data?.subscription?.planId ||
+              null;
+            if (plan) setActivePlan(normalizePlanId(plan));
+            else {
+              const dRes = await fetch(`${API}/seller/dashboard`, {
+                headers: { Authorization: `Bearer ${token}` },
+              });
+              const dJson = await dRes.json();
+              setActivePlan(
+                normalizePlanId(
+                  dJson?.data?.plan ||
+                    dJson?.data?.subscription?.planId ||
+                    "free"
+                )
+              );
+            }
+          } catch {
+            /* keep free */
           }
         } catch {
           /* ignore */
@@ -1735,7 +1768,7 @@ export default function EditProductPage() {
             <Section step={saveStep} title="Save changes">
               <div className="mb-1.5 flex justify-between text-[13px]">
                 <span className="text-[#737A86]">Plan</span>
-                <span className="font-semibold capitalize text-text">{CURRENT_PLAN}</span>
+                <span className="font-semibold capitalize text-text">{planLabel}</span>
               </div>
               <div className="mb-1 flex justify-between text-[13px]">
                 <span className="text-[#737A86]">Transaction fee</span>

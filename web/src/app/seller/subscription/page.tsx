@@ -4,167 +4,62 @@ import { useAuth } from "@clerk/nextjs";
 import {
   Check,
   Diamond,
+  Gift,
   Globe2,
   Leaf,
+  Loader2,
   Rocket,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useMarketplace } from "@/context/MarketplaceContext";
+import { useSearchParams } from "next/navigation";
+import {
+  activateFreePlan,
+  activatePromoPlan,
+  fetchSellerPlans,
+  initiatePlan,
+  verifyPlan,
+  type PlanId,
+  type PlanRow,
+  type PlansResponse,
+} from "@/lib/subscriptionApi";
 
-const API = process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com/api";
-const DEFAULT_REGION = "NG";
+const GRAD = "linear-gradient(90deg,#00E575,#14B8A6,#2563EB)";
 
-const PLAN_PRICE_USD: Record<string, number | null> = {
-  free: null,
-  global: 12,
-  business: 30,
-  dominant: 75,
+const ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
+  free: Leaf,
+  dominant: Globe2,
+  business_plus: Rocket,
+  global_reach: Diamond,
 };
 
-const PLAN_PRICE_NGN: Record<string, number | null> = {
-  free: null,
-  global: 12000,
-  business: 30000,
-  dominant: 75000,
-};
-
-type PlanId = "free" | "global" | "business" | "dominant";
-
-type PlanDef = {
-  id: PlanId;
-  name: string;
-  feePct: number;
-  features: string[];
-  limited?: boolean;
-  Icon: React.ComponentType<{ className?: string }>;
-};
-
-const PLANS: PlanDef[] = [
-  {
-    id: "free",
-    name: "Free Seller",
-    feePct: 8,
-    Icon: Leaf,
-    features: [
-      "Up to 6 images per product",
-      "Standard showroom visibility",
-      "Seller dashboard & orders",
-      "Personal storefront",
-    ],
-  },
-  {
-    id: "global",
-    name: "Dominant Niche",
-    feePct: 5,
-    Icon: Globe2,
-    features: [
-      "Up to 12 images per product",
-      "Increased showroom visibility",
-    ],
-  },
-  {
-    id: "business",
-    name: "Business Plus",
-    feePct: 3.5,
-    Icon: Rocket,
-    features: [
-      "Up to 20 images per product",
-      "High showroom visibility",
-      "Priority product discovery",
-    ],
-  },
-  {
-    id: "dominant",
-    name: "Global Reach",
-    feePct: 2,
-    limited: true,
-    Icon: Diamond,
-    features: [
-      "Up to 20 images per product",
-      "Maximum showroom visibility",
-      "Eligible for Plazore banner",
-      "Highest discovery priority",
-    ],
-  },
-];
-
-const PLAN_LABEL: Record<string, string> = {
-  free: "Free Seller",
-  global: "Dominant Niche",
-  pro: "Dominant Niche",
-  business: "Business Plus",
-  dominant: "Global Reach",
-};
-
-const REGION_META: Record<
-  string,
-  { code: string; name: string; flag: string; currency: { code: string; symbol: string } }
-> = {
-  NG: { code: "NG", name: "Nigeria", flag: "🇳🇬", currency: { code: "NGN", symbol: "₦" } },
-  US: { code: "US", name: "United States", flag: "🇺🇸", currency: { code: "USD", symbol: "$" } },
-  GB: { code: "GB", name: "United Kingdom", flag: "🇬🇧", currency: { code: "GBP", symbol: "£" } },
-  GH: { code: "GH", name: "Ghana", flag: "🇬🇭", currency: { code: "GHS", symbol: "₵" } },
-  KE: { code: "KE", name: "Kenya", flag: "🇰🇪", currency: { code: "KES", symbol: "KSh" } },
-  ZA: { code: "ZA", name: "South Africa", flag: "🇿🇦", currency: { code: "ZAR", symbol: "R" } },
-};
-
-function getRegionMeta(code: string) {
-  return REGION_META[code] || REGION_META[DEFAULT_REGION];
+function feePct(rate?: number) {
+  if (rate == null) return "—";
+  return `${(rate * 100).toFixed(rate * 100 % 1 === 0 ? 0 : 1)}%`;
 }
 
-function formatLocalMoney(amount: number, regionCode: string) {
-  const meta = getRegionMeta(regionCode);
+function formatPrice(amount: number, currency: string) {
+  if (!(amount > 0)) return "Free";
   try {
     return new Intl.NumberFormat(undefined, {
       style: "currency",
-      currency: meta.currency.code,
+      currency: currency || "NGN",
       maximumFractionDigits: 0,
     }).format(amount);
   } catch {
-    return `${meta.currency.symbol}${Math.round(amount).toLocaleString()}`;
+    return `${amount.toLocaleString()} ${currency}`;
   }
 }
 
-/** Simple FX approx if only USD price exists (same idea as mobile convertPrice) */
-function convertFromUsd(usd: number, regionCode: string): number {
-  const rates: Record<string, number> = {
-    US: 1,
-    NG: 1600,
-    GB: 0.79,
-    GH: 15.5,
-    KE: 129,
-    ZA: 18.2,
-  };
-  return usd * (rates[regionCode] ?? rates.US);
-}
-
-function resolvePlanPrice(planId: PlanId, regionCode: string): string {
-  if (planId === "free") return "Free";
-
-  if (regionCode === "NG" && PLAN_PRICE_NGN[planId] != null) {
-    return formatLocalMoney(PLAN_PRICE_NGN[planId]!, "NG");
-  }
-
-  const usd = PLAN_PRICE_USD[planId];
-  if (usd == null) return "Free";
-
-  const local = convertFromUsd(usd, regionCode);
-  return formatLocalMoney(Math.round(local), regionCode);
-}
-
-function normalizePlan(raw: string): string {
-  const p = String(raw || "free").toLowerCase();
-  if (p === "pro") return "global";
-  return p;
-}
-
-async function readJson(res: Response) {
-  const ct = res.headers.get("content-type") || "";
-  if (!ct.includes("application/json")) {
-    const t = await res.text();
-    throw new Error(`Bad response ${res.status}: ${t.slice(0, 80)}`);
-  }
-  return res.json();
+function featureList(p: PlanRow): string[] {
+  const b = p.benefits;
+  const lines = [
+    `Up to ${b.maxImagesPerProduct} images per product`,
+    `${b.showroomVisibility} showroom visibility`,
+  ];
+  if (b.priorityDiscovery) lines.push("Priority product discovery");
+  if (b.bannerEligible) lines.push("Eligible for Plazore banner");
+  lines.push(`Transaction fee: ${feePct(b.transactionFeeRate)} (product only)`);
+  return lines;
 }
 
 function OrbLoader() {
@@ -180,58 +75,154 @@ function OrbLoader() {
 
 export default function SellerSubscriptionPage() {
   const { getToken, isLoaded, isSignedIn } = useAuth();
-  const { region: appRegion } = useMarketplace();
+  const searchParams = useSearchParams();
 
   const [loading, setLoading] = useState(true);
-  const [sellerRegion, setSellerRegion] = useState(appRegion || DEFAULT_REGION);
-  const [currentPlan, setCurrentPlan] = useState<string>("free");
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState("");
+  const [toast, setToast] = useState("");
+  const [payload, setPayload] = useState<PlansResponse["data"] | null>(null);
 
   const load = useCallback(async () => {
     try {
+      setError("");
       const token = await getToken();
-      if (!token) return;
-      const res = await fetch(`${API}/users/me`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const json = await readJson(res);
-      if (json?.success) {
-        const u = json.data;
-        setSellerRegion(u.marketplaceRegion || appRegion || DEFAULT_REGION);
-        setCurrentPlan(
-          normalizePlan(
-            String(u.sellerPlan || u.subscriptionPlan || u.plan || "free")
-          )
-        );
+      if (!token) {
+        setLoading(false);
+        return;
       }
-    } catch {
-      setSellerRegion(appRegion || DEFAULT_REGION);
+      const json = await fetchSellerPlans(token);
+      setPayload(json.data);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to load plans");
     } finally {
       setLoading(false);
     }
-  }, [getToken, appRegion]);
+  }, [getToken]);
 
+  // Return from Paystack callback ?reference=
   useEffect(() => {
-    if (!isLoaded) return;
-    if (!isSignedIn) {
-      setLoading(false);
+    if (!isLoaded || !isSignedIn) return;
+    const ref =
+      searchParams.get("reference") ||
+      searchParams.get("trxref") ||
+      searchParams.get("ref");
+    if (!ref) {
+      void load();
       return;
     }
-    load();
-  }, [isLoaded, isSignedIn, load]);
+    (async () => {
+      try {
+        setBusy("verify");
+        const token = await getToken();
+        if (!token) return;
+        const v = await verifyPlan(token, ref);
+        setToast(v.data?.message || "Plan activated.");
+        await load();
+        // clean query
+        if (typeof window !== "undefined") {
+          const u = new URL(window.location.href);
+          u.searchParams.delete("reference");
+          u.searchParams.delete("trxref");
+          u.searchParams.delete("ref");
+          window.history.replaceState({}, "", u.pathname);
+        }
+      } catch (e: unknown) {
+        setError(e instanceof Error ? e.message : "Verification failed");
+        await load();
+      } finally {
+        setBusy(null);
+      }
+    })();
+  }, [isLoaded, isSignedIn, searchParams, getToken, load]);
 
-  const regionMeta = useMemo(() => getRegionMeta(sellerRegion), [sellerRegion]);
-  const currentLabel = PLAN_LABEL[currentPlan] || PLAN_LABEL.free;
-  const currentFee =
-    PLANS.find(
-      (p) =>
-        p.id === currentPlan || (currentPlan === "pro" && p.id === "global")
-    )?.feePct ?? 8;
+  const active = payload?.active;
+  const currency = payload?.currency || "NGN";
+  const country = payload?.country || "NG";
+  const promo = payload?.promo;
+
+  const plans = useMemo(() => {
+    const list = payload?.plans || [];
+    // Ensure order free → dominant → business_plus → global_reach
+    const order: PlanId[] = ["free", "dominant", "business_plus", "global_reach"];
+    return order
+      .map((id) => list.find((p) => p.id === id))
+      .filter(Boolean) as PlanRow[];
+  }, [payload?.plans]);
+
+  const onSelect = async (planId: PlanId) => {
+    if (busy) return;
+    setError("");
+    setToast("");
+    try {
+      setBusy(planId);
+      const token = await getToken();
+      if (!token) throw new Error("Sign in required");
+
+      if (planId === "free") {
+        await activateFreePlan(token);
+        setToast("Free Seller is now active.");
+        await load();
+        return;
+      }
+
+      const callbackUrl =
+        typeof window !== "undefined"
+          ? `${window.location.origin}/seller/subscription`
+          : undefined;
+
+      const res = await initiatePlan(token, planId, callbackUrl);
+      if (res.data?.activated) {
+        setToast(res.data.message || "Plan activated.");
+        await load();
+        return;
+      }
+      const url = res.data?.authorizationUrl;
+      if (url) {
+        window.location.href = url;
+        return;
+      }
+      throw new Error(res.data?.message || "Could not start payment");
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Action failed");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const onPromo = async () => {
+    if (busy) return;
+    setError("");
+    try {
+      setBusy("promo");
+      const token = await getToken();
+      if (!token) throw new Error("Sign in required");
+      const res = await activatePromoPlan(token);
+      setToast(res.data?.message || "Promotional Dominant Niche activated.");
+      await load();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Promo unavailable");
+    } finally {
+      setBusy(null);
+    }
+  };
 
   if (!isLoaded || loading) return <OrbLoader />;
 
+  if (!isSignedIn) {
+    return (
+      <div className="mx-auto max-w-md px-5 py-20 text-center text-[#F5F7FA]">
+        <p className="text-lg font-extrabold">Sign in required</p>
+        <p className="mt-2 text-sm text-white/50">
+          Open seller plans after signing in as a seller.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-[#090B0F] text-[#F5F7FA]">
-      <div className="mx-auto max-w-2xl px-[18px] py-5 pb-12 sm:px-6 lg:px-8">
+      <div className="mx-auto max-w-2xl px-[18px] py-5 pb-16 sm:px-6">
         <p className="text-[11px] font-bold uppercase tracking-[1.8px] text-[#737A86]">
           Growth
         </p>
@@ -239,11 +230,23 @@ export default function SellerSubscriptionPage() {
           Seller plans
         </h1>
         <p className="mb-5 mt-2.5 text-sm leading-[21px] text-[#A7ADB8]">
-          Lower fees and stronger visibility as your store grows. Fees apply to
-          product price only — never delivery.
+          Pricing follows your <strong className="text-white/80">business location</strong>{" "}
+          ({country} · {currency}) — not the marketplace you browse. Fees apply
+          to product price only, never delivery.
         </p>
 
-        {/* Current plan hero */}
+        {error && (
+          <div className="mb-4 border border-red-500/30 bg-red-500/10 px-3.5 py-3 text-[13px] text-red-200">
+            {error}
+          </div>
+        )}
+        {toast && (
+          <div className="mb-4 border border-[#00E575]/30 bg-[#00E575]/10 px-3.5 py-3 text-[13px] text-[#00E575]">
+            {toast}
+          </div>
+        )}
+
+        {/* Current plan */}
         <div
           className="mb-6 border border-[#00E575]/22 p-[18px]"
           style={{
@@ -254,41 +257,99 @@ export default function SellerSubscriptionPage() {
           <p className="text-[10px] font-bold uppercase tracking-[1.4px] text-[#737A86]">
             Your plan
           </p>
-          <p className="mt-1.5 text-[22px] font-extrabold">{currentLabel}</p>
-          <div className="mt-4 flex items-end justify-between gap-3">
+          <p className="mt-1.5 text-[22px] font-extrabold">
+            {plans.find((p) => p.id === active?.planId)?.name ||
+              active?.planId ||
+              "Free Seller"}
+            {active?.isPromotional ? (
+              <span className="ml-2 bg-[#00E575]/14 px-1.5 py-0.5 text-[10px] font-extrabold text-[#00E575]">
+                Promo
+              </span>
+            ) : null}
+          </p>
+          <div className="mt-4 flex flex-wrap items-end justify-between gap-3">
             <div>
               <p className="text-xs text-[#737A86]">Transaction fee</p>
               <p className="mt-0.5 text-[28px] font-extrabold text-[#00E575]">
-                {currentFee}%
+                {feePct(active?.transactionFeeRate)}
               </p>
             </div>
-            <div className="border border-white/[0.07] bg-[#171B22] px-2.5 py-1.5">
-              <span className="text-xs font-semibold text-[#A7ADB8]">
-                {regionMeta.flag} {regionMeta.name}
-              </span>
+            <div className="border border-white/[0.07] bg-[#171B22] px-2.5 py-1.5 text-xs font-semibold text-[#A7ADB8]">
+              {country} · {currency}
+              {active?.maxImagesPerProduct
+                ? ` · ${active.maxImagesPerProduct} imgs`
+                : ""}
             </div>
           </div>
+          {active?.isPromotional && active?.promoExpiresAt && (
+            <p className="mt-3 text-[12px] text-white/50">
+              Promotional Dominant Niche until{" "}
+              {new Date(active.promoExpiresAt).toLocaleDateString()}. After that,
+              renew at normal price — we will not charge silently.
+            </p>
+          )}
         </div>
 
+        {/* Promo card */}
+        {(promo?.eligible || promo?.claimed) && (
+          <div className="mb-5 border border-amber-500/30 bg-amber-500/[0.08] p-4">
+            <div className="flex gap-3">
+              <Gift className="h-5 w-5 shrink-0 text-amber-400" />
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-extrabold text-amber-100">
+                  Dominant Niche — promotional access
+                </p>
+                <p className="mt-1 text-[12.5px] leading-[18px] text-white/55">
+                  {promo.claimed
+                    ? `You hold a promotional entitlement (${promo.durationMonths} months free). Activate it below or stay on Free Seller.`
+                    : `First 200 eligible sellers: Dominant Niche free for ${promo.durationMonths} months. Not the same as Free Seller — full Dominant benefits at ₦0/$0.`}
+                </p>
+                {!promo.claimed && promo.eligible && (
+                  <button
+                    type="button"
+                    disabled={!!busy}
+                    onClick={() => void onPromo()}
+                    className="mt-3 flex h-10 items-center gap-2 px-4 text-[13px] font-extrabold text-[#041412] disabled:opacity-50"
+                    style={{ backgroundImage: GRAD }}
+                  >
+                    {busy === "promo" ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : null}
+                    Claim promotional Dominant Niche
+                  </button>
+                )}
+                {promo.claimed && active?.planId !== "dominant" && (
+                  <button
+                    type="button"
+                    disabled={!!busy}
+                    onClick={() => void onPromo()}
+                    className="mt-3 flex h-10 items-center gap-2 px-4 text-[13px] font-extrabold text-[#041412] disabled:opacity-50"
+                    style={{ backgroundImage: GRAD }}
+                  >
+                    Activate promotional Dominant Niche
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
         <p className="mb-3 text-[11px] font-bold uppercase tracking-[1.4px] text-[#737A86]">
-          Plans · {regionMeta.currency.code}
+          Plans · {currency}
         </p>
 
         <div className="space-y-3">
-          {PLANS.map((plan) => {
-            const isCurrent =
-              plan.id === currentPlan ||
-              (currentPlan === "pro" && plan.id === "global");
-            const priceLabel = resolvePlanPrice(plan.id, sellerRegion);
-            const Icon = plan.Icon;
+          {plans.map((plan) => {
+            const isCurrent = plan.id === active?.planId;
+            const Icon = ICONS[plan.id] || Leaf;
+            const priceLabel = formatPrice(plan.price.amount, plan.price.currency);
+            const features = featureList(plan);
 
             return (
               <article
                 key={plan.id}
                 className={`relative overflow-hidden border bg-[#11141A] p-4 ${
-                  isCurrent
-                    ? "border-[#00E575]/35"
-                    : "border-white/[0.07]"
+                  isCurrent ? "border-[#00E575]/35" : "border-white/[0.07]"
                 }`}
               >
                 {isCurrent && (
@@ -307,7 +368,7 @@ export default function SellerSubscriptionPage() {
                           Current
                         </span>
                       )}
-                      {plan.limited && (
+                      {plan.id === "global_reach" && (
                         <span className="border border-white/[0.07] bg-[#171B22] px-1.5 py-0.5 text-[10px] font-bold text-[#737A86]">
                           Limited
                         </span>
@@ -315,9 +376,9 @@ export default function SellerSubscriptionPage() {
                     </div>
                     <p className="mt-1.5 text-xl font-extrabold">{priceLabel}</p>
                     <p className="mt-0.5 text-[11px] text-[#737A86]">
-                      {plan.id === "free"
-                        ? "No monthly charge"
-                        : `per month · ${regionMeta.name}`}
+                      {plan.price.amount > 0
+                        ? `per month · ${country}`
+                        : "No monthly charge"}
                     </p>
                   </div>
                 </div>
@@ -325,7 +386,7 @@ export default function SellerSubscriptionPage() {
                 <div className="my-3.5 h-px bg-white/[0.07]" />
 
                 <ul className="space-y-2">
-                  {plan.features.map((f) => (
+                  {features.map((f) => (
                     <li key={f} className="flex items-start gap-2">
                       <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#00E575]" />
                       <span className="text-[13px] leading-[19px] text-[#A7ADB8]">
@@ -337,16 +398,35 @@ export default function SellerSubscriptionPage() {
 
                 <div className="mt-3 flex items-center justify-between border border-white/[0.07] bg-[#171B22] px-3 py-2.5">
                   <span className="text-xs text-[#737A86]">Transaction fee</span>
-                  <span className="text-[15px] font-extrabold">{plan.feePct}%</span>
+                  <span className="text-[15px] font-extrabold">
+                    {feePct(plan.benefits.transactionFeeRate)}
+                  </span>
                 </div>
+
+                {!isCurrent && (
+                  <button
+                    type="button"
+                    disabled={!!busy}
+                    onClick={() => void onSelect(plan.id)}
+                    className="mt-3 flex h-11 w-full items-center justify-center gap-2 text-[14px] font-extrabold text-[#041412] disabled:opacity-50"
+                    style={{ backgroundImage: GRAD }}
+                  >
+                    {busy === plan.id ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : null}
+                    {plan.id === "free"
+                      ? "Switch to Free Seller"
+                      : `Subscribe · ${priceLabel}/mo`}
+                  </button>
+                )}
               </article>
             );
           })}
         </div>
 
-        <p className="mt-4 px-2 text-center text-xs leading-[18px] text-[#737A86]">
-          Payments and plan changes will open in a later update. Until then,
-          this screen shows your current tier and what each plan unlocks.
+        <p className="mt-5 px-2 text-center text-xs leading-[18px] text-[#737A86]">
+          Paid plans activate only after Paystack confirms payment on the
+          server. Cancelling or declining leaves your current plan unchanged.
         </p>
       </div>
     </div>

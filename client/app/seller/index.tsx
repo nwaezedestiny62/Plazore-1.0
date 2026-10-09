@@ -18,7 +18,13 @@ import { Ionicons } from '@expo/vector-icons'
 import { LinearGradient } from 'expo-linear-gradient'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import api from '@/constants/api'
-import { PLAN_FEES } from '@/constants/productCatalog'
+import {
+  PLAN_FEES,
+  PLAN_DISPLAY_NAMES,
+  normalizePlanId,
+  planFeePct,
+  planDisplayName,
+} from '@/constants/productCatalog'
 import { DashboardPerformanceBars } from '@/components/DashboardPerformanceBars'
 
 const BG = '#090B0F'
@@ -284,10 +290,9 @@ export default function SellerDashboard() {
 
   const greeting = useMemo(() => getGreeting(new Date().getHours()), [])
 
-  const feePct =
-    (PLAN_FEES && typeof PLAN_FEES === 'object'
-      ? (PLAN_FEES[overview.plan] ?? PLAN_FEES.free)
-      : null) ?? 8
+  const planId = normalizePlanId(overview.plan)
+  const feePct = planFeePct(planId)
+  const planLabel = planDisplayName(planId)
 
   const exitToMall = useCallback(() => {
     if (router.canGoBack()) {
@@ -343,7 +348,7 @@ export default function SellerDashboard() {
         completedOrders: completed,
         storeName: dash?.storeName || '',
         isVerified: !!dash?.isVerified,
-        plan: dash?.plan || 'free',
+        plan: normalizePlanId(dash?.plan || dash?.subscription?.planId || dash?.subscription?.plan || 'free'),
         revenue,
       })
 
@@ -509,7 +514,7 @@ export default function SellerDashboard() {
             <Text style={styles.revenueEyebrow}>Revenue</Text>
             <View style={styles.revenueBadge}>
               <Text style={styles.revenueBadgeText}>
-                {(overview.plan || 'free').toUpperCase()}
+                {planLabel}
               </Text>
             </View>
           </View>
@@ -686,8 +691,7 @@ export default function SellerDashboard() {
           <View style={{ flex: 1 }}>
             <Text style={styles.planEyebrow}>Subscription</Text>
             <Text style={styles.planName}>
-              {(overview.plan || 'free').charAt(0).toUpperCase() +
-                (overview.plan || 'free').slice(1)}
+              {planLabel}
             </Text>
             <Text style={styles.planFee}>{feePct}% product fee</Text>
           </View>

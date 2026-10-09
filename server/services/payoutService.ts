@@ -15,6 +15,7 @@ import {
 } from "./paystack/transfers.js";
 import { isPaystackConfigured } from "./paystack/client.js";
 import { isStripeConfigured } from "./stripe/client.js";
+import { createTransfer as createStripeTransfer } from "./stripe/transfers.js";
 import { writePaymentAudit } from "../utils/paymentAudit.js";
 import { sendNotification } from "../utils/sendNotification.js";
 
@@ -104,8 +105,8 @@ export async function markDeliveryConfirmed(
 
 /**
  * Initiate seller payout for an eligible order.
- * - Paystack-paid orders → Paystack Transfer
- * - Stripe-paid orders → queue only (no silent Paystack transfer)
+ * - Paystack-paid → Paystack Transfer
+ * - Stripe-paid → Stripe Connect Transfer (requires seller.stripeAccountId)
  * Guarded against double payout.
  */
 export async function processSellerPayout(
@@ -172,7 +173,7 @@ export async function processSellerPayout(
 
   const reference = generatePayoutRef();
 
-  // ── Stripe-paid orders: queue only. Do NOT use Paystack transfer. ──
+  // ── Stripe-paid orders → real Connect transfer ──
   if (paymentProvider === "stripe") {
     if (!isStripeConfigured()) {
       throw Object.assign(
@@ -183,9 +184,88 @@ export async function processSellerPayout(
       );
     }
 
-    const stripeNote =
-      "Stripe Connect transfer not automated yet — queued for admin release";
+    const stripeAccountId =
+      (seller as any).stripeAccountId ||
+      (seller as any).stripeConnectAccountId ||
+      null;
 
+    if (!stripeAccountId) {
+      // Queue until seller completes Connect onboarding
+      let payoutDoc = await Payout.findOne({ order: order._id });
+      const note =
+        "Seller has no Stripe Connect account (acct_…). Complete Connect onboarding, then retry.";
+      if (!payoutDoc) {
+        payoutDoc = await Payout.create({
+          order: order._id,
+          payment: payment._id,
+          seller: order.seller,
+          provider: "stripe",
+          grossAmount: fees.grossAmount,
+          platformFee: fees.platformFee,
+          platformFeeRate: PLAZORE_TRANSACTION_FEE_RATE,
+          shippingCost: order.shippingCost,
+          subtotal: order.subtotal,
+          amount: fees.sellerPayoutAmount,
+          amountMinor: toPaystackAmount(fees.sellerPayoutAmount, currency),
+          currency,
+          status: "queued",
+          reference,
+          bankSnapshot: {
+            bankName: (seller as any).payout?.bankName || "",
+            accountName: (seller as any).payout?.accountName || "",
+            accountNumberLast4: String(
+              (seller as any).payout?.accountNumber || ""
+            ).slice(-4),
+            accountNumber: (seller as any).payout?.accountNumber || "",
+          },
+          triggeredBy: opts?.triggeredBy || "system",
+          adminId: opts?.adminId || null,
+          failureReason: note,
+        });
+      } else {
+        payoutDoc.reference = reference;
+        payoutDoc.status = "queued";
+        payoutDoc.provider = "stripe";
+        payoutDoc.failureReason = note;
+        await payoutDoc.save();
+      }
+
+      (order as any).payout = {
+        status: "queued",
+        eligibleAt: (order as any).payout?.eligibleAt,
+        blockedReason: note,
+        amount: fees.sellerPayoutAmount,
+        platformFee: fees.platformFee,
+        reference,
+        payoutDocId: payoutDoc._id,
+      };
+      (order as any).paymentLifecycle = "SELLER_PAYOUT_PENDING";
+      await order.save();
+
+      await writePaymentAudit({
+        order: order._id.toString(),
+        payment: payment._id.toString(),
+        payout: payoutDoc._id.toString(),
+        action: "payout.queued_stripe_no_connect",
+        actorType: opts?.triggeredBy === "admin" ? "admin" : "system",
+        actorId: opts?.adminId || null,
+        toLifecycle: "SELLER_PAYOUT_PENDING",
+        amount: fees.sellerPayoutAmount,
+        currency,
+        reference,
+        meta: { provider: "stripe", note },
+      });
+
+      return {
+        payout: payoutDoc,
+        order,
+        transfer: null,
+        provider: "stripe" as const,
+        queuedOnly: true,
+      };
+    }
+
+    // Create payout doc then transfer
     let payoutDoc = await Payout.findOne({ order: order._id });
     if (!payoutDoc) {
       payoutDoc = await Payout.create({
@@ -204,30 +284,25 @@ export async function processSellerPayout(
         status: "queued",
         reference,
         bankSnapshot: {
-          bankName: (seller as any).payout?.bankName || "",
-          accountName: (seller as any).payout?.accountName || "",
-          accountNumberLast4: String(
-            (seller as any).payout?.accountNumber || ""
-          ).slice(-4),
-          accountNumber: (seller as any).payout?.accountNumber || "",
+          bankName: "Stripe Connect",
+          accountName: (seller as any).storeName || seller.name || "",
+          accountNumberLast4: String(stripeAccountId).slice(-4),
+          accountNumber: stripeAccountId,
         },
         triggeredBy: opts?.triggeredBy || "system",
         adminId: opts?.adminId || null,
-        failureReason: stripeNote,
       });
     } else {
       payoutDoc.reference = reference;
       payoutDoc.status = "queued";
       payoutDoc.provider = "stripe";
-      payoutDoc.failureReason = stripeNote;
       await payoutDoc.save();
     }
 
     (order as any).payout = {
       status: "queued",
       eligibleAt: (order as any).payout?.eligibleAt,
-      blockedReason:
-        "Stripe payout queued — complete Connect transfer or admin release",
+      blockedReason: "",
       amount: fees.sellerPayoutAmount,
       platformFee: fees.platformFee,
       reference,
@@ -236,27 +311,80 @@ export async function processSellerPayout(
     (order as any).paymentLifecycle = "SELLER_PAYOUT_PENDING";
     await order.save();
 
-    await writePaymentAudit({
-      order: order._id.toString(),
-      payment: payment._id.toString(),
-      payout: payoutDoc._id.toString(),
-      action: "payout.queued_stripe",
-      actorType: opts?.triggeredBy === "admin" ? "admin" : "system",
-      actorId: opts?.adminId || null,
-      toLifecycle: "SELLER_PAYOUT_PENDING",
-      amount: fees.sellerPayoutAmount,
-      currency,
-      reference,
-      meta: { provider: "stripe", note: "Awaiting Connect/admin release" },
-    });
+    try {
+      const sourceCharge =
+        (payment as any).stripeChargeId ||
+        (payment as any).providerChargeId ||
+        undefined;
 
-    return {
-      payout: payoutDoc,
-      order,
-      transfer: null,
-      provider: "stripe" as const,
-      queuedOnly: true,
-    };
+      const transfer = await createStripeTransfer({
+        amountMajor: fees.sellerPayoutAmount,
+        currency,
+        destination: stripeAccountId,
+        reference,
+        orderId: order._id.toString(),
+        orderNumber: order.orderNumber,
+        sourceTransaction: sourceCharge,
+        description: `Plazore payout ${order.orderNumber}`,
+      });
+
+      payoutDoc.status = "initiated";
+      payoutDoc.providerTransferCode = transfer.transferId;
+      payoutDoc.providerTransferId = transfer.transferId;
+      payoutDoc.initiatedAt = new Date();
+      await payoutDoc.save();
+
+      (order as any).payout.status = "initiated";
+      await order.save();
+
+      await writePaymentAudit({
+        order: order._id.toString(),
+        payment: payment._id.toString(),
+        payout: payoutDoc._id.toString(),
+        action: "payout.initiated",
+        actorType: opts?.triggeredBy === "admin" ? "admin" : "system",
+        actorId: opts?.adminId || null,
+        toLifecycle: "SELLER_PAYOUT_PENDING",
+        amount: fees.sellerPayoutAmount,
+        currency,
+        reference,
+        meta: { provider: "stripe", transferId: transfer.transferId },
+      });
+
+      // Stripe transfers are typically immediate; mark success optimistically
+      // Webhook transfer.paid will also call markPayoutSuccess (idempotent)
+      await markPayoutSuccess(reference, {
+        transferId: transfer.transferId,
+        source: "stripe_transfer_create",
+      }).catch(() => {});
+
+      return {
+        payout: payoutDoc,
+        order,
+        transfer,
+        provider: "stripe" as const,
+        queuedOnly: false,
+      };
+    } catch (err: any) {
+      payoutDoc.status = "failed";
+      payoutDoc.failureReason = err.message || "Stripe transfer failed";
+      await payoutDoc.save();
+      (order as any).payout.status = "failed";
+      (order as any).payout.blockedReason = payoutDoc.failureReason;
+      await order.save();
+
+      await writePaymentAudit({
+        order: order._id.toString(),
+        payout: payoutDoc._id.toString(),
+        action: "payout.failed",
+        actorType: "system",
+        note: payoutDoc.failureReason,
+        reference,
+        meta: { provider: "stripe" },
+      });
+
+      throw err;
+    }
   }
 
   // ── Paystack path ──
@@ -413,7 +541,7 @@ export async function processSellerPayout(
   }
 }
 
-/** Called from transfer.success webhook (Paystack) or admin mark for Stripe */
+/** Called from transfer.success webhook (Paystack) or transfer.paid (Stripe) */
 export async function markPayoutSuccess(reference: string, payload?: any) {
   const payout = await Payout.findOne({ reference });
   if (!payout) return { ok: false, error: "Payout not found" };

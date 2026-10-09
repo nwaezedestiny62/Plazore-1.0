@@ -13,6 +13,7 @@ import {
   rankProductsForSearch,
 } from "../services/showroomRanker.js";
 import crypto from "crypto";
+import { assertImageLimit } from "../utils/planEnforcement.js";
 
 const getUser = (req: Request) => (req as any).user;
 
@@ -726,30 +727,42 @@ export const createProduct = async (req: Request, res: Response) => {
     let images: string[] = [];
     const imageFiles = getImageFiles(req);
 
-    if (imageFiles.length > 0) {
-      try {
-        images = await Promise.all(
-          imageFiles.map((file) =>
-            uploadToCloudinary(file.buffer, "plazore/products", "image")
-          )
-        );
-      } catch (uploadErr: any) {
-        console.error("Cloudinary image upload error:", uploadErr);
-        return res.status(502).json({
-          success: false,
-          message:
-            uploadErr?.message?.includes("EAI_AGAIN") ||
-            uploadErr?.code === "EAI_AGAIN"
-              ? "Image upload failed (network). Check internet and try again."
-              : "Image upload failed. Please try again.",
-        });
-      }
-    }
-
-    if (images.length === 0) {
+    if (imageFiles.length === 0) {
       return res.status(400).json({
         success: false,
         message: "Please upload at least one image",
+      });
+    }
+
+    // Plan image limit BEFORE Cloudinary — Free=6, Dominant=12, Business+/Global=20
+    // Avoids uploading files that would be rejected by plan.
+    try {
+      await assertImageLimit(user._id.toString(), imageFiles.length);
+    } catch (limitErr: any) {
+      return res.status(limitErr.statusCode || 400).json({
+        success: false,
+        code: limitErr.code || "PLAN_IMAGE_LIMIT",
+        message:
+          limitErr.message ||
+          "Too many images for your current plan. Upgrade to add more.",
+      });
+    }
+
+    try {
+      images = await Promise.all(
+        imageFiles.map((file) =>
+          uploadToCloudinary(file.buffer, "plazore/products", "image")
+        )
+      );
+    } catch (uploadErr: any) {
+      console.error("Cloudinary image upload error:", uploadErr);
+      return res.status(502).json({
+        success: false,
+        message:
+          uploadErr?.message?.includes("EAI_AGAIN") ||
+          uploadErr?.code === "EAI_AGAIN"
+            ? "Image upload failed (network). Check internet and try again."
+            : "Image upload failed. Please try again.",
       });
     }
 
@@ -952,6 +965,30 @@ export const updateProduct = async (req: Request, res: Response) => {
 
     const keptUrls = parseExistingImageUrls(req.body);
     const imageFiles = getImageFiles(req);
+
+    // Early plan check: kept + new files (order may dedupe later, so this is upper bound)
+    // Final exact check still runs after merge.
+    const clientWillTouchImages =
+      req.body.existingImages !== undefined ||
+      req.body.keepImages !== undefined ||
+      req.body.imagesToKeep !== undefined ||
+      req.body.imageOrder !== undefined ||
+      imageFiles.length > 0;
+
+    if (clientWillTouchImages && imageFiles.length > 0) {
+      const projected = keptUrls.length + imageFiles.length;
+      try {
+        await assertImageLimit(user._id.toString(), projected);
+      } catch (limitErr: any) {
+        return res.status(limitErr.statusCode || 400).json({
+          success: false,
+          code: limitErr.code || "PLAN_IMAGE_LIMIT",
+          message:
+            limitErr.message ||
+            "Too many images for your current plan. Upgrade to add more.",
+        });
+      }
+    }
 
     let uploadedUrls: string[] = [];
     if (imageFiles.length > 0) {
@@ -1217,6 +1254,17 @@ export const updateProduct = async (req: Request, res: Response) => {
         return res.status(400).json({
           success: false,
           message: "At least one product image is required",
+        });
+      }
+      try {
+        await assertImageLimit(user._id.toString(), finalImages.length);
+      } catch (limitErr: any) {
+        return res.status(limitErr.statusCode || 400).json({
+          success: false,
+          code: limitErr.code || "PLAN_IMAGE_LIMIT",
+          message:
+            limitErr.message ||
+            "Too many images for your current plan. Upgrade to add more.",
         });
       }
       updates.images = finalImages;

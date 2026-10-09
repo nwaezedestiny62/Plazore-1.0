@@ -28,6 +28,10 @@ import {
   PLAN_FEES,
   PLAN_IMAGE_LIMITS,
   PRODUCT_CATEGORIES,
+  normalizePlanId,
+  planDisplayName,
+  planFeePct,
+  planImageLimit,
 } from "@/lib/productCatalog";
 import {
   categoryNeedsDocs,
@@ -38,7 +42,7 @@ import { formatMoney, getRegion } from "@/lib/regions";
 
 const API =
   process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com/api";
-const CURRENT_PLAN = "free" as keyof typeof PLAN_IMAGE_LIMITS;
+/* plan loaded dynamically from /seller/subscription or /seller/dashboard */
 
 type OverlayTone = "info" | "success" | "danger";
 type Overlay = { title: string; message?: string; tone?: OverlayTone } | null;
@@ -241,8 +245,10 @@ export default function AddProductPage() {
   const { region, formatProduct } = useMarketplace();
   const router = useRouter();
 
-  const maxImages = PLAN_IMAGE_LIMITS[CURRENT_PLAN] ?? 6;
-  const feePct = PLAN_FEES[CURRENT_PLAN] ?? 8;
+  const [activePlan, setActivePlan] = useState("free");
+  const maxImages = planImageLimit(activePlan);
+  const feePct = planFeePct(activePlan);
+  const planLabel = planDisplayName(activePlan);
   const regionConfig = getRegion(region);
 
   const [overlay, setOverlay] = useState<Overlay>(null);
@@ -300,6 +306,32 @@ export default function AddProductPage() {
         const json = await res.json();
         if (json?.success && json.data?.storeName)
           setStoreName(json.data.storeName);
+        // Prefer explicit subscription endpoint; fall back to dashboard plan
+        try {
+          const subRes = await fetch(`${API}/seller/subscription`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          const subJson = await subRes.json();
+          const plan =
+            subJson?.data?.planId ||
+            subJson?.data?.plan ||
+            subJson?.data?.subscription?.planId ||
+            null;
+          if (plan) setActivePlan(normalizePlanId(plan));
+          else {
+            const dRes = await fetch(`${API}/seller/dashboard`, {
+              headers: { Authorization: `Bearer ${token}` },
+            });
+            const dJson = await dRes.json();
+            const p =
+              dJson?.data?.plan ||
+              dJson?.data?.subscription?.planId ||
+              "free";
+            setActivePlan(normalizePlanId(p));
+          }
+        } catch {
+          /* keep free */
+        }
       } catch {
         /* ignore */
       }
@@ -1407,7 +1439,7 @@ export default function AddProductPage() {
               <div className="mb-1.5 flex justify-between text-[13px]">
                 <span className="text-[#737A86]">Plan</span>
                 <span className="font-semibold capitalize text-text">
-                  {CURRENT_PLAN}
+                  {planLabel}
                 </span>
               </div>
               <div className="mb-1 flex justify-between text-[13px]">
