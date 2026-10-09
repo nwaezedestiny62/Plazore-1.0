@@ -19,6 +19,7 @@ import {
   Image,
   Keyboard,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StatusBar,
@@ -39,10 +40,23 @@ const TEXT_MUTED = 'rgba(245,247,250,0.35)'
 const GREEN = '#00E575'
 const BLUE = '#3B82F6'
 const LINE = 'rgba(255,255,255,0.08)'
+const STATUS_BG = '#090B0F'
 
-const OPEN_MS = 720
-const CLOSE_MS = 380
-const EASE = Easing.bezier(0.22, 1, 0.36, 1)
+/** Keep status bar solid dark — never transparent (avoids fight with title bar) */
+function applySolidDarkStatusBar() {
+  StatusBar.setBarStyle('light-content', true)
+  StatusBar.setHidden(false, 'fade')
+  if (Platform.OS === 'android') {
+    StatusBar.setBackgroundColor(STATUS_BG, true)
+    StatusBar.setTranslucent(false)
+  }
+}
+
+
+const OPEN_MS = 920
+const CLOSE_MS = 520
+const EASE = Easing.bezier(0.16, 1, 0.3, 1)
+const EASE_OUT = Easing.bezier(0.22, 1, 0.36, 1)
 const DEBOUNCE = 280
 const CART_SLIDE_MS = 3200
 
@@ -606,7 +620,9 @@ export default function PlazoreNavigationHub({
   const gap = 9
   const tileW = Math.floor((windowW - pad * 2 - gap) / 2)
   const tileH = Math.round(tileW * 0.86)
-  const topInset = Math.max(insets.top, StatusBar.currentHeight ?? 0, 12)
+  // Solid (non-translucent) status bar already reserves space on Android —
+  // only pad real safe-area inset so we don't double-offset vs the title bar.
+  const topInset = Math.max(insets.top, Platform.OS === 'ios' ? 12 : 0)
   const bottomInset = Math.max(insets.bottom, 12)
   const isSearching = query.trim().length >= 1
 
@@ -849,6 +865,7 @@ export default function PlazoreNavigationHub({
 
   useEffect(() => {
     if (visible) {
+      applySolidDarkStatusBar()
       setMounted(true)
       setContentKey((k) => k + 1)
       progress.setValue(0)
@@ -857,7 +874,7 @@ export default function PlazoreNavigationHub({
       Animated.parallel([
         Animated.timing(backdropOp, {
           toValue: 1,
-          duration: OPEN_MS * 0.7,
+          duration: Math.round(OPEN_MS * 0.85),
           easing: EASE,
           useNativeDriver: true,
         }),
@@ -869,9 +886,9 @@ export default function PlazoreNavigationHub({
         }),
         Animated.timing(contentFade, {
           toValue: 1,
-          duration: OPEN_MS * 0.8,
-          delay: 60,
-          easing: EASE,
+          duration: Math.round(OPEN_MS * 0.72),
+          delay: 90,
+          easing: EASE_OUT,
           useNativeDriver: true,
         }),
       ]).start()
@@ -885,7 +902,8 @@ export default function PlazoreNavigationHub({
         }),
         Animated.timing(contentFade, {
           toValue: 0,
-          duration: 240,
+          duration: Math.round(CLOSE_MS * 0.55),
+          easing: EASE_OUT,
           useNativeDriver: true,
         }),
         Animated.timing(backdropOp, {
@@ -898,6 +916,7 @@ export default function PlazoreNavigationHub({
         if (finished) {
           setMounted(false)
           resetSearch()
+          applySolidDarkStatusBar()
         }
       })
     }
@@ -905,7 +924,7 @@ export default function PlazoreNavigationHub({
 
   const translateX = progress.interpolate({
     inputRange: [0, 1],
-    outputRange: [-windowW * 0.98, 0],
+    outputRange: [-windowW, 0],
   })
 
   const isActive = (href?: string, itemId?: string) => {
@@ -979,11 +998,16 @@ export default function PlazoreNavigationHub({
       visible={mounted}
       transparent
       animationType="none"
-      statusBarTranslucent
+      statusBarTranslucent={false}
       onRequestClose={onClose}
     >
-      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
-      <View style={{ flex: 1 }}>
+      <StatusBar
+        barStyle="light-content"
+        backgroundColor={STATUS_BG}
+        translucent={false}
+        hidden={false}
+      />
+      <View style={{ flex: 1, backgroundColor: BG }}>
         <Animated.View
           style={[
             StyleSheet.absoluteFill,

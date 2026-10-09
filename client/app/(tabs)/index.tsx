@@ -30,6 +30,13 @@ const ROOM_LANDING_GAP = 24
 const ROOM_NAV_PIN_CLEARANCE = 220
 const ROOM_NAV_HOLD_MS = 1200
 
+type ShowroomRoomsState = {
+  1: Product[]
+  2: Product[]
+  3: Product[]
+  4: Product[]
+}
+
 export default function Home() {
   const { setScrollProgress, setHomeChrome, openHub } = usePlazoreChrome()
   const router = useRouter()
@@ -39,13 +46,14 @@ export default function Home() {
   const { height: windowH } = useWindowDimensions()
   const heroH = Math.max(windowH, 1)
 
+  // Stable refs — NEVER put getToken in effect dependency arrays
+  const getTokenRef = useRef(getToken)
+  getTokenRef.current = getToken
+  const isSignedInRef = useRef(isSignedIn)
+  isSignedInRef.current = isSignedIn
+
   const [products, setProducts] = useState<Product[]>([])
-  const [rooms, setRooms] = useState<{
-    1: Product[]
-    2: Product[]
-    3: Product[]
-    4: Product[]
-  } | null>(null)
+  const [rooms, setRooms] = useState<ShowroomRoomsState | null>(null)
   const [loading, setLoading] = useState(true)
   const [scrollProgress, setLocalProgress] = useState(0)
   const [activeRoom, setActiveRoom] = useState(1)
@@ -65,6 +73,7 @@ export default function Home() {
     null,
   )
   const lastProgress = useRef(-1)
+  const sessionIdRef = useRef('')
 
   useEffect(() => {
     setHomeChrome(true)
@@ -76,17 +85,26 @@ export default function Home() {
     }
   }, [setHomeChrome, setScrollProgress])
 
+  // Session + hero token — only when signed-in flag changes (not getToken identity)
   useEffect(() => {
     let cancelled = false
     ;(async () => {
       try {
         const sid = await getShowroomSessionId()
-        if (!cancelled) setSessionId(sid || '')
+        if (cancelled) return
+        const next = sid || ''
+        if (next !== sessionIdRef.current) {
+          sessionIdRef.current = next
+          setSessionId(next)
+        }
       } catch {
-        if (!cancelled) setSessionId('')
+        if (!cancelled && sessionIdRef.current !== '') {
+          sessionIdRef.current = ''
+          setSessionId('')
+        }
       }
       try {
-        const t = isSignedIn ? (await getToken()) || null : null
+        const t = isSignedIn ? (await getTokenRef.current()) || null : null
         if (!cancelled) setHeroToken(t)
       } catch {
         if (!cancelled) setHeroToken(null)
@@ -95,20 +113,29 @@ export default function Home() {
     return () => {
       cancelled = true
     }
-  }, [isSignedIn, getToken])
+  }, [isSignedIn]) // intentional: only isSignedIn, not getToken
 
+  /**
+   * Same feed as web Mall:
+   * GET /products/showroom?sessionId&region
+   * + Authorization when signed in
+   */
   const fetchProducts = useCallback(async () => {
     try {
       setLoading(true)
 
       const sid = await getShowroomSessionId()
       let list: Product[] = []
-      let nextRooms: {
-        1: Product[]
-        2: Product[]
-        3: Product[]
-        4: Product[]
-      } | null = null
+      let nextRooms: ShowroomRoomsState | null = null
+
+      let token: string | null = null
+      try {
+        if (isSignedInRef.current) {
+          token = (await getTokenRef.current()) || null
+        }
+      } catch {
+        token = null
+      }
 
       try {
         const res = await api.get('/products/showroom', {
@@ -116,11 +143,18 @@ export default function Home() {
             sessionId: sid,
             region,
           },
+          headers: token
+            ? { Authorization: `Bearer ${token}` }
+            : undefined,
         })
 
         if (res.data?.success) {
           if (res.data.sessionId) {
             await saveShowroomSessionId(res.data.sessionId)
+            if (res.data.sessionId !== sessionIdRef.current) {
+              sessionIdRef.current = res.data.sessionId
+              setSessionId(res.data.sessionId)
+            }
           }
 
           if (res.data.rooms) {
@@ -146,6 +180,9 @@ export default function Home() {
       } catch {
         const res = await api.get('/products', {
           params: { limit: 140, region },
+          headers: token
+            ? { Authorization: `Bearer ${token}` }
+            : undefined,
         })
         if (res.data?.success && Array.isArray(res.data.data)) {
           list = res.data.data
@@ -160,11 +197,11 @@ export default function Home() {
     } finally {
       setLoading(false)
     }
-  }, [region])
+  }, [region]) // region only — token via refs
 
   useEffect(() => {
     fetchProducts()
-  }, [fetchProducts])
+  }, [fetchProducts, isSignedIn])
 
   const onRoomLayout = useCallback((roomNumber: number, y: number) => {
     roomYs.current[roomNumber] = y

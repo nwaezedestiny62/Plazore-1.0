@@ -31,6 +31,7 @@ import React, { useEffect, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Animated,
+  AppState,
   Dimensions,
   Easing,
   Image,
@@ -53,23 +54,13 @@ const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window')
 const OPENER_MS = 3600
 const EASE = Easing.bezier(0.22, 1, 0.36, 1)
 
-/**
- * Must appear as process.env.EXPO_PUBLIC_* in app source so EAS inlines it
- * into the release APK. Passing it only via Clerk's internal fallback is not enough.
- */
 const CLERK_PUBLISHABLE_KEY =
   process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY ?? ''
 
-const FILL = {
-  position: 'absolute' as const,
-  top: 0,
-  right: 0,
-  bottom: 0,
-  left: 0,
-}
-
+/** Always solid dark — never transparent / translucent */
 function applyDarkStatusBar() {
   StatusBar.setBarStyle('light-content', true)
+  StatusBar.setHidden(false, 'fade')
   if (Platform.OS === 'android') {
     StatusBar.setBackgroundColor(BG, true)
     StatusBar.setTranslucent(false)
@@ -88,12 +79,18 @@ function AppShell() {
     holdIntroGate()
   }, [holdIntroGate])
 
+  // Lock dark status bar on mount + when app returns to foreground
   useEffect(() => {
-    StatusBar.setHidden(true, 'fade')
-    if (Platform.OS === 'android') {
-      StatusBar.setTranslucent(true)
-      StatusBar.setBackgroundColor('transparent', true)
-    }
+    applyDarkStatusBar()
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') applyDarkStatusBar()
+    })
+    return () => sub.remove()
+  }, [])
+
+  useEffect(() => {
+    // Keep bar dark during opener (do NOT make it transparent)
+    applyDarkStatusBar()
 
     const timer = setTimeout(() => {
       Animated.timing(openerOpacity, {
@@ -104,7 +101,6 @@ function AppShell() {
       }).start(({ finished }) => {
         if (!finished) return
         setShowOpener(false)
-        StatusBar.setHidden(false, 'fade')
         applyDarkStatusBar()
         releaseIntroGate()
       })
@@ -120,19 +116,19 @@ function AppShell() {
 
   return (
     <>
-      {/* expo-status-bar: only `style` + `hidden` are safe across SDK versions */}
-      <ExpoStatusBar style="light" hidden={showOpener} />
+      <ExpoStatusBar style="light" />
 
-      {/* Android bar color / translucent via RN StatusBar only */}
       {Platform.OS === 'android' ? (
         <StatusBar
           barStyle="light-content"
-          backgroundColor={showOpener ? 'transparent' : BG}
-          translucent={showOpener}
+          backgroundColor={BG}
+          translucent={false}
           animated
-          hidden={showOpener}
+          hidden={false}
         />
-      ) : null}
+      ) : (
+        <StatusBar barStyle="light-content" hidden={false} animated />
+      )}
 
       <Stack
         screenOptions={{

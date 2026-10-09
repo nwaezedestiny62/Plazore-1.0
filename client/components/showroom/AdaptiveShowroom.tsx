@@ -6,6 +6,10 @@ import RoomTwo from './RoomTwo'
 import RoomThree from './RoomThree'
 import RoomFour from './RoomFour'
 
+/**
+ * Same contract as web `@/lib/api` ShowroomRooms + Mall ROOM_CAPACITY.
+ * Backend `showroomRanker` ROOM_CAPACITY: 50 / 14 / 16 / 30.
+ */
 export type ShowroomRooms = {
   1?: Product[]
   2?: Product[]
@@ -20,16 +24,23 @@ interface AdaptiveShowroomProps {
   onRoomLayout?: (roomNumber: number, y: number) => void
 }
 
-/**
- * Capacities tuned for smoothness while still looking full.
- * (Original was 50/14/16/30 — these values keep the design language)
- */
-/** Match web mall capacities exactly */
+/** Exact web mall + backend capacities */
 const ROOM_CAPACITY = {
   1: 50,
   2: 14,
   3: 16,
   4: 30,
+} as const
+
+const ROOM_TITLES = {
+  one: { title: 'THE HORIZON', subtitle: 'Expanded View' },
+  two: { title: 'THE CHAMBER', subtitle: 'Private Selection' },
+  three: { title: 'THE SIGNAL', subtitle: 'Worth Your Attention' },
+  four: {
+    title: 'THE LOCALE',
+    subtitle: 'From Your Region',
+    regionLabel: "A look at what's around you",
+  },
 } as const
 
 function uniqueCount(rooms?: ShowroomRooms | null, products?: Product[]) {
@@ -45,19 +56,64 @@ function uniqueCount(rooms?: ShowroomRooms | null, products?: Product[]) {
   return ids.size
 }
 
-/** Prefer server order; drop empty rooms; never invent duplicates client-side */
-function takeRoom(list: Product[] | undefined, cap: number): Product[] {
-  if (!list?.length) return []
-  const seen = new Set<string>()
+/**
+ * Same as web Mall.takeUnique:
+ * - prefer server order
+ * - never invent products
+ * - optional shared `used` so Room 1 + 2 stay unique (web buildRooms)
+ */
+function takeUnique(
+  list: Product[] | undefined,
+  cap: number,
+  used?: Set<string>,
+): Product[] {
+  if (!list?.length || cap <= 0) return []
+  const local = used ?? new Set<string>()
   const out: Product[] = []
   for (const p of list) {
     if (out.length >= cap) break
     const id = String(p?._id || '')
-    if (!id || seen.has(id)) continue
-    seen.add(id)
+    if (!id || local.has(id)) continue
+    local.add(id)
     out.push(p)
   }
   return out
+}
+
+/**
+ * Mirror web Mall.buildRooms exactly:
+ * - Server rooms: Room1 + Room2 share one seen set (no overlap).
+ *   Room3 / Room4 use their own lists (backend may allow controlled reuse).
+ * - Fallback: sequential unique slices from flat products list.
+ */
+function buildRooms(
+  products: Product[],
+  serverRooms?: ShowroomRooms | null,
+) {
+  const hasServerRooms = !!(
+    serverRooms &&
+    ((serverRooms[1]?.length || 0) > 0 ||
+      (serverRooms[2]?.length || 0) > 0 ||
+      (serverRooms[3]?.length || 0) > 0 ||
+      (serverRooms[4]?.length || 0) > 0)
+  )
+
+  if (hasServerRooms && serverRooms) {
+    const seen12 = new Set<string>()
+    const one = takeUnique(serverRooms[1], ROOM_CAPACITY[1], seen12)
+    const two = takeUnique(serverRooms[2], ROOM_CAPACITY[2], seen12)
+    const three = takeUnique(serverRooms[3], ROOM_CAPACITY[3])
+    const four = takeUnique(serverRooms[4], ROOM_CAPACITY[4])
+    return { one, two, three, four }
+  }
+
+  const seen = new Set<string>()
+  return {
+    one: takeUnique(products, ROOM_CAPACITY[1], seen),
+    two: takeUnique(products, ROOM_CAPACITY[2], seen),
+    three: takeUnique(products, ROOM_CAPACITY[3], seen),
+    four: takeUnique(products, ROOM_CAPACITY[4], seen),
+  }
 }
 
 function AdaptiveShowroom({
@@ -68,88 +124,35 @@ function AdaptiveShowroom({
 }: AdaptiveShowroomProps) {
   const count = uniqueCount(rooms, products)
 
+  const split = useMemo(
+    () => buildRooms(products || [], rooms),
+    [products, rooms],
+  )
+
   const sections = useMemo(() => {
-    const p = products || []
-    const hasServerRooms = !!(
-      rooms &&
-      (rooms[1]?.length ||
-        rooms[2]?.length ||
-        rooms[3]?.length ||
-        rooms[4]?.length)
-    )
-
-    if (hasServerRooms) {
-      return [
-        {
-          type: 'one' as const,
-          products: takeRoom(rooms?.[1], ROOM_CAPACITY[1]),
-          title: 'THE HORIZON',
-          subtitle: 'Expanded View',
-        },
-        {
-          type: 'two' as const,
-          products: takeRoom(rooms?.[2], ROOM_CAPACITY[2]),
-          title: 'THE CHAMBER',
-          subtitle: 'Private Selection',
-        },
-        {
-          type: 'three' as const,
-          products: takeRoom(rooms?.[3], ROOM_CAPACITY[3]),
-          title: 'THE SIGNAL',
-          subtitle: 'Worth Your Attention',
-        },
-        {
-          type: 'four' as const,
-          products: takeRoom(rooms?.[4], ROOM_CAPACITY[4]),
-          title: 'THE LOCALE',
-          subtitle: 'From Your Region',
-          regionLabel: "A look at what's around you",
-        },
-      ].filter((s) => s.products.length > 0)
-    }
-
-    // Flat fallback: sequential unique slices
-    const seen = new Set<string>()
-    const take = (n: number) => {
-      const slice: Product[] = []
-      for (const item of p) {
-        if (slice.length >= n) break
-        const id = String(item?._id || '')
-        if (!id || seen.has(id)) continue
-        seen.add(id)
-        slice.push(item)
-      }
-      return slice
-    }
-
     return [
       {
         type: 'one' as const,
-        products: take(ROOM_CAPACITY[1]),
-        title: 'THE HORIZON',
-        subtitle: 'Expanded View',
+        products: split.one,
+        ...ROOM_TITLES.one,
       },
       {
         type: 'two' as const,
-        products: take(ROOM_CAPACITY[2]),
-        title: 'THE CHAMBER',
-        subtitle: 'Private Selection',
+        products: split.two,
+        ...ROOM_TITLES.two,
       },
       {
         type: 'three' as const,
-        products: take(ROOM_CAPACITY[3]),
-        title: 'THE SIGNAL',
-        subtitle: 'Worth Your Attention',
+        products: split.three,
+        ...ROOM_TITLES.three,
       },
       {
         type: 'four' as const,
-        products: take(ROOM_CAPACITY[4]),
-        title: 'THE LOCALE',
-        subtitle: 'From Your Region',
-        regionLabel: "A look at what's around you",
+        products: split.four,
+        ...ROOM_TITLES.four,
       },
     ].filter((s) => s.products.length > 0)
-  }, [products, rooms])
+  }, [split])
 
   // Keep previous rooms mounted while refreshing — prevents card re-animation
   if (loading && count === 0) {
@@ -204,7 +207,9 @@ function AdaptiveShowroom({
               products={section.products}
               title={section.title}
               subtitle={section.subtitle}
-              regionLabel={section.regionLabel}
+              regionLabel={
+                'regionLabel' in section ? section.regionLabel : undefined
+              }
             />
           )
 
