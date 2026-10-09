@@ -18,9 +18,9 @@ import {
   X,
 } from "lucide-react";
 
-const BASE = process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com/api";
+const BASE =
+  process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com/api";
 const steps = ["Preparing", "Shipped", "Delivered"];
-
 
 /** Product page: formatProduct(amount, product.region). Order lines freeze product.price in product.region. */
 function orderSourceRegion(order: any): string {
@@ -44,6 +44,20 @@ function itemSourceRegion(item: any, order?: any): string {
   return orderSourceRegion(order);
 }
 
+/** Resolve payment provider label from order / payment fields */
+function paymentProviderLabel(order: any): string | null {
+  const raw =
+    order?.paymentProvider ||
+    order?.provider ||
+    order?.payment?.provider ||
+    order?.paymentMethod?.provider ||
+    "";
+  const p = String(raw).toLowerCase();
+  if (p === "stripe") return "Stripe";
+  if (p === "paystack") return "Paystack";
+  return null;
+}
+
 export default function OrderDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
@@ -58,7 +72,9 @@ export default function OrderDetailPage() {
     formatProduct?: (amount: number, productRegion?: string | null) => string;
     ratesToNgn?: Record<string, number> | null;
   };
-  const displayRegion = resolveRegionCode(marketplace?.region || DEFAULT_REGION);
+  const displayRegion = resolveRegionCode(
+    marketplace?.region || DEFAULT_REGION
+  );
   const formatProductFn =
     marketplace?.formatProduct ||
     ((amount: number, productRegion?: string | null) =>
@@ -235,6 +251,7 @@ export default function OrderDetailPage() {
     (order.orderStatus === "Shipped" ||
       order.orderStatus === "Delivered" ||
       !!shipping.shippedAt);
+  const payProvider = paymentProviderLabel(order);
 
   return (
     <div className="min-h-screen bg-bg text-text">
@@ -431,6 +448,14 @@ export default function OrderDetailPage() {
             <p className="text-[17px] font-bold">
               {order.seller?.storeName || order.seller?.name || "Seller"}
             </p>
+            {payProvider && (
+              <p className="mt-1.5 text-[12px] text-[#6B7280]">
+                Paid via{" "}
+                <span className="font-semibold text-secondary">
+                  {payProvider}
+                </span>
+              </p>
+            )}
           </div>
 
           <p className="mb-2.5 ml-0.5 mt-1 text-[11px] font-bold uppercase tracking-[0.12em] text-[#6B7280]">
@@ -578,6 +603,12 @@ export default function OrderDetailPage() {
                 {fmt(Number(order.shippingCost) || 0)}
               </span>
             </div>
+            {payProvider && (
+              <div className="mb-2.5 flex justify-between text-[13px]">
+                <span className="text-secondary">Paid via</span>
+                <span className="font-semibold">{payProvider}</span>
+              </div>
+            )}
             <div className="my-2 h-px bg-white/7" />
             <div className="flex justify-between">
               <span className="text-sm font-bold">Order Total</span>

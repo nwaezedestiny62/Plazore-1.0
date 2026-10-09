@@ -123,14 +123,6 @@ function itemImage(item: any): string {
   );
 }
 
-/**
- * Product page rule: formatProduct(amount, product.region)
- *
- * Line prices are frozen in the product listing region at checkout
- * (backend: price = product.price, region = product.region).
- *
- * Priority: item.region → product.region → order.region → DEFAULT
- */
 function itemSourceRegion(item: any, order: any): string {
   const prod = item?.product;
   const fromItem =
@@ -151,6 +143,20 @@ function orderSourceRegion(order: any): string {
   if (order.currencyRegion) return resolveRegionCode(order.currencyRegion);
   const first = order.items?.[0];
   return itemSourceRegion(first, order);
+}
+
+/** Resolve payment provider label from order / payment fields */
+function paymentProviderLabel(order: any): string | null {
+  const raw =
+    order?.paymentProvider ||
+    order?.provider ||
+    order?.payment?.provider ||
+    order?.paymentMethod?.provider ||
+    "";
+  const p = String(raw).toLowerCase();
+  if (p === "stripe") return "Stripe";
+  if (p === "paystack") return "Paystack";
+  return null;
 }
 
 async function readJson(res: Response) {
@@ -326,12 +332,6 @@ export default function SellerOrderDetailsPage() {
     []
   );
 
-  /**
-   * Same pipeline as product page:
-   *  - amount is in listing (source) currency
-   *  - first paint: format in source region (no FX, no hydration mismatch)
-   *  - after mount: convert into seller marketplace region
-   */
   const fmtFrom = useCallback(
     (amount: number, sourceRegion?: string | null) => {
       const n = Number(amount) || 0;
@@ -574,6 +574,7 @@ export default function SellerOrderDetailsPage() {
   const isDelivered = order.orderStatus === "Delivered";
   const isCancelled = order.orderStatus === "Cancelled";
   const tone = statusColor(order.orderStatus);
+  const payProvider = paymentProviderLabel(order);
 
   return (
     <div className="min-h-screen bg-[#090B0F] text-[#F5F7FA]">
@@ -622,6 +623,12 @@ export default function SellerOrderDetailsPage() {
               ? "Cancelled by Seller"
               : order.orderStatus}
           </p>
+          {payProvider && (
+            <p className="mt-2 text-[12px] text-white/45">
+              Paid via{" "}
+              <span className="font-semibold text-white/70">{payProvider}</span>
+            </p>
+          )}
         </section>
 
         {isDelivered && buyerPending && (

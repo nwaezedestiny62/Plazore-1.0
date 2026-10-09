@@ -29,9 +29,10 @@ import AnnouncementRouter from "./routes/announcementRoutes.js";
 import { telemetryMiddleware } from "./middleware/telemetry.js";
 import ContactRouter from "./routes/contactRoutes.js";
 
-// Paystack payment architecture
+// Payment architecture (Paystack + Stripe)
 import PaymentRouter from "./routes/paymentRoutes.js";
 import { paystackWebhook } from "./controllers/paymentController.js";
+import { stripeWebhook } from "./controllers/stripeWebhookController.js";
 import { startAutoConfirmDeliveryScheduler } from "./services/jobs/autoConfirmDelivery.js";
 import { startPayoutScheduler } from "./services/jobs/processEligiblePayouts.js";
 import { startAbandonedPaymentScheduler } from "./services/jobs/releaseAbandonedPayments.js";
@@ -40,7 +41,12 @@ const app = express();
 
 await connectDB();
 
-// Clerk webhook needs raw body — must stay before express.json()
+// ============================================
+// WEBHOOKS THAT NEED RAW BODY
+// Must stay BEFORE express.json()
+// ============================================
+
+// Clerk webhook
 app.post(
   "/api/clerk",
   express.raw({ type: "application/json" }),
@@ -65,6 +71,20 @@ app.post(
   paystackWebhook
 );
 
+// Stripe webhook — raw body for signature verification
+app.post(
+  "/api/payments/stripe/webhook",
+  express.raw({ type: "application/json" }),
+  (req, res, next) => {
+    (req as any).rawBody = req.body; // keep raw Buffer for constructEvent
+    next();
+  },
+  stripeWebhook
+);
+
+// ============================================
+// NORMAL MIDDLEWARE
+// ============================================
 app.use(
   cors({
     origin: true,
@@ -90,6 +110,9 @@ app.get("/", (req: Request, res: Response) => {
   res.send("Server is Live!");
 });
 
+// ============================================
+// ROUTES
+// ============================================
 app.use("/api/products", ProductRouter);
 app.use("/api/cart", CartRouter);
 app.use("/api/orders", OrderRouter);

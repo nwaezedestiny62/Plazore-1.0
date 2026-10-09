@@ -55,6 +55,19 @@ function formatOptionLine(item: any): string {
   return ''
 }
 
+function paymentProviderLabel(order: any): string | null {
+  const raw =
+    order?.paymentProvider ||
+    order?.provider ||
+    order?.payment?.provider ||
+    order?.paymentMethodProvider ||
+    ''
+  const p = String(raw).toLowerCase()
+  if (p === 'stripe') return 'Stripe'
+  if (p === 'paystack') return 'Paystack'
+  return null
+}
+
 function PlazoreOrbPreloader() {
   const rotation = useRef(new Animated.Value(0)).current
 
@@ -92,7 +105,6 @@ function PlazoreOrbPreloader() {
   )
 }
 
-
 /**
  * Product page rule:
  *   formatProduct(amount, product.region)
@@ -103,9 +115,7 @@ function PlazoreOrbPreloader() {
  */
 function orderSourceRegion(order: any): string {
   if (!order) return DEFAULT_REGION
-  // 1) Snapshot on the order document (new orders)
   if (order.region) return resolveRegionCode(order.region)
-  // 2) First line item snapshot / product.region
   const first = order.items?.[0]
   if (first?.region) return resolveRegionCode(first.region)
   const prod = first?.product
@@ -116,7 +126,6 @@ function orderSourceRegion(order: any): string {
 }
 
 function itemSourceRegion(item: any, order?: any): string {
-  // Prefer frozen snapshot on the line
   if (item?.region) return resolveRegionCode(item.region)
   const prod = item?.product
   if (prod && typeof prod === 'object' && prod.region) {
@@ -140,7 +149,6 @@ export default function BuyerOrderDetails() {
   const toastAnim = useRef(new Animated.Value(0)).current
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // Same as product page: formatProduct(amount, listingRegion)
   const orderRegion = useMemo(() => orderSourceRegion(order), [order])
   const fmt = useCallback(
     (amount: number, listingRegion?: string | null) =>
@@ -152,7 +160,6 @@ export default function BuyerOrderDetails() {
       formatProduct(Number(amount) || 0, itemSourceRegion(item, order)),
     [formatProduct, order],
   )
-
 
   const loadOrder = useCallback(async () => {
     if (!id) {
@@ -328,6 +335,8 @@ export default function BuyerOrderDetails() {
     (order.orderStatus === 'Shipped' ||
       order.orderStatus === 'Delivered' ||
       !!shipping.shippedAt)
+
+  const payProvider = paymentProviderLabel(order)
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
@@ -534,6 +543,12 @@ export default function BuyerOrderDetails() {
           <Text style={styles.sellerName}>
             {order.seller?.storeName || order.seller?.name || 'Seller'}
           </Text>
+          {payProvider ? (
+            <Text style={styles.providerLine}>
+              Paid via{' '}
+              <Text style={styles.providerStrong}>{payProvider}</Text>
+            </Text>
+          ) : null}
         </View>
 
         <Text style={styles.sectionLabel}>Items</Text>
@@ -565,7 +580,9 @@ export default function BuyerOrderDetails() {
                   <Text style={styles.itemMeta}>
                     Qty {item.quantity} · {fmtItem(unit, item)} each
                   </Text>
-                  <Text style={styles.itemLineTotal}>{fmtItem(lineTotal, item)}</Text>
+                  <Text style={styles.itemLineTotal}>
+                    {fmtItem(lineTotal, item)}
+                  </Text>
                 </View>
               </View>
 
@@ -593,7 +610,9 @@ export default function BuyerOrderDetails() {
             {!!shipping.deliveryCompany && (
               <View style={styles.detailBlock}>
                 <Text style={styles.metaLabel}>Courier Company</Text>
-                <Text style={styles.detailValue}>{shipping.deliveryCompany}</Text>
+                <Text style={styles.detailValue}>
+                  {shipping.deliveryCompany}
+                </Text>
               </View>
             )}
 
@@ -605,11 +624,19 @@ export default function BuyerOrderDetails() {
                   activeOpacity={0.8}
                   style={styles.trackingBox}
                 >
-                  <Text style={styles.trackingText} selectable numberOfLines={1}>
+                  <Text
+                    style={styles.trackingText}
+                    selectable
+                    numberOfLines={1}
+                  >
                     {tracking}
                   </Text>
                   <View style={styles.copyBtn}>
-                    <Ionicons name="copy-outline" size={15} color={SECONDARY} />
+                    <Ionicons
+                      name="copy-outline"
+                      size={15}
+                      color={SECONDARY}
+                    />
                     <Text style={styles.copyText}>Copy</Text>
                   </View>
                 </TouchableOpacity>
@@ -683,6 +710,12 @@ export default function BuyerOrderDetails() {
               {fmt(Number(order.totalAmount) || 0)}
             </Text>
           </View>
+          {payProvider ? (
+            <Text style={styles.providerLine}>
+              Paid via{' '}
+              <Text style={styles.providerStrong}>{payProvider}</Text>
+            </Text>
+          ) : null}
           <Text style={styles.receiptNote}>
             Amounts shown in your marketplace currency. Line prices were locked
             when you placed the order.
@@ -961,6 +994,15 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   sellerName: { fontSize: 17, fontWeight: '700', color: TEXT },
+  providerLine: {
+    marginTop: 6,
+    fontSize: 12,
+    color: MUTED,
+  },
+  providerStrong: {
+    color: SECONDARY,
+    fontWeight: '700',
+  },
   sectionLabel: {
     fontSize: 11,
     fontWeight: '700',

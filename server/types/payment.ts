@@ -1,6 +1,7 @@
 /**
  * Shared payment lifecycle types for Plazore.
  * Backend is the single source of truth for these states.
+ * Supports both Paystack and Stripe under one architecture.
  */
 
 export type PaymentLifecycle =
@@ -21,7 +22,8 @@ export type PaymentLifecycle =
   | "PAYMENT_FAILED"
   | "CANCELLED";
 
-export type PaymentProvider = "paystack" | "manual" | "none";
+/** Extended to support Stripe alongside Paystack */
+export type PaymentProvider = "paystack" | "stripe" | "manual" | "none";
 
 export type PaymentStatus =
   | "pending"
@@ -117,4 +119,5 @@ export interface FeeBreakdown {
   platformFee: number;
   sellerPayoutAmount: number;
   currency: string;
+  region?: string;
 }

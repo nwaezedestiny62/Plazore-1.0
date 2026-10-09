@@ -1,9 +1,14 @@
 import mongoose, { Schema } from "mongoose";
-import type { PaymentLifecycle, PaymentProvider, PaymentStatus } from "../types/payment.js";
+import type {
+  PaymentLifecycle,
+  PaymentProvider,
+  PaymentStatus,
+} from "../types/payment.js";
 
 /**
  * One Payment document per Order (1:1).
  * Backend is source of truth. Never trust client for amount/status.
+ * Supports both Paystack and Stripe under the same document.
  */
 const paymentSchema = new Schema(
   {
@@ -29,11 +34,12 @@ const paymentSchema = new Schema(
 
     provider: {
       type: String,
-      enum: ["paystack", "manual", "none"] as PaymentProvider[],
+      enum: ["paystack", "stripe", "manual", "none"] as PaymentProvider[],
       default: "paystack",
+      index: true,
     },
 
-    /** Our internal reference — unique, used as Paystack reference when possible */
+    /** Our internal reference — unique across providers */
     reference: {
       type: String,
       required: true,
@@ -41,16 +47,24 @@ const paymentSchema = new Schema(
       index: true,
     },
 
-    /** Paystack transaction id (numeric string) after success */
+    /** Provider-specific transaction / intent ID */
     providerTransactionId: { type: String, default: null, index: true },
 
-    /** Amount buyer must pay (major units). Frozen at initialize. */
+    // ===== Stripe-specific fields =====
+    /** Stripe PaymentIntent ID (pi_...) */
+    stripePaymentIntentId: { type: String, default: null, index: true },
+    /** Stripe Charge ID (ch_...) after success */
+    stripeChargeId: { type: String, default: null },
+    /** Stripe Customer ID (cus_...) if used */
+    stripeCustomerId: { type: String, default: null },
+    /** client_secret returned to frontend for Stripe Elements / Payment Sheet */
+    stripeClientSecret: { type: String, default: null, select: false },
+
+    // ===== Amounts (frozen at initialize) =====
     amount: { type: Number, required: true, min: 0 },
-    /** Same amount in smallest currency unit (kobo etc.) sent to Paystack */
     amountMinor: { type: Number, required: true, min: 0 },
     currency: { type: String, required: true, default: "NGN" },
 
-    /** Fee snapshot at payment time */
     subtotal: { type: Number, required: true },
     shippingCost: { type: Number, required: true, default: 0 },
     platformFee: { type: Number, required: true },
@@ -95,16 +109,15 @@ const paymentSchema = new Schema(
       index: true,
     },
 
-    /** Paystack authorization_url from initialize */
+    // Paystack fields (kept for compatibility)
     authorizationUrl: { type: String, default: null },
     accessCode: { type: String, default: null },
 
-    /** Channel used (card, bank, ussd, etc.) — from verify */
     channel: { type: String, default: null },
     gatewayResponse: { type: String, default: null },
     paidAt: { type: Date, default: null },
 
-    /** Optional saved authorization for future charges (tokenized) */
+    // Tokenized / saved method info (provider-agnostic display)
     authorizationCode: { type: String, default: null },
     cardLast4: { type: String, default: null },
     cardBrand: { type: String, default: null },
@@ -114,7 +127,6 @@ const paymentSchema = new Schema(
 
     metadata: { type: Schema.Types.Mixed, default: {} },
 
-    /** Prevent double-processing of success */
     verifiedAt: { type: Date, default: null },
     verificationSource: {
       type: String,
@@ -130,5 +142,7 @@ const paymentSchema = new Schema(
 paymentSchema.index({ status: 1, lifecycle: 1 });
 paymentSchema.index({ buyer: 1, createdAt: -1 });
 paymentSchema.index({ seller: 1, createdAt: -1 });
+paymentSchema.index({ provider: 1, status: 1 });
+paymentSchema.index({ stripePaymentIntentId: 1 }, { sparse: true });
 
 export default mongoose.model("Payment", paymentSchema);

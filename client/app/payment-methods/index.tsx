@@ -1,6 +1,6 @@
 /**
  * Payment Methods — list / default / delete only
- * Cards are saved after a successful Paystack payment (no PAN/CVC in-app).
+ * Cards are saved after a successful Paystack or Stripe payment (no PAN/CVC in-app).
  */
 
 import api from '@/constants/api'
@@ -55,6 +55,12 @@ function getBrandMeta(brand?: string) {
     CARD_BRANDS.find((b) => b.key === brand) ||
     CARD_BRANDS[CARD_BRANDS.length - 1]
   )
+}
+
+function providerLabel(provider?: string) {
+  if (provider === 'stripe') return 'Stripe'
+  if (provider === 'paystack') return 'Paystack'
+  return null
 }
 
 function StorePreloader() {
@@ -146,24 +152,28 @@ export default function PaymentMethods() {
   }
 
   const handleDelete = (id: string) => {
-    Alert.alert('Remove card', 'This card will be removed from your account.', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Remove',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            const token = await getToken()
-            await api.delete(`/payment-methods/${id}`, {
-              headers: { Authorization: `Bearer ${token}` },
-            })
-            fetchCards()
-          } catch {
-            Alert.alert('Error', 'Could not remove card')
-          }
+    Alert.alert(
+      'Remove card',
+      'This card will be removed from your account. You can always pay again with Paystack or Stripe on checkout.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const token = await getToken()
+              await api.delete(`/payment-methods/${id}`, {
+                headers: { Authorization: `Bearer ${token}` },
+              })
+              fetchCards()
+            } catch {
+              Alert.alert('Error', 'Could not remove card')
+            }
+          },
         },
-      },
-    ])
+      ],
+    )
   }
 
   if (loading && !refreshing) {
@@ -208,7 +218,9 @@ export default function PaymentMethods() {
               <Ionicons name="shield-checkmark" size={18} color={GREEN} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={styles.infoTitle}>Cards stay with Paystack</Text>
+              <Text style={styles.infoTitle}>
+                Cards stay with Paystack & Stripe
+              </Text>
               <Text style={styles.infoBody}>
                 We never ask for full card numbers here. After you complete a
                 payment on checkout, a secure token is saved so future orders
@@ -224,8 +236,8 @@ export default function PaymentMethods() {
             </View>
             <Text style={styles.emptyTitle}>No saved cards yet</Text>
             <Text style={styles.emptySub}>
-              Place an order and pay with Paystack. Your card details are
-              tokenized securely and will show up here for next time.
+              Place an order and pay with Paystack or Stripe. Your card details
+              are tokenized securely and will show up here for next time.
             </Text>
             <TouchableOpacity
               onPress={() => router.push('/(tabs)' as any)}
@@ -246,6 +258,7 @@ export default function PaymentMethods() {
         }
         renderItem={({ item }) => {
           const meta = getBrandMeta(item.brand)
+          const prov = providerLabel(item.provider)
           return (
             <TouchableOpacity
               activeOpacity={0.85}
@@ -284,6 +297,11 @@ export default function PaymentMethods() {
                         <Text style={styles.defaultText}>DEFAULT</Text>
                       </View>
                     )}
+                    {prov ? (
+                      <View style={styles.providerBadge}>
+                        <Text style={styles.providerText}>{prov}</Text>
+                      </View>
+                    ) : null}
                   </View>
 
                   <Text style={styles.cardMeta} numberOfLines={1}>
@@ -316,8 +334,8 @@ export default function PaymentMethods() {
         ListFooterComponent={
           cards.length > 0 ? (
             <Text style={styles.footerNote}>
-              Managed securely · Paystack tokenisation · Plazore never stores
-              full card numbers
+              Managed securely · Paystack & Stripe tokenisation · Plazore never
+              stores full card numbers
             </Text>
           ) : null
         }
@@ -534,6 +552,19 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '700',
     color: GREEN,
+  },
+  providerBadge: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: LINE,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  providerText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: MUTED,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
   },
   cardMeta: {
     fontSize: 13,

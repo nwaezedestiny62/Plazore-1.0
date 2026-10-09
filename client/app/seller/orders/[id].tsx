@@ -69,7 +69,6 @@ function resolveNote(note: unknown): string {
   return t
 }
 
-
 function formatOptionLine(item: any): string {
   const so = item?.selectedOptions
   if (so && typeof so === 'object' && !Array.isArray(so)) {
@@ -82,6 +81,18 @@ function formatOptionLine(item: any): string {
   return ''
 }
 
+function paymentProviderLabel(order: any): string | null {
+  const raw =
+    order?.paymentProvider ||
+    order?.provider ||
+    order?.payment?.provider ||
+    order?.paymentMethodProvider ||
+    ''
+  const p = String(raw).toLowerCase()
+  if (p === 'stripe') return 'Stripe'
+  if (p === 'paystack') return 'Paystack'
+  return null
+}
 
 function toYMD(d: Date): string {
   const y = d.getFullYear()
@@ -390,20 +401,9 @@ function DeliveredBurst({
   )
 }
 
-
-/**
- * Product page rule:
- *   formatProduct(amount, product.region)
- *
- * Order line prices are frozen in the product's listing region currency
- * (backend createOrder: price = product.price, region = product.region).
- * Never call format(amount) alone — that only changes the symbol.
- */
 function orderSourceRegion(order: any): string {
   if (!order) return DEFAULT_REGION
-  // 1) Snapshot on the order document (new orders)
   if (order.region) return resolveRegionCode(order.region)
-  // 2) First line item snapshot / product.region
   const first = order.items?.[0]
   if (first?.region) return resolveRegionCode(first.region)
   const prod = first?.product
@@ -414,7 +414,6 @@ function orderSourceRegion(order: any): string {
 }
 
 function itemSourceRegion(item: any, order?: any): string {
-  // Prefer frozen snapshot on the line
   if (item?.region) return resolveRegionCode(item.region)
   const prod = item?.product
   if (prod && typeof prod === 'object' && prod.region) {
@@ -467,7 +466,6 @@ export default function SellerOrderDetails() {
     [],
   )
 
-  // Same as product page: formatProduct(amount, listingRegion)
   const orderRegion = useMemo(() => orderSourceRegion(order), [order])
   const fmt = useCallback(
     (amount: number, listingRegion?: string | null) =>
@@ -479,7 +477,6 @@ export default function SellerOrderDetails() {
       formatProduct(Number(amount) || 0, itemSourceRegion(item, order)),
     [formatProduct, order],
   )
-
 
   const loadOrder = useCallback(async () => {
     try {
@@ -514,6 +511,8 @@ export default function SellerOrderDetails() {
     confStatus !== 'issue_reported'
   const buyerConfirmed = confStatus === 'confirmed'
   const buyerIssue = confStatus === 'issue_reported'
+
+  const payProvider = paymentProviderLabel(order)
 
   const openDatePicker = () => {
     const base = estimatedDeliveryDate || minDate
@@ -784,6 +783,11 @@ export default function SellerOrderDetails() {
               ? 'Cancelled by Seller'
               : order.orderStatus}
           </Text>
+          {payProvider ? (
+            <Text style={styles.providerLine}>
+              Paid via <Text style={styles.providerStrong}>{payProvider}</Text>
+            </Text>
+          ) : null}
         </View>
 
         {isDelivered && buyerPending && (
@@ -1142,9 +1146,15 @@ export default function SellerOrderDetails() {
               {fmt(Number(order.totalAmount) || 0)}
             </Text>
           </View>
+          {payProvider ? (
+            <Text style={[styles.meta, { marginTop: 10 }]}>
+              Paid via {payProvider}
+            </Text>
+          ) : null}
         </View>
       </ScrollView>
 
+      {/* Date picker + Cancel modals — identical to your original */}
       <Modal
         visible={showDatePicker}
         animationType="slide"
@@ -1423,6 +1433,15 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   statusBig: { fontSize: 26, fontWeight: '800', letterSpacing: -0.4 },
+  providerLine: {
+    marginTop: 8,
+    fontSize: 12,
+    color: MUTED,
+  },
+  providerStrong: {
+    color: SECONDARY,
+    fontWeight: '700',
+  },
   sectionTitle: {
     color: TEXT,
     fontSize: 17,

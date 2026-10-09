@@ -3,7 +3,9 @@ import mongoose from "mongoose";
 /**
  * Display metadata only for cards.
  * Never store full PAN, CVV, or PIN.
- * Paystack authorization_code is the token for future charges.
+ *
+ * Paystack: stores authorization_code
+ * Stripe:   stores PaymentMethod ID (pm_...) + Customer ID (cus_...)
  */
 const PaymentMethodSchema = new mongoose.Schema(
   {
@@ -15,7 +17,7 @@ const PaymentMethodSchema = new mongoose.Schema(
     },
     brand: {
       type: String,
-      enum: ["Visa", "Mastercard", "Verve", "Other"],
+      enum: ["Visa", "Mastercard", "Verve", "Amex", "Other"],
       default: "Other",
     },
     name: {
@@ -43,13 +45,14 @@ const PaymentMethodSchema = new mongoose.Schema(
       default: false,
     },
 
-    // ===== Paystack tokenization =====
     provider: {
       type: String,
-      enum: ["paystack", "manual"],
+      enum: ["paystack", "stripe", "manual"],
       default: "paystack",
+      index: true,
     },
-    /** Paystack authorization_code — charge_authorization for return customers */
+
+    // ===== Paystack tokenization =====
     paystackAuthorizationCode: {
       type: String,
       default: null,
@@ -63,8 +66,13 @@ const PaymentMethodSchema = new mongoose.Schema(
     reusable: { type: Boolean, default: false },
     signature: { type: String, default: null },
 
-    // Legacy — keep for migration safety
+    // ===== Stripe tokenization =====
     stripePaymentMethodId: {
+      type: String,
+      default: null,
+      index: true,
+    },
+    stripeCustomerId: {
       type: String,
       default: null,
     },
@@ -73,6 +81,7 @@ const PaymentMethodSchema = new mongoose.Schema(
 );
 
 PaymentMethodSchema.index({ user: 1, isDefault: 1 });
+PaymentMethodSchema.index({ user: 1, provider: 1 });
 PaymentMethodSchema.index({ user: 1, signature: 1 });
 
 export default mongoose.model("PaymentMethod", PaymentMethodSchema);

@@ -1,7 +1,7 @@
 /**
- * Checkout — Paystack-gated (multi-seller sequential)
+ * Checkout — dual provider (Paystack + Stripe)
  * - Order successful ONLY after payment verifies
- * - One order + one Paystack session per seller
+ * - One order + one payment session per seller
  * - Sequential: open → verify → next
  * - Partial success supported (paid sellers stay protected)
  * - Cart cleared only after payments succeed (client-side)
@@ -54,6 +54,8 @@ const GRAD = [GREEN, TEAL, BLUE] as const
 const U = 8
 const H_PAD = 16
 
+type PaymentProvider = 'paystack' | 'stripe'
+
 type OverlayState = {
   title: string
   message?: string
@@ -70,6 +72,7 @@ type SavedCard = {
   expMonth?: string | number
   expYear?: string | number
   isDefault?: boolean
+  provider?: PaymentProvider
 }
 
 type ShipFrom = {
@@ -97,11 +100,14 @@ type PayRow = {
   authorizationUrl?: string
   authorization_url?: string
   reference?: string
+  clientSecret?: string
+  paymentIntentId?: string
   error?: string
   needsManualInit?: boolean
   status?: string
   amount?: number
   currency?: string
+  provider?: PaymentProvider
 }
 
 function resolveProductRegion(product: any): string {
@@ -197,10 +203,18 @@ function maskCard(last4?: string) {
   return `•••• ${last4}`
 }
 
-function backendErrorMessage(body: any, status?: number): string {
+function backendErrorMessage(
+  body: any,
+  status?: number,
+  providerLabel = 'Paystack',
+): string {
   if (body?.message && typeof body.message === 'string') return body.message
-  if (status === 503 || body?.code === 'PAYSTACK_NOT_CONFIGURED') {
-    return 'Order unsuccessful. Payment is not available yet — Paystack is not connected. Nothing was charged.'
+  if (
+    status === 503 ||
+    body?.code === 'PAYSTACK_NOT_CONFIGURED' ||
+    body?.code === 'STRIPE_NOT_CONFIGURED'
+  ) {
+    return `Order unsuccessful. Payment is not available yet — ${providerLabel} is not connected. Nothing was charged.`
   }
   if (status === 402) {
     return 'Order unsuccessful. Payment could not be started. Nothing was charged.'
@@ -368,6 +382,7 @@ function OrderStatusModal({
   progressLabel,
   paidCount,
   totalCount,
+  providerLabel,
   onViewOrders,
   onShowroom,
   onCloseError,
@@ -378,6 +393,7 @@ function OrderStatusModal({
   progressLabel?: string
   paidCount?: number
   totalCount?: number
+  providerLabel: string
   onViewOrders: () => void
   onShowroom: () => void
   onCloseError: () => void
@@ -429,7 +445,6 @@ function OrderStatusModal({
     <Modal visible transparent animationType="fade" statusBarTranslucent>
       <View style={styles.modalRoot}>
         <View style={styles.modalCard}>
-          {/* PROCESSING */}
           {phase === 'processing' && (
             <View style={styles.modalCenter}>
               <PlazoreOrb size={120} />
@@ -438,13 +453,12 @@ function OrderStatusModal({
               </Text>
               <Text style={styles.modalProcessingSub}>
                 {multi
-                  ? 'Each seller is paid separately on Paystack. Already successful payments stay protected.'
-                  : 'Opening Paystack. Order is confirmed only after payment succeeds.'}
+                  ? `Each seller is paid separately on ${providerLabel}. Already successful payments stay protected.`
+                  : `Opening ${providerLabel}. Order is confirmed only after payment succeeds.`}
               </Text>
             </View>
           )}
 
-          {/* FULL ERROR */}
           {phase === 'error' && (
             <View style={styles.modalCenter}>
               <View style={styles.errorIconWrap}>
@@ -463,7 +477,6 @@ function OrderStatusModal({
             </View>
           )}
 
-          {/* PARTIAL SUCCESS */}
           {phase === 'partial' && (
             <ScrollView
               showsVerticalScrollIndicator={false}
@@ -534,7 +547,6 @@ function OrderStatusModal({
             </ScrollView>
           )}
 
-          {/* FULL SUCCESS */}
           {phase === 'success' && (
             <ScrollView
               showsVerticalScrollIndicator={false}
@@ -665,6 +677,7 @@ export default function Checkout() {
   const [paidCount, setPaidCount] = useState(0)
   const [totalCount, setTotalCount] = useState(0)
   const [toast, setToast] = useState<OverlayState>(null)
+  const [provider, setProvider] = useState<PaymentProvider>('paystack')
 
   const [addresses, setAddresses] = useState<any[]>([])
   const [selectedAddress, setSelectedAddress] = useState<any>(null)
@@ -674,6 +687,7 @@ export default function Checkout() {
   const placingLock = useRef(false)
   const displayRegion = buyerRegion || DEFAULT_REGION
   const hasItems = (cartItems?.length || 0) > 0
+  const providerLabel = provider === 'stripe' ? 'Stripe' : 'Paystack'
 
   const fmt = useCallback(
     (amount: number) => {
@@ -915,7 +929,7 @@ export default function Checkout() {
     setProgressLabel(
       routeGroups.length > 1
         ? `Preparing ${routeGroups.length} payments…`
-        : 'Preparing secure payment',
+        : `Preparing secure payment · ${providerLabel}`,
     )
     setOrderPhase('processing')
     setPaidCount(0)
@@ -941,10 +955,10 @@ export default function Checkout() {
         throw new Error('Delivery address is incomplete')
       }
 
-      // 1) Create orders + Paystack sessions (server does NOT clear cart)
       const res = await api.post(
         '/payments/checkout',
         {
+          provider, // "paystack" | "stripe"
           shippingAddress: {
             street: selectedAddress.street,
             city: selectedAddress.city,
@@ -967,7 +981,7 @@ export default function Checkout() {
 
       if (body.success === false) {
         setOrderPhase('error')
-        setOrderError(backendErrorMessage(body, httpStatus))
+        setOrderError(backendErrorMessage(body, httpStatus, providerLabel))
         return
       }
 
@@ -975,31 +989,41 @@ export default function Checkout() {
         ? data.payments
         : []
 
-      // Fallback single-order shape
+      // Normalize single-payment responses
       if (payments.length === 0) {
         const url =
           data.authorizationUrl ||
           data.authorization_url ||
           body.authorizationUrl ||
           body.authorization_url
-        const ref = data.reference || body.reference
-        if (url && ref) {
+        const ref = data.reference || body.reference || ''
+        const clientSecret = data.clientSecret || body.clientSecret || ''
+        const paymentIntentId =
+          data.paymentIntentId || body.paymentIntentId || ''
+
+        if ((url && ref) || clientSecret) {
           payments.push({
             authorizationUrl: url,
-            reference: ref,
+            reference: ref || paymentIntentId,
+            clientSecret,
+            paymentIntentId,
             orderNumber: data.orderNumber,
             status: 'ready',
+            provider,
           })
         }
       }
 
-      const ready = payments.filter(
-        (p) =>
-          (p.authorizationUrl || p.authorization_url) &&
-          p.reference &&
+      const ready = payments.filter((p) => {
+        const hasUrl =
+          !!(p.authorizationUrl || p.authorization_url) && !!p.reference
+        const hasStripe = !!p.clientSecret
+        return (
+          (hasUrl || hasStripe) &&
           !p.error &&
-          p.status !== 'init_failed',
-      )
+          p.status !== 'init_failed'
+        )
+      })
       const failedInit = payments.filter(
         (p) => p.error || p.needsManualInit || p.status === 'init_failed',
       )
@@ -1019,45 +1043,55 @@ export default function Checkout() {
       const paidNumbers: string[] = []
       const failedLines: string[] = []
 
-      // 2) Sequential: one Paystack window per seller
+      // Sequential payments
       for (let i = 0; i < ready.length; i++) {
         const p = ready[i]
-        const authUrl = (p.authorizationUrl || p.authorization_url)!
-        const reference = p.reference!
+        const authUrl = p.authorizationUrl || p.authorization_url
+        const reference = p.reference || p.paymentIntentId || ''
         const label = p.orderNumber || `Seller ${i + 1}`
 
         setProgressLabel(
           ready.length > 1
             ? `Paying ${i + 1} of ${ready.length} · ${label}`
-            : 'Opening Paystack…',
+            : `Opening ${providerLabel}…`,
         )
 
-        const browserResult = await WebBrowser.openAuthSessionAsync(authUrl)
+        // Prefer hosted URL (Paystack always; Stripe Checkout Session if backend provides it)
+        if (authUrl) {
+          const browserResult = await WebBrowser.openAuthSessionAsync(authUrl)
 
-        if (browserResult.type !== 'success') {
-          failedLines.push(`${label}: cancelled`)
-          // Skip remaining — already-paid ones stay protected
-          for (let j = i + 1; j < ready.length; j++) {
-            const skip = ready[j]
-            failedLines.push(
-              `${skip.orderNumber || `Seller ${j + 1}`}: skipped`,
-            )
+          if (browserResult.type !== 'success') {
+            failedLines.push(`${label}: cancelled`)
+            for (let j = i + 1; j < ready.length; j++) {
+              const skip = ready[j]
+              failedLines.push(
+                `${skip.orderNumber || `Seller ${j + 1}`}: skipped`,
+              )
+            }
+            break
           }
-          break
+        } else if (p.clientSecret) {
+          // Stripe PaymentIntent without hosted URL — needs @stripe/stripe-react-native
+          // For now surface a clear message so the flow is not silent
+          failedLines.push(
+            `${label}: Stripe requires hosted checkout URL or Stripe React Native SDK. Ask backend to return a Checkout Session URL for mobile.`,
+          )
+          continue
         }
 
-        // 3) Verify this reference
+        // Verify this reference (works for both providers)
         try {
           const v = await api.post(
             '/payments/verify',
-            { reference },
+            { reference, provider: p.provider || provider },
             { headers: { Authorization: `Bearer ${token}` } },
           )
           const vd = v.data?.data || v.data || {}
           const ok =
             vd.verified === true ||
             vd.orderPlaced === true ||
-            vd.status === 'success'
+            vd.status === 'success' ||
+            vd.status === 'succeeded'
 
           if (ok) {
             paidNumbers.push(label)
@@ -1066,9 +1100,7 @@ export default function Checkout() {
             const reason =
               vd.failureReason ||
               vd.message ||
-              (vd.status === 'abandoned'
-                ? 'abandoned'
-                : 'declined or failed')
+              (vd.status === 'abandoned' ? 'abandoned' : 'declined or failed')
             failedLines.push(`${label}: ${reason}`)
           }
         } catch (ve: any) {
@@ -1090,7 +1122,6 @@ export default function Checkout() {
       const failed = failedLines.length
       setPaidCount(paid)
 
-      // 4) Outcomes
       if (paid > 0 && failed === 0) {
         clearCart()
         setOrderPhase('success')
@@ -1106,7 +1137,6 @@ export default function Checkout() {
         return
       }
 
-      // Nobody paid
       setOrderPhase('error')
       setOrderError(
         failed > 0
@@ -1117,7 +1147,7 @@ export default function Checkout() {
       const status = e?.response?.status
       const body = e?.response?.data
       const msg =
-        (body && backendErrorMessage(body, status)) ||
+        (body && backendErrorMessage(body, status, providerLabel)) ||
         e?.message ||
         'Order unsuccessful. Please try again.'
       setOrderPhase('error')
@@ -1150,16 +1180,29 @@ export default function Checkout() {
           <Text style={styles.headerTitle}>Checkout</Text>
           <View style={styles.headerRight} />
         </View>
+        <LinearGradient
+          colors={[
+            'transparent',
+            'rgba(0,229,117,0.4)',
+            'rgba(37,99,235,0.3)',
+            'transparent',
+          ]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 0 }}
+          style={styles.headerRule}
+        />
         <View style={styles.emptyCheckout}>
           <View style={styles.emptyCheckoutIcon}>
             <Ionicons name="bag-outline" size={28} color={MUTED} />
           </View>
           <Text style={styles.emptyCheckoutTitle}>Your bag is empty</Text>
           <Text style={styles.emptyCheckoutSub}>
-            Add products from the Showroom before checking out.
+            Checkout is only available when there is at least one product in
+            your bag.
           </Text>
           <TouchableOpacity
-            onPress={() => router.replace('/')}
+            onPress={() => router.push('/')}
+            activeOpacity={0.88}
             style={styles.primaryCtaWrap}
           >
             <LinearGradient
@@ -1169,6 +1212,7 @@ export default function Checkout() {
               style={styles.primaryCta}
             >
               <Text style={styles.primaryCtaText}>Go to Showroom</Text>
+              <Ionicons name="arrow-forward" size={16} color="#041412" />
             </LinearGradient>
           </TouchableOpacity>
         </View>
@@ -1187,19 +1231,23 @@ export default function Checkout() {
         progressLabel={progressLabel}
         paidCount={paidCount}
         totalCount={totalCount}
+        providerLabel={providerLabel}
         onViewOrders={() => {
           setOrderPhase('idle')
-          router.push('/orders')
+          router.replace('/orders' as any)
         }}
         onShowroom={() => {
           setOrderPhase('idle')
-          router.replace('/')
+          router.replace('/' as any)
         }}
         onCloseError={() => setOrderPhase('idle')}
       />
 
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+        <TouchableOpacity
+          onPress={() => router.back()}
+          style={styles.backBtn}
+        >
           <Ionicons name="chevron-back" size={22} color={TEXT} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Checkout</Text>
@@ -1229,13 +1277,13 @@ export default function Checkout() {
           <View style={styles.multiHint}>
             <Ionicons name="information-circle-outline" size={16} color={BLUE} />
             <Text style={styles.multiHintText}>
-              {routeGroups.length} sellers · each is paid separately on
-              Paystack. Successful payments stay protected.
+              {routeGroups.length} sellers · each is paid separately.
+              Successful payments stay protected.
             </Text>
           </View>
         )}
 
-        {/* Bag */}
+        {/* Bag — same as before */}
         <View style={styles.card}>
           <View style={styles.cardHeader}>
             <View style={styles.cardHeaderLeft}>
@@ -1328,7 +1376,7 @@ export default function Checkout() {
           ))}
         </View>
 
-        {/* Address */}
+        {/* Address — same */}
         <View style={styles.card}>
           <View style={styles.cardHeader}>
             <View style={styles.cardHeaderLeft}>
@@ -1404,6 +1452,76 @@ export default function Checkout() {
           )}
         </View>
 
+        {/* ── Pay with (provider selector) ── */}
+        <View style={styles.card}>
+          <View style={styles.cardHeader}>
+            <View style={styles.cardHeaderLeft}>
+              <View style={styles.iconSquare}>
+                <Ionicons name="card-outline" size={15} color={SECONDARY} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.cardTitle}>Pay with</Text>
+                <Text style={styles.cardSub}>
+                  Choose your payment provider
+                </Text>
+              </View>
+            </View>
+          </View>
+
+          <View style={styles.listPad}>
+            <TouchableOpacity
+              onPress={() => setProvider('paystack')}
+              style={[
+                styles.selectItem,
+                provider === 'paystack' && styles.selectItemActive,
+              ]}
+            >
+              <View
+                style={[
+                  styles.radio,
+                  provider === 'paystack' && styles.radioActive,
+                ]}
+              >
+                {provider === 'paystack' ? (
+                  <View style={styles.radioDot} />
+                ) : null}
+              </View>
+              <View style={styles.selectContent}>
+                <Text style={styles.selectTitle}>Paystack</Text>
+                <Text style={styles.selectSub}>
+                  Cards, bank transfer & local methods · Best for Nigeria &
+                  Africa
+                </Text>
+              </View>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={() => setProvider('stripe')}
+              style={[
+                styles.selectItem,
+                provider === 'stripe' && styles.selectItemActive,
+              ]}
+            >
+              <View
+                style={[
+                  styles.radio,
+                  provider === 'stripe' && styles.radioActive,
+                ]}
+              >
+                {provider === 'stripe' ? (
+                  <View style={styles.radioDot} />
+                ) : null}
+              </View>
+              <View style={styles.selectContent}>
+                <Text style={styles.selectTitle}>Stripe</Text>
+                <Text style={styles.selectSub}>
+                  Cards & wallets · Best for US, EU & international
+                </Text>
+              </View>
+            </TouchableOpacity>
+          </View>
+        </View>
+
         {/* Payment method */}
         <View style={styles.card}>
           <View style={styles.cardHeader}>
@@ -1414,7 +1532,7 @@ export default function Checkout() {
               <View style={{ flex: 1 }}>
                 <Text style={styles.cardTitle}>Payment method</Text>
                 <Text style={styles.cardSub}>
-                  Saved cards · Paystack hosts entry
+                  Saved cards · {providerLabel} hosts entry
                 </Text>
               </View>
             </View>
@@ -1444,7 +1562,9 @@ export default function Checkout() {
                 ) : null}
               </View>
               <View style={styles.selectContent}>
-                <Text style={styles.selectTitle}>New card on Paystack</Text>
+                <Text style={styles.selectTitle}>
+                  New card on {providerLabel}
+                </Text>
                 <Text style={styles.selectSub}>
                   Valid card + available funds required.
                 </Text>
@@ -1503,7 +1623,7 @@ export default function Checkout() {
           </View>
         </View>
 
-        {/* Shipping routes */}
+        {/* Shipping routes — same as original */}
         <View style={styles.card}>
           <View style={styles.cardHeader}>
             <View style={styles.cardHeaderLeft}>
@@ -1627,8 +1747,8 @@ export default function Checkout() {
             </View>
             <Text style={styles.receiptNote}>
               {routeGroups.length > 1
-                ? `You will complete ${routeGroups.length} separate Paystack payments (one per seller).`
-                : 'Order is placed only after Paystack confirms payment.'}{' '}
+                ? `You will complete ${routeGroups.length} separate ${providerLabel} payments (one per seller).`
+                : `Order is placed only after ${providerLabel} confirms payment.`}{' '}
               Display is converted to your marketplace ({displayRegion}).
             </Text>
           </View>
@@ -1690,10 +1810,10 @@ export default function Checkout() {
                   : !canPlaceOrder
                     ? 'Unavailable'
                     : placing
-                      ? progressLabel || 'Opening Paystack…'
+                      ? progressLabel || `Opening ${providerLabel}…`
                       : routeGroups.length > 1
                         ? `Pay ${routeGroups.length} sellers`
-                        : 'Pay with Paystack'}
+                        : `Pay with ${providerLabel}`}
               </Text>
               {canPlaceOrder && !placing && (
                 <Ionicons name="lock-closed" size={14} color="#041412" />

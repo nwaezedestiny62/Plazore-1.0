@@ -36,6 +36,7 @@ type Card = {
   name?: string;
   bank?: string;
   isDefault?: boolean;
+  provider?: "paystack" | "stripe";
 };
 
 function maskCard(last4?: string) {
@@ -48,6 +49,12 @@ function getBrandMeta(brand?: string) {
     CARD_BRANDS.find((b) => b.key === brand) ||
     CARD_BRANDS[CARD_BRANDS.length - 1]
   );
+}
+
+function providerLabel(provider?: string) {
+  if (provider === "stripe") return "Stripe";
+  if (provider === "paystack") return "Paystack";
+  return null;
 }
 
 function OrbLoader() {
@@ -176,10 +183,12 @@ export default function PaymentMethodsPage() {
             <ShieldCheck className="h-[18px] w-[18px] text-[#00E575]" />
           </span>
           <div>
-            <p className="text-[13px] font-bold">Cards stay with Paystack</p>
+            <p className="text-[13px] font-bold">
+              Cards stay with Paystack &amp; Stripe
+            </p>
             <p className="mt-1 text-[12.5px] leading-[18px] text-white/55">
               We never collect full card numbers on this page. After you pay on
-              checkout, Paystack returns a secure token. Only the last four
+              checkout, the provider returns a secure token. Only the last four
               digits appear here for recognition and defaults.
             </p>
           </div>
@@ -192,8 +201,9 @@ export default function PaymentMethodsPage() {
             </div>
             <h2 className="text-[17px] font-bold">No saved cards yet</h2>
             <p className="mt-2 mb-6 max-w-sm text-[13px] leading-5 text-[#A7ADB8]">
-              Place an order and complete payment with Paystack. Your card will
-              be tokenized securely and listed here for faster checkouts later.
+              Place an order and complete payment with Paystack or Stripe. Your
+              card will be tokenized securely and listed here for faster
+              checkouts later.
             </p>
             <Link
               href="/"
@@ -208,6 +218,7 @@ export default function PaymentMethodsPage() {
             <ul className="grid grid-cols-1 gap-3 md:grid-cols-2">
               {cards.map((item) => {
                 const meta = getBrandMeta(item.brand);
+                const prov = providerLabel(item.provider);
                 return (
                   <li key={item._id}>
                     <div
@@ -248,6 +259,11 @@ export default function PaymentMethodsPage() {
                               DEFAULT
                             </span>
                           ) : null}
+                          {prov ? (
+                            <span className="border border-white/[0.08] px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white/45">
+                              {prov}
+                            </span>
+                          ) : null}
                         </div>
                         <p className="truncate text-[13px] leading-[18px] text-[#A7ADB8]">
                           Expires {item.expMonth}/{item.expYear}
@@ -281,8 +297,8 @@ export default function PaymentMethodsPage() {
               })}
             </ul>
             <p className="mt-6 text-center text-[11px] leading-4 text-[#737A86]">
-              Managed securely · Paystack tokenisation · Plazore never stores
-              full card numbers
+              Managed securely · Paystack &amp; Stripe tokenisation · Plazore
+              never stores full card numbers
             </p>
           </>
         )}
@@ -294,7 +310,7 @@ export default function PaymentMethodsPage() {
             <h3 className="text-base font-bold">Remove card</h3>
             <p className="mt-2 text-sm text-[#A7ADB8]">
               This card will be removed from your account. You can always pay
-              again with Paystack on checkout.
+              again with Paystack or Stripe on checkout.
             </p>
             <div className="mt-5 flex gap-2">
               <button

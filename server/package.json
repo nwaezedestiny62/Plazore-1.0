@@ -22,7 +22,8 @@
     "express": "^5.2.1",
     "mongoose": "^9.6.2",
     "multer": "^2.2.0",
-    "openai": "^7.3.0"
+    "openai": "^7.3.0",
+    "stripe": "^23.0.0"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",

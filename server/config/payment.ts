@@ -1,6 +1,7 @@
 /**
  * Plazore payment configuration
  * Platform fee is FIXED at 8%. Never use 7%.
+ * Shared by both Paystack and Stripe rails.
  */
 
 export const PLAZORE_TRANSACTION_FEE_RATE = 0.08;
@@ -49,7 +50,7 @@ export const REGION_TO_CURRENCY: Record<string, string> = {
   AU: "AUD",
 };
 
-const ZERO_DECIMAL = new Set(["NGN", "XOF", "XAF", "KES", "JPY"]);
+const ZERO_DECIMAL = new Set(["NGN", "XOF", "XAF", "KES", "JPY", "UGX", "RWF"]);
 
 const KNOWN_ISO = new Set([
   "NGN",
@@ -115,7 +116,8 @@ export function calculateSellerPayout(
   return { platformFee, sellerPayoutAmount, grossAmount };
 }
 
-export function toPaystackAmount(
+/** Convert major units → minor units for the given currency (works for both providers) */
+export function toMinorUnits(
   majorUnits: number,
   currency?: string
 ): number {
@@ -124,11 +126,27 @@ export function toPaystackAmount(
   return Math.round(majorUnits * 100);
 }
 
-export function fromPaystackAmount(
+export function fromMinorUnits(
   minorUnits: number,
   currency?: string
 ): number {
   const cur = String(currency || "NGN").toUpperCase();
   if (ZERO_DECIMAL.has(cur)) return minorUnits;
   return minorUnits / 100;
+}
+
+// Backwards-compatible aliases used by existing Paystack code
+export const toPaystackAmount = toMinorUnits;
+export const fromPaystackAmount = fromMinorUnits;
+
+/**
+ * Recommended provider by region (can be overridden by buyer choice).
+ * Used only as a soft default at checkout.
+ */
+export function recommendedProvider(region?: string): "paystack" | "stripe" {
+  const r = String(region || "NG").toUpperCase();
+  if (["NG", "GH", "KE", "ZA", "EG", "CI", "SN", "CM"].includes(r)) {
+    return "paystack";
+  }
+  return "stripe";
 }

@@ -36,6 +36,7 @@ import {
 const BASE =
   process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com/api";
 const GRAD = "linear-gradient(90deg,#00E575,#14B8A6,#2563EB)";
+const STRIPE_PK = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || "";
 
 type Address = {
   _id: string;
@@ -55,9 +56,11 @@ type SavedCard = {
   expMonth?: string | number;
   expYear?: string | number;
   isDefault?: boolean;
+  provider?: "paystack" | "stripe";
 };
 
 type Phase = "idle" | "processing" | "success" | "error" | "partial";
+type PaymentProvider = "paystack" | "stripe";
 
 type Toast = {
   title: string;
@@ -93,9 +96,12 @@ type PayRow = {
   authorizationUrl?: string;
   authorization_url?: string;
   reference?: string;
+  clientSecret?: string;
+  paymentIntentId?: string;
   error?: string;
   needsManualInit?: boolean;
   status?: string;
+  provider?: PaymentProvider;
 };
 
 function productRegion(product: CartItem["product"]) {
@@ -205,6 +211,26 @@ function waitForPopupClose(win: Window | null): Promise<void> {
   });
 }
 
+/** Load Stripe.js only when needed */
+async function loadStripeJs() {
+  if (typeof window === "undefined") return null;
+  const existing = (window as any).Stripe;
+  if (existing && STRIPE_PK) return existing(STRIPE_PK);
+
+  await new Promise<void>((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = "https://js.stripe.com/v3/";
+    s.async = true;
+    s.onload = () => resolve();
+    s.onerror = () => reject(new Error("Failed to load Stripe.js"));
+    document.head.appendChild(s);
+  });
+
+  const Stripe = (window as any).Stripe;
+  if (!Stripe || !STRIPE_PK) return null;
+  return Stripe(STRIPE_PK);
+}
+
 export default function CheckoutPage() {
   const router = useRouter();
   const { getToken, isSignedIn } = useAuth();
@@ -217,6 +243,7 @@ export default function CheckoutPage() {
   const [selectedAddress, setSelectedAddress] = useState<Address | null>(null);
   const [cards, setCards] = useState<SavedCard[]>([]);
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
+  const [provider, setProvider] = useState<PaymentProvider>("paystack");
   const [phase, setPhase] = useState<Phase>("idle");
   const [orderError, setOrderError] = useState("");
   const [toast, setToast] = useState<Toast>(null);
@@ -406,10 +433,12 @@ export default function CheckoutPage() {
       })
     : "";
 
+  const providerLabel = provider === "stripe" ? "Stripe" : "Paystack";
+
   /**
-   * Multi-seller sequential Paystack:
-   * - Single seller → full-page redirect
-   * - Multi seller → sequential popups, verify each
+   * Multi-seller sequential payments (Paystack redirect / Stripe confirm):
+   * - Single seller → full-page redirect or Stripe confirm
+   * - Multi seller → sequential popups / confirms, verify each
    * - Paid sellers stay protected; failed ones do not charge
    */
   const placeOrder = async () => {
@@ -432,12 +461,22 @@ export default function CheckoutPage() {
       return;
     }
 
+    if (provider === "stripe" && !STRIPE_PK) {
+      setToast({
+        title: "Stripe not ready",
+        message:
+          "Stripe publishable key is not configured yet. Use Paystack or add NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY.",
+        tone: "danger",
+      });
+      return;
+    }
+
     placingLock.current = true;
     setOrderError("");
     setProcessingHint(
       routeGroups.length > 1
         ? `Preparing ${routeGroups.length} payments…`
-        : "Preparing secure payment"
+        : `Preparing secure payment · ${providerLabel}`
     );
     setPhase("processing");
     setPaidCount(0);
@@ -470,6 +509,7 @@ export default function CheckoutPage() {
       const res = await apiAuth("/payments/checkout", token, {
         method: "POST",
         body: JSON.stringify({
+          provider, // "paystack" | "stripe"
           shippingAddress: {
             street: selectedAddress.street,
             city: selectedAddress.city,
@@ -494,10 +534,14 @@ export default function CheckoutPage() {
 
       if (!res.ok || body.success === false) {
         setPhase("error");
+        const notConfigured =
+          res.status === 503 ||
+          body.code === "PAYSTACK_NOT_CONFIGURED" ||
+          body.code === "STRIPE_NOT_CONFIGURED";
         setOrderError(
           body.message ||
-            (res.status === 503 || body.code === "PAYSTACK_NOT_CONFIGURED"
-              ? "Order unsuccessful. Payment is not available yet — Paystack is not connected. Nothing was charged."
+            (notConfigured
+              ? `Order unsuccessful. ${providerLabel} is not connected yet. Nothing was charged.`
               : res.status === 402
                 ? "Order unsuccessful. Payment could not be started. Nothing was charged."
                 : res.status === 401
@@ -511,6 +555,7 @@ export default function CheckoutPage() {
         ? data.payments
         : [];
 
+      // Normalize single-payment responses
       if (payments.length === 0) {
         const url =
           data.authorization_url ||
@@ -518,24 +563,34 @@ export default function CheckoutPage() {
           body.authorization_url ||
           body.authorizationUrl;
         const ref = data.reference || body.reference || "";
-        if (url && ref) {
+        const clientSecret = data.clientSecret || body.clientSecret || "";
+        const paymentIntentId =
+          data.paymentIntentId || body.paymentIntentId || "";
+
+        if ((url && ref) || clientSecret) {
           payments.push({
             authorizationUrl: url,
-            reference: ref,
+            reference: ref || paymentIntentId,
+            clientSecret,
+            paymentIntentId,
             orderNumber: data.orderNumber,
             orderId: data.orderId,
             status: "ready",
+            provider,
           });
         }
       }
 
-      const ready = payments.filter(
-        (p) =>
-          (p.authorizationUrl || p.authorization_url) &&
-          p.reference &&
+      const ready = payments.filter((p) => {
+        const hasPaystack =
+          (p.authorizationUrl || p.authorization_url) && p.reference;
+        const hasStripe = !!p.clientSecret;
+        return (
+          (hasPaystack || hasStripe) &&
           !p.error &&
           p.status !== "init_failed"
-      );
+        );
+      });
       const failedInit = payments.filter(
         (p) => p.error || p.needsManualInit || p.status === "init_failed"
       );
@@ -555,48 +610,16 @@ export default function CheckoutPage() {
       const paidNumbers: string[] = [];
       const failedLines: string[] = [];
 
-      // Single seller → full-page redirect (best Paystack UX)
+      // ── Single payment ──────────────────────────────────────
       if (ready.length === 1 && failedInit.length === 0) {
         const p = ready[0];
-        const authUrl = (p.authorizationUrl || p.authorization_url)!;
-        try {
-          sessionStorage.setItem("plazore_pay_ref", p.reference || "");
-        } catch {
-          /* ignore */
-        }
-        window.location.href = authUrl;
-        return;
-      }
 
-      // Multi-seller → sequential popups
-      for (let i = 0; i < ready.length; i++) {
-        const p = ready[i];
-        const authUrl = (p.authorizationUrl || p.authorization_url)!;
-        const reference = p.reference!;
-        const label = p.orderNumber || `Seller ${i + 1}`;
-
-        setProcessingHint(
-          `Paying ${i + 1} of ${ready.length} · ${label}`
-        );
-
-        const popup = window.open(
-          authUrl,
-          `plazore_pay_${i}`,
-          "width=480,height=720,scrollbars=yes"
-        );
-
-        if (!popup) {
-          // Popup blocked — redirect for remaining, keep already-paid
+        // Paystack → full-page redirect
+        if (p.authorizationUrl || p.authorization_url) {
+          const authUrl = (p.authorizationUrl || p.authorization_url)!;
           try {
-            sessionStorage.setItem(
-              "plazore_pay_queue",
-              JSON.stringify(ready.slice(i))
-            );
-            sessionStorage.setItem("plazore_pay_ref", reference);
-            sessionStorage.setItem(
-              "plazore_pay_paid",
-              JSON.stringify(paidNumbers)
-            );
+            sessionStorage.setItem("plazore_pay_ref", p.reference || "");
+            sessionStorage.setItem("plazore_pay_provider", "paystack");
           } catch {
             /* ignore */
           }
@@ -604,18 +627,129 @@ export default function CheckoutPage() {
           return;
         }
 
-        await waitForPopupClose(popup);
+        // Stripe → confirmPayment (redirect mode keeps UX close to Paystack)
+        if (p.clientSecret) {
+          setProcessingHint("Opening secure card form…");
+          const stripe = await loadStripeJs();
+          if (!stripe) {
+            setPhase("error");
+            setOrderError(
+              "Stripe could not be loaded. Check NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY."
+            );
+            return;
+          }
 
+          const returnUrl =
+            typeof window !== "undefined"
+              ? `${window.location.origin}/checkout/callback?provider=stripe&ref=${encodeURIComponent(
+                  p.reference || p.paymentIntentId || ""
+                )}`
+              : undefined;
+
+          const { error } = await stripe.confirmPayment({
+            clientSecret: p.clientSecret,
+            confirmParams: {
+              return_url: returnUrl,
+            },
+            redirect: "always",
+          });
+
+          if (error) {
+            setPhase("error");
+            setOrderError(
+              error.message ||
+                "Card was declined or payment could not be completed. Nothing was charged."
+            );
+          }
+          return;
+        }
+      }
+
+      // ── Multi-seller sequential ─────────────────────────────
+      for (let i = 0; i < ready.length; i++) {
+        const p = ready[i];
+        const reference = p.reference || p.paymentIntentId || "";
+        const label = p.orderNumber || `Seller ${i + 1}`;
+
+        setProcessingHint(
+          `Paying ${i + 1} of ${ready.length} · ${label} · ${providerLabel}`
+        );
+
+        // Paystack popup path
+        if (p.authorizationUrl || p.authorization_url) {
+          const authUrl = (p.authorizationUrl || p.authorization_url)!;
+          const popup = window.open(
+            authUrl,
+            `plazore_pay_${i}`,
+            "width=480,height=720,scrollbars=yes"
+          );
+
+          if (!popup) {
+            try {
+              sessionStorage.setItem(
+                "plazore_pay_queue",
+                JSON.stringify(ready.slice(i))
+              );
+              sessionStorage.setItem("plazore_pay_ref", reference);
+              sessionStorage.setItem(
+                "plazore_pay_paid",
+                JSON.stringify(paidNumbers)
+              );
+              sessionStorage.setItem("plazore_pay_provider", provider);
+            } catch {
+              /* ignore */
+            }
+            window.location.href = authUrl;
+            return;
+          }
+
+          await waitForPopupClose(popup);
+        }
+
+        // Stripe sequential (confirm each PaymentIntent)
+        if (p.clientSecret) {
+          const stripe = await loadStripeJs();
+          if (!stripe) {
+            failedLines.push(`${label}: Stripe.js unavailable`);
+            continue;
+          }
+
+          const returnUrl =
+            typeof window !== "undefined"
+              ? `${window.location.origin}/checkout/callback?provider=stripe&ref=${encodeURIComponent(
+                  reference
+                )}&seq=${i}`
+              : undefined;
+
+          const { error } = await stripe.confirmPayment({
+            clientSecret: p.clientSecret,
+            confirmParams: { return_url: returnUrl },
+            redirect: "if_required",
+          });
+
+          if (error) {
+            failedLines.push(
+              `${label}: ${error.message || "declined or cancelled"}`
+            );
+            continue;
+          }
+        }
+
+        // Verify with backend (works for both providers)
         try {
           const v = await apiAuth("/payments/verify", token, {
             method: "POST",
-            body: JSON.stringify({ reference }),
+            body: JSON.stringify({
+              reference,
+              provider: p.provider || provider,
+            }),
           });
           const vd = v.body?.data || v.body || {};
           const ok =
             vd.verified === true ||
             vd.orderPlaced === true ||
-            vd.status === "success";
+            vd.status === "success" ||
+            vd.status === "succeeded";
 
           if (ok) {
             paidNumbers.push(label);
@@ -625,7 +759,7 @@ export default function CheckoutPage() {
               vd.failureReason ||
               vd.message ||
               (vd.status === "abandoned"
-                ? "abandoned on Paystack"
+                ? "abandoned"
                 : "declined, failed, or insufficient funds");
             failedLines.push(`${label}: ${reason}`);
           }
@@ -777,7 +911,7 @@ export default function CheckoutPage() {
                 <p className="mt-2 text-[13px] text-white/55">
                   {routeGroups.length > 1
                     ? "Each seller is paid separately. Already successful payments stay protected."
-                    : "Opening Paystack. Order is confirmed only after payment succeeds."}
+                    : `Opening ${providerLabel}. Order is confirmed only after payment succeeds.`}
                 </p>
               </>
             )}
@@ -907,13 +1041,13 @@ export default function CheckoutPage() {
             <div className="mb-3 flex gap-2.5 border border-blue/25 bg-blue/[0.08] p-3">
               <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-blue-400" />
               <p className="text-[12.5px] leading-[18px] text-white/55">
-                {routeGroups.length} sellers · each is paid separately on
-                Paystack. Successful payments stay protected.
+                {routeGroups.length} sellers · each is paid separately.
+                Successful payments stay protected.
               </p>
             </div>
           )}
 
-          {/* Bag */}
+          {/* Bag — unchanged structure */}
           <section className="mb-3 overflow-hidden border border-white/8 bg-[#0E1116]">
             <div className="flex items-center justify-between border-b border-white/8 bg-[#14181F] px-3.5 py-3">
               <div className="flex items-center gap-2.5">
@@ -1005,7 +1139,7 @@ export default function CheckoutPage() {
             ))}
           </section>
 
-          {/* Address */}
+          {/* Address — unchanged */}
           <section className="mb-3 overflow-hidden border border-white/8 bg-[#0E1116]">
             <div className="flex items-center justify-between border-b border-white/8 bg-[#14181F] px-3.5 py-3">
               <div className="flex items-center gap-2.5">
@@ -1085,7 +1219,77 @@ export default function CheckoutPage() {
             )}
           </section>
 
-          {/* Payment method */}
+          {/* ── Payment provider selector (new, same visual language) ── */}
+          <section className="mb-3 overflow-hidden border border-white/8 bg-[#0E1116]">
+            <div className="flex items-center gap-2.5 border-b border-white/8 bg-[#14181F] px-3.5 py-3">
+              <span className="flex h-[30px] w-[30px] items-center justify-center border border-white/8 bg-[#0E1116]">
+                <CreditCard className="h-3.5 w-3.5 text-white/55" />
+              </span>
+              <div>
+                <p className="text-sm font-extrabold">Pay with</p>
+                <p className="text-[10px] text-white/40">
+                  Choose your payment provider
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-2 p-3">
+              <button
+                type="button"
+                onClick={() => setProvider("paystack")}
+                className={`flex w-full gap-3 border p-3 text-left ${
+                  provider === "paystack"
+                    ? "border-green/50 bg-[#14181F]"
+                    : "border-white/8"
+                }`}
+              >
+                <span
+                  className={`mt-0.5 flex h-[18px] w-[18px] items-center justify-center border-2 ${
+                    provider === "paystack" ? "border-green" : "border-white/38"
+                  }`}
+                >
+                  {provider === "paystack" && (
+                    <span className="h-2 w-2 bg-green" />
+                  )}
+                </span>
+                <span>
+                  <span className="text-[13px] font-bold">Paystack</span>
+                  <span className="mt-1 block text-xs text-white/55">
+                    Cards, bank transfer &amp; local methods · Best for Nigeria
+                    &amp; Africa
+                  </span>
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setProvider("stripe")}
+                className={`flex w-full gap-3 border p-3 text-left ${
+                  provider === "stripe"
+                    ? "border-green/50 bg-[#14181F]"
+                    : "border-white/8"
+                }`}
+              >
+                <span
+                  className={`mt-0.5 flex h-[18px] w-[18px] items-center justify-center border-2 ${
+                    provider === "stripe" ? "border-green" : "border-white/38"
+                  }`}
+                >
+                  {provider === "stripe" && (
+                    <span className="h-2 w-2 bg-green" />
+                  )}
+                </span>
+                <span>
+                  <span className="text-[13px] font-bold">Stripe</span>
+                  <span className="mt-1 block text-xs text-white/55">
+                    Cards &amp; wallets · Best for US, EU &amp; international
+                  </span>
+                </span>
+              </button>
+            </div>
+          </section>
+
+          {/* Payment method (saved cards) */}
           <section className="mb-3 overflow-hidden border border-white/8 bg-[#0E1116]">
             <div className="flex items-center justify-between border-b border-white/8 bg-[#14181F] px-3.5 py-3">
               <div className="flex items-center gap-2.5">
@@ -1095,7 +1299,7 @@ export default function CheckoutPage() {
                 <div>
                   <p className="text-sm font-extrabold">Payment method</p>
                   <p className="text-[10px] text-white/40">
-                    Saved cards · Paystack hosts entry
+                    Saved cards · {providerLabel} hosts entry
                   </p>
                 </div>
               </div>
@@ -1128,11 +1332,11 @@ export default function CheckoutPage() {
                 </span>
                 <span>
                   <span className="text-[13px] font-bold">
-                    New card on Paystack
+                    New card on {providerLabel}
                   </span>
                   <span className="mt-1 block text-xs text-white/55">
-                    Enter card securely on Paystack. Order only succeeds if the
-                    card is valid and funds are available.
+                    Enter card securely on {providerLabel}. Order only succeeds
+                    if the card is valid and funds are available.
                   </span>
                 </span>
               </button>
@@ -1193,7 +1397,7 @@ export default function CheckoutPage() {
             </div>
           </section>
 
-          {/* Shipping routes */}
+          {/* Shipping routes — unchanged */}
           <section className="mb-3 overflow-hidden border border-white/8 bg-[#0E1116]">
             <div className="flex items-center gap-2.5 border-b border-white/8 bg-[#14181F] px-3.5 py-3">
               <span className="flex h-[30px] w-[30px] items-center justify-center border border-white/8 bg-[#0E1116]">
@@ -1303,8 +1507,8 @@ export default function CheckoutPage() {
             </div>
             <p className="text-[11px] text-white/38">
               {routeGroups.length > 1
-                ? `You will complete ${routeGroups.length} separate Paystack payments (one per seller). Paid ones stay protected if another fails.`
-                : "Order is placed only after Paystack confirms payment."}
+                ? `You will complete ${routeGroups.length} separate ${providerLabel} payments (one per seller). Paid ones stay protected if another fails.`
+                : `Order is placed only after ${providerLabel} confirms payment.`}
             </p>
           </div>
           <div className="hidden border-t border-white/8 p-4 md:block">
@@ -1330,10 +1534,10 @@ export default function CheckoutPage() {
                 : !canPlaceOrder
                   ? "Complete required steps"
                   : placing
-                    ? processingHint || "Opening Paystack…"
+                    ? processingHint || `Opening ${providerLabel}…`
                     : routeGroups.length > 1
                       ? `Pay ${routeGroups.length} sellers`
-                      : "Pay with Paystack"}
+                      : `Pay with ${providerLabel}`}
               {canPlaceOrder && !placing && <Lock className="h-4 w-4" />}
             </button>
           </div>
@@ -1369,7 +1573,7 @@ export default function CheckoutPage() {
                   ? "…"
                   : routeGroups.length > 1
                     ? `Pay ${routeGroups.length}`
-                    : "Pay with Paystack"}
+                    : `Pay with ${providerLabel}`}
           </button>
         </div>
       </div>
