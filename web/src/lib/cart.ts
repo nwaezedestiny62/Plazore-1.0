@@ -25,6 +25,7 @@ export type AddToCartSelection = {
   variant?: ProductVariant | null;
 };
 
+/** Stable line id — same product + same variant = one line */
 function lineId(productId: string, variantKey?: string): string {
   const key = String(variantKey || "").trim();
   return key ? `${productId}::${key}` : productId;
@@ -66,7 +67,7 @@ export function cartCount() {
  * Add to cart.
  * - Simple product: no selection needed.
  * - Variant product: pass variant / selectedOptions / variantKey.
- * Same product + same variantKey → increases quantity.
+ * Same product + same variantKey → increases quantity (never creates a second line).
  * Different variant → separate line.
  */
 export function addToCart(
@@ -115,11 +116,12 @@ export function addToCart(
   const i = items.findIndex((x) => x.id === id);
 
   if (i >= 0) {
+    // Merge into existing line — never push a duplicate
     items[i].quantity += quantity;
     items[i].price = unitPrice;
-    items[i].variantId = variantId;
-    items[i].variantKey = variantKey;
-    items[i].selectedOptions = selectedOptions;
+    items[i].variantId = variantId || items[i].variantId;
+    items[i].variantKey = variantKey || items[i].variantKey;
+    items[i].selectedOptions = selectedOptions || items[i].selectedOptions;
   } else {
     items.push({
       id,

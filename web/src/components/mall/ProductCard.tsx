@@ -188,13 +188,15 @@ export function ProductCard({
   const btnRef = useRef<HTMLButtonElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const impressed = useRef(false);
+  /** Blocks double-click / double onClick on cart button */
+  const addLockRef = useRef(false);
+
   const [authOpen, setAuthOpen] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerIn, setPickerIn] = useState(false);
   const [pressed, setPressed] = useState(false);
   const [selected, setSelected] = useState<Record<string, string>>({});
 
-  // Single static image only — no carousel / no interval (prevents lag)
   const primaryImage =
     product.images?.length && product.images[0] ? product.images[0] : null;
 
@@ -313,6 +315,10 @@ export function ProductCard({
     }, 240);
   }, []);
 
+  /**
+   * Single path into cart. Cart lib merges by line id.
+   * Fly animation is visual only — we never call addToCart twice.
+   */
   const doAdd = useCallback(
     (variant?: ProductVariant | null) => {
       void trackShowroomEvent({
@@ -334,6 +340,7 @@ export function ProductCard({
           }
         : product;
 
+      // Write to cart exactly once
       try {
         addToCart(product, 1, {
           variantId: variant?.variantId,
@@ -342,9 +349,10 @@ export function ProductCard({
           variant: variant || undefined,
         });
       } catch {
-        /* flyAdd is the showroom path */
+        /* picker path should already enforce selection */
       }
 
+      // Fly is visual only (does NOT call addToCart again)
       const el = btnRef.current;
       if (el && fly) {
         const r = el.getBoundingClientRect();
@@ -367,6 +375,14 @@ export function ProductCard({
     e.preventDefault();
     e.stopPropagation();
     if (!isLoaded) return;
+
+    // Guard double-click / rapid taps
+    if (addLockRef.current) return;
+    addLockRef.current = true;
+    window.setTimeout(() => {
+      addLockRef.current = false;
+    }, 400);
+
     if (!isSignedIn) {
       stashReturn(product._id);
       setAuthOpen(true);
@@ -383,6 +399,14 @@ export function ProductCard({
     e.preventDefault();
     e.stopPropagation();
     if (!selectionComplete || !selectedVariant || !inStock) return;
+
+    // Guard double confirm
+    if (addLockRef.current) return;
+    addLockRef.current = true;
+    window.setTimeout(() => {
+      addLockRef.current = false;
+    }, 400);
+
     doAdd(selectedVariant);
     closePicker();
   };

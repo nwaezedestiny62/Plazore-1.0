@@ -176,9 +176,10 @@ const orderSchema = new mongoose.Schema(
       enum: ["pending", "paid", "failed", "refunded"],
       default: "pending",
     },
+    /** paystack | stripe — set when payment is initialized */
     paymentMethod: {
       type: String,
-      enum: ["cash", "card", "transfer", "pending", "paystack"],
+      enum: ["cash", "card", "transfer", "pending", "paystack", "stripe"],
       default: "pending",
     },
 

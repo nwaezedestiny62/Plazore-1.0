@@ -33,7 +33,6 @@ const LINE = 'rgba(255,255,255,0.1)'
 const TEXT = '#F5F7FA'
 const SECONDARY = 'rgba(255,255,255,0.55)'
 const GREEN = '#00E575'
-const GRAD = ['#00E575', '#14B8A6', '#2563EB']
 
 const PENDING_KEY = 'plazore_pending_action'
 const RETURN_KEY = 'plazore_return_to'
@@ -155,7 +154,6 @@ function normalizeOptions(product: Product) {
       }))
       .filter((o) => o.name && o.values.length)
   }
-  // Derive from variants if options missing
   const map: Record<string, Set<string>> = {}
   for (const v of product.variants || []) {
     const o = v.options || {}
@@ -196,6 +194,8 @@ function ShowroomProductCard({
   const pendingCartRef = useRef<Product | null>(null)
   const cartBtnRef = useRef<View>(null)
   const impressed = useRef(false)
+  /** Blocks double onPress from RN Pressable inside ScrollView */
+  const addLockRef = useRef(false)
 
   const defaultW = (screenW - H_PADDING * 2 - GAP) / 2
   const cardW = Number(style?.width) > 0 ? Number(style.width) : defaultW
@@ -215,7 +215,11 @@ function ShowroomProductCard({
       optionGroups.every((g) => !!selected[g.name]))
 
   const unitPrice = useMemo(() => {
-    if (matched && matched.price != null && Number.isFinite(Number(matched.price))) {
+    if (
+      matched &&
+      matched.price != null &&
+      Number.isFinite(Number(matched.price))
+    ) {
       return Number(matched.price)
     }
     return resolvePrice(product)
@@ -247,7 +251,6 @@ function ShowroomProductCard({
     return ''
   }, [product.images, matched])
 
-
   useEffect(() => {
     if (impressed.current || !product?._id) return
     impressed.current = true
@@ -261,13 +264,16 @@ function ShowroomProductCard({
   }, [product?._id, product?.region, room, position])
 
   const doAddToCart = useCallback(
-    (p: Product, variantPayload?: {
-      variantId?: string
-      variantKey?: string
-      selectedOptions?: Record<string, string>
-      price?: number
-      image?: string
-    }) => {
+    (
+      p: Product,
+      variantPayload?: {
+        variantId?: string
+        variantKey?: string
+        selectedOptions?: Record<string, string>
+        price?: number
+        image?: string
+      },
+    ) => {
       trackShowroomEvent({
         productId: String(p._id),
         type: 'cart',
@@ -275,16 +281,26 @@ function ShowroomProductCard({
         position,
         region: p.region,
       })
-      // Skip layout measure when fly-cart is unavailable — kills scroll jank
+
       if (!flyCart) {
         addToCart(p, variantPayload)
         return
       }
+
+      // Ensure measure callback can only add once
+      let added = false
+      const safeAdd = () => {
+        if (added) return
+        added = true
+        addToCart(p, variantPayload)
+      }
+
       cartBtnRef.current?.measureInWindow((x, y, width, height) => {
         if (width <= 0 || height <= 0) {
-          addToCart(p, variantPayload)
+          safeAdd()
           return
         }
+        // flyAdd calls addToCart once internally
         flyCart.flyAdd(p, { x, y, width, height }, variantPayload)
       })
     },
@@ -335,6 +351,12 @@ function ShowroomProductCard({
 
   const handleAddToCart = useCallback(() => {
     if (!isLoaded) return
+    // Guard double onPress
+    if (addLockRef.current) return
+    addLockRef.current = true
+    setTimeout(() => {
+      addLockRef.current = false
+    }, 400)
 
     if (!isSignedIn) {
       pendingCartRef.current = product
@@ -350,7 +372,7 @@ function ShowroomProductCard({
     }
 
     doAddToCart(product)
-  }, [isLoaded, isSignedIn, product, doAddToCart, hasVar])
+  }, [isLoaded, isSignedIn, product, doAddToCart, hasVar, pathname])
 
   const confirmVariantAdd = useCallback(() => {
     if (!allPicked || !matched || !inStock || adding) return
@@ -466,7 +488,6 @@ function ShowroomProductCard({
         </Pressable>
       </Link>
 
-      {/* Variant sheet — mall counter, sharp edges */}
       <Modal
         visible={variantOpen}
         transparent
@@ -517,10 +538,7 @@ function ShowroomProductCard({
                               [group.name]: val,
                             }))
                           }
-                          style={[
-                            styles.optChip,
-                            active && styles.optChipOn,
-                          ]}
+                          style={[styles.optChip, active && styles.optChipOn]}
                         >
                           <Text
                             style={[
@@ -573,7 +591,6 @@ function ShowroomProductCard({
         </Pressable>
       </Modal>
 
-      {/* Auth sheet */}
       <Modal
         visible={authOpen}
         transparent

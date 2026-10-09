@@ -72,10 +72,7 @@ function lineKey(
   return `${productId}::base`
 }
 
-function resolveUnitPrice(
-  product: Product,
-  opts?: AddToCartOpts
-): number {
+function resolveUnitPrice(product: Product, opts?: AddToCartOpts): number {
   if (opts?.price != null && Number.isFinite(Number(opts.price))) {
     return Number(opts.price)
   }
@@ -90,7 +87,10 @@ function resolveUnitPrice(
   return Number(product.price) || 0
 }
 
-function resolveImage(product: Product, opts?: AddToCartOpts): string | undefined {
+function resolveImage(
+  product: Product,
+  opts?: AddToCartOpts
+): string | undefined {
   if (opts?.image) return opts.image
   if (opts?.variantId && product.variants) {
     const v = product.variants.find((x) => x.variantId === opts.variantId)
@@ -124,6 +124,9 @@ export function CartProvider({ children }: { children: ReactNode }) {
    * addToCart(product) — simple product
    * addToCart(product, "M") — legacy size string
    * addToCart(product, { variantId, selectedOptions, price }) — variants
+   *
+   * Line id is stable (lineKey) so concurrent/Strict double-updaters
+   * merge into one line instead of creating two random ids.
    */
   const addToCart = useCallback(
     async (product: Product, optsOrSize?: AddToCartOpts | string) => {
@@ -135,16 +138,17 @@ export function CartProvider({ children }: { children: ReactNode }) {
       const qty = Math.max(1, Number(opts.quantity) || 1)
       const unit = resolveUnitPrice(product, opts)
       const image = resolveImage(product, opts)
+      const key = lineKey(
+        product._id,
+        opts.variantId,
+        opts.size,
+        opts.selectedOptions
+      )
 
       setCartItems((prev) => {
-        const key = lineKey(
-          product._id,
-          opts.variantId,
-          opts.size,
-          opts.selectedOptions
-        )
         const existing = prev.find(
           (item) =>
+            item.id === key ||
             lineKey(
               item.productId,
               item.variantId,
@@ -162,7 +166,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
         }
 
         const newItem: CartItem = {
-          id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+          id: key,
           productId: product._id,
           product,
           quantity: qty,
@@ -260,7 +264,9 @@ export function findVariant(
 ): ProductVariant | null {
   const list = product.variants || []
   if (!list.length) return null
-  const entries = Object.entries(selected).filter(([, v]) => v != null && v !== '')
+  const entries = Object.entries(selected).filter(
+    ([, v]) => v != null && v !== ''
+  )
   if (!entries.length) return null
   return (
     list.find((v) => {
