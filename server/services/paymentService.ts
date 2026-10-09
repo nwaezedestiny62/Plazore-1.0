@@ -7,7 +7,6 @@ import PaymentEvent from "../models/PaymentEvent.js";
 import {
   calculateSellerPayout,
   currencyForRegion,
-  toPaystackAmount,
   toMinorUnits,
   PLAZORE_TRANSACTION_FEE_RATE,
 } from "../config/payment.js";
@@ -434,7 +433,6 @@ export async function initializePaymentForOrder(params: {
     payment.currency = currency;
     payment.status = "pending";
     payment.lifecycle = "PENDING_PAYMENT";
-    // clear previous rail-specific fields when switching provider
     if (provider === "stripe") {
       payment.authorizationUrl = null;
       payment.accessCode = null;
@@ -501,14 +499,14 @@ export async function initializePaymentForOrder(params: {
       amount,
       currency,
       region,
-      publicKey: getPublishableKey() || process.env.STRIPE_PUBLISHABLE_KEY || null,
-      // keep keys frontend may already look for
+      publicKey:
+        getPublishableKey() || process.env.STRIPE_PUBLISHABLE_KEY || null,
       authorizationUrl: null,
       accessCode: null,
     };
   }
 
-  // ── Paystack path (unchanged behaviour) ──
+  // ── Paystack path ──
   const callbackUrl =
     params.callbackUrl || process.env.PAYSTACK_CALLBACK_URL || undefined;
 
@@ -684,7 +682,6 @@ export async function verifyPaymentByReference(
       return await markPaymentSuccess(payment, order, data, source);
     }
 
-    // requires_payment_method | canceled | processing (treat non-success as fail for API verify)
     if (
       intent.status === "canceled" ||
       intent.status === "requires_payment_method"
@@ -713,7 +710,11 @@ export async function verifyPaymentByReference(
       action: "payment.verify_amount_mismatch",
       actorType: source === "webhook" ? "webhook" : "system",
       reference,
-      meta: { provider: "paystack", expected: payment.amountMinor, got: data.amount },
+      meta: {
+        provider: "paystack",
+        expected: payment.amountMinor,
+        got: data.amount,
+      },
     });
     throw Object.assign(new Error("Payment amount mismatch"), {
       statusCode: 400,
@@ -853,7 +854,7 @@ async function markPaymentSuccess(
   return { payment, order, alreadyVerified: false };
 }
 
-/** Paystack charge.success webhook handler (unchanged + idempotent). */
+/** Paystack charge.success webhook handler (idempotent). */
 export async function handleChargeSuccessWebhook(
   eventId: string,
   payload: any,

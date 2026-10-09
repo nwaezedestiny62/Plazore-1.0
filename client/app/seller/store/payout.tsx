@@ -1,9 +1,7 @@
 /**
  * Secure Payout & Shipping
- * - Always starts locked
- * - Unlocks only after backend verifies last 4 of account number
- * - Re-locks whenever the screen loses focus
- * - Save asks for confirmation: what changed + Proceed / No
+ * NG: Paystack bank code + 10-digit NUBAN.
+ * Other regions: Stripe Connect pending. No fake Nigerian account.
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react'
@@ -29,6 +27,7 @@ import api from '@/constants/api'
 
 const BG = '#090B0F'
 const SURFACE = '#11141A'
+const SURFACE_2 = '#171B22'
 const LINE = 'rgba(255,255,255,0.07)'
 const TEXT = '#F5F7FA'
 const SECONDARY = '#A7ADB8'
@@ -36,6 +35,34 @@ const MUTED = '#737A86'
 const GREEN = '#00E575'
 const BLUE = '#3B82F6'
 const DANGER = '#EF4444'
+
+const NGN_BANKS = [
+  { code: '044', name: 'Access Bank' },
+  { code: '063', name: 'Access Bank (Diamond)' },
+  { code: '050', name: 'Ecobank Nigeria' },
+  { code: '070', name: 'Fidelity Bank' },
+  { code: '011', name: 'First Bank of Nigeria' },
+  { code: '214', name: 'First City Monument Bank' },
+  { code: '00103', name: 'Globus Bank' },
+  { code: '058', name: 'Guaranty Trust Bank' },
+  { code: '030', name: 'Heritage Bank' },
+  { code: '301', name: 'Jaiz Bank' },
+  { code: '082', name: 'Keystone Bank' },
+  { code: '50211', name: 'Kuda Bank' },
+  { code: '076', name: 'Polaris Bank' },
+  { code: '101', name: 'Providus Bank' },
+  { code: '221', name: 'Stanbic IBTC Bank' },
+  { code: '068', name: 'Standard Chartered Bank' },
+  { code: '232', name: 'Sterling Bank' },
+  { code: '100', name: 'Suntrust Bank' },
+  { code: '032', name: 'Union Bank of Nigeria' },
+  { code: '033', name: 'United Bank For Africa' },
+  { code: '215', name: 'Unity Bank' },
+  { code: '035', name: 'Wema Bank' },
+  { code: '057', name: 'Zenith Bank' },
+  { code: '999992', name: 'OPay' },
+  { code: '999991', name: 'PalmPay' },
+]
 
 type OverlayAction = {
   label: string
@@ -53,9 +80,12 @@ type OverlayState = {
 } | null
 
 type FormState = {
+  region: string
+  bankCode: string
   bankName: string
   accountName: string
   accountNumber: string
+  payoutStatus: string
   street: string
   city: string
   state: string
@@ -66,9 +96,12 @@ type FormState = {
 }
 
 const empty: FormState = {
+  region: 'NG',
+  bankCode: '',
   bankName: '',
   accountName: '',
   accountNumber: '',
+  payoutStatus: 'incomplete',
   street: '',
   city: '',
   state: '',
@@ -78,26 +111,35 @@ const empty: FormState = {
   courierCompany: '',
 }
 
-const LABELS: Record<keyof FormState, string> = {
-  bankName: 'Bank name',
-  accountName: 'Account name',
-  accountNumber: 'Account number',
-  street: 'Street',
-  city: 'City',
-  state: 'State',
-  zipCode: 'Zip',
-  country: 'Country',
-  deliveryMethod: 'Delivery method',
-  courierCompany: 'Courier company',
+function maskAccount(n: string) {
+  const d = n.replace(/\D/g, '')
+  if (d.length <= 4) return d || '—'
+  return `••••${d.slice(-4)}`
 }
 
-function TopOverlay({
-  state,
-  onDismiss,
-}: {
-  state: OverlayState
-  onDismiss: () => void
-}) {
+function summarizeChanges(before: FormState, after: FormState): string[] {
+  const lines: string[] = []
+  const bankA = NGN_BANKS.find((b) => b.code === before.bankCode)?.name || before.bankName
+  const bankB = NGN_BANKS.find((b) => b.code === after.bankCode)?.name || after.bankName
+  if (bankA !== bankB) lines.push(`Bank: ${bankA || '—'} → ${bankB || '—'}`)
+  if (before.accountName.trim() !== after.accountName.trim()) {
+    lines.push(`Account name: ${before.accountName || '—'} → ${after.accountName || '—'}`)
+  }
+  if (before.accountNumber.trim() !== after.accountNumber.trim()) {
+    lines.push(`Account number: ${maskAccount(before.accountNumber)} → ${maskAccount(after.accountNumber)}`)
+  }
+  const ship = (v: string) => (v === 'self' ? 'Self delivery' : v === 'courier' ? 'Courier' : 'None')
+  ;(['street', 'city', 'state', 'zipCode', 'country', 'courierCompany'] as const).forEach((key) => {
+    if (String(before[key]).trim() === String(after[key]).trim()) return
+    lines.push(`${key}: ${before[key] || '—'} → ${after[key] || '—'}`)
+  })
+  if (before.deliveryMethod !== after.deliveryMethod) {
+    lines.push(`Delivery: ${ship(before.deliveryMethod)} → ${ship(after.deliveryMethod)}`)
+  }
+  return lines
+}
+
+function TopOverlay({ state, onDismiss }: { state: OverlayState; onDismiss: () => void }) {
   const insets = useSafeAreaInsets()
   const translateY = useRef(new Animated.Value(-140)).current
   const opacity = useRef(new Animated.Value(0)).current
@@ -107,39 +149,17 @@ function TopOverlay({
     if (timer.current) clearTimeout(timer.current)
     if (!state) {
       Animated.parallel([
-        Animated.timing(translateY, {
-          toValue: -140,
-          duration: 220,
-          useNativeDriver: true,
-        }),
-        Animated.timing(opacity, {
-          toValue: 0,
-          duration: 180,
-          useNativeDriver: true,
-        }),
+        Animated.timing(translateY, { toValue: -140, duration: 220, useNativeDriver: true }),
+        Animated.timing(opacity, { toValue: 0, duration: 180, useNativeDriver: true }),
       ]).start()
       return
     }
     Animated.parallel([
-      Animated.spring(translateY, {
-        toValue: 0,
-        friction: 9,
-        tension: 80,
-        useNativeDriver: true,
-      }),
-      Animated.timing(opacity, {
-        toValue: 1,
-        duration: 200,
-        useNativeDriver: true,
-      }),
+      Animated.spring(translateY, { toValue: 0, friction: 9, tension: 80, useNativeDriver: true }),
+      Animated.timing(opacity, { toValue: 1, duration: 200, useNativeDriver: true }),
     ]).start()
-
-    // Only auto-dismiss when there are no actions (confirm must stay)
     if (!state.actions?.length) {
-      timer.current = setTimeout(
-        () => onDismiss(),
-        state.durationMs ?? 3800
-      )
+      timer.current = setTimeout(() => onDismiss(), state.durationMs ?? 3800)
     }
     return () => {
       if (timer.current) clearTimeout(timer.current)
@@ -147,12 +167,7 @@ function TopOverlay({
   }, [state])
 
   if (!state) return null
-  const accent =
-    state.tone === 'danger'
-      ? DANGER
-      : state.tone === 'success'
-        ? GREEN
-        : BLUE
+  const accent = state.tone === 'danger' ? DANGER : state.tone === 'success' ? GREEN : BLUE
 
   return (
     <Animated.View
@@ -169,33 +184,15 @@ function TopOverlay({
         transform: [{ translateY }],
       }}
     >
-      <View
-        style={{
-          backgroundColor: SURFACE,
-          borderWidth: StyleSheet.hairlineWidth,
-          borderColor: 'rgba(255,255,255,0.1)',
-          overflow: 'hidden',
-        }}
-      >
+      <View style={{ backgroundColor: SURFACE, borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.1)', overflow: 'hidden' }}>
         <View style={{ flexDirection: 'row' }}>
           <View style={{ width: 3, backgroundColor: accent }} />
           <View style={{ flex: 1, padding: 14 }}>
             <View style={{ flexDirection: 'row', gap: 10 }}>
               <View style={{ flex: 1 }}>
-                <Text style={{ color: TEXT, fontSize: 15, fontWeight: '700' }}>
-                  {state.title}
-                </Text>
+                <Text style={{ color: TEXT, fontSize: 15, fontWeight: '700' }}>{state.title}</Text>
                 {!!state.message && (
-                  <Text
-                    style={{
-                      color: SECONDARY,
-                      fontSize: 13,
-                      lineHeight: 19,
-                      marginTop: 6,
-                    }}
-                  >
-                    {state.message}
-                  </Text>
+                  <Text style={{ color: SECONDARY, fontSize: 13, lineHeight: 19, marginTop: 6 }}>{state.message}</Text>
                 )}
               </View>
               {!state.actions?.length && (
@@ -204,21 +201,13 @@ function TopOverlay({
                 </Pressable>
               )}
             </View>
-
             {!!state.actions?.length && (
-              <View
-                style={{
-                  flexDirection: 'row',
-                  gap: 10,
-                  marginTop: 14,
-                }}
-              >
+              <View style={{ flexDirection: 'row', gap: 10, marginTop: 14 }}>
                 {state.actions.map((a) => (
                   <TouchableOpacity
                     key={a.label}
                     onPress={() => {
                       onDismiss()
-                      // small delay so dismiss anim starts cleanly
                       setTimeout(() => a.onPress(), 40)
                     }}
                     activeOpacity={0.85}
@@ -227,27 +216,11 @@ function TopOverlay({
                       paddingVertical: 12,
                       alignItems: 'center',
                       borderWidth: StyleSheet.hairlineWidth,
-                      borderColor: a.primary
-                        ? 'transparent'
-                        : LINE,
-                      backgroundColor: a.primary
-                        ? GREEN
-                        : a.destructive
-                          ? 'rgba(239,68,68,0.12)'
-                          : SURFACE_2,
+                      borderColor: a.primary ? 'transparent' : LINE,
+                      backgroundColor: a.primary ? GREEN : a.destructive ? 'rgba(239,68,68,0.12)' : SURFACE_2,
                     }}
                   >
-                    <Text
-                      style={{
-                        fontWeight: '800',
-                        fontSize: 13,
-                        color: a.primary
-                          ? '#041412'
-                          : a.destructive
-                            ? DANGER
-                            : TEXT,
-                      }}
-                    >
+                    <Text style={{ fontWeight: '800', fontSize: 13, color: a.primary ? '#041412' : a.destructive ? DANGER : TEXT }}>
                       {a.label}
                     </Text>
                   </TouchableOpacity>
@@ -267,16 +240,16 @@ function Field({
   onChange,
   placeholder,
   keyboardType,
-  secure,
   maxLength,
+  editable = true,
 }: {
   label: string
   value: string
   onChange: (t: string) => void
   placeholder?: string
   keyboardType?: any
-  secure?: boolean
   maxLength?: number
+  editable?: boolean
 }) {
   return (
     <View style={{ marginBottom: 14 }}>
@@ -287,41 +260,14 @@ function Field({
         placeholder={placeholder}
         placeholderTextColor="#3D5268"
         keyboardType={keyboardType}
-        secureTextEntry={secure}
         maxLength={maxLength}
+        editable={editable}
         style={styles.input}
         autoCapitalize="none"
         autoCorrect={false}
       />
     </View>
   )
-}
-
-function maskAccount(n: string) {
-  const d = n.replace(/\D/g, '')
-  if (d.length <= 4) return d || '—'
-  return `••••${d.slice(-4)}`
-}
-
-function summarizeChanges(before: FormState, after: FormState): string[] {
-  const lines: string[] = []
-  ;(Object.keys(LABELS) as (keyof FormState)[]).forEach((key) => {
-    const a = String(before[key] ?? '').trim()
-    const b = String(after[key] ?? '').trim()
-    if (a === b) return
-    if (key === 'accountNumber') {
-      lines.push(
-        `${LABELS[key]}: ${maskAccount(a)} → ${maskAccount(b)}`
-      )
-    } else if (key === 'deliveryMethod') {
-      const label = (v: string) =>
-        v === 'self' ? 'Self delivery' : v === 'courier' ? 'Courier' : 'None'
-      lines.push(`${LABELS[key]}: ${label(a)} → ${label(b)}`)
-    } else {
-      lines.push(`${LABELS[key]}: ${a || '—'} → ${b || '—'}`)
-    }
-  })
-  return lines
 }
 
 export default function SecurePayoutScreen() {
@@ -332,18 +278,19 @@ export default function SecurePayoutScreen() {
   const [setupRequired, setSetupRequired] = useState(false)
   const [lastFour, setLastFour] = useState('')
   const [verifying, setVerifying] = useState(false)
+  const [showBanks, setShowBanks] = useState(false)
   const [form, setForm] = useState<FormState>(empty)
   const [baseline, setBaseline] = useState<FormState>(empty)
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [overlay, setOverlay] = useState<OverlayState>(null)
 
+  const isNigeria = (form.region || 'NG').toUpperCase() === 'NG'
+  const selectedBank = NGN_BANKS.find((b) => b.code === form.bankCode)
+
   const toast = useCallback(
-    (
-      title: string,
-      message?: string,
-      tone: 'info' | 'success' | 'danger' = 'info'
-    ) => setOverlay({ title, message, tone, durationMs: 3800 }),
+    (title: string, message?: string, tone: 'info' | 'success' | 'danger' = 'info') =>
+      setOverlay({ title, message, tone, durationMs: 3800 }),
     []
   )
 
@@ -361,49 +308,6 @@ export default function SecurePayoutScreen() {
     }, [])
   )
 
-  const verify = async () => {
-    const digits = String(lastFour).replace(/\D/g, '').slice(0, 4)
-    if (digits.length !== 4) {
-      toast('Required', 'Enter exactly 4 digits', 'danger')
-      return
-    }
-    try {
-      setVerifying(true)
-      const token = await getToken()
-      if (!token) {
-        toast('Error', 'Not signed in', 'danger')
-        return
-      }
-
-      const res = await api.post(
-        '/seller/store/verify-payout',
-        { lastFour: digits },
-        { headers: { Authorization: `Bearer ${token}` } }
-      )
-
-      if (res.data?.success && res.data?.data?.unlocked) {
-        setUnlocked(true)
-        setSetupRequired(!!res.data.data.setupRequired)
-        await loadSensitive()
-      } else {
-        toast(
-          'Access denied',
-          res.data?.message || 'Could not unlock',
-          'danger'
-        )
-      }
-    } catch (e: any) {
-      const msg =
-        e?.response?.data?.message ||
-        (e?.response?.status === 404
-          ? 'Verify endpoint missing — restart server after adding the route'
-          : 'Digits did not match or network error')
-      toast('Access denied', msg, 'danger')
-    } finally {
-      setVerifying(false)
-    }
-  }
-
   const loadSensitive = async () => {
     try {
       setLoading(true)
@@ -414,9 +318,12 @@ export default function SecurePayoutScreen() {
       if (res.data.success) {
         const d = res.data.data
         const next: FormState = {
+          region: d.marketplaceRegion || 'NG',
+          bankCode: d.payout?.bankCode || '',
           bankName: d.payout?.bankName || '',
           accountName: d.payout?.accountName || '',
           accountNumber: d.payout?.accountNumber || '',
+          payoutStatus: d.payout?.status || 'incomplete',
           street: d.shippingDefaults?.address?.street || '',
           city: d.shippingDefaults?.address?.city || '',
           state: d.shippingDefaults?.address?.state || '',
@@ -435,23 +342,56 @@ export default function SecurePayoutScreen() {
     }
   }
 
-  const performSave = async () => {
-    if (!form.accountNumber.trim() || !form.bankName.trim()) {
-      toast('Required', 'Bank name and account number are required', 'danger')
+  const verify = async () => {
+    const digits = String(lastFour).replace(/\D/g, '').slice(0, 4)
+    if (digits.length !== 4) {
+      toast('Required', 'Enter exactly 4 digits', 'danger')
       return
     }
+    try {
+      setVerifying(true)
+      const token = await getToken()
+      if (!token) {
+        toast('Error', 'Not signed in', 'danger')
+        return
+      }
+      const res = await api.post(
+        '/seller/store/verify-payout',
+        { lastFour: digits },
+        { headers: { Authorization: `Bearer ${token}` } }
+      )
+      if (res.data?.success && res.data?.data?.unlocked) {
+        setUnlocked(true)
+        setSetupRequired(!!res.data.data.setupRequired)
+        await loadSensitive()
+      } else {
+        toast('Access denied', res.data?.message || 'Could not unlock', 'danger')
+      }
+    } catch (e: any) {
+      toast('Access denied', e?.response?.data?.message || 'Digits did not match', 'danger')
+    } finally {
+      setVerifying(false)
+    }
+  }
+
+  const performSave = async () => {
     try {
       setSaving(true)
       const token = await getToken()
       const formData = new FormData()
-
+      const bankName = selectedBank?.name || form.bankName
       formData.append(
         'payout',
-        JSON.stringify({
-          bankName: form.bankName.trim(),
-          accountName: form.accountName.trim(),
-          accountNumber: form.accountNumber.trim(),
-        })
+        JSON.stringify(
+          isNigeria
+            ? {
+                bankCode: form.bankCode,
+                bankName,
+                accountName: form.accountName.trim(),
+                accountNumber: form.accountNumber.replace(/\D/g, ''),
+              }
+            : { provider: 'stripe' }
+        )
       )
       formData.append(
         'shippingDefaults',
@@ -467,93 +407,73 @@ export default function SecurePayoutScreen() {
           courierCompany: form.courierCompany.trim(),
         })
       )
-
       const res = await api.put('/seller/store', formData, {
         headers: {
           Authorization: `Bearer ${token}`,
           'Content-Type': 'multipart/form-data',
         },
       })
-
       if (res.data.success) {
-        setBaseline({ ...form })
+        const savedName = res.data.data?.payout?.accountName || form.accountName
+        const savedStatus = res.data.data?.payout?.status || form.payoutStatus
+        const next = { ...form, bankName, accountName: savedName, payoutStatus: savedStatus }
+        setForm(next)
+        setBaseline(next)
         setSetupRequired(false)
         toast(
-          'Updated',
-          'Payout and shipping defaults were saved. Future earnings use this account.',
+          savedStatus === 'verified' ? 'Account verified' : 'Updated',
+          savedStatus === 'verified'
+            ? `Paystack confirmed ${savedName}.`
+            : 'Payout and shipping defaults were saved.',
           'success'
         )
       }
     } catch (e: any) {
-      toast(
-        'Error',
-        e.response?.data?.message || 'Could not save',
-        'danger'
-      )
+      toast('Error', e.response?.data?.message || 'Could not save', 'danger')
     } finally {
       setSaving(false)
     }
   }
 
-  /** Confirm before save — shows what changed + consequences */
   const requestSave = () => {
-    if (!form.accountNumber.trim() || !form.bankName.trim()) {
-      toast('Required', 'Bank name and account number are required', 'danger')
-      return
+    if (isNigeria) {
+      if (!form.bankCode) {
+        toast('Required', 'Select your bank', 'danger')
+        return
+      }
+      if (!/^\d{10}$/.test(form.accountNumber.replace(/\D/g, ''))) {
+        toast('Required', 'Account number must be 10 digits', 'danger')
+        return
+      }
     }
-
     const changes = summarizeChanges(baseline, form)
-
-    if (changes.length === 0) {
+    if (!changes.length) {
       toast('No changes', 'Nothing was modified.', 'info')
       return
     }
-
-    const list = changes.map((c) => `• ${c}`).join('\n')
-    const message =
-      `You are about to update:\n\n${list}\n\n` +
-      `What this means:\n` +
-      `• Future seller payouts will go to the bank account filled in.\n` +
-      `• Shipping defaults apply when you create new products (existing listings keep their own settings).\n` +
-      `• After you leave this screen, access locks again and the last 4 digits of the account will be required.\n\n` +
-      `Are you sure you want to make this change?`
-
     setOverlay({
       title: 'Confirm update',
-      message,
+      message: `You are about to update:\n\n${changes.map((c) => `• ${c}`).join('\n')}\n\nFuture payouts use this destination. Leaving this screen locks access again.`,
       tone: 'info',
       actions: [
-        {
-          label: 'No',
-          onPress: () => {},
-        },
-        {
-          label: 'Proceed',
-          primary: true,
-          onPress: () => {
-            performSave()
-          },
-        },
+        { label: 'No', onPress: () => {} },
+        { label: 'Proceed', primary: true, onPress: () => performSave() },
       ],
     })
   }
 
-  // ── LOCK GATE ──
   if (!unlocked) {
     return (
       <SafeAreaView style={styles.root} edges={['top', 'bottom']}>
         <TopOverlay state={overlay} onDismiss={() => setOverlay(null)} />
-
         <View style={styles.gate}>
           <View style={styles.lockIcon}>
             <Ionicons name="shield-checkmark" size={28} color={GREEN} />
           </View>
           <Text style={styles.gateTitle}>Protected details</Text>
           <Text style={styles.gateBody}>
-            Payout account and shipping defaults are sensitive. Enter the last 4
-            digits of the account number filled in to continue.
+            Payout account and shipping defaults are sensitive. Enter the last 4 digits of the account number to continue.
           </Text>
-
           <Text style={styles.label}>Last 4 digits</Text>
           <TextInput
             value={lastFour}
@@ -566,36 +486,15 @@ export default function SecurePayoutScreen() {
             style={[styles.input, styles.pinInput]}
             autoFocus
           />
-
-          <TouchableOpacity
-            onPress={verify}
-            disabled={verifying || lastFour.length !== 4}
-            activeOpacity={0.9}
-            style={{ marginTop: 8, overflow: 'hidden' }}
-          >
-            <LinearGradient
-              colors={[GREEN, BLUE]}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-              style={styles.cta}
-            >
-              {verifying ? (
-                <ActivityIndicator color="#041412" />
-              ) : (
-                <Text style={styles.ctaText}>Unlock</Text>
-              )}
+          <TouchableOpacity onPress={verify} disabled={verifying || lastFour.length !== 4} activeOpacity={0.9} style={{ marginTop: 8, overflow: 'hidden' }}>
+            <LinearGradient colors={[GREEN, BLUE]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.cta}>
+              {verifying ? <ActivityIndicator color="#041412" /> : <Text style={styles.ctaText}>Unlock</Text>}
             </LinearGradient>
           </TouchableOpacity>
-
           <Text style={styles.gateHint}>
-            First time? If no account is saved yet, any 4 digits open setup.
-            After you save an account, only the correct last 4 will work.
+            No Nigerian account yet, or this region uses Stripe? Any 4 digits open setup.
           </Text>
-
-          <TouchableOpacity
-            onPress={() => router.back()}
-            style={styles.backLink}
-          >
+          <TouchableOpacity onPress={() => router.back()} style={styles.backLink}>
             <Text style={{ color: MUTED, fontSize: 13 }}>Go back</Text>
           </TouchableOpacity>
         </View>
@@ -603,49 +502,19 @@ export default function SecurePayoutScreen() {
     )
   }
 
-  // ── UNLOCKED ──
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      style={styles.root}
-    >
+    <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.root}>
       <TopOverlay state={overlay} onDismiss={() => setOverlay(null)} />
-
-      <ScrollView
-        contentContainerStyle={{ padding: 18, paddingBottom: 48 }}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
-      >
+      <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 48 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
         <View style={styles.unlockedBadge}>
           <Ionicons name="lock-open-outline" size={14} color={GREEN} />
           <Text style={styles.unlockedText}>Session unlocked</Text>
         </View>
-
         <Text style={styles.kicker}>Sensitive</Text>
         <Text style={styles.title}>Payout & shipping</Text>
         <Text style={styles.lead}>
-          Where Plazore sends your earnings, and default shipping used when you
-          list products. Leaving this screen locks access again.
+          Where Plazore sends your earnings, and default shipping used when you list products.
         </Text>
-
-        {setupRequired && (
-          <View style={styles.warnBox}>
-            <Text style={{ color: '#F0C070', fontWeight: '700', fontSize: 13 }}>
-              Set up your payout account
-            </Text>
-            <Text
-              style={{
-                color: '#C4A882',
-                fontSize: 12,
-                lineHeight: 18,
-                marginTop: 4,
-              }}
-            >
-              No account filled in yet. Enter bank details below and save — next
-              visits will require the last 4 digits.
-            </Text>
-          </View>
-        )}
 
         {loading ? (
           <ActivityIndicator color={GREEN} style={{ marginVertical: 40 }} />
@@ -653,87 +522,91 @@ export default function SecurePayoutScreen() {
           <>
             <Text style={styles.sectionLabel}>Payout account</Text>
             <View style={styles.card}>
-              <Field
-                label="Bank Name"
-                value={form.bankName}
-                onChange={(t) => setField('bankName', t)}
-                placeholder="e.g. GTBank"
-              />
-              <Field
-                label="Account Name"
-                value={form.accountName}
-                onChange={(t) => setField('accountName', t)}
-                placeholder="Name on the account"
-              />
-              <Field
-                label="Account Number"
-                value={form.accountNumber}
-                onChange={(t) => setField('accountNumber', t)}
-                placeholder="0123456789"
-                keyboardType="number-pad"
-              />
+              {isNigeria ? (
+                <>
+                  {setupRequired && (
+                    <View style={styles.warnBox}>
+                      <Text style={{ color: '#F0C070', fontWeight: '700', fontSize: 13 }}>Select your bank</Text>
+                      <Text style={{ color: '#C4A882', fontSize: 12, lineHeight: 18, marginTop: 4 }}>
+                        A typed bank name cannot be paid. Pick the bank, then the 10-digit account.
+                      </Text>
+                    </View>
+                  )}
+                  {form.payoutStatus === 'verified' && (
+                    <Text style={{ color: GREEN, fontWeight: '700', fontSize: 12, marginBottom: 10 }}>Verified with Paystack</Text>
+                  )}
+                  <Text style={styles.label}>Bank</Text>
+                  <TouchableOpacity onPress={() => setShowBanks((v) => !v)} style={[styles.input, { marginBottom: 10 }]}>
+                    <Text style={{ color: selectedBank ? TEXT : '#3D5268', fontSize: 15 }}>
+                      {selectedBank?.name || form.bankName || 'Select bank'}
+                    </Text>
+                  </TouchableOpacity>
+                  {showBanks && (
+                    <View style={{ maxHeight: 220, marginBottom: 12, borderWidth: StyleSheet.hairlineWidth, borderColor: LINE }}>
+                      <ScrollView nestedScrollEnabled>
+                        {NGN_BANKS.map((b) => (
+                          <TouchableOpacity
+                            key={b.code}
+                            onPress={() => {
+                              setField('bankCode', b.code)
+                              setField('bankName', b.name)
+                              setShowBanks(false)
+                            }}
+                            style={{ paddingHorizontal: 14, paddingVertical: 12, backgroundColor: form.bankCode === b.code ? 'rgba(0,229,117,0.1)' : '#0A121C' }}
+                          >
+                            <Text style={{ color: form.bankCode === b.code ? GREEN : TEXT, fontSize: 14 }}>{b.name}</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </ScrollView>
+                    </View>
+                  )}
+                  <Field
+                    label="Account name"
+                    value={form.accountName}
+                    onChange={(t) => setField('accountName', t)}
+                    placeholder="Filled by Paystack when keys are on"
+                    editable={form.payoutStatus !== 'verified'}
+                  />
+                  <Field
+                    label="Account number"
+                    value={form.accountNumber}
+                    onChange={(t) => setField('accountNumber', t.replace(/\D/g, '').slice(0, 10))}
+                    placeholder="0123456789"
+                    keyboardType="number-pad"
+                    maxLength={10}
+                  />
+                </>
+              ) : (
+                <View style={styles.warnBox}>
+                  <Text style={{ color: '#F0C070', fontWeight: '700', fontSize: 13 }}>Stripe Connect not linked</Text>
+                  <Text style={{ color: '#C4A882', fontSize: 12, lineHeight: 18, marginTop: 4 }}>
+                    {form.region} sellers are not paid with a Nigerian account number. Earnings stay held until Stripe Connect is added. Shipping defaults can still be saved.
+                  </Text>
+                </View>
+              )}
             </View>
 
             <Text style={styles.sectionLabel}>Shipping defaults</Text>
             <View style={styles.card}>
-              <Field
-                label="Street"
-                value={form.street}
-                onChange={(t) => setField('street', t)}
-                placeholder="Street address"
-              />
-              <Field
-                label="City"
-                value={form.city}
-                onChange={(t) => setField('city', t)}
-              />
-              <Field
-                label="State"
-                value={form.state}
-                onChange={(t) => setField('state', t)}
-              />
+              <Field label="Street" value={form.street} onChange={(t) => setField('street', t)} placeholder="Street address" />
+              <Field label="City" value={form.city} onChange={(t) => setField('city', t)} />
+              <Field label="State" value={form.state} onChange={(t) => setField('state', t)} />
               <View style={{ flexDirection: 'row', gap: 10 }}>
                 <View style={{ flex: 1 }}>
-                  <Field
-                    label="Zip"
-                    value={form.zipCode}
-                    onChange={(t) => setField('zipCode', t)}
-                  />
+                  <Field label="Zip" value={form.zipCode} onChange={(t) => setField('zipCode', t)} />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Field
-                    label="Country"
-                    value={form.country}
-                    onChange={(t) => setField('country', t)}
-                  />
+                  <Field label="Country" value={form.country} onChange={(t) => setField('country', t)} />
                 </View>
               </View>
-
-              <Text style={[styles.label, { marginBottom: 8 }]}>
-                Default method
-              </Text>
+              <Text style={[styles.label, { marginBottom: 8 }]}>Default method</Text>
               <View style={{ flexDirection: 'row', gap: 10, marginBottom: 12 }}>
                 {(['courier', 'self'] as const).map((m) => {
                   const active = form.deliveryMethod === m
                   return (
-                    <TouchableOpacity
-                      key={m}
-                      onPress={() => setField('deliveryMethod', m)}
-                      style={[styles.shipChoice, active && styles.shipChoiceOn]}
-                    >
-                      <Ionicons
-                        name={m === 'self' ? 'walk-outline' : 'car-outline'}
-                        size={18}
-                        color={active ? GREEN : MUTED}
-                      />
-                      <Text
-                        style={{
-                          marginTop: 6,
-                          fontWeight: '600',
-                          fontSize: 13,
-                          color: active ? TEXT : MUTED,
-                        }}
-                      >
+                    <TouchableOpacity key={m} onPress={() => setField('deliveryMethod', m)} style={[styles.shipChoice, active && styles.shipChoiceOn]}>
+                      <Ionicons name={m === 'self' ? 'walk-outline' : 'car-outline'} size={18} color={active ? GREEN : MUTED} />
+                      <Text style={{ marginTop: 6, fontWeight: '600', fontSize: 13, color: active ? TEXT : MUTED }}>
                         {m === 'self' ? 'Self delivery' : 'Courier'}
                       </Text>
                     </TouchableOpacity>
@@ -741,32 +614,13 @@ export default function SecurePayoutScreen() {
                 })}
               </View>
               {form.deliveryMethod === 'courier' && (
-                <Field
-                  label="Courier company"
-                  value={form.courierCompany}
-                  onChange={(t) => setField('courierCompany', t)}
-                  placeholder="e.g. DHL, GIG"
-                />
+                <Field label="Courier company" value={form.courierCompany} onChange={(t) => setField('courierCompany', t)} placeholder="e.g. DHL, GIG" />
               )}
             </View>
 
-            <TouchableOpacity
-              onPress={requestSave}
-              disabled={saving}
-              activeOpacity={0.9}
-              style={{ marginTop: 8, overflow: 'hidden' }}
-            >
-              <LinearGradient
-                colors={[GREEN, BLUE]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 0 }}
-                style={styles.cta}
-              >
-                {saving ? (
-                  <ActivityIndicator color="#041412" />
-                ) : (
-                  <Text style={styles.ctaText}>Save payout & shipping</Text>
-                )}
+            <TouchableOpacity onPress={requestSave} disabled={saving} activeOpacity={0.9} style={{ marginTop: 8, overflow: 'hidden' }}>
+              <LinearGradient colors={[GREEN, BLUE]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.cta}>
+                {saving ? <ActivityIndicator color="#041412" /> : <Text style={styles.ctaText}>Save payout & shipping</Text>}
               </LinearGradient>
             </TouchableOpacity>
           </>
@@ -776,145 +630,27 @@ export default function SecurePayoutScreen() {
   )
 }
 
-const SURFACE_2 = '#171B22'
-
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: BG },
-  gate: {
-    flex: 1,
-    paddingHorizontal: 24,
-    justifyContent: 'center',
-  },
-  lockIcon: {
-    width: 56,
-    height: 56,
-    borderRadius: 16,
-    backgroundColor: 'rgba(0,229,117,0.12)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 16,
-  },
-  gateTitle: {
-    fontSize: 22,
-    fontWeight: '800',
-    color: TEXT,
-    letterSpacing: -0.3,
-  },
-  gateBody: {
-    marginTop: 8,
-    marginBottom: 24,
-    fontSize: 14,
-    lineHeight: 21,
-    color: SECONDARY,
-  },
-  gateHint: {
-    marginTop: 16,
-    fontSize: 12,
-    lineHeight: 18,
-    color: MUTED,
-  },
+  gate: { flex: 1, paddingHorizontal: 24, justifyContent: 'center' },
+  lockIcon: { width: 56, height: 56, borderRadius: 16, backgroundColor: 'rgba(0,229,117,0.12)', alignItems: 'center', justifyContent: 'center', marginBottom: 16 },
+  gateTitle: { fontSize: 22, fontWeight: '800', color: TEXT, letterSpacing: -0.3 },
+  gateBody: { marginTop: 8, marginBottom: 24, fontSize: 14, lineHeight: 21, color: SECONDARY },
+  gateHint: { marginTop: 16, fontSize: 12, lineHeight: 18, color: MUTED },
   backLink: { marginTop: 24, alignItems: 'center' },
-  pinInput: {
-    letterSpacing: 8,
-    fontSize: 22,
-    fontWeight: '700',
-    textAlign: 'center',
-  },
-  unlockedBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    alignSelf: 'flex-start',
-    backgroundColor: 'rgba(0,229,117,0.1)',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    marginBottom: 12,
-  },
+  pinInput: { letterSpacing: 8, fontSize: 22, fontWeight: '700', textAlign: 'center' },
+  unlockedBadge: { flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', backgroundColor: 'rgba(0,229,117,0.1)', paddingHorizontal: 10, paddingVertical: 5, marginBottom: 12 },
   unlockedText: { color: GREEN, fontSize: 11, fontWeight: '700' },
-  kicker: {
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 2,
-    color: MUTED,
-    textTransform: 'uppercase',
-  },
-  title: {
-    marginTop: 4,
-    fontSize: 24,
-    fontWeight: '800',
-    color: TEXT,
-    letterSpacing: -0.4,
-  },
-  lead: {
-    marginTop: 6,
-    marginBottom: 18,
-    fontSize: 13,
-    lineHeight: 19,
-    color: SECONDARY,
-  },
-  sectionLabel: {
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 1.2,
-    color: MUTED,
-    textTransform: 'uppercase',
-    marginBottom: 8,
-  },
-  card: {
-    backgroundColor: SURFACE,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: LINE,
-    padding: 14,
-    marginBottom: 18,
-  },
-  label: {
-    color: MUTED,
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 0.8,
-    textTransform: 'uppercase',
-    marginBottom: 6,
-  },
-  input: {
-    backgroundColor: '#0A121C',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: LINE,
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 13,
-    color: TEXT,
-    fontSize: 15,
-  },
-  warnBox: {
-    marginBottom: 14,
-    backgroundColor: '#2A1F14',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#5C3D1E',
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-  },
-  shipChoice: {
-    flex: 1,
-    paddingVertical: 14,
-    borderRadius: 14,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: LINE,
-    backgroundColor: '#0A121C',
-    alignItems: 'center',
-  },
-  shipChoiceOn: {
-    borderColor: 'rgba(0,229,117,0.4)',
-    backgroundColor: 'rgba(0,229,117,0.08)',
-  },
-  cta: {
-    paddingVertical: 15,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  ctaText: {
-    color: '#041412',
-    fontWeight: '800',
-    fontSize: 15,
-  },
+  kicker: { fontSize: 11, fontWeight: '700', letterSpacing: 2, color: MUTED, textTransform: 'uppercase' },
+  title: { marginTop: 4, fontSize: 24, fontWeight: '800', color: TEXT, letterSpacing: -0.4 },
+  lead: { marginTop: 6, marginBottom: 18, fontSize: 13, lineHeight: 19, color: SECONDARY },
+  sectionLabel: { fontSize: 11, fontWeight: '700', letterSpacing: 1.2, color: MUTED, textTransform: 'uppercase', marginBottom: 8 },
+  card: { backgroundColor: SURFACE, borderWidth: StyleSheet.hairlineWidth, borderColor: LINE, padding: 14, marginBottom: 18 },
+  label: { color: MUTED, fontSize: 11, fontWeight: '700', letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 6 },
+  input: { backgroundColor: '#0A121C', borderWidth: StyleSheet.hairlineWidth, borderColor: LINE, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 13, color: TEXT, fontSize: 15 },
+  warnBox: { marginBottom: 14, backgroundColor: '#2A1F14', borderWidth: StyleSheet.hairlineWidth, borderColor: '#5C3D1E', borderRadius: 14, paddingHorizontal: 14, paddingVertical: 12 },
+  shipChoice: { flex: 1, paddingVertical: 14, borderRadius: 14, borderWidth: StyleSheet.hairlineWidth, borderColor: LINE, backgroundColor: '#0A121C', alignItems: 'center' },
+  shipChoiceOn: { borderColor: 'rgba(0,229,117,0.4)', backgroundColor: 'rgba(0,229,117,0.08)' },
+  cta: { paddingVertical: 15, alignItems: 'center', justifyContent: 'center' },
+  ctaText: { color: '#041412', fontWeight: '800', fontSize: 15 },
 })

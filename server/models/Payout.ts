@@ -26,6 +26,14 @@ const payoutSchema = new Schema(
       index: true,
     },
 
+    /** Which rail paid the buyer: paystack | stripe */
+    provider: {
+      type: String,
+      enum: ["paystack", "stripe"],
+      default: "paystack",
+      index: true,
+    },
+
     grossAmount: { type: Number, required: true },
     platformFee: { type: Number, required: true },
     platformFeeRate: { type: Number, required: true, default: 0.08 },
@@ -60,7 +68,7 @@ const payoutSchema = new Schema(
 
     /** Paystack transfer recipient code */
     recipientCode: { type: String, default: null },
-    /** Paystack transfer code / id */
+    /** Provider transfer code / id */
     providerTransferCode: { type: String, default: null },
     providerTransferId: { type: String, default: null },
 
@@ -68,7 +76,6 @@ const payoutSchema = new Schema(
       bankName: { type: String, default: "" },
       accountName: { type: String, default: "" },
       accountNumberLast4: { type: String, default: "" },
-      // Never store full account number long-term if avoidable; snapshot for audit
       accountNumber: { type: String, default: "" },
     },
 
@@ -89,5 +96,6 @@ const payoutSchema = new Schema(
 
 payoutSchema.index({ seller: 1, status: 1, createdAt: -1 });
 payoutSchema.index({ status: 1, createdAt: 1 });
+payoutSchema.index({ provider: 1, status: 1 });
 
 export default mongoose.model("Payout", payoutSchema);

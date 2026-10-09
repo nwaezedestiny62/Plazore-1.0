@@ -14,6 +14,7 @@ import {
   initiateTransfer,
 } from "./paystack/transfers.js";
 import { isPaystackConfigured } from "./paystack/client.js";
+import { isStripeConfigured } from "./stripe/client.js";
 import { writePaymentAudit } from "../utils/paymentAudit.js";
 import { sendNotification } from "../utils/sendNotification.js";
 
@@ -34,7 +35,8 @@ export async function markDeliveryConfirmed(
   actorId?: string
 ) {
   const order = await Order.findById(orderId);
-  if (!order) throw Object.assign(new Error("Order not found"), { statusCode: 404 });
+  if (!order)
+    throw Object.assign(new Error("Order not found"), { statusCode: 404 });
 
   if (order.orderStatus !== "Delivered") {
     throw Object.assign(new Error("Order is not in Delivered state"), {
@@ -101,7 +103,9 @@ export async function markDeliveryConfirmed(
 }
 
 /**
- * Initiate Paystack transfer for an eligible order.
+ * Initiate seller payout for an eligible order.
+ * - Paystack-paid orders → Paystack Transfer
+ * - Stripe-paid orders → queue only (no silent Paystack transfer)
  * Guarded against double payout.
  */
 export async function processSellerPayout(
@@ -109,9 +113,9 @@ export async function processSellerPayout(
   opts?: { triggeredBy?: "system" | "admin" | "manual"; adminId?: string }
 ) {
   const order = await Order.findById(orderId);
-  if (!order) throw Object.assign(new Error("Order not found"), { statusCode: 404 });
+  if (!order)
+    throw Object.assign(new Error("Order not found"), { statusCode: 404 });
 
-  // Guards
   if (order.paymentStatus !== "paid") {
     throw Object.assign(new Error("Order is not paid"), { statusCode: 400 });
   }
@@ -133,7 +137,6 @@ export async function processSellerPayout(
     );
   }
 
-  // Existing successful payout?
   const existing = await Payout.findOne({
     order: order._id,
     status: { $in: ["success", "initiated"] },
@@ -145,8 +148,118 @@ export async function processSellerPayout(
   }
 
   const seller = await User.findById(order.seller);
-  if (!seller) throw Object.assign(new Error("Seller not found"), { statusCode: 404 });
+  if (!seller)
+    throw Object.assign(new Error("Seller not found"), { statusCode: 404 });
 
+  const payment = await Payment.findOne({ order: order._id });
+  if (!payment) {
+    throw Object.assign(new Error("Paid order has no payment record"), {
+      statusCode: 400,
+    });
+  }
+
+  const paymentProvider = String(
+    payment.provider || order.paymentMethod || "paystack"
+  ).toLowerCase();
+
+  const fees =
+    (order as any).feeBreakdown ||
+    calculateSellerPayout(order.subtotal, order.shippingCost);
+  const currency =
+    fees.currency ||
+    payment.currency ||
+    currencyForRegion(String((order as any).region || "NG"));
+
+  const reference = generatePayoutRef();
+
+  // ── Stripe-paid orders: queue only. Do NOT use Paystack transfer. ──
+  if (paymentProvider === "stripe") {
+    if (!isStripeConfigured()) {
+      throw Object.assign(
+        new Error(
+          "Stripe not configured — cannot process Stripe-order payouts"
+        ),
+        { statusCode: 503 }
+      );
+    }
+
+    const stripeNote =
+      "Stripe Connect transfer not automated yet — queued for admin release";
+
+    let payoutDoc = await Payout.findOne({ order: order._id });
+    if (!payoutDoc) {
+      payoutDoc = await Payout.create({
+        order: order._id,
+        payment: payment._id,
+        seller: order.seller,
+        provider: "stripe",
+        grossAmount: fees.grossAmount,
+        platformFee: fees.platformFee,
+        platformFeeRate: PLAZORE_TRANSACTION_FEE_RATE,
+        shippingCost: order.shippingCost,
+        subtotal: order.subtotal,
+        amount: fees.sellerPayoutAmount,
+        amountMinor: toPaystackAmount(fees.sellerPayoutAmount, currency),
+        currency,
+        status: "queued",
+        reference,
+        bankSnapshot: {
+          bankName: (seller as any).payout?.bankName || "",
+          accountName: (seller as any).payout?.accountName || "",
+          accountNumberLast4: String(
+            (seller as any).payout?.accountNumber || ""
+          ).slice(-4),
+          accountNumber: (seller as any).payout?.accountNumber || "",
+        },
+        triggeredBy: opts?.triggeredBy || "system",
+        adminId: opts?.adminId || null,
+        failureReason: stripeNote,
+      });
+    } else {
+      payoutDoc.reference = reference;
+      payoutDoc.status = "queued";
+      payoutDoc.provider = "stripe";
+      payoutDoc.failureReason = stripeNote;
+      await payoutDoc.save();
+    }
+
+    (order as any).payout = {
+      status: "queued",
+      eligibleAt: (order as any).payout?.eligibleAt,
+      blockedReason:
+        "Stripe payout queued — complete Connect transfer or admin release",
+      amount: fees.sellerPayoutAmount,
+      platformFee: fees.platformFee,
+      reference,
+      payoutDocId: payoutDoc._id,
+    };
+    (order as any).paymentLifecycle = "SELLER_PAYOUT_PENDING";
+    await order.save();
+
+    await writePaymentAudit({
+      order: order._id.toString(),
+      payment: payment._id.toString(),
+      payout: payoutDoc._id.toString(),
+      action: "payout.queued_stripe",
+      actorType: opts?.triggeredBy === "admin" ? "admin" : "system",
+      actorId: opts?.adminId || null,
+      toLifecycle: "SELLER_PAYOUT_PENDING",
+      amount: fees.sellerPayoutAmount,
+      currency,
+      reference,
+      meta: { provider: "stripe", note: "Awaiting Connect/admin release" },
+    });
+
+    return {
+      payout: payoutDoc,
+      order,
+      transfer: null,
+      provider: "stripe" as const,
+      queuedOnly: true,
+    };
+  }
+
+  // ── Paystack path ──
   const bank = (seller as any).payout || {};
   if (!bank.accountNumber || !bank.bankName || !bank.accountName) {
     (order as any).payout = {
@@ -168,21 +281,8 @@ export async function processSellerPayout(
     );
   }
 
-  const payment = await Payment.findOne({ order: order._id });
-  const fees =
-    (order as any).feeBreakdown ||
-    calculateSellerPayout(order.subtotal, order.shippingCost);
-  const currency =
-    fees.currency ||
-    payment?.currency ||
-    currencyForRegion(String((order as any).region || "NG"));
-
-  const reference = generatePayoutRef();
-
-  // bank_code: sellers currently store bankName only.
-  // Production: require bank_code on seller profile or resolve via Paystack bank list.
-  // For now we expect seller.payout.bankCode (add to User model when integrating).
-  const bankCode = (bank as any).bankCode || process.env.PAYSTACK_DEFAULT_BANK_CODE;
+  const bankCode =
+    (bank as any).bankCode || process.env.PAYSTACK_DEFAULT_BANK_CODE;
   if (!bankCode) {
     throw Object.assign(
       new Error(
@@ -201,7 +301,6 @@ export async function processSellerPayout(
       currency,
     });
     recipientCode = recipient.recipient_code;
-    // Cache on user for reuse
     await User.findByIdAndUpdate(seller._id, {
       $set: { paystackRecipientCode: recipientCode },
     });
@@ -211,15 +310,16 @@ export async function processSellerPayout(
   if (!payoutDoc) {
     payoutDoc = await Payout.create({
       order: order._id,
-      payment: payment?._id,
+      payment: payment._id,
       seller: order.seller,
+      provider: "paystack",
       grossAmount: fees.grossAmount,
       platformFee: fees.platformFee,
       platformFeeRate: PLAZORE_TRANSACTION_FEE_RATE,
       shippingCost: order.shippingCost,
       subtotal: order.subtotal,
       amount: fees.sellerPayoutAmount,
-      amountMinor: toPaystackAmount(fees.sellerPayoutAmount),
+      amountMinor: toPaystackAmount(fees.sellerPayoutAmount, currency),
       currency,
       status: "queued",
       reference,
@@ -237,6 +337,7 @@ export async function processSellerPayout(
     payoutDoc.reference = reference;
     payoutDoc.status = "queued";
     payoutDoc.recipientCode = recipientCode;
+    payoutDoc.provider = "paystack";
     await payoutDoc.save();
   }
 
@@ -272,7 +373,7 @@ export async function processSellerPayout(
 
     await writePaymentAudit({
       order: order._id.toString(),
-      payment: payment?._id?.toString(),
+      payment: payment._id.toString(),
       payout: payoutDoc._id.toString(),
       action: "payout.initiated",
       actorType: opts?.triggeredBy === "admin" ? "admin" : "system",
@@ -281,9 +382,16 @@ export async function processSellerPayout(
       amount: fees.sellerPayoutAmount,
       currency,
       reference,
+      meta: { provider: "paystack" },
     });
 
-    return { payout: payoutDoc, order, transfer };
+    return {
+      payout: payoutDoc,
+      order,
+      transfer,
+      provider: "paystack" as const,
+      queuedOnly: false,
+    };
   } catch (err: any) {
     payoutDoc.status = "failed";
     payoutDoc.failureReason = err.message || "Transfer failed";
@@ -305,7 +413,7 @@ export async function processSellerPayout(
   }
 }
 
-/** Called from transfer.success webhook */
+/** Called from transfer.success webhook (Paystack) or admin mark for Stripe */
 export async function markPayoutSuccess(reference: string, payload?: any) {
   const payout = await Payout.findOne({ reference });
   if (!payout) return { ok: false, error: "Payout not found" };
@@ -313,6 +421,7 @@ export async function markPayoutSuccess(reference: string, payload?: any) {
 
   payout.status = "success";
   payout.completedAt = new Date();
+  payout.failureReason = "";
   await payout.save();
 
   const order = await Order.findById(payout.order);
@@ -321,6 +430,7 @@ export async function markPayoutSuccess(reference: string, payload?: any) {
       ...(order as any).payout,
       status: "completed",
       reference: payout.reference,
+      blockedReason: "",
     };
     (order as any).paymentLifecycle = "SELLER_PAID";
     await order.save();

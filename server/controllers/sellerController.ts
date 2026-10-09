@@ -4,6 +4,137 @@ import Product from "../models/Products.js";
 import Order from "../models/Order.js";
 import { clerkClient } from "@clerk/express";
 import cloudinary from "../config/cloudinary.js";
+import { isPaystackConfigured } from "../services/paystack/client.js";
+import { paystackRequest } from "../services/paystack/client.js";
+import { createTransferRecipient } from "../services/paystack/transfers.js";
+
+function httpError(statusCode: number, message: string) {
+  return Object.assign(new Error(message), { statusCode });
+}
+
+function regionCurrency(region: string) {
+  const code = String(region || "NG").trim().toUpperCase();
+  if (code === "NG") return "NGN";
+  if (code === "US") return "USD";
+  if (code === "DE") return "EUR";
+  if (code === "KE") return "KES";
+  if (code === "GB") return "GBP";
+  return "USD";
+}
+
+/**
+ * Nigeria: Paystack must be able to pay this exact account.
+ * When PAYSTACK_SECRET_KEY is set, resolve the name and cache a recipient.
+ * When it is not set yet, still require a real bank code + 10-digit NUBAN
+ * and mark unverified so payout does not pretend the account is ready.
+ */
+async function buildNgnPayout(input: {
+  bankCode?: string;
+  bankName?: string;
+  accountNumber?: string;
+  accountName?: string;
+}) {
+  const bankCode = String(input.bankCode || "").replace(/\D/g, "");
+  const accountNumber = String(input.accountNumber || "").replace(/\D/g, "");
+  const bankName = String(input.bankName || "").trim();
+
+  if (!/^\d{3,6}$/.test(bankCode)) {
+    throw httpError(400, "Select your bank from the list");
+  }
+  if (!/^\d{10}$/.test(accountNumber)) {
+    throw httpError(400, "Nigerian account number must be 10 digits");
+  }
+  if (!bankName) {
+    throw httpError(400, "Bank name is required");
+  }
+
+  let accountName = String(input.accountName || "").trim();
+  let status: "verified" | "unverified" = "unverified";
+  let paystackRecipientCode: string | null = null;
+
+  if (isPaystackConfigured()) {
+    const resolved = await paystackRequest<{
+      account_name: string;
+      account_number: string;
+    }>(
+      "GET",
+      `/bank/resolve?account_number=${accountNumber}&bank_code=${bankCode}`
+    );
+    accountName = String(resolved.data?.account_name || "").trim();
+    if (!accountName) {
+      throw httpError(400, "Paystack could not verify this account");
+    }
+    const recipient = await createTransferRecipient({
+      type: "nuban",
+      name: accountName,
+      account_number: accountNumber,
+      bank_code: bankCode,
+      currency: "NGN",
+    });
+    paystackRecipientCode = recipient.recipient_code;
+    status = "verified";
+  } else if (accountName.length < 2) {
+    throw httpError(
+      400,
+      "Enter the account name. It will be checked with Paystack once keys are set."
+    );
+  }
+
+  return {
+    payout: {
+      country: "NG",
+      currency: "NGN",
+      provider: "paystack" as const,
+      bankName,
+      bankCode,
+      accountName,
+      accountNumber,
+      status,
+      verifiedAt: status === "verified" ? new Date() : null,
+    },
+    paystackRecipientCode,
+    stripeAccountId: null as string | null,
+  };
+}
+
+/** US / DE / KE / other: do not collect a Nigerian account. Stripe Connect later. */
+function buildConnectPayout(region: string) {
+  const country = String(region || "US").trim().toUpperCase();
+  return {
+    payout: {
+      country,
+      currency: regionCurrency(country),
+      provider: "stripe" as const,
+      bankName: "",
+      bankCode: "",
+      accountName: "",
+      accountNumber: "",
+      status: "pending_connect" as const,
+      verifiedAt: null,
+    },
+    paystackRecipientCode: null as string | null,
+    stripeAccountId: null as string | null,
+  };
+}
+
+async function resolvePayoutProfile(
+  region: string,
+  payout: any
+) {
+  const code = String(region || "NG").trim().toUpperCase();
+  if (code === "NG") {
+    return buildNgnPayout(payout || {});
+  }
+  return buildConnectPayout(code);
+}
+
+function stripSecrets(doc: any) {
+  if (!doc) return doc;
+  const o = typeof doc.toObject === "function" ? doc.toObject() : { ...doc };
+  delete o.paystackRecipientCode;
+  delete o.stripeAccountId;
+  return o;
+}
 
 // Apply to become a seller
 export const applyAsSeller = async (req: Request, res: Response) => {
@@ -15,8 +146,10 @@ export const applyAsSeller = async (req: Request, res: Response) => {
       businessGoal,
       phone,
       bankName,
+      bankCode,
       accountName,
       accountNumber,
+      marketplaceRegion,
     } = req.body;
 
     if (!storeName?.trim()) {
@@ -43,17 +176,27 @@ export const applyAsSeller = async (req: Request, res: Response) => {
         message: "Valid phone number is required",
       });
     }
-    if (!bankName?.trim() || !accountName?.trim() || !accountNumber?.trim()) {
-      return res.status(400).json({
-        success: false,
-        message: "All payout / bank details are required",
-      });
-    }
 
     if (user.role === "seller" || user.role === "admin") {
       return res.status(400).json({
         success: false,
         message: "You are already a seller or admin",
+      });
+    }
+
+    const region = String(marketplaceRegion || "NG").trim().toUpperCase() || "NG";
+    let profile;
+    try {
+      profile = await resolvePayoutProfile(region, {
+        bankName,
+        bankCode,
+        accountName,
+        accountNumber,
+      });
+    } catch (err: any) {
+      return res.status(err.statusCode || 400).json({
+        success: false,
+        message: err.message || "Payout details are invalid",
       });
     }
 
@@ -65,17 +208,15 @@ export const applyAsSeller = async (req: Request, res: Response) => {
         storeDescription: storeDescription.trim(),
         businessGoal: businessGoal.trim(),
         phone: String(phone).trim(),
+        marketplaceRegion: region,
         sellerAppliedAt: new Date(),
-        isSellerVerified: true, // immediate access — no 17h review for now
-        // New sellers must complete onboarding + business location
+        isSellerVerified: true,
         sellerOnboardingCompleted: false,
         sellerOnboardingVersion: 0,
         businessLocationCompleted: false,
-        payout: {
-          bankName: bankName.trim(),
-          accountName: accountName.trim(),
-          accountNumber: String(accountNumber).trim(),
-        },
+        payout: profile.payout,
+        paystackRecipientCode: profile.paystackRecipientCode,
+        stripeAccountId: profile.stripeAccountId,
       },
       { new: true }
     );
@@ -88,11 +229,19 @@ export const applyAsSeller = async (req: Request, res: Response) => {
 
     res.json({
       success: true,
-      message: "You are now a seller. Welcome to the Seller Lounge.",
-      data: updated,
+      message:
+        profile.payout.status === "pending_connect"
+          ? "You are now a seller. Stripe Connect will be linked before payouts."
+          : profile.payout.status === "verified"
+            ? "You are now a seller. Payout account verified with Paystack."
+            : "You are now a seller. Payout account saved. It will be verified when Paystack keys are set.",
+      data: stripSecrets(updated),
     });
   } catch (error: any) {
-    res.status(500).json({ success: false, message: error.message });
+    res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.message,
+    });
   }
 };
 
@@ -107,7 +256,6 @@ export const getSellerDashboard = async (req: Request, res: Response) => {
       isActive: true,
     });
 
-    // Orders that contain at least one of this seller's items
     const orders = await Order.find({
       "items.seller": sellerId,
     }).sort({ createdAt: -1 });
@@ -158,13 +306,14 @@ const uploadOne = (file: any, folder: string): Promise<string> =>
     stream.end(file.buffer);
   });
 
+const STORE_SELECT =
+  "name email phone storeName storeDescription businessGoal storeLogo storeBanner payout shippingDefaults isSellerVerified sellerAppliedAt role marketplaceRegion";
+
 // GET /api/seller/store
 export const getMyStore = async (req: Request, res: Response) => {
   try {
     const user = getUser(req);
-    const full = await User.findById(user._id).select(
-      "name email phone storeName storeDescription businessGoal storeLogo storeBanner payout shippingDefaults isSellerVerified sellerAppliedAt role marketplaceRegion"
-    );
+    const full = await User.findById(user._id).select(STORE_SELECT);
 
     if (!full) {
       return res
@@ -193,6 +342,13 @@ export const updateMyStore = async (req: Request, res: Response) => {
       updates.businessGoal = String(body.businessGoal).trim();
     if (body.phone !== undefined) updates.phone = String(body.phone).trim();
 
+    const existing = await User.findById(user._id).select(
+      "marketplaceRegion payout"
+    );
+    const region = String(
+      existing?.marketplaceRegion || "NG"
+    ).toUpperCase();
+
     let payout = body.payout;
     if (typeof payout === "string") {
       try {
@@ -202,11 +358,9 @@ export const updateMyStore = async (req: Request, res: Response) => {
       }
     }
     if (payout && typeof payout === "object") {
-      updates.payout = {
-        bankName: String(payout.bankName || "").trim(),
-        accountName: String(payout.accountName || "").trim(),
-        accountNumber: String(payout.accountNumber || "").trim(),
-      };
+      const profile = await resolvePayoutProfile(region, payout);
+      updates.payout = profile.payout;
+      updates.paystackRecipientCode = profile.paystackRecipientCode;
     }
 
     let shippingDefaults = body.shippingDefaults;
@@ -226,6 +380,8 @@ export const updateMyStore = async (req: Request, res: Response) => {
           state: String(addr.state || "").trim(),
           zipCode: String(addr.zipCode || "").trim(),
           country: String(addr.country || "").trim(),
+          landmark: String(addr.landmark || "").trim(),
+          label: String(addr.label || "").trim(),
         },
         deliveryMethod:
           shippingDefaults.deliveryMethod === "self" ||
@@ -256,14 +412,15 @@ export const updateMyStore = async (req: Request, res: Response) => {
     const updated = await User.findByIdAndUpdate(user._id, updates, {
       new: true,
       runValidators: true,
-    }).select(
-      "name email phone storeName storeDescription businessGoal storeLogo storeBanner payout shippingDefaults isSellerVerified sellerAppliedAt role marketplaceRegion"
-    );
+    }).select(STORE_SELECT);
 
     res.json({ success: true, data: updated });
   } catch (error: any) {
     console.error("updateMyStore:", error);
-    res.status(500).json({ success: false, message: error.message });
+    res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.message,
+    });
   }
 };
 
@@ -364,7 +521,6 @@ export const getMyOrders = async (req: Request, res: Response) => {
       .populate("items.product", "name images")
       .sort({ createdAt: -1 });
 
-    // Filter items to only this seller's items
     const filtered = orders.map((order) => {
       const sellerItems = order.items.filter(
         (item: any) => item.seller.toString() === req.user._id.toString()
@@ -393,7 +549,6 @@ export const updateMyOrderStatus = async (req: Request, res: Response) => {
         .json({ success: false, message: "Order not found" });
     }
 
-    // Check if this seller has items in the order
     const hasItems = order.items.some(
       (item: any) => item.seller.toString() === req.user._id.toString()
     );
@@ -435,18 +590,24 @@ export const verifyPayoutAccess = async (req: Request, res: Response) => {
       });
     }
 
-    const full = await User.findById(user._id).select("payout");
+    const full = await User.findById(user._id).select(
+      "payout marketplaceRegion"
+    );
     if (!full) {
       return res.status(404).json({ success: false, message: "User not found" });
     }
 
     const stored = String(full.payout?.accountNumber ?? "").replace(/\D/g, "");
+    const pendingConnect = full.payout?.status === "pending_connect";
 
-    // No account yet → allow setup
-    if (!stored || stored.length < 4) {
+    if (pendingConnect || !stored || stored.length < 4) {
       return res.json({
         success: true,
-        data: { unlocked: true, setupRequired: true },
+        data: {
+          unlocked: true,
+          setupRequired: !pendingConnect,
+          pendingConnect: !!pendingConnect,
+        },
       });
     }
 
@@ -460,7 +621,7 @@ export const verifyPayoutAccess = async (req: Request, res: Response) => {
 
     return res.json({
       success: true,
-      data: { unlocked: true, setupRequired: false },
+      data: { unlocked: true, setupRequired: false, pendingConnect: false },
     });
   } catch (error: any) {
     console.error("verifyPayoutAccess:", error);
@@ -470,19 +631,16 @@ export const verifyPayoutAccess = async (req: Request, res: Response) => {
     });
   }
 };
+
 // ====================== SELLER ONBOARDING ======================
 
 const CURRENT_ONBOARDING_VERSION = 1;
 
-/**
- * GET /api/seller/onboarding-status
- * Returns progress so the client can route correctly after login / refresh.
- */
 export const getOnboardingStatus = async (req: Request, res: Response) => {
   try {
     const user = getUser(req);
     const full = await User.findById(user._id).select(
-      "role sellerOnboardingCompleted sellerOnboardingVersion sellerOnboardingCompletedAt businessLocationCompleted businessLocationCompletedAt shippingDefaults marketplaceRegion storeName"
+      "role sellerAppliedAt sellerOnboardingCompleted sellerOnboardingVersion sellerOnboardingCompletedAt businessLocationCompleted businessLocationCompletedAt shippingDefaults marketplaceRegion storeName"
     );
 
     if (!full) {
@@ -500,7 +658,6 @@ export const getOnboardingStatus = async (req: Request, res: Response) => {
       });
     }
 
-    // Admins skip onboarding
     if (full.role === "admin") {
       return res.json({
         success: true,
@@ -517,13 +674,10 @@ export const getOnboardingStatus = async (req: Request, res: Response) => {
     const addr = full.shippingDefaults?.address;
     const hasExistingLocation = !!(addr?.city && addr?.country);
 
-    // Explicitly completed onboarding (new flow)
     let onboardingDone =
       !!full.sellerOnboardingCompleted &&
       (full.sellerOnboardingVersion ?? 0) >= CURRENT_ONBOARDING_VERSION;
 
-    // Grandfather existing sellers who registered before this feature:
-    // if they never had the flag set but already operate (have location or long-standing account)
     if (!onboardingDone && full.sellerAppliedAt) {
       const appliedMs = new Date(full.sellerAppliedAt).getTime();
       const featureLaunchMs = new Date("2026-10-04T00:00:00Z").getTime();
@@ -567,11 +721,6 @@ export const getOnboardingStatus = async (req: Request, res: Response) => {
   }
 };
 
-/**
- * POST /api/seller/onboarding/complete
- * Marks the educational onboarding screens as completed.
- * Does NOT unlock the dashboard — business location is still required.
- */
 export const completeSellerOnboarding = async (req: Request, res: Response) => {
   try {
     const user = getUser(req);
@@ -613,10 +762,6 @@ export const completeSellerOnboarding = async (req: Request, res: Response) => {
   }
 };
 
-/**
- * POST /api/seller/business-location
- * Saves the mandatory business location and unlocks the seller dashboard.
- */
 export const completeBusinessLocation = async (req: Request, res: Response) => {
   try {
     const user = getUser(req);
@@ -628,15 +773,8 @@ export const completeBusinessLocation = async (req: Request, res: Response) => {
       });
     }
 
-    const {
-      street,
-      city,
-      state,
-      zipCode,
-      country,
-      landmark,
-      label,
-    } = req.body || {};
+    const { street, city, state, zipCode, country, landmark, label } =
+      req.body || {};
 
     if (!country?.trim()) {
       return res.status(400).json({
@@ -670,7 +808,7 @@ export const completeBusinessLocation = async (req: Request, res: Response) => {
     const existing = await User.findById(user._id).select("shippingDefaults");
     const prevDefaults = existing?.shippingDefaults || {};
 
-    const updated = await User.findByIdAndUpdate(
+    await User.findByIdAndUpdate(
       user._id,
       {
         shippingDefaults: {
@@ -680,7 +818,6 @@ export const completeBusinessLocation = async (req: Request, res: Response) => {
         },
         businessLocationCompleted: true,
         businessLocationCompletedAt: new Date(),
-        // Ensure onboarding is also marked if somehow skipped
         sellerOnboardingCompleted: true,
         sellerOnboardingVersion: CURRENT_ONBOARDING_VERSION,
         sellerOnboardingCompletedAt:
@@ -689,8 +826,6 @@ export const completeBusinessLocation = async (req: Request, res: Response) => {
             : new Date(),
       },
       { new: true }
-    ).select(
-      "shippingDefaults businessLocationCompleted sellerOnboardingCompleted marketplaceRegion storeName"
     );
 
     return res.json({
@@ -699,7 +834,7 @@ export const completeBusinessLocation = async (req: Request, res: Response) => {
       data: {
         businessLocationCompleted: true,
         sellerOnboardingCompleted: true,
-        businessLocation: updated?.shippingDefaults?.address || address,
+        businessLocation: address,
       },
     });
   } catch (error: any) {
@@ -711,10 +846,6 @@ export const completeBusinessLocation = async (req: Request, res: Response) => {
   }
 };
 
-/**
- * PUT /api/seller/business-location (also used by admin via admin routes)
- * Update business location after initial setup.
- */
 export const updateBusinessLocation = async (req: Request, res: Response) => {
   try {
     const user = getUser(req);
@@ -726,15 +857,8 @@ export const updateBusinessLocation = async (req: Request, res: Response) => {
       });
     }
 
-    const {
-      street,
-      city,
-      state,
-      zipCode,
-      country,
-      landmark,
-      label,
-    } = req.body || {};
+    const { street, city, state, zipCode, country, landmark, label } =
+      req.body || {};
 
     if (!country?.trim() || !city?.trim() || !street?.trim()) {
       return res.status(400).json({
@@ -752,9 +876,6 @@ export const updateBusinessLocation = async (req: Request, res: Response) => {
       landmark: String(landmark || "").trim(),
       label: String(label || "").trim(),
     };
-
-    const existing = await User.findById(user._id).select("shippingDefaults");
-    const prevDefaults = existing?.shippingDefaults || {};
 
     const updated = await User.findByIdAndUpdate(
       user._id,

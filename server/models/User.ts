@@ -61,11 +61,38 @@ const userSchema = new mongoose.Schema(
     isSellerSuspended: { type: Boolean, default: false },
     sellerAppliedAt: { type: Date },
 
+    /**
+     * One payout profile for every seller.
+     * NG  → Paystack NUBAN (bankCode + verified account).
+     * US/DE/KE/other → Stripe Connect later. Do not store a fake NUBAN.
+     * paystackRecipientCode and stripeAccountId stay OFF this object
+     * so store responses do not leak provider secrets.
+     */
     payout: {
+      country: { type: String, default: "NG", uppercase: true, trim: true },
+      currency: { type: String, default: "NGN", uppercase: true, trim: true },
+      provider: {
+        type: String,
+        enum: ["paystack", "stripe", ""],
+        default: "",
+      },
       bankName: { type: String, default: "" },
+      /** Paystack bank code, e.g. 058. Never a display name. */
+      bankCode: { type: String, default: "" },
       accountName: { type: String, default: "" },
       accountNumber: { type: String, default: "" },
+      status: {
+        type: String,
+        enum: ["incomplete", "unverified", "verified", "pending_connect"],
+        default: "incomplete",
+      },
+      verifiedAt: { type: Date, default: null },
     },
+
+    /** Set only after Paystack create-recipient succeeds. Never returned by store selects. */
+    paystackRecipientCode: { type: String, default: null },
+    /** Set later when Stripe Connect onboarding returns acct_… */
+    stripeAccountId: { type: String, default: null },
 
     shippingDefaults: {
       address: {

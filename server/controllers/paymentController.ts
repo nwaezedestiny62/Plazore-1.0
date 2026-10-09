@@ -11,12 +11,14 @@ import {
   verifyPaymentByReference,
   handleChargeSuccessWebhook,
   releaseStockForOrder,
+  type PaymentProvider,
 } from "../services/paymentService.js";
 import {
   processSellerPayout,
   markPayoutSuccess,
 } from "../services/payoutService.js";
-import { createRefund } from "../services/paystack/refunds.js";
+import { createRefund as createPaystackRefund } from "../services/paystack/refunds.js";
+import { createRefund as createStripeRefund } from "../services/stripe/refunds.js";
 import {
   verifyPaystackSignature,
   buildEventId,
@@ -24,8 +26,12 @@ import {
 import { writePaymentAudit } from "../utils/paymentAudit.js";
 import {
   isPaystackConfigured,
-  getPublicKey,
+  getPublicKey as getPaystackPublicKey,
 } from "../services/paystack/client.js";
+import {
+  isStripeConfigured,
+  getPublishableKey as getStripePublishableKey,
+} from "../services/stripe/client.js";
 import { PLAZORE_TRANSACTION_FEE_RATE } from "../config/payment.js";
 import PaymentEvent from "../models/PaymentEvent.js";
 
@@ -35,6 +41,11 @@ function generateReference(prefix = "PLZ"): string {
   const ts = Date.now().toString(36).toUpperCase();
   const rnd = crypto.randomBytes(4).toString("hex").toUpperCase();
   return `${prefix}_${ts}_${rnd}`;
+}
+
+function normalizeProvider(raw?: string | null): PaymentProvider {
+  const p = String(raw || "paystack").toLowerCase().trim();
+  return p === "stripe" ? "stripe" : "paystack";
 }
 
 /**
@@ -70,41 +81,58 @@ async function markOrdersPaymentFailed(
       };
       await o.save();
 
-      // Put stock back so inventory is not stuck
-      await releaseStockForOrder(
-        o._id.toString(),
-        note || reasonLabel
-      ).catch(() => {});
+      await releaseStockForOrder(o._id.toString(), note || reasonLabel).catch(
+        () => {}
+      );
     } catch (e) {
       console.error("[markOrdersPaymentFailed]", e);
     }
   }
 }
 
-/** GET /api/payments/config — public key only */
+/** GET /api/payments/config — public keys only (both providers) */
 export const getPaymentConfig = async (_req: Request, res: Response) => {
+  const paystackOk = isPaystackConfigured();
+  const stripeOk = isStripeConfigured();
+
   res.json({
     success: true,
     data: {
-      configured: isPaystackConfigured(),
-      publicKey: getPublicKey(),
       feeRate: PLAZORE_TRANSACTION_FEE_RATE,
       feePercent: 8,
-      provider: "paystack",
+      providers: {
+        paystack: {
+          configured: paystackOk,
+          publicKey: paystackOk ? getPaystackPublicKey() : null,
+        },
+        stripe: {
+          configured: stripeOk,
+          publicKey: stripeOk ? getStripePublishableKey() : null,
+        },
+      },
+      // backward-compatible single fields (default to paystack)
+      configured: paystackOk || stripeOk,
+      publicKey: paystackOk
+        ? getPaystackPublicKey()
+        : stripeOk
+          ? getStripePublishableKey()
+          : null,
+      provider: paystackOk ? "paystack" : stripeOk ? "stripe" : "none",
+      available: [
+        ...(paystackOk ? (["paystack"] as const) : []),
+        ...(stripeOk ? (["stripe"] as const) : []),
+      ],
     },
   });
 };
 
 /**
  * POST /api/payments/checkout
+ * Body may include provider: "paystack" | "stripe"
  *
  * Multi-seller:
- * - Creates one order + one Paystack session per seller
+ * - Creates one order + one payment session per seller
  * - Returns payments[] — client must complete ALL ready sessions sequentially
- * - Paid sellers stay paid; failed sellers are cancelled + stock released
- * - Cart is NOT cleared here (client clears after payments succeed)
- *
- * Order is successful ONLY after verify/webhook marks payment paid.
  */
 export const checkoutAndPay = async (req: Request, res: Response) => {
   try {
@@ -116,14 +144,27 @@ export const checkoutAndPay = async (req: Request, res: Response) => {
       items: frontendItems,
       callbackUrl,
       paymentMethodId,
+      provider: bodyProvider,
     } = req.body;
 
-    if (!isPaystackConfigured()) {
+    const provider = normalizeProvider(bodyProvider);
+
+    if (provider === "paystack" && !isPaystackConfigured()) {
       return res.status(503).json({
         success: false,
         code: "PAYSTACK_NOT_CONFIGURED",
         message:
           "Order unsuccessful. Payment is not available — Paystack is not connected. No order was placed and nothing was charged.",
+        orderPlaced: false,
+        paymentStatus: "failed",
+      });
+    }
+    if (provider === "stripe" && !isStripeConfigured()) {
+      return res.status(503).json({
+        success: false,
+        code: "STRIPE_NOT_CONFIGURED",
+        message:
+          "Order unsuccessful. Payment is not available — Stripe is not connected. No order was placed and nothing was charged.",
         orderPlaced: false,
         paymentStatus: "failed",
       });
@@ -192,28 +233,38 @@ export const checkoutAndPay = async (req: Request, res: Response) => {
           orderId: order._id.toString(),
           buyer: user,
           callbackUrl,
+          provider,
         });
 
-        if (!init?.authorizationUrl) {
-          throw new Error("No payment authorization URL returned");
+        const isReady =
+          provider === "stripe"
+            ? !!init?.clientSecret
+            : !!init?.authorizationUrl;
+
+        if (!isReady) {
+          throw new Error("No payment session returned from gateway");
         }
 
         payments.push({
           orderId: order._id,
           orderNumber: order.orderNumber,
           sellerId: order.seller,
+          provider: init.provider,
           amount: init.amount,
           currency: init.currency,
-          authorizationUrl: init.authorizationUrl,
-          authorization_url: init.authorizationUrl,
-          accessCode: init.accessCode,
           reference: init.reference,
+          // Paystack
+          authorizationUrl: init.authorizationUrl || null,
+          authorization_url: init.authorizationUrl || null,
+          accessCode: init.accessCode || null,
+          // Stripe
+          clientSecret: init.clientSecret || null,
+          paymentIntentId: init.paymentIntentId || null,
           feeBreakdown: (order as any).feeBreakdown,
           status: "ready",
         });
       } catch (err: any) {
         failedOrderIds.push(order._id.toString());
-        // Release stock for this failed seller immediately
         await releaseStockForOrder(
           order._id.toString(),
           err.message || "Payment initialization failed"
@@ -223,6 +274,7 @@ export const checkoutAndPay = async (req: Request, res: Response) => {
           orderId: order._id,
           orderNumber: order.orderNumber,
           sellerId: order.seller,
+          provider,
           error: err.message || "Payment initialization failed",
           needsManualInit: true,
           status: "init_failed",
@@ -230,7 +282,11 @@ export const checkoutAndPay = async (req: Request, res: Response) => {
       }
     }
 
-    const viable = payments.filter((p) => p.authorizationUrl);
+    const viable = payments.filter(
+      (p) =>
+        p.status === "ready" &&
+        (provider === "stripe" ? p.clientSecret : p.authorizationUrl)
+    );
 
     if (viable.length === 0) {
       await markOrdersPaymentFailed(
@@ -258,10 +314,11 @@ export const checkoutAndPay = async (req: Request, res: Response) => {
       );
     }
 
-    // Do NOT clear cart here.
-    // Client clears only after sequential payments succeed (partial or full).
-
     const primary = viable[0];
+    const publicKey =
+      provider === "stripe"
+        ? getStripePublishableKey()
+        : getPaystackPublicKey();
 
     return res.status(201).json({
       success: true,
@@ -273,16 +330,18 @@ export const checkoutAndPay = async (req: Request, res: Response) => {
           ? `Complete payment for all ${viable.length} sellers. Order is not confirmed until each payment succeeds.`
           : "Complete payment to place your order. Your order is not confirmed until payment succeeds.",
       data: {
-        // Single-seller convenience (first ready session)
+        provider,
+        // Single-seller convenience
         authorization_url: primary.authorizationUrl,
         authorizationUrl: primary.authorizationUrl,
-        reference: primary.reference,
         accessCode: primary.accessCode,
+        clientSecret: primary.clientSecret,
+        paymentIntentId: primary.paymentIntentId,
+        reference: primary.reference,
         amount: primary.amount,
         currency: primary.currency,
         orderId: primary.orderId,
         orderNumber: primary.orderNumber,
-        // Multi-seller: client must open every ready payment sequentially
         orders: orders.map((o: any) => ({
           _id: o._id,
           orderNumber: o.orderNumber,
@@ -291,12 +350,12 @@ export const checkoutAndPay = async (req: Request, res: Response) => {
           region: o.region,
           currency: o.currency,
         })),
-        payments, // includes ready + failed init rows
+        payments,
         paymentsReady: viable.length,
         paymentsFailed: failedOrderIds.length,
         sellerCount: orders.length,
         requiresSequentialPayment: viable.length > 1,
-        publicKey: getPublicKey(),
+        publicKey,
         feePercent: 8,
       },
     });
@@ -304,15 +363,18 @@ export const checkoutAndPay = async (req: Request, res: Response) => {
     console.error("checkoutAndPay:", error);
     const isNotConfigured =
       error.name === "PaystackNotConfiguredError" ||
-      String(error.message || "")
-        .toLowerCase()
-        .includes("paystack not");
+      error.name === "StripeNotConfiguredError" ||
+      /paystack not|stripe not/i.test(String(error.message || ""));
 
     return res
       .status(error.statusCode || (isNotConfigured ? 503 : 500))
       .json({
         success: false,
-        code: isNotConfigured ? "PAYSTACK_NOT_CONFIGURED" : "CHECKOUT_FAILED",
+        code: isNotConfigured
+          ? error.name === "StripeNotConfiguredError"
+            ? "STRIPE_NOT_CONFIGURED"
+            : "PAYSTACK_NOT_CONFIGURED"
+          : "CHECKOUT_FAILED",
         message:
           error.message ||
           "Order unsuccessful. Something went wrong during checkout.",
@@ -325,7 +387,11 @@ export const checkoutAndPay = async (req: Request, res: Response) => {
 /** POST /api/payments/initialize — for an existing pending order */
 export const initializePayment = async (req: Request, res: Response) => {
   try {
-    if (!isPaystackConfigured()) {
+    const user = getUser(req);
+    const { orderId, callbackUrl, provider: bodyProvider } = req.body;
+    const provider = normalizeProvider(bodyProvider);
+
+    if (provider === "paystack" && !isPaystackConfigured()) {
       return res.status(503).json({
         success: false,
         code: "PAYSTACK_NOT_CONFIGURED",
@@ -335,9 +401,17 @@ export const initializePayment = async (req: Request, res: Response) => {
         paymentStatus: "failed",
       });
     }
+    if (provider === "stripe" && !isStripeConfigured()) {
+      return res.status(503).json({
+        success: false,
+        code: "STRIPE_NOT_CONFIGURED",
+        message:
+          "Order unsuccessful. Payment is not available — Stripe is not connected.",
+        orderPlaced: false,
+        paymentStatus: "failed",
+      });
+    }
 
-    const user = getUser(req);
-    const { orderId, callbackUrl } = req.body;
     if (!orderId) {
       return res.status(400).json({
         success: false,
@@ -350,9 +424,15 @@ export const initializePayment = async (req: Request, res: Response) => {
       orderId,
       buyer: user,
       callbackUrl,
+      provider,
     });
 
-    if (!result?.authorizationUrl) {
+    const isReady =
+      provider === "stripe"
+        ? !!result?.clientSecret
+        : !!result?.authorizationUrl;
+
+    if (!isReady) {
       return res.status(402).json({
         success: false,
         code: "PAYMENT_INIT_FAILED",
@@ -371,9 +451,12 @@ export const initializePayment = async (req: Request, res: Response) => {
       message:
         "Complete payment to confirm your order. Not successful until payment is verified.",
       data: {
+        provider: result.provider,
         authorizationUrl: result.authorizationUrl,
         authorization_url: result.authorizationUrl,
         accessCode: result.accessCode,
+        clientSecret: result.clientSecret,
+        paymentIntentId: result.paymentIntentId,
         reference: result.reference,
         amount: result.amount,
         currency: result.currency,
@@ -391,7 +474,9 @@ export const initializePayment = async (req: Request, res: Response) => {
       code:
         error.name === "PaystackNotConfiguredError"
           ? "PAYSTACK_NOT_CONFIGURED"
-          : undefined,
+          : error.name === "StripeNotConfiguredError"
+            ? "STRIPE_NOT_CONFIGURED"
+            : undefined,
       orderPlaced: false,
       paymentStatus: "failed",
     });
@@ -444,6 +529,7 @@ export const verifyPayment = async (req: Request, res: Response) => {
         alreadyVerified: result.alreadyVerified,
         status: result.payment.status,
         paymentStatus: paid ? "paid" : result.payment.status,
+        provider: result.payment.provider,
         lifecycle: result.payment.lifecycle,
         orderId: result.order?._id,
         orderNumber: result.order?.orderNumber,
@@ -467,7 +553,9 @@ export const verifyPayment = async (req: Request, res: Response) => {
       code:
         error.name === "PaystackNotConfiguredError"
           ? "PAYSTACK_NOT_CONFIGURED"
-          : undefined,
+          : error.name === "StripeNotConfiguredError"
+            ? "STRIPE_NOT_CONFIGURED"
+            : undefined,
       orderPlaced: false,
       paymentStatus: "failed",
     });
@@ -542,6 +630,7 @@ export const paystackWebhook = async (req: Request, res: Response) => {
             signatureValid,
             processed: true,
             processedAt: new Date(),
+            provider: "paystack",
           },
           { upsert: true }
         );
@@ -560,6 +649,7 @@ export const paystackWebhook = async (req: Request, res: Response) => {
             signatureValid,
             processed: true,
             processedAt: new Date(),
+            provider: "paystack",
           },
           { upsert: true }
         );
@@ -575,6 +665,7 @@ export const paystackWebhook = async (req: Request, res: Response) => {
           signatureValid,
           processed: true,
           processedAt: new Date(),
+          provider: "paystack",
         },
         { upsert: true }
       );
@@ -595,6 +686,7 @@ export const paystackWebhook = async (req: Request, res: Response) => {
           signatureValid,
           processed: true,
           processedAt: new Date(),
+          provider: "paystack",
         },
         { upsert: true }
       );
@@ -608,6 +700,7 @@ export const paystackWebhook = async (req: Request, res: Response) => {
           signatureValid,
           processed: true,
           processedAt: new Date(),
+          provider: "paystack",
         },
         { upsert: true }
       );
@@ -643,6 +736,7 @@ export const getPaymentForOrder = async (req: Request, res: Response) => {
       data: {
         lifecycle: (order as any).paymentLifecycle || "PENDING_PAYMENT",
         paymentStatus: order.paymentStatus,
+        paymentMethod: order.paymentMethod,
         orderStatus: order.orderStatus,
         orderPlaced: order.paymentStatus === "paid",
         region: (order as any).region,
@@ -674,6 +768,7 @@ export const getPaymentForOrder = async (req: Request, res: Response) => {
         payment: payment
           ? {
               reference: payment.reference,
+              provider: payment.provider,
               status: payment.status,
               amount: payment.amount,
               currency: payment.currency,
@@ -689,7 +784,7 @@ export const getPaymentForOrder = async (req: Request, res: Response) => {
   }
 };
 
-/** POST /api/payments/admin/disputes/:orderId/open */
+/** POST /api/payments/disputes/:orderId/open */
 export const openDispute = async (req: Request, res: Response) => {
   try {
     const user = getUser(req);
@@ -810,27 +905,59 @@ export const adminRefundBuyer = async (req: Request, res: Response) => {
       adminId: user._id,
     });
 
-    try {
-      const ps = await createRefund({
-        transaction: payment.reference,
-        customer_note:
-          req.body.reason || "Order dispute resolved in your favour",
-        merchant_note: `Plazore admin refund ${refundRef}`,
-      });
-      refundDoc.status = "processing";
-      refundDoc.providerRefundId = String(
-        ps?.id || ps?.transaction?.id || ""
-      );
-      await refundDoc.save();
-    } catch (err: any) {
-      refundDoc.status = "failed";
-      refundDoc.failureReason = err.message;
-      await refundDoc.save();
-      return res.status(502).json({
-        success: false,
-        message: "Paystack refund failed: " + err.message,
-        data: refundDoc,
-      });
+    const provider = String(payment.provider || "paystack").toLowerCase();
+
+    if (provider === "stripe") {
+      try {
+        const intentId =
+          payment.stripePaymentIntentId || payment.providerTransactionId;
+        if (!intentId) {
+          throw new Error("Missing Stripe PaymentIntent ID for refund");
+        }
+        const sr = await createStripeRefund({
+          paymentIntentId: String(intentId),
+          amountMajor: payment.amount,
+          currency: payment.currency,
+          reason: "requested_by_customer",
+          reference: refundRef,
+          orderId: order._id.toString(),
+        });
+        refundDoc.status = "processing";
+        refundDoc.providerRefundId = String(sr?.refundId || "");
+        await refundDoc.save();
+      } catch (err: any) {
+        refundDoc.status = "failed";
+        refundDoc.failureReason = err.message;
+        await refundDoc.save();
+        return res.status(502).json({
+          success: false,
+          message: "Stripe refund failed: " + err.message,
+          data: refundDoc,
+        });
+      }
+    } else {
+      try {
+        const ps = await createPaystackRefund({
+          transaction: payment.reference,
+          customer_note:
+            req.body.reason || "Order dispute resolved in your favour",
+          merchant_note: `Plazore admin refund ${refundRef}`,
+        });
+        refundDoc.status = "processing";
+        refundDoc.providerRefundId = String(
+          ps?.id || ps?.transaction?.id || ""
+        );
+        await refundDoc.save();
+      } catch (err: any) {
+        refundDoc.status = "failed";
+        refundDoc.failureReason = err.message;
+        await refundDoc.save();
+        return res.status(502).json({
+          success: false,
+          message: "Paystack refund failed: " + err.message,
+          data: refundDoc,
+        });
+      }
     }
 
     const dispute = await OrderDispute.findOne({ order: order._id });
@@ -864,6 +991,7 @@ export const adminRefundBuyer = async (req: Request, res: Response) => {
       amount: payment.amount,
       currency: payment.currency,
       reference: refundRef,
+      meta: { provider },
     });
 
     res.json({ success: true, data: { refund: refundDoc, order } });

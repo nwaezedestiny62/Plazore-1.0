@@ -23,6 +23,35 @@ const API =
 const BG_IMAGE =
   "https://images.unsplash.com/photo-1441986300917-64674bd600d8?auto=format&fit=crop&w=1600&q=80";
 
+/** Paystack NGN bank codes. Display name is not enough to pay out. */
+const NGN_BANKS = [
+  { code: "044", name: "Access Bank" },
+  { code: "063", name: "Access Bank (Diamond)" },
+  { code: "050", name: "Ecobank Nigeria" },
+  { code: "070", name: "Fidelity Bank" },
+  { code: "011", name: "First Bank of Nigeria" },
+  { code: "214", name: "First City Monument Bank" },
+  { code: "00103", name: "Globus Bank" },
+  { code: "058", name: "Guaranty Trust Bank" },
+  { code: "030", name: "Heritage Bank" },
+  { code: "301", name: "Jaiz Bank" },
+  { code: "082", name: "Keystone Bank" },
+  { code: "50211", name: "Kuda Bank" },
+  { code: "076", name: "Polaris Bank" },
+  { code: "101", name: "Providus Bank" },
+  { code: "221", name: "Stanbic IBTC Bank" },
+  { code: "068", name: "Standard Chartered Bank" },
+  { code: "232", name: "Sterling Bank" },
+  { code: "100", name: "Suntrust Bank" },
+  { code: "032", name: "Union Bank of Nigeria" },
+  { code: "033", name: "United Bank For Africa" },
+  { code: "215", name: "Unity Bank" },
+  { code: "035", name: "Wema Bank" },
+  { code: "057", name: "Zenith Bank" },
+  { code: "999992", name: "OPay" },
+  { code: "999991", name: "PalmPay" },
+] as const;
+
 type FocusKey =
   | "storeName"
   | "desc"
@@ -42,9 +71,10 @@ export default function SellerRegisterPage() {
   const [storeDescription, setStoreDescription] = useState("");
   const [businessGoal, setBusinessGoal] = useState("");
   const [phone, setPhone] = useState("");
-  const [bankName, setBankName] = useState("");
+  const [bankCode, setBankCode] = useState("");
   const [accountName, setAccountName] = useState("");
   const [accountNumber, setAccountNumber] = useState("");
+  const [showBanks, setShowBanks] = useState(false);
   const [marketplaceRegion, setMarketplaceRegion] = useState(DEFAULT_REGION);
   const [showRegions, setShowRegions] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -59,6 +89,9 @@ export default function SellerRegisterPage() {
 
   const logoRef = useRef<HTMLInputElement>(null);
   const bannerRef = useRef<HTMLInputElement>(null);
+
+  const isNigeria = marketplaceRegion === "NG";
+  const selectedBank = NGN_BANKS.find((b) => b.code === bankCode);
 
   useEffect(() => {
     if (!isLoaded) return;
@@ -150,10 +183,13 @@ export default function SellerRegisterPage() {
       return setError("Please enter your business goal");
     if (!phone.trim() || phone.trim().length < 7)
       return setError("Please enter a valid phone number");
-    if (!bankName.trim() || !accountName.trim() || !accountNumber.trim())
-      return setError("Please fill in all payout / bank details");
     if (!marketplaceRegion)
       return setError("Please select your marketplace region");
+    if (isNigeria) {
+      if (!bankCode) return setError("Select your bank");
+      if (!/^\d{10}$/.test(accountNumber.replace(/\D/g, "")))
+        return setError("Nigerian account number must be 10 digits");
+    }
 
     try {
       setLoading(true);
@@ -174,10 +210,13 @@ export default function SellerRegisterPage() {
           storeDescription: storeDescription.trim(),
           businessGoal: businessGoal.trim(),
           phone: phone.trim().replace(/\s+/g, ""),
-          bankName: bankName.trim(),
-          accountName: accountName.trim(),
-          accountNumber: accountNumber.trim(),
           marketplaceRegion,
+          bankCode: isNigeria ? bankCode : "",
+          bankName: isNigeria ? selectedBank?.name || "" : "",
+          accountName: isNigeria ? accountName.trim() : "",
+          accountNumber: isNigeria
+            ? accountNumber.replace(/\D/g, "")
+            : "",
         }),
       });
 
@@ -186,7 +225,6 @@ export default function SellerRegisterPage() {
         throw new Error(json?.message || "Registration failed");
       }
 
-      // Real Cloudinary upload via existing PUT /seller/store
       if (logoFile || bannerFile) {
         try {
           const fd = new FormData();
@@ -252,14 +290,9 @@ export default function SellerRegisterPage() {
 
   return (
     <div className="relative min-h-dvh overflow-hidden bg-[#090B0F] text-white">
-      {/* External still image only — no video */}
       <div className="pointer-events-none absolute inset-0">
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={BG_IMAGE}
-          alt=""
-          className="h-full w-full object-cover"
-        />
+        <img src={BG_IMAGE} alt="" className="h-full w-full object-cover" />
         <div className="absolute inset-0 bg-gradient-to-b from-[rgba(5,8,12,0.72)] via-[rgba(9,11,15,0.86)] to-[rgba(9,11,15,0.97)]" />
         <div className="absolute inset-0 bg-gradient-to-r from-[rgba(6,18,16,0.35)] via-transparent to-[rgba(9,11,15,0.25)]" />
       </div>
@@ -314,7 +347,6 @@ export default function SellerRegisterPage() {
                 Store identity
               </p>
 
-              {/* Logo */}
               <label className="mb-2 block text-[11px] font-bold uppercase tracking-[0.08em] text-white/55">
                 Store logo
               </label>
@@ -359,7 +391,6 @@ export default function SellerRegisterPage() {
                 Square image · shown on storefront cards
               </p>
 
-              {/* Banner / setback */}
               <label className="mb-2 block text-[11px] font-bold uppercase tracking-[0.08em] text-white/55">
                 Store banner (backdrop)
               </label>
@@ -511,6 +542,7 @@ export default function SellerRegisterPage() {
                         onClick={() => {
                           setMarketplaceRegion(r.code);
                           setShowRegions(false);
+                          setBankCode("");
                         }}
                         className={`flex w-full items-center gap-3 border-b border-white/[0.08] px-3.5 py-3 text-left last:border-b-0 ${
                           on ? "bg-[#00E575]/10" : "hover:bg-white/[0.04]"
@@ -526,63 +558,95 @@ export default function SellerRegisterPage() {
               )}
 
               <p className="mb-4 mt-7 text-[15px] font-bold tracking-wide">
-                Payout / bank details
+                Payout
               </p>
 
               <div className="mb-5 flex gap-3 border border-[#00E575]/28 bg-[#00E575]/[0.08] p-3.5">
                 <ShieldCheck className="mt-0.5 h-[18px] w-[18px] shrink-0 text-[#00E575]" />
                 <p className="text-[13px] leading-[1.45] text-white/75">
-                  Please ensure this bank account is valid and belongs to you.
-                  Once Plazore reviews and approves your application, this
-                  account becomes the default payout destination for sales on
-                  Plazore. Changing payout details later will require
-                  verification using the last four digits of the account number
-                  filled in.
+                  {isNigeria
+                    ? "Nigeria pays through Paystack. Pick the bank, then the 10-digit account number. When Paystack keys are on, Plazore checks the account name before saving. Changing it later needs the last four digits."
+                    : "This region pays through Stripe Connect, not a Nigerian account number. You can open the store now. Payouts stay held until Connect is linked."}
                 </p>
               </div>
 
-              <label className="mb-2 block text-[11px] font-bold uppercase tracking-[0.08em] text-white/55">
-                Bank name *
-              </label>
-              <div className={`${fieldClass("bank")} mb-4`}>
-                <input
-                  value={bankName}
-                  onChange={(e) => setBankName(e.target.value)}
-                  onFocus={() => setFocus("bank")}
-                  onBlur={() => setFocus(null)}
-                  placeholder="e.g. GTBank"
-                  className="w-full bg-transparent text-[16px] text-white outline-none placeholder:text-white/35"
-                />
-              </div>
+              {isNigeria ? (
+                <>
+                  <label className="mb-2 block text-[11px] font-bold uppercase tracking-[0.08em] text-white/55">
+                    Bank *
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setShowBanks((v) => !v)}
+                    className="mb-3 flex w-full items-center gap-3 border border-white/14 bg-white/10 px-3.5 py-3.5 text-left"
+                  >
+                    <span className="min-w-0 flex-1 text-[16px] font-semibold">
+                      {selectedBank?.name || "Select bank"}
+                    </span>
+                    {showBanks ? (
+                      <ChevronUp className="h-4 w-4 text-white/55" />
+                    ) : (
+                      <ChevronDown className="h-4 w-4 text-white/55" />
+                    )}
+                  </button>
+                  {showBanks && (
+                    <div className="mb-4 max-h-64 overflow-y-auto border border-white/12 bg-black/35">
+                      {NGN_BANKS.map((b) => {
+                        const on = bankCode === b.code;
+                        return (
+                          <button
+                            key={b.code}
+                            type="button"
+                            onClick={() => {
+                              setBankCode(b.code);
+                              setShowBanks(false);
+                            }}
+                            className={`flex w-full items-center gap-3 border-b border-white/[0.08] px-3.5 py-3 text-left last:border-b-0 ${
+                              on ? "bg-[#00E575]/10" : "hover:bg-white/[0.04]"
+                            }`}
+                          >
+                            <span className="flex-1 text-[15px]">{b.name}</span>
+                            {on && <Check className="h-4 w-4 text-[#00E575]" />}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
 
-              <label className="mb-2 block text-[11px] font-bold uppercase tracking-[0.08em] text-white/55">
-                Account name *
-              </label>
-              <div className={`${fieldClass("accName")} mb-4`}>
-                <input
-                  value={accountName}
-                  onChange={(e) => setAccountName(e.target.value)}
-                  onFocus={() => setFocus("accName")}
-                  onBlur={() => setFocus(null)}
-                  placeholder="Name on the account"
-                  className="w-full bg-transparent text-[16px] text-white outline-none placeholder:text-white/35"
-                />
-              </div>
+                  <label className="mb-2 block text-[11px] font-bold uppercase tracking-[0.08em] text-white/55">
+                    Account name
+                  </label>
+                  <div className={`${fieldClass("accName")} mb-4`}>
+                    <input
+                      value={accountName}
+                      onChange={(e) => setAccountName(e.target.value)}
+                      onFocus={() => setFocus("accName")}
+                      onBlur={() => setFocus(null)}
+                      placeholder="Paystack overwrites this when keys are set"
+                      className="w-full bg-transparent text-[16px] text-white outline-none placeholder:text-white/35"
+                    />
+                  </div>
 
-              <label className="mb-2 block text-[11px] font-bold uppercase tracking-[0.08em] text-white/55">
-                Account number *
-              </label>
-              <div className={`${fieldClass("accNum")} mb-2`}>
-                <input
-                  value={accountNumber}
-                  onChange={(e) => setAccountNumber(e.target.value)}
-                  onFocus={() => setFocus("accNum")}
-                  onBlur={() => setFocus(null)}
-                  placeholder="0123456789"
-                  inputMode="numeric"
-                  className="w-full bg-transparent text-[16px] text-white outline-none placeholder:text-white/35"
-                />
-              </div>
+                  <label className="mb-2 block text-[11px] font-bold uppercase tracking-[0.08em] text-white/55">
+                    Account number *
+                  </label>
+                  <div className={`${fieldClass("accNum")} mb-2`}>
+                    <input
+                      value={accountNumber}
+                      onChange={(e) =>
+                        setAccountNumber(
+                          e.target.value.replace(/\D/g, "").slice(0, 10)
+                        )
+                      }
+                      onFocus={() => setFocus("accNum")}
+                      onBlur={() => setFocus(null)}
+                      placeholder="0123456789"
+                      inputMode="numeric"
+                      className="w-full bg-transparent text-[16px] text-white outline-none placeholder:text-white/35"
+                    />
+                  </div>
+                </>
+              ) : null}
 
               {error && (
                 <p className="mt-4 border border-red-400/30 bg-red-500/10 px-3 py-2.5 text-[13px] text-red-200">
