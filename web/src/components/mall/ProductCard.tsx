@@ -188,7 +188,6 @@ export function ProductCard({
   const btnRef = useRef<HTMLButtonElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const impressed = useRef(false);
-  /** Blocks double-click / double onClick on cart button */
   const addLockRef = useRef(false);
 
   const [authOpen, setAuthOpen] = useState(false);
@@ -315,10 +314,6 @@ export function ProductCard({
     }, 240);
   }, []);
 
-  /**
-   * Single path into cart. Cart lib merges by line id.
-   * Fly animation is visual only — we never call addToCart twice.
-   */
   const doAdd = useCallback(
     (variant?: ProductVariant | null) => {
       void trackShowroomEvent({
@@ -340,7 +335,6 @@ export function ProductCard({
           }
         : product;
 
-      // Write to cart exactly once
       try {
         addToCart(product, 1, {
           variantId: variant?.variantId,
@@ -352,7 +346,6 @@ export function ProductCard({
         /* picker path should already enforce selection */
       }
 
-      // Fly is visual only (does NOT call addToCart again)
       const el = btnRef.current;
       if (el && fly) {
         const r = el.getBoundingClientRect();
@@ -371,12 +364,11 @@ export function ProductCard({
     [product, room, position, displayRegion, fly]
   );
 
-  const onCart = (e: React.MouseEvent) => {
+  const onCart = (e: React.MouseEvent | React.PointerEvent) => {
     e.preventDefault();
     e.stopPropagation();
     if (!isLoaded) return;
 
-    // Guard double-click / rapid taps
     if (addLockRef.current) return;
     addLockRef.current = true;
     window.setTimeout(() => {
@@ -400,7 +392,6 @@ export function ProductCard({
     e.stopPropagation();
     if (!selectionComplete || !selectedVariant || !inStock) return;
 
-    // Guard double confirm
     if (addLockRef.current) return;
     addLockRef.current = true;
     window.setTimeout(() => {
@@ -454,12 +445,13 @@ export function ProductCard({
           light ? "text-chamber-ink" : "text-text"
         }`}
       >
-        <Link
-          href={`/product/${product._id}`}
-          className="block focus:outline-none focus-visible:ring-1 focus-visible:ring-white/30"
-          onClick={trackOpen}
-        >
-          <div className="relative aspect-[3/3.55] overflow-hidden bg-[#0A0C10] sm:aspect-[3/3.5]">
+        {/* Image is the positioning parent. Button is a sibling of the link, pinned to this frame. */}
+        <div className="relative aspect-[3/3.55] overflow-hidden bg-[#0A0C10] sm:aspect-[3/3.5]">
+          <Link
+            href={`/product/${product._id}`}
+            className="absolute inset-0 block focus:outline-none focus-visible:ring-1 focus-visible:ring-white/30"
+            onClick={trackOpen}
+          >
             {primaryImage ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
@@ -470,7 +462,9 @@ export function ProductCard({
                 className="absolute inset-0 h-full w-full object-cover"
                 style={{
                   transform: pickerOpen ? "scale(1.03)" : "scale(1)",
-                  filter: pickerOpen ? "saturate(0.88) brightness(0.92)" : "none",
+                  filter: pickerOpen
+                    ? "saturate(0.88) brightness(0.92)"
+                    : "none",
                   transition:
                     "transform 0.35s cubic-bezier(0.22, 1, 0.36, 1), filter 0.3s ease",
                 }}
@@ -478,204 +472,232 @@ export function ProductCard({
             ) : (
               <div className="h-full w-full bg-surface" />
             )}
+          </Link>
 
-            {pickerOpen ? (
+          {pickerOpen ? (
+            <div
+              className="absolute inset-0 z-20 flex flex-col"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+              }}
+            >
               <div
-                className="absolute inset-0 z-20 flex flex-col"
-                onClick={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
+                className="absolute inset-0"
+                style={{
+                  background:
+                    "radial-gradient(120% 80% at 50% 100%, rgba(0,229,117,0.08), transparent 55%), linear-gradient(180deg, rgba(4,6,10,0.28) 0%, rgba(4,6,10,0.62) 100%)",
+                  opacity: pickerIn ? 1 : 0,
+                  transition: "opacity 0.28s ease",
+                }}
+                onClick={closePicker}
+              />
+
+              <div
+                className="relative z-10 mt-auto flex min-h-0 max-h-full flex-1 flex-col"
+                style={{
+                  transform: pickerIn ? "translateY(0)" : "translateY(14px)",
+                  opacity: pickerIn ? 1 : 0,
+                  transition:
+                    "transform 0.36s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.26s ease",
                 }}
               >
                 <div
-                  className="absolute inset-0"
+                  className="flex min-h-0 flex-1 flex-col overflow-hidden border-t"
                   style={{
+                    borderColor: "rgba(255,255,255,0.16)",
                     background:
-                      "radial-gradient(120% 80% at 50% 100%, rgba(0,229,117,0.08), transparent 55%), linear-gradient(180deg, rgba(4,6,10,0.28) 0%, rgba(4,6,10,0.62) 100%)",
-                    opacity: pickerIn ? 1 : 0,
-                    transition: "opacity 0.28s ease",
-                  }}
-                  onClick={closePicker}
-                />
-
-                <div
-                  className="relative z-10 mt-auto flex min-h-0 max-h-full flex-1 flex-col"
-                  style={{
-                    transform: pickerIn ? "translateY(0)" : "translateY(14px)",
-                    opacity: pickerIn ? 1 : 0,
-                    transition:
-                      "transform 0.36s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.26s ease",
+                      "linear-gradient(180deg, rgba(18,22,30,0.55) 0%, rgba(10,12,18,0.78) 100%)",
+                    backdropFilter: "blur(22px) saturate(1.55)",
+                    WebkitBackdropFilter: "blur(22px) saturate(1.55)",
+                    boxShadow:
+                      "inset 0 1px 0 rgba(255,255,255,0.12), 0 -24px 48px rgba(0,0,0,0.38)",
                   }}
                 >
                   <div
-                    className="flex min-h-0 flex-1 flex-col overflow-hidden border-t"
+                    className="h-[2px] w-full shrink-0"
+                    style={{ backgroundImage: GRAD }}
+                  />
+
+                  <div className="flex shrink-0 items-center justify-between gap-2 px-2.5 py-2 sm:px-3">
+                    <div className="min-w-0">
+                      <p className="text-[9px] font-bold uppercase tracking-[0.2em] text-white/38 sm:text-[10px]">
+                        Configure
+                      </p>
+                      <p className="mt-0.5 truncate text-[11px] font-semibold text-white/82 sm:text-[12px]">
+                        {pickedCount}/{optionGroups.length} selected
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={closePicker}
+                      aria-label="Close"
+                      className="flex h-8 w-8 shrink-0 items-center justify-center border border-white/12 bg-white/[0.06] text-white/70 hover:bg-white/[0.12] hover:text-white"
+                    >
+                      <X className="h-3.5 w-3.5" strokeWidth={2.2} />
+                    </button>
+                  </div>
+
+                  <div
+                    ref={scrollRef}
+                    className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2.5 pb-1 sm:px-3"
                     style={{
-                      borderColor: "rgba(255,255,255,0.16)",
-                      background:
-                        "linear-gradient(180deg, rgba(18,22,30,0.55) 0%, rgba(10,12,18,0.78) 100%)",
-                      backdropFilter: "blur(22px) saturate(1.55)",
-                      WebkitBackdropFilter: "blur(22px) saturate(1.55)",
-                      boxShadow:
-                        "inset 0 1px 0 rgba(255,255,255,0.12), 0 -24px 48px rgba(0,0,0,0.38)",
+                      WebkitOverflowScrolling: "touch",
+                      scrollbarWidth: "thin",
+                      scrollbarColor: "rgba(255,255,255,0.18) transparent",
                     }}
                   >
-                    <div
-                      className="h-[2px] w-full shrink-0"
-                      style={{ backgroundImage: GRAD }}
-                    />
-
-                    <div className="flex shrink-0 items-center justify-between gap-2 px-2.5 py-2 sm:px-3">
-                      <div className="min-w-0">
-                        <p className="text-[9px] font-bold uppercase tracking-[0.2em] text-white/38 sm:text-[10px]">
-                          Configure
-                        </p>
-                        <p className="mt-0.5 truncate text-[11px] font-semibold text-white/82 sm:text-[12px]">
-                          {pickedCount}/{optionGroups.length} selected
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={closePicker}
-                        aria-label="Close"
-                        className="flex h-8 w-8 shrink-0 items-center justify-center border border-white/12 bg-white/[0.06] text-white/70 hover:bg-white/[0.12] hover:text-white"
+                    {optionGroups.map((g, gi) => (
+                      <div
+                        key={g.name}
+                        className={gi === 0 ? "pt-0.5" : "pt-2.5"}
                       >
-                        <X className="h-3.5 w-3.5" strokeWidth={2.2} />
-                      </button>
-                    </div>
-
-                    <div
-                      ref={scrollRef}
-                      className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2.5 pb-1 sm:px-3"
-                      style={{
-                        WebkitOverflowScrolling: "touch",
-                        scrollbarWidth: "thin",
-                        scrollbarColor: "rgba(255,255,255,0.18) transparent",
-                      }}
-                    >
-                      {optionGroups.map((g, gi) => (
-                        <div
-                          key={g.name}
-                          className={gi === 0 ? "pt-0.5" : "pt-2.5"}
-                        >
-                          <div className="mb-1.5 flex items-baseline justify-between gap-2">
-                            <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-white/50 sm:text-[11px]">
-                              {g.name}
+                        <div className="mb-1.5 flex items-baseline justify-between gap-2">
+                          <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-white/50 sm:text-[11px]">
+                            {g.name}
+                          </p>
+                          {selected[g.name] ? (
+                            <p className="max-w-[55%] truncate text-[10px] font-medium text-[#00E575]/90">
+                              {selected[g.name]}
                             </p>
-                            {selected[g.name] ? (
-                              <p className="max-w-[55%] truncate text-[10px] font-medium text-[#00E575]/90">
-                                {selected[g.name]}
-                              </p>
-                            ) : (
-                              <p className="text-[10px] text-white/28">
-                                choose
-                              </p>
-                            )}
-                          </div>
-                          <div className="flex flex-wrap gap-1.5">
-                            {g.values.map((val) => {
-                              const on = selected[g.name] === val;
-                              const possible = valuePossible(g.name, val);
-                              return (
-                                <button
-                                  key={val}
-                                  type="button"
-                                  disabled={!possible && !on}
-                                  onClick={() =>
-                                    possible && pickValue(g.name, val)
-                                  }
-                                  className="min-h-[28px] px-2.5 text-[11px] font-semibold sm:min-h-[30px] sm:px-3 sm:text-[12px]"
-                                  style={{
-                                    backgroundImage: on ? GRAD : undefined,
-                                    backgroundColor: on
-                                      ? undefined
-                                      : possible
-                                        ? "rgba(255,255,255,0.07)"
-                                        : "rgba(255,255,255,0.02)",
-                                    color: on
-                                      ? "#041412"
-                                      : possible
-                                        ? "rgba(255,255,255,0.9)"
-                                        : "rgba(255,255,255,0.22)",
-                                    border: on
-                                      ? "1px solid transparent"
-                                      : possible
-                                        ? "1px solid rgba(255,255,255,0.14)"
-                                        : "1px solid rgba(255,255,255,0.05)",
-                                    boxShadow: on
-                                      ? "0 0 0 1px rgba(0,229,117,0.18), 0 8px 18px rgba(0,0,0,0.25)"
-                                      : "none",
-                                    textDecoration: possible
-                                      ? "none"
-                                      : "line-through",
-                                    cursor: possible ? "pointer" : "not-allowed",
-                                    transition:
-                                      "background-color 0.16s ease, border-color 0.16s ease, color 0.16s ease",
-                                  }}
-                                >
-                                  {val}
-                                </button>
-                              );
-                            })}
-                          </div>
+                          ) : (
+                            <p className="text-[10px] text-white/28">choose</p>
+                          )}
                         </div>
-                      ))}
-                    </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {g.values.map((val) => {
+                            const on = selected[g.name] === val;
+                            const possible = valuePossible(g.name, val);
+                            return (
+                              <button
+                                key={val}
+                                type="button"
+                                disabled={!possible && !on}
+                                onClick={() =>
+                                  possible && pickValue(g.name, val)
+                                }
+                                className="min-h-[28px] px-2.5 text-[11px] font-semibold sm:min-h-[30px] sm:px-3 sm:text-[12px]"
+                                style={{
+                                  backgroundImage: on ? GRAD : undefined,
+                                  backgroundColor: on
+                                    ? undefined
+                                    : possible
+                                      ? "rgba(255,255,255,0.07)"
+                                      : "rgba(255,255,255,0.02)",
+                                  color: on
+                                    ? "#041412"
+                                    : possible
+                                      ? "rgba(255,255,255,0.9)"
+                                      : "rgba(255,255,255,0.22)",
+                                  border: on
+                                    ? "1px solid transparent"
+                                    : possible
+                                      ? "1px solid rgba(255,255,255,0.14)"
+                                      : "1px solid rgba(255,255,255,0.05)",
+                                  boxShadow: on
+                                    ? "0 0 0 1px rgba(0,229,117,0.18), 0 8px 18px rgba(0,0,0,0.25)"
+                                    : "none",
+                                  textDecoration: possible
+                                    ? "none"
+                                    : "line-through",
+                                  cursor: possible ? "pointer" : "not-allowed",
+                                  transition:
+                                    "background-color 0.16s ease, border-color 0.16s ease, color 0.16s ease",
+                                }}
+                              >
+                                {val}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
 
-                    <div
-                      className="shrink-0 border-t px-2.5 py-2 sm:px-3 sm:py-2.5"
+                  <div
+                    className="shrink-0 border-t px-2.5 py-2 sm:px-3 sm:py-2.5"
+                    style={{
+                      borderColor: "rgba(255,255,255,0.1)",
+                      background: "rgba(8,10,14,0.55)",
+                      backdropFilter: "blur(16px)",
+                      WebkitBackdropFilter: "blur(16px)",
+                    }}
+                  >
+                    <p
+                      className="mb-1.5 truncate text-[11px] font-semibold tracking-tight text-white/88 sm:text-[12px]"
+                      suppressHydrationWarning
+                    >
+                      {priceLabel}
+                      {selectionComplete && inStock ? (
+                        <span className="ml-1.5 text-[10px] font-medium text-white/38">
+                          ready
+                        </span>
+                      ) : null}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={confirmVariant}
+                      disabled={!selectionComplete || !inStock}
+                      className="flex h-9 w-full items-center justify-center text-[12px] font-extrabold tracking-wide disabled:opacity-45 sm:h-10 sm:text-[13px]"
                       style={{
-                        borderColor: "rgba(255,255,255,0.1)",
-                        background: "rgba(8,10,14,0.55)",
-                        backdropFilter: "blur(16px)",
-                        WebkitBackdropFilter: "blur(16px)",
+                        backgroundImage:
+                          selectionComplete && inStock ? GRAD : undefined,
+                        backgroundColor:
+                          selectionComplete && inStock
+                            ? undefined
+                            : "rgba(255,255,255,0.08)",
+                        color:
+                          selectionComplete && inStock
+                            ? "#041412"
+                            : "rgba(255,255,255,0.5)",
+                        boxShadow:
+                          selectionComplete && inStock
+                            ? "0 10px 24px rgba(0,229,117,0.18)"
+                            : "none",
                       }}
                     >
-                      <p
-                        className="mb-1.5 truncate text-[11px] font-semibold tracking-tight text-white/88 sm:text-[12px]"
-                        suppressHydrationWarning
-                      >
-                        {priceLabel}
-                        {selectionComplete && inStock ? (
-                          <span className="ml-1.5 text-[10px] font-medium text-white/38">
-                            ready
-                          </span>
-                        ) : null}
-                      </p>
-                      <button
-                        type="button"
-                        onClick={confirmVariant}
-                        disabled={!selectionComplete || !inStock}
-                        className="flex h-9 w-full items-center justify-center text-[12px] font-extrabold tracking-wide disabled:opacity-45 sm:h-10 sm:text-[13px]"
-                        style={{
-                          backgroundImage:
-                            selectionComplete && inStock ? GRAD : undefined,
-                          backgroundColor:
-                            selectionComplete && inStock
-                              ? undefined
-                              : "rgba(255,255,255,0.08)",
-                          color:
-                            selectionComplete && inStock
-                              ? "#041412"
-                              : "rgba(255,255,255,0.5)",
-                          boxShadow:
-                            selectionComplete && inStock
-                              ? "0 10px 24px rgba(0,229,117,0.18)"
-                              : "none",
-                        }}
-                      >
-                        {!selectionComplete
-                          ? "Select options"
-                          : !inStock
-                            ? "Out of stock"
-                            : "Add to bag"}
-                      </button>
-                    </div>
+                      {!selectionComplete
+                        ? "Select options"
+                        : !inStock
+                          ? "Out of stock"
+                          : "Add to bag"}
+                    </button>
                   </div>
                 </div>
               </div>
-            ) : null}
-          </div>
+            </div>
+          ) : null}
 
+          <button
+            ref={btnRef}
+            type="button"
+            onClick={onCart}
+            onPointerDown={(e) => {
+              e.stopPropagation();
+              setPressed(true);
+            }}
+            onPointerUp={() => setPressed(false)}
+            onPointerLeave={() => setPressed(false)}
+            aria-label={hasVariants ? "Choose options" : "Add to bag"}
+            className="absolute bottom-2 right-2 z-30 flex h-8 w-8 items-center justify-center bg-white text-[#111] shadow-[0_2px_10px_rgba(0,0,0,0.18)] transition-[transform,box-shadow,opacity] duration-200 ease-out hover:shadow-[0_4px_14px_rgba(0,0,0,0.22)] focus:outline-none focus-visible:ring-1 focus-visible:ring-white/40 active:opacity-90 sm:bottom-2.5 sm:right-2.5 sm:h-9 sm:w-9"
+            style={{
+              transform: pressed ? "scale(0.96)" : "scale(1)",
+              opacity: pickerOpen ? 0 : 1,
+              pointerEvents: pickerOpen ? "none" : "auto",
+            }}
+          >
+            <ShoppingCart
+              className="h-[14px] w-[14px] sm:h-[15px] sm:w-[15px]"
+              strokeWidth={2.1}
+            />
+          </button>
+        </div>
+
+        <Link
+          href={`/product/${product._id}`}
+          className="block focus:outline-none focus-visible:ring-1 focus-visible:ring-white/30"
+          onClick={trackOpen}
+        >
           <p className="mt-2.5 line-clamp-2 text-[13px] font-medium leading-[1.35] tracking-[-0.01em] sm:text-[13.5px]">
             {product.name}
           </p>
@@ -731,24 +753,6 @@ export function ProductCard({
             </p>
           )}
         </Link>
-
-        <button
-          ref={btnRef}
-          type="button"
-          onClick={onCart}
-          onPointerDown={() => setPressed(true)}
-          onPointerUp={() => setPressed(false)}
-          onPointerLeave={() => setPressed(false)}
-          aria-label={hasVariants ? "Choose options" : "Add to bag"}
-          className="absolute right-2 top-[calc(68%-2.25rem)] z-30 flex h-9 w-9 items-center justify-center bg-white text-[#111] shadow-[0_2px_10px_rgba(0,0,0,0.16)] transition-[transform,box-shadow,opacity] duration-200 ease-out hover:shadow-[0_4px_14px_rgba(0,0,0,0.22)] focus:outline-none focus-visible:ring-1 focus-visible:ring-white/40 active:opacity-90"
-          style={{
-            transform: pressed ? "scale(0.96)" : "scale(1)",
-            opacity: pickerOpen ? 0 : 1,
-            pointerEvents: pickerOpen ? "none" : "auto",
-          }}
-        >
-          <ShoppingCart className="h-[15px] w-[15px]" strokeWidth={2.1} />
-        </button>
       </div>
 
       {authOpen ? (
