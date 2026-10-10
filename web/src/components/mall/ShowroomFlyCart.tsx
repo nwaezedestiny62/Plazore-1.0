@@ -48,29 +48,23 @@ export function ShowroomFlyCartProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const flyAdd = useCallback((product: Product, origin: Origin) => {
-    try {
-      addToCart(product);
-    } catch {
-      /* still animate */
-    }
+  const target =
+    targetRef.current ||
+    (typeof window !== "undefined"
+      ? { x: window.innerWidth - 48, y: 40 }
+      : { x: 0, y: 0 });
 
-    const target =
-      targetRef.current ||
-      (typeof window !== "undefined"
-        ? { x: window.innerWidth - 48, y: 40 }
-        : { x: 0, y: 0 });
-
-    const id = `${product._id}-${Date.now()}`;
-    setJobs((prev) => [
-      ...prev,
-      {
-        id,
-        image: product.images?.[0],
-        origin,
-        target,
-      },
-    ]);
-  }, []);
+  const id = `${product._id}-${Date.now()}`;
+  setJobs((prev) => [
+    ...prev,
+    {
+      id,
+      image: product.images?.[0],
+      origin,
+      target,
+    },
+  ]);
+}, []);
 
   const onDone = useCallback((id: string) => {
     setJobs((prev) => prev.filter((j) => j.id !== id));
