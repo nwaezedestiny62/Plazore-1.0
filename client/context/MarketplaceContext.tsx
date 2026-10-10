@@ -1,6 +1,7 @@
 import api from "@/constants/api";
 import {
   DEFAULT_REGION,
+  detectGuestRegion,
   formatMoney,
   formatProductPrice,
   getRegion,
@@ -81,6 +82,7 @@ export function MarketplaceProvider({
 
   const localOverrideUntil = useRef(0);
   const bootstrapped = useRef(false);
+  const guestDetectRan = useRef(false);
 
   const applyRegion = useCallback(
     (code: string, opts?: { sticky?: boolean }) => {
@@ -137,6 +139,14 @@ export function MarketplaceProvider({
     }
   }, []);
 
+  /**
+   * Guest (not signed in):
+   * 1) Saved AsyncStorage region wins
+   * 2) Else auto-detect (timezone → locale → short geo IP)
+   * 3) Unsupported country → NG / Naira
+   *
+   * Signed in: profile marketplaceRegion wins (after local sticky window).
+   */
   const refreshRegion = useCallback(async () => {
     if (Date.now() < localOverrideUntil.current) {
       setLoading(false);
@@ -146,7 +156,19 @@ export function MarketplaceProvider({
     if (!isSignedIn) {
       try {
         const cached = await AsyncStorage.getItem(STORAGE_KEY);
-        setRegionState(normalizeRegion(cached));
+        if (isValidRegion(cached)) {
+          setRegionState(normalizeRegion(cached));
+          setLoading(false);
+          return;
+        }
+
+        if (!guestDetectRan.current) {
+          guestDetectRan.current = true;
+          const detected = await detectGuestRegion();
+          applyRegion(detected);
+        } else {
+          setRegionState(DEFAULT_REGION);
+        }
       } catch {
         setRegionState(DEFAULT_REGION);
       } finally {
@@ -202,6 +224,20 @@ export function MarketplaceProvider({
       }
 
       if (!cancelled) {
+        // Guest first visit: detect early so prices paint in local currency
+        if (!isSignedIn) {
+          try {
+            const cached = await AsyncStorage.getItem(STORAGE_KEY);
+            if (!isValidRegion(cached) && !guestDetectRan.current) {
+              guestDetectRan.current = true;
+              const detected = await detectGuestRegion();
+              if (!cancelled) applyRegion(detected);
+            }
+          } catch {
+            /* NG default already set */
+          }
+        }
+
         await Promise.all([refreshRegion(), refreshRates()]);
         bootstrapped.current = true;
       }
@@ -217,7 +253,6 @@ export function MarketplaceProvider({
     refreshRegion();
   }, [isSignedIn, isLoaded]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Quiet refresh of rates (does not touch region / showroom)
   useEffect(() => {
     const id = setInterval(() => {
       refreshRates();

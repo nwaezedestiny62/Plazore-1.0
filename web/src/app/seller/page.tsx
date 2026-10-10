@@ -8,6 +8,8 @@ import {
   CheckCheck,
   CheckCircle2,
   Clock,
+  Eye,
+  EyeOff,
   Lightbulb,
   Package,
   Palette,
@@ -20,7 +22,8 @@ import {
 } from "lucide-react";
 import { useMarketplace } from "@/context/MarketplaceContext";
 
-const API = process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com/api";
+const API =
+  process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com/api";
 
 /** Must stay in sync with web/src/lib/productCatalog.ts + server plans */
 const PLAN_FEES: Record<string, number> = {
@@ -51,10 +54,17 @@ function normalizePlan(raw?: string | null): string {
     .trim()
     .toLowerCase()
     .replace(/[\s-]+/g, "_");
-  if (k === "dominant" || k === "dominant_niche" || k === "pro" || k === "growth")
+  if (
+    k === "dominant" ||
+    k === "dominant_niche" ||
+    k === "pro" ||
+    k === "growth"
+  )
     return "dominant_niche";
-  if (k === "business" || k === "business_plus" || k === "plus") return "business_plus";
-  if (k === "global" || k === "global_reach" || k === "enterprise") return "global_reach";
+  if (k === "business" || k === "business_plus" || k === "plus")
+    return "business_plus";
+  if (k === "global" || k === "global_reach" || k === "enterprise")
+    return "global_reach";
   return "free";
 }
 
@@ -99,6 +109,9 @@ type Overview = {
   isVerified: boolean;
   plan: string;
   revenue?: number;
+  pendingPayout?: number;
+  paidOut?: number;
+  currency?: string;
 };
 
 type ActivityItem = {
@@ -270,7 +283,11 @@ function OrbLoader() {
         <div className="absolute inset-0 animate-spin rounded-full border-[2.4px] border-transparent border-t-[#00E575] border-r-[#3B82F6] border-l-[#00E575]" />
         <div className="flex h-12 w-12 items-center justify-center rounded-full bg-[#00E575]/10 sm:h-14 sm:w-14">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/logo.png" alt="" className="h-7 w-7 object-contain sm:h-8 sm:w-8" />
+          <img
+            src="/logo.png"
+            alt=""
+            className="h-7 w-7 object-contain sm:h-8 sm:w-8"
+          />
         </div>
       </div>
     </div>
@@ -354,6 +371,7 @@ export default function SellerDashboardPage() {
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [hideMoney, setHideMoney] = useState(false);
   const [overview, setOverview] = useState<Overview>({
     totalProducts: 0,
     pendingOrders: 0,
@@ -362,6 +380,8 @@ export default function SellerDashboardPage() {
     isVerified: false,
     plan: "free",
     revenue: 0,
+    pendingPayout: 0,
+    paidOut: 0,
   });
   const [activity, setActivity] = useState<ActivityItem[]>([]);
   const [analytics, setAnalytics] = useState<{
@@ -394,20 +414,22 @@ export default function SellerDashboardPage() {
       if (!token) return;
       const headers = { Authorization: `Bearer ${token}` };
 
-      const [dashRes, ordersRes, productsRes, analyticsRes] = await Promise.all([
-        fetch(`${API}/seller/dashboard`, { headers })
-          .then((r) => r.json())
-          .catch(() => null),
-        fetch(`${API}/orders/seller/my`, { headers })
-          .then((r) => r.json())
-          .catch(() => null),
-        fetch(`${API}/seller/products`, { headers })
-          .then((r) => r.json())
-          .catch(() => null),
-        fetch(`${API}/analytics/seller?range=30`, { headers })
-          .then((r) => r.json())
-          .catch(() => null),
-      ]);
+      const [dashRes, ordersRes, productsRes, analyticsRes] = await Promise.all(
+        [
+          fetch(`${API}/seller/dashboard`, { headers })
+            .then((r) => r.json())
+            .catch(() => null),
+          fetch(`${API}/orders/seller/my`, { headers })
+            .then((r) => r.json())
+            .catch(() => null),
+          fetch(`${API}/seller/products`, { headers })
+            .then((r) => r.json())
+            .catch(() => null),
+          fetch(`${API}/analytics/seller?range=30`, { headers })
+            .then((r) => r.json())
+            .catch(() => null),
+        ]
+      );
 
       const dash = dashRes?.success ? dashRes.data : null;
       const orders: Record<string, unknown>[] = Array.isArray(ordersRes?.data)
@@ -428,19 +450,22 @@ export default function SellerDashboardPage() {
         (o) => o?.orderStatus === "Delivered"
       ).length;
 
-      const revenue =
-        Number(
-          dash?.revenue ?? dash?.totalRevenue ?? analyticsData?.totals?.revenue
-        ) || 0;
-
       setOverview({
         totalProducts: dash?.totalProducts ?? products.length ?? 0,
-        pendingOrders: pending,
-        completedOrders: completed,
+        pendingOrders: dash?.pendingOrders ?? pending,
+        completedOrders: dash?.completedOrders ?? completed,
         storeName: dash?.storeName || "",
         isVerified: !!dash?.isVerified,
-        plan: normalizePlan(dash?.plan || dash?.subscription?.planId || dash?.subscription?.plan || "free"),
-        revenue,
+        plan: normalizePlan(
+          dash?.plan ||
+            dash?.subscription?.planId ||
+            dash?.subscription?.plan ||
+            "free"
+        ),
+        revenue: Number(dash?.revenue ?? dash?.totalRevenue) || 0,
+        pendingPayout: Number(dash?.pendingPayout) || 0,
+        paidOut: Number(dash?.paidOut) || 0,
+        currency: dash?.currency || "",
       });
 
       setActivity(
@@ -494,6 +519,12 @@ export default function SellerDashboardPage() {
 
   const revenueLabel =
     overview.revenue && overview.revenue > 0 ? format(overview.revenue) : "—";
+  const pendingLabel =
+    overview.pendingPayout && overview.pendingPayout > 0
+      ? format(overview.pendingPayout)
+      : "—";
+  const paidOutLabel =
+    overview.paidOut && overview.paidOut > 0 ? format(overview.paidOut) : "—";
 
   if (loading) return <OrbLoader />;
 
@@ -564,24 +595,60 @@ export default function SellerDashboardPage() {
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-12 lg:gap-6">
           {/* Main column */}
           <section className="min-w-0 space-y-4 lg:col-span-8">
-            {/* Revenue */}
+            {/* Revenue / wallet */}
             <div className="border border-[#00E575]/22 bg-gradient-to-br from-[#00E575]/[0.14] to-[#3B82F6]/10 p-4 sm:p-[18px]">
               <div className="flex items-center justify-between gap-2">
                 <p className="text-[10px] font-bold uppercase tracking-[1.1px] text-[#737A86] sm:text-[11px] sm:tracking-[1.2px]">
                   Revenue
                 </p>
-                <span className="bg-white/[0.06] px-2 py-0.5 text-[9px] font-extrabold tracking-wide text-[#A7ADB8] sm:text-[10px]">
-                  {planLabel}
-                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setHideMoney((v) => !v)}
+                    className="flex h-7 w-7 items-center justify-center border border-white/[0.08] bg-white/[0.04] text-[#A7ADB8] hover:text-[#F5F7FA]"
+                    aria-label={hideMoney ? "Show amounts" : "Hide amounts"}
+                  >
+                    {hideMoney ? (
+                      <EyeOff className="h-3.5 w-3.5" />
+                    ) : (
+                      <Eye className="h-3.5 w-3.5" />
+                    )}
+                  </button>
+                  <span className="bg-white/[0.06] px-2 py-0.5 text-[9px] font-extrabold tracking-wide text-[#A7ADB8] sm:text-[10px]">
+                    {planLabel}
+                  </span>
+                </div>
               </div>
+
               <p className="mt-2 text-3xl font-extrabold tracking-tight sm:mt-2.5 sm:text-4xl md:text-5xl">
-                {revenueLabel}
+                {hideMoney ? "••••••" : revenueLabel}
               </p>
+
               <p className="mt-1 text-[11.5px] leading-relaxed text-[#A7ADB8] sm:mt-1.5 sm:text-[12.5px] sm:leading-[18px]">
                 {overview.revenue && overview.revenue > 0
-                  ? "Revenue from completed orders on Plazore."
-                  : "Payouts and live totals appear here when payments are enabled."}
+                  ? "Net earnings (after platform fee)."
+                  : "Totals appear here once paid orders come in."}
               </p>
+
+              <div className="mt-3 grid grid-cols-2 gap-2 sm:mt-3.5">
+                <div className="rounded-lg border border-white/[0.06] bg-[#0A121C]/60 px-2.5 py-2">
+                  <p className="text-[9px] font-bold uppercase tracking-wide text-[#737A86]">
+                    Pending payout
+                  </p>
+                  <p className="mt-0.5 text-[13px] font-bold text-[#F0C070] sm:text-sm">
+                    {hideMoney ? "••••" : pendingLabel}
+                  </p>
+                </div>
+                <div className="rounded-lg border border-white/[0.06] bg-[#0A121C]/60 px-2.5 py-2">
+                  <p className="text-[9px] font-bold uppercase tracking-wide text-[#737A86]">
+                    Paid out
+                  </p>
+                  <p className="mt-0.5 text-[13px] font-bold text-[#00E575] sm:text-sm">
+                    {hideMoney ? "••••" : paidOutLabel}
+                  </p>
+                </div>
+              </div>
+
               <div className="mt-3 flex items-center justify-between gap-2 text-[11px] sm:mt-3.5 sm:text-xs">
                 <span className="text-[#737A86]">
                   Fee · {feePct}% of product price
@@ -672,7 +739,8 @@ export default function SellerDashboardPage() {
                       key={String(p?.productId || i)}
                       type="button"
                       onClick={() => {
-                        const id = p?.productId != null ? String(p.productId) : "";
+                        const id =
+                          p?.productId != null ? String(p.productId) : "";
                         if (id)
                           router.push(`/seller/products/${id}/performance`);
                       }}
@@ -713,7 +781,11 @@ export default function SellerDashboardPage() {
                     label: "Add product",
                     icon: PlusCircle,
                   },
-                  { href: "/seller/products", label: "Products", icon: Package },
+                  {
+                    href: "/seller/products",
+                    label: "Products",
+                    icon: Package,
+                  },
                   { href: "/seller/orders", label: "Orders", icon: Receipt },
                   { href: "/seller/store", label: "Storefront", icon: Store },
                 ].map((a) => (
@@ -798,7 +870,7 @@ export default function SellerDashboardPage() {
                   Subscription
                 </p>
                 <p className="mt-0.5 text-base font-extrabold capitalize sm:mt-1 sm:text-lg">
-                  {overview.plan || "free"}
+                  {planLabel}
                 </p>
                 <p className="mt-0.5 text-[11px] text-[#A7ADB8] sm:text-xs">
                   {feePct}% product fee

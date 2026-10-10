@@ -30,22 +30,18 @@ type ProviderHealth = {
   publicKey?: string | null;
 };
 
+type MoneyBucket = { currency: string; amount: number };
+
 type PaymentsSummary = {
   feePercent: number;
+  gmv: number | null;
+  feeRevenue: number | null;
+  subRevenue: MoneyBucket[];
   providers: {
     paystack: ProviderHealth;
     stripe: ProviderHealth;
   };
   available: string[];
-  recentPayouts?: Array<{
-    _id: string;
-    reference?: string;
-    provider?: string;
-    status?: string;
-    amount?: number;
-    currency?: string;
-    createdAt?: string;
-  }>;
   counts?: {
     paidOrders?: number;
     pendingPayouts?: number;
@@ -141,13 +137,7 @@ function PaymentsGate({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
-function StatusPill({
-  ok,
-  label,
-}: {
-  ok: boolean;
-  label: string;
-}) {
+function StatusPill({ ok, label }: { ok: boolean; label: string }) {
   return (
     <span
       className={cn(
@@ -157,14 +147,37 @@ function StatusPill({
           : "border-red-500/30 bg-red-500/10 text-red-300"
       )}
     >
-      {ok ? (
-        <CheckCircle2 className="h-3 w-3" />
-      ) : (
-        <XCircle className="h-3 w-3" />
-      )}
+      {ok ? <CheckCircle2 className="h-3 w-3" /> : <XCircle className="h-3 w-3" />}
       {label}
     </span>
   );
+}
+
+function money(amount: number, currency = "NGN") {
+  try {
+    return new Intl.NumberFormat("en-NG", {
+      style: "currency",
+      currency,
+      maximumFractionDigits: 0,
+    }).format(amount);
+  } catch {
+    return `${currency} ${Math.round(amount).toLocaleString()}`;
+  }
+}
+
+function sumSubs(rows: any[]): MoneyBucket[] {
+  const map = new Map<string, number>();
+  for (const row of rows) {
+    const provider = String(row?.provider || "").toLowerCase();
+    if (provider !== "paystack" && provider !== "stripe") continue;
+    const amount = Number(row?.amountPaid) || 0;
+    if (amount <= 0) continue;
+    const currency = String(row?.currency || "NGN").toUpperCase();
+    map.set(currency, (map.get(currency) || 0) + amount);
+  }
+  return Array.from(map.entries())
+    .map(([currency, amount]) => ({ currency, amount }))
+    .sort((a, b) => b.amount - a.amount);
 }
 
 function PaymentsBody() {
@@ -184,34 +197,45 @@ function PaymentsBody() {
         return;
       }
 
-      // Prefer dedicated admin endpoint; fall back to public config
-      let json: any = null;
-      try {
-        json = await adminFetch<any>("/admin/payments/summary", token);
-      } catch {
-        try {
-          json = await adminFetch<any>("/payments/config", token);
-        } catch (e: any) {
-          throw e;
-        }
-      }
+      const [statsRes, subRes, configRes] = await Promise.all([
+        adminFetch<any>("/admin/stats", token).catch(() => null),
+        adminFetch<any>("/admin/subscriptions/overview", token).catch(() => null),
+        adminFetch<any>("/payments/config", token).catch(() => null),
+      ]);
 
-      const body = json?.data || json || {};
+      const stats = statsRes?.data || {};
+      const config = configRes?.data || configRes || {};
+      const subs = subRes?.data?.subscriptions || [];
+
+      const gmvRaw = stats?.commerce?.gmv ?? stats?.totalRevenue;
+      const feeRaw =
+        stats?.commerce?.platformFeeRevenue ??
+        stats?.revenue?.transactionFees ??
+        null;
+
       setData({
-        feePercent: body.feePercent ?? body.feeRate ? Math.round((body.feeRate || 0.08) * 100) : 8,
+        feePercent:
+          config.feePercent ??
+          (config.feeRate ? Math.round(Number(config.feeRate) * 100) : 8),
+        gmv: gmvRaw == null ? null : Number(gmvRaw) || 0,
+        feeRevenue: feeRaw == null ? null : Number(feeRaw) || 0,
+        subRevenue: sumSubs(subs),
         providers: {
           paystack: {
-            configured: !!body.providers?.paystack?.configured || body.provider === "paystack",
-            publicKey: body.providers?.paystack?.publicKey || null,
+            configured:
+              !!config.providers?.paystack?.configured ||
+              config.provider === "paystack",
+            publicKey: config.providers?.paystack?.publicKey || null,
           },
           stripe: {
-            configured: !!body.providers?.stripe?.configured,
-            publicKey: body.providers?.stripe?.publicKey || null,
+            configured: !!config.providers?.stripe?.configured,
+            publicKey: config.providers?.stripe?.publicKey || null,
           },
         },
-        available: body.available || [],
-        recentPayouts: body.recentPayouts || [],
-        counts: body.counts || {},
+        available: config.available || [],
+        counts: {
+          paidOrders: stats?.payments?.paid,
+        },
       });
     } catch (e: unknown) {
       const msg =
@@ -228,6 +252,13 @@ function PaymentsBody() {
     void load();
   }, [load]);
 
+  const subPrimary = data?.subRevenue[0];
+  const subLabel = subPrimary
+    ? money(subPrimary.amount, subPrimary.currency)
+    : data
+      ? money(0, "NGN")
+      : "—";
+
   return (
     <div className="mx-auto max-w-5xl pb-24 text-[#F5F7FA]">
       <header className="mb-8">
@@ -240,8 +271,8 @@ function PaymentsBody() {
               Payments
             </h1>
             <p className="mt-2 max-w-xl text-[13.5px] text-white/50">
-              Provider health, platform fee baseline, and settlement posture.
-              Buyer charges and seller payouts share one lifecycle.
+              Gross merchandise value, platform fee take, and seller plan
+              revenue.
             </p>
           </div>
           <Button
@@ -262,47 +293,63 @@ function PaymentsBody() {
         </div>
       )}
 
-      <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        {[
-          {
-            label: "Platform fee (default)",
-            value: `${data?.feePercent ?? 8}%`,
-            hint: "Overridden by seller plan",
-            icon: Banknote,
-          },
-          {
-            label: "Paid orders",
-            value: String(data?.counts?.paidOrders ?? "—"),
-            hint: "Successful charges",
-            icon: CreditCard,
-          },
-          {
-            label: "Pending payouts",
-            value: String(data?.counts?.pendingPayouts ?? "—"),
-            hint: "Eligible / queued",
-            icon: Shield,
-          },
-          {
-            label: "Completed payouts",
-            value: String(data?.counts?.completedPayouts ?? "—"),
-            hint: "Seller paid",
-            icon: CheckCircle2,
-          },
-        ].map((card) => (
-          <div
-            key={card.label}
-            className="rounded-2xl border border-white/[0.08] bg-white/[0.03] p-4"
-          >
-            <div className="flex items-center gap-2 text-white/40">
-              <card.icon className="h-3.5 w-3.5" />
-              <p className="text-[10px] font-semibold uppercase tracking-[0.14em]">
-                {card.label}
-              </p>
-            </div>
-            <p className="mt-2 text-2xl font-semibold tabular-nums">{card.value}</p>
-            <p className="mt-1 text-[11px] text-white/35">{card.hint}</p>
+      <div className="mb-6 grid gap-3 lg:grid-cols-3">
+        <div className="rounded-2xl border border-white/[0.08] bg-white/[0.03] p-5">
+          <div className="flex items-center gap-2 text-white/40">
+            <Banknote className="h-3.5 w-3.5" />
+            <p className="text-[10px] font-semibold uppercase tracking-[0.14em]">
+              GMV
+            </p>
           </div>
-        ))}
+          <p className="mt-3 text-3xl font-semibold tabular-nums">
+            {data?.gmv == null ? "—" : money(data.gmv, "NGN")}
+          </p>
+          <p className="mt-2 text-[11px] leading-relaxed text-white/35">
+            Sum of order totals on non-cancelled orders. Currencies are added
+            as stored, not converted. Paid orders:{" "}
+            {data?.counts?.paidOrders ?? "—"}.
+          </p>
+        </div>
+
+        <div className="rounded-2xl border border-white/[0.08] bg-white/[0.03] p-5">
+          <div className="flex items-center gap-2 text-white/40">
+            <CreditCard className="h-3.5 w-3.5" />
+            <p className="text-[10px] font-semibold uppercase tracking-[0.14em]">
+              Transaction fee revenue
+            </p>
+          </div>
+          <p className="mt-3 text-3xl font-semibold tabular-nums">
+            {data?.feeRevenue == null ? "—" : money(data.feeRevenue, "NGN")}
+          </p>
+          <p className="mt-2 text-[11px] leading-relaxed text-white/35">
+            {data?.feeRevenue == null
+              ? "Not on /admin/stats yet. Needs a sum of feeBreakdown.platformFee on paid, non-refunded orders."
+              : `Default plan rate ${data?.feePercent ?? 8}%. Actual take uses each seller’s plan rate.`}
+          </p>
+        </div>
+
+        <div className="rounded-2xl border border-white/[0.08] bg-white/[0.03] p-5">
+          <div className="flex items-center gap-2 text-white/40">
+            <Shield className="h-3.5 w-3.5" />
+            <p className="text-[10px] font-semibold uppercase tracking-[0.14em]">
+              Subscription revenue
+            </p>
+          </div>
+          <p className="mt-3 text-3xl font-semibold tabular-nums">{subLabel}</p>
+          <p className="mt-2 text-[11px] leading-relaxed text-white/35">
+            Paid Paystack and Stripe plans only. Promo and Free are excluded.
+          </p>
+          {data && data.subRevenue.length > 1 && (
+            <ul className="mt-3 space-y-1 text-[12px] text-white/55">
+              {data.subRevenue.map((b) => (
+                <li key={b.currency} className="flex justify-between">
+                  <span>{b.currency}</span>
+                  <span className="tabular-nums">{money(b.amount, b.currency)}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       </div>
 
       <section className="mb-6 rounded-2xl border border-white/[0.08] bg-white/[0.03] p-5">
@@ -357,28 +404,6 @@ function PaymentsBody() {
             )}
           </div>
         </div>
-      </section>
-
-      <section className="rounded-2xl border border-white/[0.08] bg-white/[0.03] p-5">
-        <h2 className="text-sm font-semibold">Operational notes</h2>
-        <ul className="mt-3 space-y-2 text-[13px] text-white/55">
-          <li>
-            · Buyer charges verify via webhook +{" "}
-            <span className="font-mono text-white/70">/payments/verify</span>.
-          </li>
-          <li>
-            · Seller payouts run after delivery confirmation (buyer or
-            auto-17h).
-          </li>
-          <li>
-            · Admin refund / settle-seller live on Orders → order detail.
-          </li>
-          <li>
-            · Stripe payouts require seller{" "}
-            <span className="font-mono text-white/70">stripeAccountId</span>{" "}
-            (Connect).
-          </li>
-        </ul>
       </section>
     </div>
   );

@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import User from "../models/User.js";
 import Product from "../models/Products.js";
 import Order from "../models/Order.js";
+import Payout from "../models/Payout.js";
 import { clerkClient } from "@clerk/express";
 import cloudinary from "../config/cloudinary.js";
 import { isPaystackConfigured } from "../services/paystack/client.js";
@@ -117,10 +118,7 @@ function buildConnectPayout(region: string) {
   };
 }
 
-async function resolvePayoutProfile(
-  region: string,
-  payout: any
-) {
+async function resolvePayoutProfile(region: string, payout: any) {
   const code = String(region || "NG").trim().toUpperCase();
   if (code === "NG") {
     return buildNgnPayout(payout || {});
@@ -134,6 +132,31 @@ function stripSecrets(doc: any) {
   delete o.paystackRecipientCode;
   delete o.stripeAccountId;
   return o;
+}
+
+/** Net amount the seller earns from one paid order (after platform fee). */
+function sellerAmountFromOrder(order: any): number {
+  const fee = order.feeBreakdown || {};
+  let amount = Number(fee.sellerPayoutAmount);
+  if (Number.isFinite(amount) && amount > 0) return amount;
+
+  const sub = Number(fee.subtotal ?? order.subtotal) || 0;
+  const rate = Number(fee.platformFeeRate) || 0.08;
+  const platformFee =
+    Number(fee.platformFee) || Math.round(sub * rate * 100) / 100;
+  const shipping = Number(fee.shippingCost ?? order.shippingCost) || 0;
+  return Math.max(0, sub - platformFee + shipping);
+}
+
+function orderCountsAsPaidMoney(order: any): boolean {
+  const status = String(order.orderStatus || "");
+  return (
+    order.paymentStatus === "paid" &&
+    status !== "Cancelled" &&
+    order.paymentLifecycle !== "REFUNDED" &&
+    order.paymentLifecycle !== "PAYMENT_FAILED" &&
+    order.paymentLifecycle !== "CANCELLED"
+  );
 }
 
 // Apply to become a seller
@@ -184,7 +207,8 @@ export const applyAsSeller = async (req: Request, res: Response) => {
       });
     }
 
-    const region = String(marketplaceRegion || "NG").trim().toUpperCase() || "NG";
+    const region =
+      String(marketplaceRegion || "NG").trim().toUpperCase() || "NG";
     let profile;
     try {
       profile = await resolvePayoutProfile(region, {
@@ -245,47 +269,127 @@ export const applyAsSeller = async (req: Request, res: Response) => {
   }
 };
 
-// Seller dashboard stats (only own data)
+/**
+ * Seller dashboard stats — revenue is net seller payout amount.
+ * Returns totalRevenue, pendingPayout, paidOut for the wallet UI.
+ */
 export const getSellerDashboard = async (req: Request, res: Response) => {
   try {
-    const sellerId = req.user._id;
+    const sellerId = (req as any).user._id;
+    const user = (req as any).user;
 
-    const totalProducts = await Product.countDocuments({ seller: sellerId });
-    const activeProducts = await Product.countDocuments({
-      seller: sellerId,
-      isActive: true,
-    });
-
-    const orders = await Order.find({
-      "items.seller": sellerId,
-    }).sort({ createdAt: -1 });
-
-    const totalOrders = orders.length;
+    const [totalProducts, activeProducts, orders] = await Promise.all([
+      Product.countDocuments({ seller: sellerId }),
+      Product.countDocuments({ seller: sellerId, isActive: true }),
+      Order.find({
+        seller: sellerId,
+        isSellerOwnedPurchase: { $ne: true },
+      })
+        .sort({ createdAt: -1 })
+        .lean(),
+    ]);
 
     let totalRevenue = 0;
-    orders.forEach((order) => {
-      order.items.forEach((item: any) => {
-        if (item.seller.toString() === sellerId.toString()) {
-          totalRevenue += item.price * item.quantity;
-        }
-      });
-    });
+    let pendingPayout = 0;
+    let paidOut = 0;
+    let pendingOrders = 0;
+    let completedOrders = 0;
 
-    const recentOrders = orders.slice(0, 5);
+    const PENDING_PAYOUT_STATUSES = new Set([
+      "awaiting_buyer",
+      "eligible",
+      "queued",
+      "initiated",
+    ]);
+    const PAID_OUT_STATUSES = new Set(["completed"]);
+
+    for (const order of orders) {
+      const status = String(order.orderStatus || "");
+      if (status === "Preparing" || status === "Shipped") pendingOrders += 1;
+      if (status === "Delivered") completedOrders += 1;
+
+      if (!orderCountsAsPaidMoney(order)) continue;
+
+      const sellerAmount = sellerAmountFromOrder(order);
+      totalRevenue += sellerAmount;
+
+      const payoutStatus = String(order.payout?.status || "not_eligible");
+      if (
+        PAID_OUT_STATUSES.has(payoutStatus) ||
+        order.paymentLifecycle === "SELLER_PAID"
+      ) {
+        paidOut += sellerAmount;
+      } else if (PENDING_PAYOUT_STATUSES.has(payoutStatus)) {
+        pendingPayout += sellerAmount;
+      } else if (
+        order.paymentLifecycle === "DELIVERY_CONFIRMED" ||
+        order.paymentLifecycle === "SELLER_PAYOUT_PENDING" ||
+        (status === "Delivered" && payoutStatus !== "not_eligible")
+      ) {
+        pendingPayout += sellerAmount;
+      }
+    }
+
+    // Prefer Payout collection when transfer records exist
+    try {
+      const payoutAgg = await Payout.aggregate([
+        {
+          $match: {
+            seller: sellerId,
+            status: { $in: ["success", "queued", "initiated"] },
+          },
+        },
+        {
+          $group: {
+            _id: "$status",
+            total: { $sum: "$amount" },
+          },
+        },
+      ]);
+      let fromDocsPaid = 0;
+      let fromDocsPending = 0;
+      for (const row of payoutAgg) {
+        if (row._id === "success") fromDocsPaid += row.total || 0;
+        else fromDocsPending += row.total || 0;
+      }
+      if (fromDocsPaid > 0) paidOut = fromDocsPaid;
+      if (fromDocsPending > 0) pendingPayout = fromDocsPending;
+    } catch {
+      // Order-based numbers still apply if Payout query fails
+    }
+
+    const plan =
+      user?.subscription?.planId ||
+      user?.subscription?.plan ||
+      user?.sellerPlan ||
+      user?.plan ||
+      "free";
+
+    const region = String(user?.marketplaceRegion || "NG").toUpperCase();
+    const currency =
+      orders.find((o: any) => o.currency)?.currency ||
+      regionCurrency(region);
 
     res.json({
       success: true,
       data: {
         totalProducts,
         activeProducts,
-        totalOrders,
+        totalOrders: orders.length,
+        pendingOrders,
+        completedOrders,
         totalRevenue,
-        recentOrders,
-        storeName: req.user.storeName,
-        isVerified: req.user.isSellerVerified,
+        revenue: totalRevenue,
+        pendingPayout,
+        paidOut,
+        currency,
+        storeName: user.storeName || "",
+        isVerified: !!user.isSellerVerified,
+        plan,
       },
     });
   } catch (error: any) {
+    console.error("getSellerDashboard:", error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
@@ -345,9 +449,7 @@ export const updateMyStore = async (req: Request, res: Response) => {
     const existing = await User.findById(user._id).select(
       "marketplaceRegion payout"
     );
-    const region = String(
-      existing?.marketplaceRegion || "NG"
-    ).toUpperCase();
+    const region = String(existing?.marketplaceRegion || "NG").toUpperCase();
 
     let payout = body.payout;
     if (typeof payout === "string") {
@@ -428,7 +530,6 @@ export const updateMyStore = async (req: Request, res: Response) => {
  * PUBLIC storefront
  * Critical: products MUST include `region` so clients can convert
  * product.price (locked at creation) → buyer's marketplace currency.
- * Same pattern as product page: formatProduct(price, product.region)
  */
 export const getPublicStorefront = async (req: Request, res: Response) => {
   try {
@@ -513,31 +614,23 @@ export const getMyProducts = async (req: Request, res: Response) => {
   }
 };
 
-// Get seller's orders (only items belonging to them)
+// Get seller's orders (top-level seller field — not items.seller)
 export const getMyOrders = async (req: Request, res: Response) => {
   try {
-    const orders = await Order.find({ "items.seller": req.user._id })
-      .populate("user", "name email")
+    const sellerId = (req as any).user._id;
+
+    const orders = await Order.find({ seller: sellerId })
+      .populate("buyer", "name email")
       .populate("items.product", "name images")
       .sort({ createdAt: -1 });
 
-    const filtered = orders.map((order) => {
-      const sellerItems = order.items.filter(
-        (item: any) => item.seller.toString() === req.user._id.toString()
-      );
-      return {
-        ...order.toObject(),
-        items: sellerItems,
-      };
-    });
-
-    res.json({ success: true, data: filtered });
+    res.json({ success: true, data: orders });
   } catch (error: any) {
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// Update order status for seller's items
+// Update order status for seller's order
 export const updateMyOrderStatus = async (req: Request, res: Response) => {
   try {
     const { orderStatus } = req.body;
@@ -549,11 +642,11 @@ export const updateMyOrderStatus = async (req: Request, res: Response) => {
         .json({ success: false, message: "Order not found" });
     }
 
-    const hasItems = order.items.some(
-      (item: any) => item.seller.toString() === req.user._id.toString()
-    );
+    const sellerId = String((req as any).user._id);
+    const ownsOrder =
+      String(order.seller) === sellerId || (req as any).user.role === "admin";
 
-    if (!hasItems && req.user.role !== "admin") {
+    if (!ownsOrder) {
       return res.status(403).json({
         success: false,
         message: "Not authorized",
@@ -561,7 +654,9 @@ export const updateMyOrderStatus = async (req: Request, res: Response) => {
     }
 
     if (orderStatus) order.orderStatus = orderStatus;
-    if (orderStatus === "delivered") order.deliveredAt = new Date();
+    if (orderStatus === "Delivered" || orderStatus === "delivered") {
+      order.deliveredAt = new Date();
+    }
 
     await order.save();
     res.json({ success: true, data: order });

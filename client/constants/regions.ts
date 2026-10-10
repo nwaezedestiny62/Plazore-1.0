@@ -126,12 +126,95 @@ export const REGIONS: Record<string, RegionConfig> = {
 
 /** Old / alternate codes → current region codes */
 export const REGION_ALIASES: Record<string, string> = {
-  EU: "FR", // legacy “Europe” → France (EUR)
+  EU: "FR",
   EUROPE: "FR",
   FRANCE: "FR",
   GERMANY: "DE",
   UK: "GB",
   USA: "US",
+};
+
+/**
+ * ISO 3166-1 alpha-2 country → marketplace region.
+ * Only listed countries resolve; everything else falls back to DEFAULT_REGION (NG).
+ */
+export const COUNTRY_TO_REGION: Record<string, string> = {
+  NG: "NG",
+  GH: "GH",
+  BJ: "BJ",
+  CM: "CM",
+  KE: "KE",
+  ZA: "ZA",
+  EG: "EG",
+  US: "US",
+  CA: "CA",
+  GB: "GB",
+  DE: "DE",
+  FR: "FR",
+  AU: "AU",
+  UK: "GB",
+  USA: "US",
+  AT: "DE",
+  BE: "FR",
+  NL: "DE",
+  IE: "GB",
+  CH: "DE",
+  NZ: "AU",
+};
+
+/** IANA timezone → region (instant, offline) */
+export const TIMEZONE_TO_REGION: Record<string, string> = {
+  "Africa/Lagos": "NG",
+  "Africa/Accra": "GH",
+  "Africa/Porto-Novo": "BJ",
+  "Africa/Douala": "CM",
+  "Africa/Nairobi": "KE",
+  "Africa/Johannesburg": "ZA",
+  "Africa/Cairo": "EG",
+  "America/New_York": "US",
+  "America/Chicago": "US",
+  "America/Denver": "US",
+  "America/Los_Angeles": "US",
+  "America/Phoenix": "US",
+  "America/Anchorage": "US",
+  "America/Honolulu": "US",
+  "America/Detroit": "US",
+  "America/Indiana/Indianapolis": "US",
+  "America/Boise": "US",
+  "Pacific/Honolulu": "US",
+  "America/Toronto": "CA",
+  "America/Vancouver": "CA",
+  "America/Edmonton": "CA",
+  "America/Winnipeg": "CA",
+  "America/Halifax": "CA",
+  "America/St_Johns": "CA",
+  "Europe/London": "GB",
+  "Europe/Berlin": "DE",
+  "Europe/Paris": "FR",
+  "Australia/Sydney": "AU",
+  "Australia/Melbourne": "AU",
+  "Australia/Brisbane": "AU",
+  "Australia/Perth": "AU",
+  "Australia/Adelaide": "AU",
+};
+
+/** Locale tag → region */
+export const LOCALE_TO_REGION: Record<string, string> = {
+  "en-NG": "NG",
+  "en-GH": "GH",
+  "fr-BJ": "BJ",
+  "fr-CM": "CM",
+  "en-KE": "KE",
+  "en-ZA": "ZA",
+  "ar-EG": "EG",
+  "en-EG": "EG",
+  "en-US": "US",
+  "en-CA": "CA",
+  "fr-CA": "CA",
+  "en-GB": "GB",
+  "de-DE": "DE",
+  "fr-FR": "FR",
+  "en-AU": "AU",
 };
 
 export const DEFAULT_REGION = "NG";
@@ -164,6 +247,15 @@ export function resolveRegionCode(code?: string | null): string {
   return DEFAULT_REGION;
 }
 
+/** Unsupported countries → NG */
+export function regionFromCountry(country?: string | null): string {
+  if (!country) return DEFAULT_REGION;
+  const cc = String(country).trim().toUpperCase();
+  const mapped = COUNTRY_TO_REGION[cc] || REGION_ALIASES[cc];
+  if (mapped && REGIONS[mapped]) return mapped;
+  return DEFAULT_REGION;
+}
+
 export function getRegion(code?: string | null): RegionConfig {
   return REGIONS[resolveRegionCode(code)];
 }
@@ -173,8 +265,98 @@ export function regionCurrencyCode(regionCode?: string | null): string {
 }
 
 /**
+ * Instant offline guess from timezone + locale.
+ * Works on React Native (Hermes) and web.
+ */
+/**
+ * Instant offline guess from timezone + locale.
+ * Works on React Native (Hermes) and web.
+ */
+export function detectRegionFromBrowser(): string | null {
+  try {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "";
+    if (tz && TIMEZONE_TO_REGION[tz] && REGIONS[TIMEZONE_TO_REGION[tz]]) {
+      return TIMEZONE_TO_REGION[tz];
+    }
+  } catch {
+    /* ignore */
+  }
+
+  try {
+    // RN / Hermes: navigator may exist; keep access untyped and narrow safely
+    const nav: any =
+      typeof globalThis !== "undefined"
+        ? (globalThis as any).navigator
+        : undefined;
+
+    const locale =
+      (Array.isArray(nav?.languages) && nav.languages[0]) ||
+      (typeof nav?.language === "string" && nav.language) ||
+      "";
+
+    const tag = String(locale).trim();
+    if (tag && LOCALE_TO_REGION[tag] && REGIONS[LOCALE_TO_REGION[tag]]) {
+      return LOCALE_TO_REGION[tag];
+    }
+
+    const parts = tag.replace("_", "-").split("-");
+    if (parts.length >= 2) {
+      const fromLocale = regionFromCountry(parts[parts.length - 1]);
+      if (fromLocale !== DEFAULT_REGION) return fromLocale;
+    }
+  } catch {
+    /* ignore */
+  }
+
+  return null;
+}
+
+/**
+ * Optional geo IP with short timeout. Safe on RN fetch.
+ */
+export async function detectRegionFromGeoIp(
+  timeoutMs = 1800
+): Promise<string | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const res = await fetch("https://ipapi.co/json/", {
+      signal: controller.signal,
+      headers: { Accept: "application/json" },
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { country_code?: string };
+    if (data?.country_code) {
+      const cc = String(data.country_code).toUpperCase();
+      if (COUNTRY_TO_REGION[cc] || REGION_ALIASES[cc]) {
+        return regionFromCountry(cc);
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Guest bootstrap: timezone/locale first, then geo IP.
+ * Always returns a valid region; unknown → NG.
+ */
+export async function detectGuestRegion(): Promise<string> {
+  const fromDevice = detectRegionFromBrowser();
+  if (fromDevice && REGIONS[fromDevice]) return fromDevice;
+
+  const fromIp = await detectRegionFromGeoIp(1800);
+  if (fromIp && REGIONS[fromIp]) return fromIp;
+
+  return DEFAULT_REGION;
+}
+
+/**
  * Convert using NGN as pivot.
- * amount_to = amount_from * (from→NGN) / (to→NGN)
  */
 export function convertWithNgnRates(
   amount: number,
@@ -199,7 +381,7 @@ export function convertWithNgnRates(
   return Math.round(converted * factor) / factor;
 }
 
-/** @deprecated name kept for old imports — same as convert via region codes */
+/** @deprecated */
 export function convertPrice(
   amount: number,
   fromRegionCode?: string | null,
@@ -212,22 +394,29 @@ export function convertPrice(
   return out == null ? Number(amount) || 0 : out;
 }
 
+/** Deterministic money string (no locale drift between platforms). */
 export function formatMoney(
   amount: number,
   regionCode?: string | null
 ): string {
   const region = getRegion(regionCode);
   const code = region.currency.code;
-  const zeroDecimal = code === "XOF" || code === "XAF";
-  const formatted = Number(amount || 0).toLocaleString(region.locale, {
-    minimumFractionDigits: zeroDecimal ? 0 : 2,
-    maximumFractionDigits: zeroDecimal ? 0 : 2,
-  });
-  if (code === "XOF") return `CFA ${formatted}`;
-  if (code === "XAF") return `FCFA ${formatted}`;
+  const n = Number(amount) || 0;
+  const zeroDecimal =
+    code === "XOF" || code === "XAF" || code === "NGN" || code === "KES";
+  const decimals = zeroDecimal ? 0 : 2;
+  const fixed = Math.abs(n).toFixed(decimals);
+  const [intPart, frac] = fixed.split(".");
+  const withCommas = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  const sign = n < 0 ? "-" : "";
+  const body = decimals > 0 ? `${withCommas}.${frac}` : withCommas;
+
+  if (code === "XOF") return `${sign}CFA ${body}`;
+  if (code === "XAF") return `${sign}FCFA ${body}`;
+
   return region.currency.position === "before"
-    ? `${region.currency.symbol}${formatted}`
-    : `${formatted}${region.currency.symbol}`;
+    ? `${sign}${region.currency.symbol}${body}`
+    : `${sign}${body}${region.currency.symbol}`;
 }
 
 /**
@@ -249,13 +438,12 @@ export function formatProductPrice(
     ratesToNgn
   );
   if (converted == null) {
-    // Fail safe: show canonical product currency, do not invent
     return formatMoney(amount, productRegion);
   }
   return formatMoney(converted, buyerRegion);
 }
 
-/** Legacy export — prefer DEFAULT_RATES_TO_NGN / server config */
+/** Legacy export */
 export const USD_RATES: Record<string, number> = {
   USD: 1,
   NGN: 1326.68,

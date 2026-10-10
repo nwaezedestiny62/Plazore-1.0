@@ -1,5 +1,10 @@
 import mongoose from "mongoose";
 
+/**
+ * Line items — one product row per order.
+ * Price / region / currency are frozen at checkout (server-side only).
+ * Seller lives on the parent order, not on each item.
+ */
 const orderItemSchema = new mongoose.Schema({
   product: {
     type: mongoose.Schema.Types.ObjectId,
@@ -8,11 +13,13 @@ const orderItemSchema = new mongoose.Schema({
   },
   name: { type: String, required: true },
   quantity: { type: Number, required: true, min: 1 },
+
   /**
    * Listing unit price frozen at checkout (server product.price).
-   * Always in the currency of `region` / `currency` — never client-sent.
+   * Always in the currency of this line’s region / currency — never client-sent.
    */
   price: { type: Number, required: true },
+
   /**
    * Product listing region at checkout (e.g. NG, US, DE).
    * Same semantics as product.region.
@@ -24,6 +31,7 @@ const orderItemSchema = new mongoose.Schema({
     uppercase: true,
     index: true,
   },
+
   /**
    * ISO 4217 for this line’s frozen price (from currencyForRegion(region)).
    */
@@ -34,12 +42,15 @@ const orderItemSchema = new mongoose.Schema({
     uppercase: true,
     index: true,
   },
+
   image: { type: String },
+
   note: {
     type: String,
     maxlength: 120,
     default: "",
   },
+
   /**
    * Set only by the backend when buyer === product seller.
    * Never accept from the client.
@@ -59,17 +70,24 @@ const orderSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
+
+    /**
+     * Owning seller for this order (one seller per order in V1).
+     * Dashboard / payouts query this field — NOT items.seller.
+     */
     seller: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       required: true,
       index: true,
     },
+
     orderNumber: {
       type: String,
       unique: true,
       required: true,
     },
+
     items: [orderItemSchema],
 
     buyerContact: {
@@ -91,10 +109,15 @@ const orderSchema = new mongoose.Schema(
       default: "",
     },
 
+    /**
+     * Fulfillment-facing status shown to seller / buyer UIs.
+     * Keep in sync with paymentLifecycle transitions in order services.
+     */
     orderStatus: {
       type: String,
       enum: ["Preparing", "Shipped", "Delivered", "Cancelled"],
       default: "Preparing",
+      index: true,
     },
 
     productShipping: {
@@ -175,7 +198,9 @@ const orderSchema = new mongoose.Schema(
       type: String,
       enum: ["pending", "paid", "failed", "refunded"],
       default: "pending",
+      index: true,
     },
+
     /** paystack | stripe — set when payment is initialized */
     paymentMethod: {
       type: String,
@@ -183,6 +208,10 @@ const orderSchema = new mongoose.Schema(
       default: "pending",
     },
 
+    /**
+     * Full money lifecycle for escrow → fulfillment → payout.
+     * Seller dashboard revenue only counts paid, non-refunded states.
+     */
     paymentLifecycle: {
       type: String,
       enum: [
@@ -216,7 +245,9 @@ const orderSchema = new mongoose.Schema(
 
     /**
      * Frozen fee snapshot — all amounts in `currency`.
-     * platformFeeRate always 0.08 (8% of subtotal only).
+     * platformFee is charged on subtotal only (not shipping).
+     * sellerPayoutAmount = subtotal - platformFee + shippingCost
+     * (shipping passes through to the seller).
      */
     feeBreakdown: {
       subtotal: { type: Number, default: 0 },
@@ -224,6 +255,7 @@ const orderSchema = new mongoose.Schema(
       grossAmount: { type: Number, default: 0 },
       platformFeeRate: { type: Number, default: 0.08 },
       platformFee: { type: Number, default: 0 },
+      /** Net amount the seller receives for this order */
       sellerPayoutAmount: { type: Number, default: 0 },
       currency: { type: String, default: "NGN", uppercase: true },
       region: { type: String, default: "", uppercase: true },
@@ -237,6 +269,10 @@ const orderSchema = new mongoose.Schema(
 
     deliveredAt: { type: Date },
 
+    /**
+     * Buyer must confirm delivery (or auto-confirm after deadline)
+     * before seller payout becomes eligible.
+     */
     buyerConfirmation: {
       status: {
         type: String,
@@ -259,6 +295,10 @@ const orderSchema = new mongoose.Schema(
       confirmationDeadline: { type: Date, default: null },
     },
 
+    /**
+     * Embedded payout state for this order.
+     * Full transfer trail lives on the Payout document (payoutDocId).
+     */
     payout: {
       status: {
         type: String,
@@ -274,6 +314,7 @@ const orderSchema = new mongoose.Schema(
           "refunded",
         ],
         default: "not_eligible",
+        index: true,
       },
       eligibleAt: { type: Date },
       blockedReason: { type: String, default: "" },
@@ -296,9 +337,11 @@ const orderSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+// —— Query indexes ——
 orderSchema.index({ buyer: 1, createdAt: -1 });
 orderSchema.index({ seller: 1, createdAt: -1 });
 orderSchema.index({ orderStatus: 1 });
+orderSchema.index({ paymentStatus: 1 });
 orderSchema.index({ "buyerConfirmation.status": 1 });
 orderSchema.index({ "buyerConfirmation.confirmationDeadline": 1 });
 orderSchema.index({ "payout.status": 1 });
@@ -306,6 +349,11 @@ orderSchema.index({ paymentLifecycle: 1 });
 orderSchema.index({ seller: 1, isSellerOwnedPurchase: 1, orderStatus: 1 });
 orderSchema.index({ region: 1, currency: 1 });
 orderSchema.index({ currency: 1, paymentStatus: 1 });
+
+/** Seller dashboard: paid orders for revenue / pending / paid-out */
+orderSchema.index({ seller: 1, paymentStatus: 1, createdAt: -1 });
+orderSchema.index({ seller: 1, "payout.status": 1 });
+orderSchema.index({ seller: 1, paymentLifecycle: 1 });
 
 const Order = mongoose.model("Order", orderSchema);
 export default Order;

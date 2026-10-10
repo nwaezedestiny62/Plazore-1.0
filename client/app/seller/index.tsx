@@ -19,8 +19,6 @@ import { LinearGradient } from 'expo-linear-gradient'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import api from '@/constants/api'
 import {
-  PLAN_FEES,
-  PLAN_DISPLAY_NAMES,
   normalizePlanId,
   planFeePct,
   planDisplayName,
@@ -78,6 +76,9 @@ type Overview = {
   isVerified: boolean
   plan: string
   revenue?: number
+  pendingPayout?: number
+  paidOut?: number
+  currency?: string
 }
 
 type ActivityItem = {
@@ -92,6 +93,20 @@ function getGreeting(hour: number) {
   if (hour < 12) return 'Good morning'
   if (hour < 17) return 'Good afternoon'
   return 'Good evening'
+}
+
+function formatMoney(amount: number, currency?: string) {
+  if (!amount || amount <= 0) return '—'
+  const code = (currency || 'USD').toUpperCase()
+  try {
+    return new Intl.NumberFormat(undefined, {
+      style: 'currency',
+      currency: code,
+      maximumFractionDigits: 0,
+    }).format(amount)
+  } catch {
+    return `${code} ${Number(amount).toLocaleString()}`
+  }
 }
 
 function PlazoreOrb({ size = 110 }: { size?: number }) {
@@ -267,6 +282,7 @@ export default function SellerDashboard() {
 
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
+  const [hideMoney, setHideMoney] = useState(false)
   const [overview, setOverview] = useState<Overview>({
     totalProducts: 0,
     pendingOrders: 0,
@@ -275,6 +291,8 @@ export default function SellerDashboard() {
     isVerified: false,
     plan: 'free',
     revenue: 0,
+    pendingPayout: 0,
+    paidOut: 0,
   })
   const [activity, setActivity] = useState<ActivityItem[]>([])
   const [analytics, setAnalytics] = useState<any>(null)
@@ -335,21 +353,22 @@ export default function SellerDashboard() {
         (o) => o?.orderStatus === 'Delivered'
       ).length
 
-      const revenue =
-        Number(
-          dash?.revenue ??
-            dash?.totalRevenue ??
-            analyticsData?.totals?.revenue
-        ) || 0
-
       setOverview({
         totalProducts: dash?.totalProducts ?? products.length ?? 0,
-        pendingOrders: pending,
-        completedOrders: completed,
+        pendingOrders: dash?.pendingOrders ?? pending,
+        completedOrders: dash?.completedOrders ?? completed,
         storeName: dash?.storeName || '',
         isVerified: !!dash?.isVerified,
-        plan: normalizePlanId(dash?.plan || dash?.subscription?.planId || dash?.subscription?.plan || 'free'),
-        revenue,
+        plan: normalizePlanId(
+          dash?.plan ||
+            dash?.subscription?.planId ||
+            dash?.subscription?.plan ||
+            'free'
+        ),
+        revenue: Number(dash?.revenue ?? dash?.totalRevenue) || 0,
+        pendingPayout: Number(dash?.pendingPayout) || 0,
+        paidOut: Number(dash?.paidOut) || 0,
+        currency: dash?.currency || '',
       })
 
       const recent: ActivityItem[] = orders.slice(0, 5).map((o: any) => ({
@@ -417,10 +436,15 @@ export default function SellerDashboard() {
     : []
   const safeSeries = Array.isArray(analytics?.series) ? analytics.series : []
 
-  const revenueLabel =
-    overview.revenue && overview.revenue > 0
-      ? `$${Number(overview.revenue).toLocaleString()}`
-      : '—'
+  const revenueLabel = hideMoney
+    ? '••••••'
+    : formatMoney(overview.revenue || 0, overview.currency)
+  const pendingLabel = hideMoney
+    ? '••••'
+    : formatMoney(overview.pendingPayout || 0, overview.currency)
+  const paidOutLabel = hideMoney
+    ? '••••'
+    : formatMoney(overview.paidOut || 0, overview.currency)
 
   if (loading && !refreshing) {
     return (
@@ -465,7 +489,6 @@ export default function SellerDashboard() {
         </View>
       </View>
 
-      {/* Exit — full-width strip, always readable */}
       <View style={styles.exitBar}>
         <TouchableOpacity
           onPress={exitToMall}
@@ -512,10 +535,22 @@ export default function SellerDashboard() {
         >
           <View style={styles.revenueTop}>
             <Text style={styles.revenueEyebrow}>Revenue</Text>
-            <View style={styles.revenueBadge}>
-              <Text style={styles.revenueBadgeText}>
-                {planLabel}
-              </Text>
+            <View style={styles.revenueTopRight}>
+              <TouchableOpacity
+                onPress={() => setHideMoney((v) => !v)}
+                hitSlop={10}
+                accessibilityLabel={hideMoney ? 'Show amounts' : 'Hide amounts'}
+                style={styles.eyeBtn}
+              >
+                <Ionicons
+                  name={hideMoney ? 'eye-off-outline' : 'eye-outline'}
+                  size={18}
+                  color={SECONDARY}
+                />
+              </TouchableOpacity>
+              <View style={styles.revenueBadge}>
+                <Text style={styles.revenueBadgeText}>{planLabel}</Text>
+              </View>
             </View>
           </View>
           <Text style={styles.revenueAmount} numberOfLines={1}>
@@ -523,9 +558,25 @@ export default function SellerDashboard() {
           </Text>
           <Text style={styles.revenueHint}>
             {overview.revenue && overview.revenue > 0
-              ? 'Revenue from completed orders on Plazore.'
-              : 'Payouts and live totals appear here when payments are enabled.'}
+              ? 'Net earnings (after platform fee).'
+              : 'Totals appear here once paid orders come in.'}
           </Text>
+
+          <View style={styles.walletRow}>
+            <View style={styles.walletCell}>
+              <Text style={styles.walletLabel}>Pending payout</Text>
+              <Text style={[styles.walletValue, { color: '#F0C070' }]}>
+                {pendingLabel}
+              </Text>
+            </View>
+            <View style={styles.walletCell}>
+              <Text style={styles.walletLabel}>Paid out</Text>
+              <Text style={[styles.walletValue, { color: GREEN }]}>
+                {paidOutLabel}
+              </Text>
+            </View>
+          </View>
+
           <View style={styles.revenueMeta}>
             <Text style={styles.revenueMetaText}>
               Fee · {feePct}% of product price
@@ -690,9 +741,7 @@ export default function SellerDashboard() {
         <View style={styles.planCard}>
           <View style={{ flex: 1 }}>
             <Text style={styles.planEyebrow}>Subscription</Text>
-            <Text style={styles.planName}>
-              {planLabel}
-            </Text>
+            <Text style={styles.planName}>{planLabel}</Text>
             <Text style={styles.planFee}>{feePct}% product fee</Text>
           </View>
           <TouchableOpacity
@@ -896,6 +945,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
+  revenueTopRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  eyeBtn: {
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
   revenueEyebrow: {
     fontSize: 11,
     fontWeight: '700',
@@ -926,6 +989,32 @@ const styles = StyleSheet.create({
     fontSize: 12.5,
     color: SECONDARY,
     lineHeight: 18,
+  },
+  walletRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 12,
+  },
+  walletCell: {
+    flex: 1,
+    backgroundColor: 'rgba(10,18,28,0.6)',
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    borderRadius: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.06)',
+  },
+  walletLabel: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: MUTED,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+  },
+  walletValue: {
+    marginTop: 2,
+    fontSize: 13,
+    fontWeight: '700',
   },
   revenueMeta: {
     marginTop: 14,

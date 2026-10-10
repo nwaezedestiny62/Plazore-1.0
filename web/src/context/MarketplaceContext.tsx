@@ -12,6 +12,7 @@ import React, {
 } from "react";
 import {
   DEFAULT_REGION,
+  detectGuestRegion,
   formatMoney,
   formatProductPrice,
   getRegion,
@@ -22,7 +23,8 @@ import {
 
 const STORAGE_KEY = "plazore_marketplace_region";
 const RATES_CACHE_KEY = "plazore_currency_rates_v1";
-const API = process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com/api";
+const API =
+  process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com/api";
 
 function isValidRegion(code?: string | null): code is string {
   if (!code) return false;
@@ -84,6 +86,7 @@ export function MarketplaceProvider({
   const [ratesLoaded, setRatesLoaded] = useState(false);
   const localOverrideUntil = useRef(0);
   const bootstrapped = useRef(false);
+  const guestDetectRan = useRef(false);
 
   const applyRegion = useCallback(
     (code: string, opts?: { sticky?: boolean }) => {
@@ -164,6 +167,14 @@ export function MarketplaceProvider({
     }
   }, []);
 
+  /**
+   * Guest (not signed in):
+   * 1) Saved localStorage region wins
+   * 2) Else auto-detect (timezone → locale → short geo IP)
+   * 3) Unsupported country → NG / Naira
+   *
+   * Signed in: profile marketplaceRegion wins (after local sticky window).
+   */
   const refreshRegion = useCallback(async () => {
     if (Date.now() < localOverrideUntil.current) {
       setLoading(false);
@@ -173,7 +184,20 @@ export function MarketplaceProvider({
     if (!isSignedIn) {
       try {
         const cached = localStorage.getItem(STORAGE_KEY);
-        setRegionState(normalizeRegion(cached));
+        if (isValidRegion(cached)) {
+          setRegionState(normalizeRegion(cached));
+          setLoading(false);
+          return;
+        }
+
+        // First visit as guest — detect once per session bootstrap
+        if (!guestDetectRan.current) {
+          guestDetectRan.current = true;
+          const detected = await detectGuestRegion();
+          applyRegion(detected);
+        } else {
+          setRegionState(DEFAULT_REGION);
+        }
       } catch {
         setRegionState(DEFAULT_REGION);
       } finally {
@@ -205,12 +229,14 @@ export function MarketplaceProvider({
   useEffect(() => {
     if (!isLoaded) return;
     let cancelled = false;
+
     (async () => {
       try {
         const cached = localStorage.getItem(STORAGE_KEY);
         if (!cancelled && isValidRegion(cached)) {
           setRegionState(normalizeRegion(cached));
         }
+
         const ratesCached = localStorage.getItem(RATES_CACHE_KEY);
         if (!cancelled && ratesCached) {
           const parsed = JSON.parse(ratesCached) as ClientRateMap;
@@ -222,11 +248,27 @@ export function MarketplaceProvider({
       } catch {
         /* ignore */
       }
+
       if (!cancelled) {
+        // If guest with no cache, kick detection early so UI paints in local currency fast
+        if (!isSignedIn) {
+          try {
+            const cached = localStorage.getItem(STORAGE_KEY);
+            if (!isValidRegion(cached) && !guestDetectRan.current) {
+              guestDetectRan.current = true;
+              const detected = await detectGuestRegion();
+              if (!cancelled) applyRegion(detected);
+            }
+          } catch {
+            /* NG default already set */
+          }
+        }
+
         await Promise.all([refreshRegion(), refreshRates()]);
         bootstrapped.current = true;
       }
     })();
+
     return () => {
       cancelled = true;
     };
