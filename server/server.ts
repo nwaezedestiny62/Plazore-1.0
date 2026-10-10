@@ -37,6 +37,12 @@ import { startAutoConfirmDeliveryScheduler } from "./services/jobs/autoConfirmDe
 import { startPayoutScheduler } from "./services/jobs/processEligiblePayouts.js";
 import { startAbandonedPaymentScheduler } from "./services/jobs/releaseAbandonedPayments.js";
 
+// Seller subscriptions (Paystack + Stripe plan payments)
+import SubscriptionRouter, {
+  mountAdminSubscriptionRoutes,
+} from "./routes/subscriptionRoutes.js";
+import { startSubscriptionExpiryScheduler } from "./services/jobs/expireSubscriptions.js";
+
 const app = express();
 
 await connectDB();
@@ -119,6 +125,15 @@ app.use("/api/orders", OrderRouter);
 app.use("/api/addresses", AddressRouter);
 app.use("/api/admin", AdminRouter);
 app.use("/api/seller", SellerRouter);
+// Seller plans / subscriptions (mounted under /api/seller)
+// → GET  /api/seller/plans
+// → GET  /api/seller/subscription
+// → POST /api/seller/subscriptions/initiate
+// → POST /api/seller/subscriptions/verify
+// → POST /api/seller/subscriptions/activate-promo
+// → POST /api/seller/subscriptions/activate-free
+// → POST /api/seller/onboarding/complete-hook
+app.use("/api/seller", SubscriptionRouter);
 app.use("/api/notifications", NotificationRouter);
 app.use("/api/users", UserRouter);
 app.use("/api/wishlist", WishlistRouter);
@@ -138,6 +153,12 @@ app.use(telemetryMiddleware);
 // Single moderation mount (covers /me + admin actions)
 app.use("/api/moderation", ModerationRouter);
 
+// Admin subscription routes on AdminRouter:
+// → GET  /api/admin/subscriptions/overview
+// → POST /api/admin/subscriptions/promo
+// → POST /api/admin/subscriptions/expire-overdue
+mountAdminSubscriptionRoutes(AdminRouter);
+
 await makeAdmin();
 
 app.listen(port, () => {
@@ -146,4 +167,5 @@ app.listen(port, () => {
   startAutoConfirmDeliveryScheduler();
   startPayoutScheduler();
   startAbandonedPaymentScheduler(); // stock release for abandoned payments
+  startSubscriptionExpiryScheduler(); // downgrade expired seller plans → Free
 });

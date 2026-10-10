@@ -3,18 +3,25 @@
  * Mount with express.raw({ type: "application/json" }) BEFORE express.json().
  *
  * Route: POST /api/payments/stripe/webhook
+ *
+ * Handles:
+ * - payment_intent.succeeded / failed / canceled  (orders + seller subscriptions)
+ * - charge.refunded / refund.updated               (refund status sync)
+ * - transfer.created / transfer.paid               (seller payouts)
  */
 
 import { Request, Response } from "express";
 import Payment from "../models/Payment.js";
 import PaymentEvent from "../models/PaymentEvent.js";
+import Refund from "../models/Refund.js";
 import {
   constructStripeEvent,
   buildStripeEventId,
 } from "../services/stripe/webhook.js";
 import { verifyPaymentByReference } from "../services/paymentService.js";
 import { markPayoutSuccess } from "../services/payoutService.js";
-import { writePaymentAudit } from "../utils/paymentAudit.js";
+import { activatePlanFromWebhook } from "../services/subscriptionService.js";
+import { mapStripeRefundStatus } from "../services/stripe/refunds.js";
 
 export const stripeWebhook = async (req: Request, res: Response) => {
   const signature = req.headers["stripe-signature"] as string;
@@ -24,7 +31,6 @@ export const stripeWebhook = async (req: Request, res: Response) => {
 
   let event: any;
   try {
-    // req.body must be the raw Buffer (set up in server.ts)
     const rawBody = (req as any).rawBody || req.body;
     event = constructStripeEvent(rawBody, signature);
   } catch (err: any) {
@@ -34,7 +40,7 @@ export const stripeWebhook = async (req: Request, res: Response) => {
 
   const eventId = buildStripeEventId(event);
 
-  // Idempotency — never process the same event twice
+  // Idempotency
   const existing = await PaymentEvent.findOne({ eventId });
   if (existing?.processed) {
     return res.json({ received: true, duplicate: true });
@@ -45,10 +51,14 @@ export const stripeWebhook = async (req: Request, res: Response) => {
     {
       eventId,
       event: event.type,
-      reference: event.data?.object?.metadata?.plazore_reference || null,
+      reference:
+        event.data?.object?.metadata?.plazore_reference ||
+        event.data?.object?.metadata?.plazore_refund_reference ||
+        null,
       payload: event,
       signatureValid: true,
       processed: false,
+      provider: "stripe",
     },
     { upsert: true, new: true }
   );
@@ -57,8 +67,43 @@ export const stripeWebhook = async (req: Request, res: Response) => {
     switch (event.type) {
       case "payment_intent.succeeded": {
         const intent = event.data.object;
+        const meta = intent.metadata || {};
+
+        // Seller subscription path
+        if (String(meta.type || "") === "seller_subscription") {
+          const reference =
+            meta.plazore_reference ||
+            (await findSubReferenceByPaymentIntent(intent.id));
+          if (reference) {
+            let chargeId: string | null = null;
+            const charge = intent.latest_charge;
+            if (typeof charge === "string") chargeId = charge;
+            else if (charge?.id) chargeId = charge.id;
+
+            await activatePlanFromWebhook({
+              provider: "stripe",
+              reference,
+              metadata: meta,
+              amountMinor: intent.amount,
+              currency: intent.currency,
+              stripePaymentIntentId: intent.id,
+              stripeChargeId: chargeId,
+            });
+          }
+          await PaymentEvent.updateOne(
+            { eventId },
+            {
+              processed: true,
+              processedAt: new Date(),
+              reference: meta.plazore_reference || null,
+            }
+          );
+          break;
+        }
+
+        // Order payment path
         const reference =
-          intent.metadata?.plazore_reference ||
+          meta.plazore_reference ||
           (await findReferenceByPaymentIntent(intent.id));
 
         if (!reference) {
@@ -82,8 +127,19 @@ export const stripeWebhook = async (req: Request, res: Response) => {
       case "payment_intent.payment_failed":
       case "payment_intent.canceled": {
         const intent = event.data.object;
+        const meta = intent.metadata || {};
+
+        if (String(meta.type || "") === "seller_subscription") {
+          // Leave subscription in pending_payment; seller can retry
+          await PaymentEvent.updateOne(
+            { eventId },
+            { processed: true, processedAt: new Date() }
+          );
+          break;
+        }
+
         const reference =
-          intent.metadata?.plazore_reference ||
+          meta.plazore_reference ||
           (await findReferenceByPaymentIntent(intent.id));
 
         if (reference) {
@@ -96,8 +152,10 @@ export const stripeWebhook = async (req: Request, res: Response) => {
         break;
       }
 
-      case "charge.refunded": {
-        // Optional: mark refund status on our side if you want deeper tracking
+      case "charge.refunded":
+      case "refund.updated":
+      case "refund.created": {
+        await handleStripeRefundEvent(event);
         await PaymentEvent.updateOne(
           { eventId },
           { processed: true, processedAt: new Date() }
@@ -107,7 +165,6 @@ export const stripeWebhook = async (req: Request, res: Response) => {
 
       case "transfer.created":
       case "transfer.paid": {
-        // Optional: if you link transfer metadata to our payout reference
         const transfer = event.data.object;
         const payoutRef = transfer.metadata?.plazore_payout_reference;
         if (payoutRef) {
@@ -121,7 +178,6 @@ export const stripeWebhook = async (req: Request, res: Response) => {
       }
 
       default:
-        // Unhandled event type — still mark processed so we don't retry forever
         await PaymentEvent.updateOne(
           { eventId },
           { processed: true, processedAt: new Date() }
@@ -135,7 +191,7 @@ export const stripeWebhook = async (req: Request, res: Response) => {
       { eventId },
       { processingError: err.message || "processing failed" }
     );
-    // Return 200 so Stripe does not retry aggressively while we investigate
+    // 200 so Stripe does not retry aggressively while we investigate
     res.status(200).json({ received: true, error: err.message });
   }
 };
@@ -147,4 +203,74 @@ async function findReferenceByPaymentIntent(
     stripePaymentIntentId: paymentIntentId,
   });
   return payment?.reference || null;
+}
+
+async function findSubReferenceByPaymentIntent(
+  paymentIntentId: string
+): Promise<string | null> {
+  try {
+    const SellerSubscription = (await import("../models/SellerSubscription.js"))
+      .default;
+    const sub: any = await (SellerSubscription as any).findOne({
+      stripePaymentIntentId: paymentIntentId,
+    });
+    return sub?.paymentReference || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Sync Refund document status from Stripe charge.refunded / refund.* events.
+ */
+async function handleStripeRefundEvent(event: any) {
+  const obj = event.data?.object;
+  if (!obj) return;
+
+  // charge.refunded → object is Charge with refunds list
+  // refund.updated / refund.created → object is Refund
+  let refundId: string | null = null;
+  let status: string | null = null;
+  let plazoreRef: string | null = null;
+
+  if (event.type === "charge.refunded") {
+    const refunds = obj.refunds?.data || [];
+    const latest = refunds[0];
+    if (latest) {
+      refundId = latest.id;
+      status = latest.status;
+      plazoreRef = latest.metadata?.plazore_refund_reference || null;
+    }
+  } else {
+    refundId = obj.id;
+    status = obj.status;
+    plazoreRef = obj.metadata?.plazore_refund_reference || null;
+  }
+
+  if (!refundId && !plazoreRef) return;
+
+  const mapped = mapStripeRefundStatus(status);
+
+  const query: any = { provider: "stripe" };
+  if (plazoreRef) query.reference = plazoreRef;
+  else if (refundId) query.providerRefundId = refundId;
+
+  const refundDoc: any = await Refund.findOne(query);
+  if (!refundDoc) return;
+
+  refundDoc.status = mapped;
+  if (refundId) refundDoc.providerRefundId = refundId;
+  if (mapped === "processed") {
+    refundDoc.processedAt = new Date();
+  }
+  if (mapped === "failed") {
+    refundDoc.failureReason =
+      obj.failure_reason || obj.reason || "Stripe refund failed";
+  }
+  refundDoc.gatewayPayload = {
+    eventType: event.type,
+    status,
+    refundId,
+  };
+  await refundDoc.save();
 }

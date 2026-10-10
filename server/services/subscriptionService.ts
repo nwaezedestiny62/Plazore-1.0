@@ -1,9 +1,11 @@
 /**
- * Seller subscription lifecycle.
- * Business location country → currency → plan. Never buyer marketplace region.
+ * Seller subscription lifecycle — dual provider (Paystack + Stripe).
  *
- * Typed loosely on purpose so the rest of the codebase does not go red
- * when plans / PromoConfig / SellerSubscription are still being wired.
+ * Rules:
+ * - Business location country → currency → plan price. Never buyer marketplace region.
+ * - Paid plans activate ONLY after server-side verification (API or webhook).
+ * - One active SellerSubscription document per seller.
+ * - Free + promo paths never hit a payment gateway.
  */
 
 import crypto from "crypto";
@@ -20,15 +22,25 @@ import {
   transactionFeeRateForPlan,
   maxImagesForPlan,
   DOMINANT_PROMO,
+  type PlanId,
 } from "../config/plans.js";
-import { isPaystackConfigured } from "./paystack/client.js";
+import {
+  isPaystackConfigured,
+} from "./paystack/client.js";
 import {
   initializeTransaction,
   verifyTransaction,
 } from "./paystack/transactions.js";
+import {
+  isStripeConfigured,
+  getPublishableKey,
+} from "./stripe/client.js";
+import {
+  createPaymentIntent,
+  retrievePaymentIntent,
+} from "./stripe/paymentIntents.js";
 
-// Plan ids used on the server (must match SellerSubscription enum + plans.ts)
-type PlanId = "free" | "dominant" | "business_plus" | "global_reach";
+export type SubProvider = "paystack" | "stripe";
 
 function genRef(prefix = "PLZSUB") {
   return `${prefix}_${Date.now().toString(36).toUpperCase()}_${crypto
@@ -52,6 +64,11 @@ function asPlanId(v: any): PlanId {
   if (s === "business_plus" || s === "business" || s === "plus") return "business_plus";
   if (s === "global_reach" || s === "global") return "global_reach";
   return "free";
+}
+
+function normalizeProvider(raw?: string | null): SubProvider {
+  const p = String(raw || "paystack").toLowerCase().trim();
+  return p === "stripe" ? "stripe" : "paystack";
 }
 
 export function sellerBusinessCountry(seller: any): string {
@@ -92,10 +109,14 @@ export async function ensureSellerSubscription(sellerId: string) {
     isPromotional: false,
     transactionFeeRate: benefits.transactionFeeRate,
     maxImagesPerProduct: benefits.maxImagesPerProduct,
+    lastVerificationSource: "system",
   });
   return sub;
 }
 
+/**
+ * Resolve active plan. Auto-downgrades expired paid plans to Free.
+ */
 export async function getActivePlanForSeller(sellerId: string) {
   const sub: any = await ensureSellerSubscription(sellerId);
   const now = new Date();
@@ -133,6 +154,7 @@ export async function getActivePlanForSeller(sellerId: string) {
     expiresAt: sub.expiresAt,
     country: sub.country,
     currency: sub.currency,
+    provider: sub.provider,
   };
 }
 
@@ -172,6 +194,10 @@ export async function listPlansForSeller(sellerId: string) {
     activeStatus: active.status,
     isPromotional: active.isPromotional,
     expiresAt: active.expiresAt,
+    providers: {
+      paystack: isPaystackConfigured(),
+      stripe: isStripeConfigured(),
+    },
     promo: {
       eligible: promoEligible,
       remainingSlots: promoRemaining,
@@ -198,6 +224,9 @@ export async function activateFreePlan(sellerId: string) {
   sub.amountPaid = 0;
   sub.provider = "system";
   sub.paymentReference = null;
+  sub.stripePaymentIntentId = null;
+  sub.stripeClientSecret = null;
+  sub.stripeChargeId = null;
   sub.startedAt = new Date();
   sub.expiresAt = null;
   sub.isPromotional = false;
@@ -205,16 +234,14 @@ export async function activateFreePlan(sellerId: string) {
   sub.promoExpiresAt = null;
   sub.transactionFeeRate = benefits.transactionFeeRate;
   sub.maxImagesPerProduct = benefits.maxImagesPerProduct;
+  sub.lastVerifiedAt = new Date();
+  sub.lastVerificationSource = "system";
   await sub.save();
 
   return { subscription: sub };
 }
 
-/**
- * Activate promotional Dominant Niche (free for DOMINANT_PROMO.durationMonths).
- */
 export async function activatePromoDominant(sellerId: string) {
-  // claim is a plain object — do not use strict discriminated-union access
   const claim: any = await claimDominantPromoSlot(sellerId);
 
   if (!claim || claim.claimed !== true) {
@@ -231,6 +258,14 @@ export async function activatePromoDominant(sellerId: string) {
     });
   }
 
+  // Already claimed previously — still ensure sub is on promo if active
+  if (claim.already === true) {
+    const existing = await getActivePlanForSeller(sellerId);
+    if (existing.isPromotional && existing.status === "active") {
+      return { subscription: existing.subscription, claim };
+    }
+  }
+
   const slotNumber =
     claim.slotNumber != null ? Number(claim.slotNumber) : null;
 
@@ -244,8 +279,7 @@ export async function activatePromoDominant(sellerId: string) {
   const benefits = getPlanBenefits("dominant");
   const sub: any = await ensureSellerSubscription(sellerId);
   const now = new Date();
-  const duration =
-    (DOMINANT_PROMO && DOMINANT_PROMO.durationMonths) || 7;
+  const duration = (DOMINANT_PROMO && DOMINANT_PROMO.durationMonths) || 7;
   const expires = addMonths(now, duration);
 
   sub.planId = "dominant";
@@ -256,6 +290,8 @@ export async function activatePromoDominant(sellerId: string) {
   sub.provider = "promo";
   sub.paymentReference =
     slotNumber != null ? `PROMO_SLOT_${slotNumber}` : "PROMO_SLOT";
+  sub.stripePaymentIntentId = null;
+  sub.stripeClientSecret = null;
   sub.startedAt = now;
   sub.expiresAt = expires;
   sub.isPromotional = true;
@@ -263,27 +299,46 @@ export async function activatePromoDominant(sellerId: string) {
   sub.promoExpiresAt = expires;
   sub.transactionFeeRate = benefits.transactionFeeRate;
   sub.maxImagesPerProduct = benefits.maxImagesPerProduct;
+  sub.lastVerifiedAt = now;
+  sub.lastVerificationSource = "promo";
   await sub.save();
 
   return { subscription: sub, claim };
 }
 
+/**
+ * Start payment for a paid plan.
+ * provider: "paystack" | "stripe"
+ */
 export async function initiatePlanPayment(
   sellerId: string,
   planIdInput: string,
-  callbackUrl?: string
+  callbackUrl?: string,
+  providerInput?: string
 ) {
   const planId = asPlanId(planIdInput);
+  const provider = normalizeProvider(providerInput);
 
   if (planId === "free") {
-    return { free: true, subscription: (await activateFreePlan(sellerId)).subscription };
+    return {
+      free: true,
+      subscription: (await activateFreePlan(sellerId)).subscription,
+    };
   }
   if (!(PLANS as any)[planId]) {
     throw Object.assign(new Error("Invalid plan"), { statusCode: 400 });
   }
-  if (!isPaystackConfigured()) {
+
+  if (provider === "paystack" && !isPaystackConfigured()) {
     throw Object.assign(new Error("Paystack not configured"), {
       statusCode: 503,
+      code: "PAYSTACK_NOT_CONFIGURED",
+    });
+  }
+  if (provider === "stripe" && !isStripeConfigured()) {
+    throw Object.assign(new Error("Stripe not configured"), {
+      statusCode: 503,
+      code: "STRIPE_NOT_CONFIGURED",
     });
   }
 
@@ -306,10 +361,56 @@ export async function initiatePlanPayment(
   sub.planId = planId;
   sub.country = country;
   sub.currency = currency;
+  sub.provider = provider;
   await sub.save();
 
   const reference = genRef("PLZSUB");
   const email = seller.email || `seller_${sellerId}@plazore.local`;
+
+  // ── Stripe path ──
+  if (provider === "stripe") {
+    const intent = await createPaymentIntent({
+      amountMajor: price.amount,
+      currency,
+      reference,
+      orderId: `sub_${sellerId}`,
+      orderNumber: `SUB-${planId.toUpperCase()}`,
+      buyerId: String(sellerId),
+      sellerId: String(sellerId),
+      buyerEmail: email,
+      returnUrl: callbackUrl,
+      metadata: {
+        type: "seller_subscription",
+        sellerId: String(sellerId),
+        planId,
+        country,
+        currency,
+        amountMajor: String(price.amount),
+      },
+    });
+
+    sub.paymentReference = reference;
+    sub.stripePaymentIntentId = intent.paymentIntentId;
+    sub.stripeClientSecret = intent.clientSecret;
+    await sub.save();
+
+    return {
+      free: false,
+      provider: "stripe" as const,
+      reference,
+      clientSecret: intent.clientSecret,
+      paymentIntentId: intent.paymentIntentId,
+      publicKey: getPublishableKey(),
+      authorizationUrl: null,
+      accessCode: null,
+      amount: price.amount,
+      currency,
+      planId,
+      country,
+    };
+  }
+
+  // ── Paystack path ──
   const init: any = await initializeTransaction({
     email,
     amountMajor: price.amount,
@@ -327,13 +428,19 @@ export async function initiatePlanPayment(
   });
 
   sub.paymentReference = reference;
+  sub.stripePaymentIntentId = null;
+  sub.stripeClientSecret = null;
   await sub.save();
 
   return {
     free: false,
+    provider: "paystack" as const,
     reference,
     authorizationUrl: init.authorization_url || init.authorizationUrl,
     accessCode: init.access_code,
+    clientSecret: null,
+    paymentIntentId: null,
+    publicKey: process.env.PAYSTACK_PUBLIC_KEY || null,
     amount: price.amount,
     currency,
     planId,
@@ -342,15 +449,150 @@ export async function initiatePlanPayment(
 }
 
 /**
- * verifyTransaction returns the INNER Paystack object — never use .data again.
+ * Shared activation after successful payment (API verify or webhook).
+ */
+async function activatePaidPlan(params: {
+  sellerId: string;
+  planId: PlanId;
+  reference: string;
+  provider: SubProvider;
+  currency: string;
+  country: string;
+  amountMajor: number;
+  source: "api" | "webhook";
+  stripePaymentIntentId?: string | null;
+  stripeChargeId?: string | null;
+}) {
+  const benefits = getPlanBenefits(params.planId);
+  const sub: any = await ensureSellerSubscription(params.sellerId);
+  const now = new Date();
+
+  // Idempotent: already active with same reference
+  if (
+    sub.status === "active" &&
+    sub.paymentReference === params.reference &&
+    asPlanId(sub.planId) === params.planId
+  ) {
+    return { subscription: sub, alreadyActive: true };
+  }
+
+  sub.planId = params.planId;
+  sub.status = "active";
+  sub.country = params.country;
+  sub.currency = params.currency;
+  sub.amountPaid = params.amountMajor;
+  sub.provider = params.provider;
+  sub.paymentReference = params.reference;
+  if (params.stripePaymentIntentId) {
+    sub.stripePaymentIntentId = params.stripePaymentIntentId;
+  }
+  if (params.stripeChargeId) {
+    sub.stripeChargeId = params.stripeChargeId;
+  }
+  sub.stripeClientSecret = null;
+  sub.startedAt = now;
+  sub.expiresAt = addMonths(now, 1);
+  sub.isPromotional = false;
+  sub.promoSlotNumber = null;
+  sub.promoExpiresAt = null;
+  sub.transactionFeeRate = benefits.transactionFeeRate;
+  sub.maxImagesPerProduct = benefits.maxImagesPerProduct;
+  sub.lastVerifiedAt = now;
+  sub.lastVerificationSource = params.source;
+  await sub.save();
+
+  return { subscription: sub, alreadyActive: false };
+}
+
+/**
+ * Verify by reference (client callback or manual).
+ * Routes to Stripe PaymentIntent or Paystack verify.
  */
 export async function verifyAndActivatePlan(
   sellerId: string,
   reference: string
 ) {
+  const sub: any = await (SellerSubscription as any).findOne({
+    paymentReference: reference,
+  });
+
+  // Prefer record's provider; fall back to paystack
+  const provider: SubProvider = normalizeProvider(
+    sub?.provider || "paystack"
+  );
+
+  if (provider === "stripe") {
+    if (!isStripeConfigured()) {
+      throw Object.assign(new Error("Stripe not configured"), {
+        statusCode: 503,
+        code: "STRIPE_NOT_CONFIGURED",
+      });
+    }
+
+    const intentId =
+      sub?.stripePaymentIntentId ||
+      (await findStripeIntentByReference(reference));
+
+    if (!intentId) {
+      throw Object.assign(new Error("Missing Stripe PaymentIntent for this reference"), {
+        statusCode: 400,
+      });
+    }
+
+    const intent = await retrievePaymentIntent(String(intentId));
+    if (intent.status !== "succeeded") {
+      throw Object.assign(
+        new Error("Payment not successful — plan not activated"),
+        { statusCode: 402 }
+      );
+    }
+
+    const meta: any = intent.metadata || {};
+    const planId = asPlanId(meta.planId || meta.plan_id);
+    if (planId === "free") {
+      throw Object.assign(new Error("Invalid plan in payment metadata"), {
+        statusCode: 400,
+      });
+    }
+    if (meta.sellerId && String(meta.sellerId) !== String(sellerId)) {
+      throw Object.assign(new Error("Payment does not belong to this seller"), {
+        statusCode: 403,
+      });
+    }
+
+    const country = String(meta.country || "NG").toUpperCase();
+    const currency = String(
+      intent.currency || meta.currency || "USD"
+    ).toUpperCase();
+    const amountMajor =
+      meta.amountMajor != null
+        ? Number(meta.amountMajor)
+        : Number((getPlanPrice(planId, currency) || {}).amount || 0);
+
+    let chargeId: string | null = null;
+    const charge = (intent as any).latest_charge;
+    if (typeof charge === "string") chargeId = charge;
+    else if (charge?.id) chargeId = charge.id;
+
+    return activatePaidPlan({
+      sellerId,
+      planId,
+      reference,
+      provider: "stripe",
+      currency,
+      country,
+      amountMajor,
+      source: "api",
+      stripePaymentIntentId: String(intentId),
+      stripeChargeId: chargeId,
+    });
+  }
+
+  // Paystack
   if (!isPaystackConfigured()) {
     throw Object.assign(new Error("Paystack not configured"), {
       statusCode: 503,
+      code: "PAYSTACK_NOT_CONFIGURED",
     });
   }
 
@@ -370,7 +612,6 @@ export async function verifyAndActivatePlan(
       statusCode: 400,
     });
   }
-
   if (meta.sellerId && String(meta.sellerId) !== String(sellerId)) {
     throw Object.assign(new Error("Payment does not belong to this seller"), {
       statusCode: 403,
@@ -378,41 +619,92 @@ export async function verifyAndActivatePlan(
   }
 
   const seller: any = await (User as any).findById(sellerId);
-  if (!seller) {
-    throw Object.assign(new Error("Seller not found"), { statusCode: 404 });
-  }
-
-  const country = String(meta.country || sellerBusinessCountry(seller));
+  const country = String(
+    meta.country || (seller ? sellerBusinessCountry(seller) : "NG")
+  ).toUpperCase();
   const currency = String(
     (data && data.currency) ||
       meta.currency ||
       currencyForBusinessCountry(country)
   ).toUpperCase();
-
-  const benefits = getPlanBenefits(planId);
-  const sub: any = await ensureSellerSubscription(sellerId);
-  const now = new Date();
-
-  sub.planId = planId;
-  sub.status = "active";
-  sub.country = country;
-  sub.currency = currency;
-  sub.amountPaid =
+  const amountMajor =
     meta.amountMajor != null
       ? Number(meta.amountMajor)
       : Number((getPlanPrice(planId, currency) || {}).amount || 0);
-  sub.provider = "paystack";
-  sub.paymentReference = reference;
-  sub.startedAt = now;
-  sub.expiresAt = addMonths(now, 1);
-  sub.isPromotional = false;
-  sub.promoSlotNumber = null;
-  sub.promoExpiresAt = null;
-  sub.transactionFeeRate = benefits.transactionFeeRate;
-  sub.maxImagesPerProduct = benefits.maxImagesPerProduct;
-  await sub.save();
 
-  return { subscription: sub, verified: true };
+  return activatePaidPlan({
+    sellerId,
+    planId,
+    reference,
+    provider: "paystack",
+    currency,
+    country,
+    amountMajor,
+    source: "api",
+  });
+}
+
+async function findStripeIntentByReference(
+  reference: string
+): Promise<string | null> {
+  const row: any = await (SellerSubscription as any).findOne({
+    paymentReference: reference,
+  });
+  return row?.stripePaymentIntentId || null;
+}
+
+/**
+ * Webhook path — activate from Paystack charge.success or Stripe payment_intent.succeeded
+ * when metadata.type === "seller_subscription".
+ * Idempotent.
+ */
+export async function activatePlanFromWebhook(params: {
+  provider: SubProvider;
+  reference: string;
+  metadata: Record<string, any>;
+  amountMinor?: number;
+  currency?: string;
+  stripePaymentIntentId?: string | null;
+  stripeChargeId?: string | null;
+}) {
+  const meta = params.metadata || {};
+  if (String(meta.type || "") !== "seller_subscription") {
+    return { handled: false, reason: "not_subscription" };
+  }
+
+  const sellerId = String(meta.sellerId || "");
+  if (!sellerId) {
+    return { handled: false, reason: "missing_seller" };
+  }
+
+  const planId = asPlanId(meta.planId || meta.plan_id);
+  if (planId === "free") {
+    return { handled: false, reason: "invalid_plan" };
+  }
+
+  const country = String(meta.country || "NG").toUpperCase();
+  const currency = String(
+    params.currency || meta.currency || currencyForBusinessCountry(country)
+  ).toUpperCase();
+  const amountMajor =
+    meta.amountMajor != null
+      ? Number(meta.amountMajor)
+      : Number((getPlanPrice(planId, currency) || {}).amount || 0);
+
+  const result = await activatePaidPlan({
+    sellerId,
+    planId,
+    reference: params.reference,
+    provider: params.provider,
+    currency,
+    country,
+    amountMajor,
+    source: "webhook",
+    stripePaymentIntentId: params.stripePaymentIntentId,
+    stripeChargeId: params.stripeChargeId,
+  });
+
+  return { handled: true, ...result };
 }
 
 export async function onSellerOnboardingComplete(sellerId: string) {
@@ -479,6 +771,33 @@ export async function listSubscriptionsAdmin(limit = 50) {
     .populate("seller", "name email storeName role")
     .lean();
   return rows;
+}
+
+/**
+ * Batch-expire paid plans past expiresAt. Call from a cron job.
+ */
+export async function expireOverdueSubscriptions(limit = 200) {
+  const now = new Date();
+  const overdue: any[] = await (SellerSubscription as any)
+    .find({
+      status: "active",
+      planId: { $ne: "free" },
+      expiresAt: { $ne: null, $lt: now },
+    })
+    .limit(limit);
+
+  const freeBenefits = getPlanBenefits("free");
+  let count = 0;
+  for (const sub of overdue) {
+    sub.status = "expired";
+    sub.planId = "free";
+    sub.transactionFeeRate = freeBenefits.transactionFeeRate;
+    sub.maxImagesPerProduct = freeBenefits.maxImagesPerProduct;
+    sub.isPromotional = false;
+    await sub.save();
+    count += 1;
+  }
+  return { expired: count };
 }
 
 export { transactionFeeRateForPlan, maxImagesForPlan, getPlanBenefits };

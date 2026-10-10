@@ -39,9 +39,19 @@ const refundSchema = new Schema(
 
     /** Our reference */
     reference: { type: String, required: true, unique: true, index: true },
-    /** Paystack refund id */
+
+    /** paystack | stripe */
+    provider: {
+      type: String,
+      enum: ["paystack", "stripe"],
+      default: "paystack",
+      index: true,
+    },
+
+    /** Gateway refund id (re_… / Paystack id) */
     providerRefundId: { type: String, default: null, index: true },
-    /** Original payment reference */
+
+    /** Original payment reference / PaymentIntent id */
     transactionReference: { type: String, required: true },
 
     initiatedBy: {
@@ -53,10 +63,15 @@ const refundSchema = new Schema(
 
     failureReason: { type: String, default: "" },
     processedAt: { type: Date, default: null },
+
+    /** Webhook-confirmed final status payload snippet */
+    gatewayPayload: { type: Schema.Types.Mixed, default: null },
   },
   { timestamps: true }
 );
 
 refundSchema.index({ order: 1, status: 1 });
+refundSchema.index({ provider: 1, status: 1 });
+refundSchema.index({ providerRefundId: 1 });
 
 export default mongoose.model("Refund", refundSchema);

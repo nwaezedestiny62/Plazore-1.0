@@ -10,6 +10,7 @@ import {
   setPromoEnabled,
   listSubscriptionsAdmin,
   onSellerOnboardingComplete,
+  expireOverdueSubscriptions,
 } from "../services/subscriptionService.js";
 import type { PlanId } from "../config/plans.js";
 
@@ -52,7 +53,11 @@ export const getMySubscription = async (req: Request, res: Response) => {
 
 /**
  * POST /api/seller/subscriptions/initiate
- * Body: { planId: "dominant" | "business_plus" | "global_reach" | "free", callbackUrl? }
+ * Body: {
+ *   planId: "dominant" | "business_plus" | "global_reach" | "free",
+ *   callbackUrl?,
+ *   provider?: "paystack" | "stripe"
+ * }
  */
 export const initiateSubscription = async (req: Request, res: Response) => {
   try {
@@ -62,11 +67,13 @@ export const initiateSubscription = async (req: Request, res: Response) => {
     }
     const planId = String(req.body?.planId || "free").toLowerCase() as PlanId;
     const callbackUrl = req.body?.callbackUrl;
+    const provider = req.body?.provider;
 
     const result = await initiatePlanPayment(
       user._id.toString(),
       planId,
-      callbackUrl
+      callbackUrl,
+      provider
     );
 
     if (result.free) {
@@ -86,9 +93,24 @@ export const initiateSubscription = async (req: Request, res: Response) => {
       data: {
         activated: false,
         paymentRequired: true,
-        ...result,
+        provider: result.provider,
+        reference: result.reference,
+        // Paystack
+        authorizationUrl: result.authorizationUrl || null,
+        authorization_url: result.authorizationUrl || null,
+        accessCode: result.accessCode || null,
+        // Stripe
+        clientSecret: result.clientSecret || null,
+        paymentIntentId: result.paymentIntentId || null,
+        publicKey: result.publicKey || null,
+        amount: result.amount,
+        currency: result.currency,
+        planId: result.planId,
+        country: result.country,
         message:
-          "Complete payment on Paystack. Plan activates only after verification.",
+          result.provider === "stripe"
+            ? "Complete payment with Stripe. Plan activates only after verification."
+            : "Complete payment on Paystack. Plan activates only after verification.",
       },
     });
   } catch (e: any) {
@@ -123,6 +145,7 @@ export const verifySubscription = async (req: Request, res: Response) => {
       success: true,
       data: {
         activated: true,
+        alreadyActive: !!(result as any).alreadyActive,
         subscription: result.subscription,
         message: "Payment verified. Plan is now active for one month.",
       },
@@ -136,7 +159,7 @@ export const verifySubscription = async (req: Request, res: Response) => {
   }
 };
 
-/** POST /api/seller/subscriptions/activate-promo — Dominant Niche 7 months free */
+/** POST /api/seller/subscriptions/activate-promo */
 export const activatePromo = async (req: Request, res: Response) => {
   try {
     const user = getUser(req);
@@ -177,7 +200,7 @@ export const activateFree = async (req: Request, res: Response) => {
       data: {
         activated: true,
         planId: "free",
-        subscription: sub,
+        subscription: sub.subscription || sub,
       },
     });
   } catch (e: any) {
@@ -188,11 +211,7 @@ export const activateFree = async (req: Request, res: Response) => {
   }
 };
 
-/**
- * POST /api/seller/onboarding/complete-hook
- * Call after business location + onboarding done — claims promo slot if available
- * (does not auto-switch plan; seller still chooses Free vs Promo Dominant)
- */
+/** POST /api/seller/onboarding/complete-hook */
 export const onboardingCompleteHook = async (req: Request, res: Response) => {
   try {
     const user = getUser(req);
@@ -244,6 +263,20 @@ export const adminSetPromo = async (req: Request, res: Response) => {
     const enabled = !!req.body?.enabled;
     const promo = await setPromoEnabled(enabled);
     res.json({ success: true, data: { promo } });
+  } catch (e: any) {
+    res.status(500).json({ success: false, message: e.message });
+  }
+};
+
+/** POST /api/admin/subscriptions/expire-overdue — manual trigger / cron */
+export const adminExpireOverdue = async (req: Request, res: Response) => {
+  try {
+    const user = getUser(req);
+    if (user?.role !== "admin") {
+      return res.status(403).json({ success: false, message: "Admin only" });
+    }
+    const result = await expireOverdueSubscriptions(200);
+    res.json({ success: true, data: result });
   } catch (e: any) {
     res.status(500).json({ success: false, message: e.message });
   }

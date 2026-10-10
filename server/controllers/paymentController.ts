@@ -2,6 +2,7 @@ import crypto from "crypto";
 import { Request, Response } from "express";
 import Order from "../models/Order.js";
 import Payment from "../models/Payment.js";
+import { activatePlanFromWebhook } from "../services/subscriptionService.js";
 import Cart from "../models/Cart.js";
 import OrderDispute from "../models/OrderDispute.js";
 import Refund from "../models/Refund.js";
@@ -709,6 +710,31 @@ export const paystackWebhook = async (req: Request, res: Response) => {
     console.error("[webhook] processing error:", err);
   }
 };
+
+export async function tryActivateSubscriptionFromPaystackCharge(payload: any) {
+  try {
+    const data = payload?.data || {};
+    const meta = data.metadata || {};
+    if (String(meta.type || "") !== "seller_subscription") {
+      return { handled: false };
+    }
+    if (!data.reference) {
+      return { handled: false, reason: "no_reference" };
+    }
+
+    return await activatePlanFromWebhook({
+      provider: "paystack",
+      reference: String(data.reference),
+      metadata: meta,
+      amountMinor: data.amount,
+      currency: data.currency,
+    });
+  } catch (err) {
+    console.error("[paystackWebhook] subscription activation error:", err);
+    return { handled: false, error: String((err as any)?.message || err) };
+  }
+}
+
 
 /** GET /api/payments/order/:orderId — payment details for order UI */
 export const getPaymentForOrder = async (req: Request, res: Response) => {
