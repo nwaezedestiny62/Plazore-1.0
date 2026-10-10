@@ -152,11 +152,10 @@ export const COUNTRY_TO_REGION: Record<string, string> = {
   DE: "DE",
   FR: "FR",
   AU: "AU",
-  // Common near-matches that share currency / market intent
   UK: "GB",
   USA: "US",
-  AT: "DE", // Austria → EUR / DE market
-  BE: "FR", // Belgium → EUR
+  AT: "DE",
+  BE: "FR",
   NL: "DE",
   IE: "GB",
   CH: "DE",
@@ -165,24 +164,15 @@ export const COUNTRY_TO_REGION: Record<string, string> = {
 
 /**
  * IANA timezone → region (instant, offline, no network).
- * Used for guest auto-detect before any API call.
  */
 export const TIMEZONE_TO_REGION: Record<string, string> = {
-  // Nigeria
   "Africa/Lagos": "NG",
-  // Ghana
   "Africa/Accra": "GH",
-  // Benin
   "Africa/Porto-Novo": "BJ",
-  // Cameroon
   "Africa/Douala": "CM",
-  // Kenya
   "Africa/Nairobi": "KE",
-  // South Africa
   "Africa/Johannesburg": "ZA",
-  // Egypt
   "Africa/Cairo": "EG",
-  // United States
   "America/New_York": "US",
   "America/Chicago": "US",
   "America/Denver": "US",
@@ -194,20 +184,15 @@ export const TIMEZONE_TO_REGION: Record<string, string> = {
   "America/Indiana/Indianapolis": "US",
   "America/Boise": "US",
   "Pacific/Honolulu": "US",
-  // Canada
   "America/Toronto": "CA",
   "America/Vancouver": "CA",
   "America/Edmonton": "CA",
   "America/Winnipeg": "CA",
   "America/Halifax": "CA",
   "America/St_Johns": "CA",
-  // United Kingdom
   "Europe/London": "GB",
-  // Germany
   "Europe/Berlin": "DE",
-  // France
   "Europe/Paris": "FR",
-  // Australia
   "Australia/Sydney": "AU",
   "Australia/Melbourne": "AU",
   "Australia/Brisbane": "AU",
@@ -215,7 +200,10 @@ export const TIMEZONE_TO_REGION: Record<string, string> = {
   "Australia/Adelaide": "AU",
 };
 
-/** Locale tag prefix → region (navigator.language / Intl) */
+/**
+ * Strong locale → region only.
+ * NEVER map en-US / plain "en" → US — language is not location.
+ */
 export const LOCALE_TO_REGION: Record<string, string> = {
   "en-NG": "NG",
   "en-GH": "GH",
@@ -225,8 +213,6 @@ export const LOCALE_TO_REGION: Record<string, string> = {
   "en-ZA": "ZA",
   "ar-EG": "EG",
   "en-EG": "EG",
-  "en-US": "US",
-  "en-CA": "CA",
   "fr-CA": "CA",
   "en-GB": "GB",
   "de-DE": "DE",
@@ -284,13 +270,8 @@ export function regionCurrencyCode(regionCode?: string | null): string {
   return getRegion(regionCode).currency.code;
 }
 
-/**
- * Instant offline guess from timezone + browser locale.
- * Returns null if nothing maps to a supported region (caller falls back to NG).
- */
-export function detectRegionFromBrowser(): string | null {
-  if (typeof window === "undefined") return null;
-
+/** Timezone only — most reliable offline signal. */
+export function detectRegionFromTimezone(): string | null {
   try {
     const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "";
     if (tz && TIMEZONE_TO_REGION[tz] && REGIONS[TIMEZONE_TO_REGION[tz]]) {
@@ -299,35 +280,38 @@ export function detectRegionFromBrowser(): string | null {
   } catch {
     /* ignore */
   }
+  return null;
+}
 
+/**
+ * Strong locales only (en-NG, de-DE, …). Never en-US → US.
+ */
+export function detectRegionFromLocale(): string | null {
   try {
     const locale =
       (typeof navigator !== "undefined" &&
         (navigator.languages?.[0] || navigator.language)) ||
       "";
-    const tag = String(locale).trim();
+    const tag = String(locale).trim().replace("_", "-");
     if (tag && LOCALE_TO_REGION[tag] && REGIONS[LOCALE_TO_REGION[tag]]) {
       return LOCALE_TO_REGION[tag];
-    }
-    // en-US → US via country suffix
-    const parts = tag.replace("_", "-").split("-");
-    if (parts.length >= 2) {
-      const fromLocale = regionFromCountry(parts[parts.length - 1]);
-      if (fromLocale !== DEFAULT_REGION) return fromLocale;
     }
   } catch {
     /* ignore */
   }
-
   return null;
 }
 
+/** @deprecated use detectRegionFromTimezone */
+export function detectRegionFromBrowser(): string | null {
+  return detectRegionFromTimezone();
+}
+
 /**
- * Optional network confirm via free geo IP (short timeout).
- * Never blocks UX longer than `timeoutMs`. Failures return null.
+ * Geo IP (short timeout). Failures → null.
  */
 export async function detectRegionFromGeoIp(
-  timeoutMs = 1800
+  timeoutMs = 2000
 ): Promise<string | null> {
   if (typeof window === "undefined") return null;
 
@@ -335,18 +319,17 @@ export async function detectRegionFromGeoIp(
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    // Lightweight public endpoint — country_code only
     const res = await fetch("https://ipapi.co/json/", {
       signal: controller.signal,
       headers: { Accept: "application/json" },
     });
     if (!res.ok) return null;
     const data = (await res.json()) as { country_code?: string };
-    const region = regionFromCountry(data?.country_code);
-    // Only accept if it's a real supported market (not forced NG from unknown)
     if (data?.country_code) {
       const cc = String(data.country_code).toUpperCase();
-      if (COUNTRY_TO_REGION[cc] || REGION_ALIASES[cc]) return region;
+      if (COUNTRY_TO_REGION[cc] || REGION_ALIASES[cc]) {
+        return regionFromCountry(cc);
+      }
     }
     return null;
   } catch {
@@ -357,15 +340,21 @@ export async function detectRegionFromGeoIp(
 }
 
 /**
- * Guest bootstrap: browser first (instant), then optional geo IP.
- * Always returns a valid region code; unknown → NG.
+ * Guest region resolve order (location > language):
+ * 1) Geo IP — where the device actually is (NG stays NG even if browser is en-US)
+ * 2) Timezone (Africa/Lagos → NG, America/New_York → US, …)
+ * 3) Strong locale only (en-NG, de-DE, en-GB…) — NEVER en-US → US
+ * 4) DEFAULT_REGION (NG / ₦)
  */
 export async function detectGuestRegion(): Promise<string> {
-  const fromBrowser = detectRegionFromBrowser();
-  if (fromBrowser && REGIONS[fromBrowser]) return fromBrowser;
-
-  const fromIp = await detectRegionFromGeoIp(1800);
+  const fromIp = await detectRegionFromGeoIp(2000);
   if (fromIp && REGIONS[fromIp]) return fromIp;
+
+  const fromTz = detectRegionFromTimezone();
+  if (fromTz && REGIONS[fromTz]) return fromTz;
+
+  const fromLocale = detectRegionFromLocale();
+  if (fromLocale && REGIONS[fromLocale]) return fromLocale;
 
   return DEFAULT_REGION;
 }
@@ -397,7 +386,7 @@ export function convertWithNgnRates(
   return Math.round(converted * factor) / factor;
 }
 
-/** @deprecated name kept for old imports — same as convert via region codes */
+/** @deprecated name kept for old imports */
 export function convertPrice(
   amount: number,
   fromRegionCode?: string | null,
@@ -459,7 +448,7 @@ export function formatProductPrice(
   return formatMoney(converted, buyerRegion);
 }
 
-/** Legacy export — prefer DEFAULT_RATES_TO_NGN / server config */
+/** Legacy export */
 export const USD_RATES: Record<string, number> = {
   USD: 1,
   NGN: 1326.68,

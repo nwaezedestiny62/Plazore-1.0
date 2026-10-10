@@ -13,10 +13,6 @@ export interface RegionConfig {
   flag: string;
 }
 
-/**
- * Marketplace regions (13). Currency is attached for display.
- * Rates: 1 unit of currency = rateToNgn NGN (offline fallback until /api/currency is live).
- */
 export const REGIONS: Record<string, RegionConfig> = {
   NG: {
     code: "NG",
@@ -124,7 +120,6 @@ export const REGIONS: Record<string, RegionConfig> = {
   },
 };
 
-/** Old / alternate codes → current region codes */
 export const REGION_ALIASES: Record<string, string> = {
   EU: "FR",
   EUROPE: "FR",
@@ -134,10 +129,6 @@ export const REGION_ALIASES: Record<string, string> = {
   USA: "US",
 };
 
-/**
- * ISO 3166-1 alpha-2 country → marketplace region.
- * Only listed countries resolve; everything else falls back to DEFAULT_REGION (NG).
- */
 export const COUNTRY_TO_REGION: Record<string, string> = {
   NG: "NG",
   GH: "GH",
@@ -162,7 +153,6 @@ export const COUNTRY_TO_REGION: Record<string, string> = {
   NZ: "AU",
 };
 
-/** IANA timezone → region (instant, offline) */
 export const TIMEZONE_TO_REGION: Record<string, string> = {
   "Africa/Lagos": "NG",
   "Africa/Accra": "GH",
@@ -198,7 +188,7 @@ export const TIMEZONE_TO_REGION: Record<string, string> = {
   "Australia/Adelaide": "AU",
 };
 
-/** Locale tag → region */
+/** NEVER map en-US → US */
 export const LOCALE_TO_REGION: Record<string, string> = {
   "en-NG": "NG",
   "en-GH": "GH",
@@ -208,8 +198,6 @@ export const LOCALE_TO_REGION: Record<string, string> = {
   "en-ZA": "ZA",
   "ar-EG": "EG",
   "en-EG": "EG",
-  "en-US": "US",
-  "en-CA": "CA",
   "fr-CA": "CA",
   "en-GB": "GB",
   "de-DE": "DE",
@@ -220,7 +208,6 @@ export const LOCALE_TO_REGION: Record<string, string> = {
 export const DEFAULT_REGION = "NG";
 export const REGION_LIST = Object.values(REGIONS);
 
-/** 1 UNIT of this currency = X NGN (fallback until server rates load) */
 export const DEFAULT_RATES_TO_NGN: Record<string, number> = {
   NGN: 1,
   USD: 1326.68,
@@ -247,7 +234,6 @@ export function resolveRegionCode(code?: string | null): string {
   return DEFAULT_REGION;
 }
 
-/** Unsupported countries → NG */
 export function regionFromCountry(country?: string | null): string {
   if (!country) return DEFAULT_REGION;
   const cc = String(country).trim().toUpperCase();
@@ -264,15 +250,7 @@ export function regionCurrencyCode(regionCode?: string | null): string {
   return getRegion(regionCode).currency.code;
 }
 
-/**
- * Instant offline guess from timezone + locale.
- * Works on React Native (Hermes) and web.
- */
-/**
- * Instant offline guess from timezone + locale.
- * Works on React Native (Hermes) and web.
- */
-export function detectRegionFromBrowser(): string | null {
+export function detectRegionFromTimezone(): string | null {
   try {
     const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "";
     if (tz && TIMEZONE_TO_REGION[tz] && REGIONS[TIMEZONE_TO_REGION[tz]]) {
@@ -281,41 +259,33 @@ export function detectRegionFromBrowser(): string | null {
   } catch {
     /* ignore */
   }
+  return null;
+}
 
+export function detectRegionFromLocale(): string | null {
   try {
-    // RN / Hermes: navigator may exist; keep access untyped and narrow safely
     const nav: any =
-      typeof globalThis !== "undefined"
-        ? (globalThis as any).navigator
-        : undefined;
-
+      typeof globalThis !== "undefined" ? (globalThis as any).navigator : undefined;
     const locale =
       (Array.isArray(nav?.languages) && nav.languages[0]) ||
       (typeof nav?.language === "string" && nav.language) ||
       "";
-
-    const tag = String(locale).trim();
+    const tag = String(locale).trim().replace("_", "-");
     if (tag && LOCALE_TO_REGION[tag] && REGIONS[LOCALE_TO_REGION[tag]]) {
       return LOCALE_TO_REGION[tag];
-    }
-
-    const parts = tag.replace("_", "-").split("-");
-    if (parts.length >= 2) {
-      const fromLocale = regionFromCountry(parts[parts.length - 1]);
-      if (fromLocale !== DEFAULT_REGION) return fromLocale;
     }
   } catch {
     /* ignore */
   }
-
   return null;
 }
 
-/**
- * Optional geo IP with short timeout. Safe on RN fetch.
- */
+export function detectRegionFromBrowser(): string | null {
+  return detectRegionFromTimezone();
+}
+
 export async function detectRegionFromGeoIp(
-  timeoutMs = 1800
+  timeoutMs = 2000
 ): Promise<string | null> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -342,22 +312,22 @@ export async function detectRegionFromGeoIp(
 }
 
 /**
- * Guest bootstrap: timezone/locale first, then geo IP.
- * Always returns a valid region; unknown → NG.
+ * 1) Geo IP  2) Timezone  3) Strong locale  4) NG
+ * Never en-US → US
  */
 export async function detectGuestRegion(): Promise<string> {
-  const fromDevice = detectRegionFromBrowser();
-  if (fromDevice && REGIONS[fromDevice]) return fromDevice;
-
-  const fromIp = await detectRegionFromGeoIp(1800);
+  const fromIp = await detectRegionFromGeoIp(2000);
   if (fromIp && REGIONS[fromIp]) return fromIp;
+
+  const fromTz = detectRegionFromTimezone();
+  if (fromTz && REGIONS[fromTz]) return fromTz;
+
+  const fromLocale = detectRegionFromLocale();
+  if (fromLocale && REGIONS[fromLocale]) return fromLocale;
 
   return DEFAULT_REGION;
 }
 
-/**
- * Convert using NGN as pivot.
- */
 export function convertWithNgnRates(
   amount: number,
   fromCurrency: string,
@@ -381,7 +351,6 @@ export function convertWithNgnRates(
   return Math.round(converted * factor) / factor;
 }
 
-/** @deprecated */
 export function convertPrice(
   amount: number,
   fromRegionCode?: string | null,
@@ -394,7 +363,6 @@ export function convertPrice(
   return out == null ? Number(amount) || 0 : out;
 }
 
-/** Deterministic money string (no locale drift between platforms). */
 export function formatMoney(
   amount: number,
   regionCode?: string | null
@@ -419,10 +387,6 @@ export function formatMoney(
     : `${sign}${body}${region.currency.symbol}`;
 }
 
-/**
- * Product amount is in product.region’s currency.
- * Display in buyer region currency.
- */
 export function formatProductPrice(
   amount: number,
   productRegion?: string | null,
@@ -443,7 +407,6 @@ export function formatProductPrice(
   return formatMoney(converted, buyerRegion);
 }
 
-/** Legacy export */
 export const USD_RATES: Record<string, number> = {
   USD: 1,
   NGN: 1326.68,
