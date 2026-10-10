@@ -31,7 +31,6 @@ import {
 import { writePaymentAudit } from "../utils/paymentAudit.js";
 import { sendNotification } from "../utils/sendNotification.js";
 
-
 /** Snapshot frozen on Order.feeBreakdown (includes planId from planEnforcement). */
 type FeeBreakdownSnap = {
   subtotal?: number;
@@ -189,8 +188,8 @@ export async function createPendingOrders(params: {
       String(sellerItems[0]?.currency || "").trim().toUpperCase() ||
       currencyForRegion(region);
 
-    // ★ Dynamic plan fee — Free 8%, Dominant 5%, Business Plus 3.5%, Global Reach 2%
-    // Shipping excluded from fee calculation inside feeBreakdownForSellerOrder
+    // Dynamic plan fee — Free 8%, Dominant 5%, Business Plus 3.5%, Global Reach 2%
+    // Shipping excluded from fee base inside feeBreakdownForSellerOrder
     const feeBreakdown = await feeBreakdownForSellerOrder(
       sellerId,
       subtotal,
@@ -362,7 +361,7 @@ export async function failPaymentAndReleaseStock(
 
 /**
  * Initialize payment for an order.
- * provider: "paystack" | "stripe" (default paystack for backward compatibility)
+ * provider: "paystack" | "stripe" (default paystack)
  * Uses frozen feeBreakdown from order (plan rate locked at createPendingOrders).
  */
 export async function initializePaymentForOrder(params: {
@@ -420,17 +419,21 @@ export async function initializePaymentForOrder(params: {
     .trim()
     .toUpperCase();
 
-  // Prefer frozen plan fee from order; fallback recalculates with default only
   const lockedRate =
     typeof fb.platformFeeRate === "number"
       ? fb.platformFeeRate
       : PLAZORE_TRANSACTION_FEE_RATE;
 
-  const fallbackFees = calculateSellerPayout(order.subtotal, order.shippingCost, currency);
+  const fallbackFees = calculateSellerPayout(
+    order.subtotal,
+    order.shippingCost,
+    currency
+  );
   const platformFee = fb.platformFee ?? fallbackFees.platformFee;
   const sellerPayoutAmount =
     fb.sellerPayoutAmount ?? fallbackFees.sellerPayoutAmount;
   const platformFeeRate = lockedRate;
+  const planId = (fb as any).planId ?? null;
 
   const reference = generateReference("PLZPAY");
   const amountMinor = toMinorUnits(amount, currency);
@@ -459,7 +462,7 @@ export async function initializePaymentForOrder(params: {
       lifecycle: "PENDING_PAYMENT",
       metadata: {
         type: "marketplace_order",
-        planId: (fb as any).planId ?? null,
+        planId,
       },
     });
   } else {
@@ -496,6 +499,10 @@ export async function initializePaymentForOrder(params: {
       sellerId: order.seller.toString(),
       buyerEmail: email,
       returnUrl: params.callbackUrl,
+      metadata: {
+        type: "marketplace_order",
+        planId: planId != null ? String(planId) : "",
+      },
     });
 
     payment.stripePaymentIntentId = intent.paymentIntentId;
@@ -527,7 +534,7 @@ export async function initializePaymentForOrder(params: {
       meta: {
         provider: "stripe",
         paymentIntentId: intent.paymentIntentId,
-        planId: (fb as any).planId ?? null,
+        planId,
         platformFeeRate,
       },
     });
@@ -567,7 +574,7 @@ export async function initializePaymentForOrder(params: {
       sellerId: order.seller.toString(),
       region,
       currency,
-      planId: (fb as any).planId ?? null,
+      planId,
       platformFeeRate,
     },
   });
@@ -599,7 +606,11 @@ export async function initializePaymentForOrder(params: {
     amount,
     currency,
     reference,
-    meta: { provider: "paystack", planId: (fb as any).planId ?? null, platformFeeRate },
+    meta: {
+      provider: "paystack",
+      planId,
+      platformFeeRate,
+    },
   });
 
   return {
@@ -860,10 +871,13 @@ async function markPaymentSuccess(
   };
 
   if (session) {
-    await session.withTransaction(async () => {
-      await apply();
-    });
-    session.endSession();
+    try {
+      await session.withTransaction(async () => {
+        await apply();
+      });
+    } finally {
+      session.endSession();
+    }
   } else {
     await apply();
   }
@@ -899,7 +913,7 @@ async function markPaymentSuccess(
   return { payment, order, alreadyVerified: false };
 }
 
-/** Paystack charge.success webhook handler (idempotent). */
+/** Paystack charge.success webhook handler (idempotent). Orders only. */
 export async function handleChargeSuccessWebhook(
   eventId: string,
   payload: any,
@@ -937,6 +951,22 @@ export async function handleChargeSuccessWebhook(
     return { ok: false, error: "Missing reference" };
   }
 
+  // Seller plan payments are handled separately in paymentController
+  // via tryActivateSubscriptionFromPaystackCharge (metadata.type === seller_subscription).
+  // Skip order verify if this charge is a subscription payment.
+  const meta = payload?.data?.metadata || {};
+  if (String(meta.type || "") === "seller_subscription") {
+    await PaymentEvent.updateOne(
+      { eventId },
+      {
+        processed: true,
+        processedAt: new Date(),
+        processingError: "delegated_to_subscription_handler",
+      }
+    );
+    return { ok: true, delegated: true };
+  }
+
   try {
     const result = await verifyPaymentByReference(reference, "webhook");
     await PaymentEvent.updateOne(
@@ -959,7 +989,7 @@ export async function handleChargeSuccessWebhook(
 }
 
 /**
- * Stripe payment_intent.succeeded webhook handler.
+ * Stripe payment_intent.succeeded webhook helper for marketplace orders.
  * Looks up Payment by stripePaymentIntentId or plazore_reference metadata.
  */
 export async function handleStripePaymentIntentSucceeded(
@@ -997,6 +1027,19 @@ export async function handleStripePaymentIntentSucceeded(
       { processingError: "Invalid signature" }
     );
     return { ok: false, error: "Invalid signature" };
+  }
+
+  // Seller subscriptions handled in stripeWebhookController
+  if (String(intent?.metadata?.type || "") === "seller_subscription") {
+    await PaymentEvent.updateOne(
+      { eventId },
+      {
+        processed: true,
+        processedAt: new Date(),
+        processingError: "delegated_to_subscription_handler",
+      }
+    );
+    return { ok: true, delegated: true };
   }
 
   try {
