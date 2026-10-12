@@ -6,7 +6,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { HeroStage } from "@/components/mall/HeroStage";
 import {
   Bell,
-  ChevronDown,
   Search,
   ShoppingBag,
   ShoppingCart,
@@ -104,7 +103,7 @@ function buildRooms(
     !!serverRooms &&
     ((serverRooms[1]?.length || 0) > 0 ||
       (serverRooms[2]?.length || 0) > 0 ||
-      (serverRooms[3]?.length || 0) ||
+      (serverRooms[3]?.length || 0) > 0 ||
       (serverRooms[4]?.length || 0) > 0);
 
   if (hasServerRooms && serverRooms) {
@@ -137,6 +136,12 @@ function isBagVisible(el: HTMLElement | null): boolean {
     r.width > 0 &&
     r.height > 0
   );
+}
+
+/** Native smooth scroll to an element — no snap, no lock, respects free scroll. */
+function smoothScrollToEl(el: HTMLElement | null) {
+  if (!el || typeof window === "undefined") return;
+  el.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function CustomBarIcon({ className = "" }: { className?: string }) {
@@ -184,7 +189,6 @@ function MallChrome({
       const desktop = bagRefDesktop.current;
       const mobile = bagRefMobile.current;
 
-      // Mobile header is md:hidden — prefer it under 768 when visible
       if (window.innerWidth < 768 && isBagVisible(mobile)) {
         fly.registerBagTarget(mobile);
         return;
@@ -412,7 +416,6 @@ function MallChrome({
             ) : null}
           </Link>
 
-          {/* Futuristic mobile cart target */}
           <Link
             ref={bagRefMobile}
             href="/cart"
@@ -475,27 +478,27 @@ function RoomThreeStage({ products }: { products: Product[] }) {
   const [current, setCurrent] = useState(0);
   const currentRef = useRef(0);
   const busy = useRef(false);
-  const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cartBtnRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     currentRef.current = current;
   }, [current]);
 
-  const clearHold = useCallback(() => {
-    if (holdTimer.current) {
-      clearTimeout(holdTimer.current);
-      holdTimer.current = null;
+  const clearAuto = useCallback(() => {
+    if (autoTimer.current) {
+      clearTimeout(autoTimer.current);
+      autoTimer.current = null;
     }
   }, []);
 
-  const scheduleHold = useCallback(() => {
-    clearHold();
+  const scheduleAuto = useCallback(() => {
+    clearAuto();
     if (products.length < 2) return;
-    holdTimer.current = setTimeout(() => {
+    autoTimer.current = setTimeout(() => {
       goTo(currentRef.current + 1);
     }, 5200);
-  }, [products.length, clearHold]);
+  }, [products.length, clearAuto]);
 
   const goTo = useCallback(
     (raw: number) => {
@@ -505,22 +508,22 @@ function RoomThreeStage({ products }: { products: Product[] }) {
         ((raw % products.length) + products.length) % products.length;
       if (target === from) return;
       busy.current = true;
-      clearHold();
+      clearAuto();
       setCurrent(target);
       window.setTimeout(() => {
         busy.current = false;
         currentRef.current = target;
-        scheduleHold();
+        scheduleAuto();
       }, 1800);
     },
-    [products.length, clearHold, scheduleHold],
+    [products.length, clearAuto, scheduleAuto],
   );
 
   useEffect(() => {
     if (products.length < 2) return;
-    scheduleHold();
-    return () => clearHold();
-  }, [products.length, scheduleHold, clearHold]);
+    scheduleAuto();
+    return () => clearAuto();
+  }, [products.length, scheduleAuto, clearAuto]);
 
   const handleAddToCart = () => {
     const product = products[currentRef.current];
@@ -675,6 +678,16 @@ function MallInner({
   const roomRefs = useRef<Record<number, HTMLElement | null>>({});
   const fetchedRef = useRef(false);
   const heroFetchedRef = useRef(false);
+
+  /* Native smooth scroll on this page — no snap, no section lock */
+  useEffect(() => {
+    const html = document.documentElement;
+    const prev = html.style.scrollBehavior;
+    html.style.scrollBehavior = "smooth";
+    return () => {
+      html.style.scrollBehavior = prev;
+    };
+  }, []);
 
   useEffect(() => {
     if (heroFetchedRef.current) return;
@@ -874,33 +887,47 @@ function MallInner({
     return () => clearInterval(id);
   }, [heroSlides.length]);
 
+  /**
+   * Progress + active room only — read-only.
+   * No scroll hijack, no snap-on-stop, no section hold.
+   * User stops wherever they are; we only observe.
+   */
   useEffect(() => {
+    let ticking = false;
+
     const onScroll = () => {
-      const heroH = window.innerHeight;
-      const y = window.scrollY;
-      setProgress(Math.min(1, Math.max(0, y / (heroH * 0.75))));
-      const probe = y + window.innerHeight * 0.3;
-      let current = 1;
-      for (const n of [1, 2, 3, 4]) {
-        const el = roomRefs.current[n];
-        if (el) {
-          const top = el.getBoundingClientRect().top + window.scrollY;
-          if (top <= probe) current = n;
+      if (ticking) return;
+      ticking = true;
+      requestAnimationFrame(() => {
+        const heroH = window.innerHeight || 1;
+        const y = window.scrollY || window.pageYOffset || 0;
+        setProgress(Math.min(1, Math.max(0, y / (heroH * 0.75))));
+
+        const probe = y + window.innerHeight * 0.3;
+        let current = 1;
+        for (const n of [1, 2, 3, 4]) {
+          const el = roomRefs.current[n];
+          if (el) {
+            const top = el.getBoundingClientRect().top + y;
+            if (top <= probe) current = n;
+          }
         }
-      }
-      setActiveRoom(current);
+        setActiveRoom(current);
+        ticking = false;
+      });
     };
+
     onScroll();
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
 
   const enterShowroom = () => {
-    showroomRef.current?.scrollIntoView({ behavior: "smooth" });
+    smoothScrollToEl(showroomRef.current);
   };
 
   const goRoom = (n: number) => {
-    roomRefs.current[n]?.scrollIntoView({ behavior: "smooth", block: "start" });
+    smoothScrollToEl(roomRefs.current[n] ?? null);
   };
 
   const current =
@@ -910,11 +937,15 @@ function MallInner({
   const subClass = heroSubSize(current?.subheadline || "");
 
   return (
-    <div className="min-h-dvh bg-bg text-text">
+    <div
+      className="min-h-dvh bg-bg text-text"
+      style={{ scrollBehavior: "smooth" }}
+    >
       <MallChrome progress={progress} bagN={bagN} notifN={notifN} />
 
       <HeroStage slides={heroSlides} onEnterShowroom={enterShowroom} />
 
+      {/* Desktop room dots — optional jump only; never auto-snap */}
       <div
         className={`fixed right-4 top-1/2 z-40 hidden -translate-y-1/2 flex-col gap-2.5 md:flex ${
           roomNavOn ? "opacity-100" : "pointer-events-none opacity-0"
@@ -935,6 +966,7 @@ function MallInner({
         ))}
       </div>
 
+      {/* Mobile room pills — optional jump only */}
       <div
         className={`fixed inset-x-0 bottom-5 z-40 flex justify-center px-4 md:hidden ${
           roomNavOn ? "opacity-100" : "pointer-events-none opacity-0"
