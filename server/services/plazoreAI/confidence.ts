@@ -5,6 +5,8 @@
  *
  * Seller-owned purchases (buyer === seller) never contribute to confidence.
  * All buyer-facing default copy is time-stamped with “As of …” using gatheredAt.
+ *
+ * Daily algorithm refresh (no AI) always keeps asOf + the “As of …” date fresh.
  */
 
 import mongoose from "mongoose";
@@ -97,6 +99,23 @@ export function formatAsOfDate(date?: Date | string | null): string {
     month: "short",
     year: "numeric",
   });
+}
+
+/**
+ * Rewrite only the date in existing explanation text.
+ * No AI. Preserves AI prose; only refreshes “As of …”.
+ */
+export function stampConfidenceDate(
+  text: string,
+  asOf?: Date | string | null
+): string {
+  const when = formatAsOfDate(asOf);
+  const t = String(text || "").trim();
+  if (!t) return "";
+  if (/as of\s+/i.test(t)) {
+    return t.replace(/as of\s+[^,.\n]*/i, `As of ${when}`);
+  }
+  return `As of ${when}, ${t}`;
 }
 
 export function defaultExplanationFor(
@@ -394,8 +413,15 @@ export async function gatherCommerceEvidence(
 
 /**
  * Algorithm-only refresh for one product (no AI call).
- * Updates buyerConfidence when the level/score meaningfully changes.
- * defaultExplanation always refreshed with current As of date when level moves.
+ *
+ * Always:
+ *   - recomputes level/score/factors from live commerce evidence
+ *   - refreshes buyerConfidence.asOf + commerceEvidence.gatheredAt
+ *   - keeps the buyer-facing “As of …” date fresh (stamp existing AI prose,
+ *     or fall back to defaultExplanation)
+ *
+ * When level moves (or explanation was empty): replace with dated default.
+ * When only score/asOf moves: stamp the date into existing explanation only.
  */
 export async function refreshBuyerConfidenceForProduct(
   productId: string
@@ -440,10 +466,10 @@ export async function refreshBuyerConfidenceForProduct(
   }
 
   const prev = aiDoc.buyerConfidence;
-  const changed =
-    !prev ||
-    prev.level !== result.level ||
-    Math.abs((prev.score || 0) - result.score) >= 4;
+  const levelMoved = !prev || prev.level !== result.level;
+  const scoreMoved =
+    !prev || Math.abs((prev.score || 0) - result.score) >= 4;
+  const changed = levelMoved || scoreMoved;
 
   const confidencePayload = {
     level: result.level,
@@ -452,35 +478,34 @@ export async function refreshBuyerConfidenceForProduct(
     asOf: result.asOf,
   };
 
-  if (changed) {
-    aiDoc.buyerConfidence = confidencePayload as any;
-    // Keep AI prose unless empty or level moved — dated default is safer than stale AI line
-    if (!aiDoc.confidenceExplanation?.trim()) {
-      aiDoc.confidenceExplanation = result.defaultExplanation;
-    } else if (prev?.level !== result.level) {
-      aiDoc.confidenceExplanation = result.defaultExplanation;
-    }
-    (aiDoc as any).commerceEvidence = {
-      seller: commerce.seller,
-      product: commerce.product,
-      gatheredAt: commerce.gatheredAt,
-    };
-    (aiDoc as any).lastAlgorithmAt = new Date();
-    await aiDoc.save();
+  // --- always refresh snapshot + asOf (algorithm only, no AI) ---
+  aiDoc.buyerConfidence = {
+    ...(prev || {}),
+    ...confidencePayload,
+  } as any;
+
+  (aiDoc as any).commerceEvidence = {
+    seller: commerce.seller,
+    product: commerce.product,
+    gatheredAt: commerce.gatheredAt,
+  };
+  (aiDoc as any).lastAlgorithmAt = new Date();
+
+  // --- keep “As of …” fresh on buyer-facing copy (no AI) ---
+  const existing = String(aiDoc.confidenceExplanation || "").trim();
+
+  if (!existing || levelMoved) {
+    // Empty or level changed → safe dated default
+    aiDoc.confidenceExplanation = result.defaultExplanation;
   } else {
-    // Still refresh snapshot + asOf even if level/score unchanged
-    aiDoc.buyerConfidence = {
-      ...(prev || {}),
-      ...confidencePayload,
-    } as any;
-    (aiDoc as any).lastAlgorithmAt = new Date();
-    (aiDoc as any).commerceEvidence = {
-      seller: commerce.seller,
-      product: commerce.product,
-      gatheredAt: commerce.gatheredAt,
-    };
-    await aiDoc.save();
+    // Same level → preserve AI prose, only rewrite the date
+    aiDoc.confidenceExplanation = stampConfidenceDate(
+      existing,
+      commerce.gatheredAt
+    );
   }
+
+  await aiDoc.save();
 
   return { updated: changed, level: result.level };
 }

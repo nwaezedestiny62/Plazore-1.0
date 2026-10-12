@@ -123,14 +123,6 @@ export const TV_ROWS: TvRow[] = [
         image:
           "https://images.unsplash.com/photo-1441986300917-64674bd600d8?auto=format&fit=crop&w=900&q=80",
       },
-      {
-        href: "/currency",
-        label: "Rates",
-        kicker: "Currency",
-        kind: "image",
-        image:
-          "https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?auto=format&fit=crop&w=900&q=80",
-      },
     ],
   },
   {
@@ -231,6 +223,14 @@ export const TV_ROWS: TvRow[] = [
         image:
           "https://images.unsplash.com/photo-1639322537228-f710d846310a?auto=format&fit=crop&w=900&q=80",
       },
+      {
+      href: "/currency",
+      label: "Rates",
+      kicker: "Currency",
+      kind: "image",
+      image:
+        "https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?auto=format&fit=crop&w=900&q=80",
+    },
     ],
   },
   {
