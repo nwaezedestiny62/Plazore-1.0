@@ -4,6 +4,7 @@
  * Algorithm maintains after AI baseline. No invented evidence.
  *
  * Seller-owned purchases (buyer === seller) never contribute to confidence.
+ * All buyer-facing default copy is time-stamped with “As of …” using gatheredAt.
  */
 
 import mongoose from "mongoose";
@@ -48,8 +49,10 @@ export interface CommerceEvidence {
 
 export interface ConfidenceResult extends IBuyerConfidence {
   evidence: CommerceEvidence;
-  /** Safe buyer-facing line if AI explanation is missing */
+  /** Safe buyer-facing line if AI explanation is missing — always includes As of date */
   defaultExplanation: string;
+  /** ISO timestamp for prompts / UI */
+  asOf: string;
 }
 
 const EMPTY_SLICE: CommerceSlice = {
@@ -74,14 +77,40 @@ function levelFromScore(score: number): ConfidenceLevel {
   return "Limited Confidence";
 }
 
-export function defaultExplanationFor(level: ConfidenceLevel): string {
+/** Human-readable date for “As of 12 Oct 2026” style lines. */
+export function formatAsOfDate(date?: Date | string | null): string {
+  const d =
+    date instanceof Date
+      ? date
+      : date
+        ? new Date(date)
+        : new Date();
+  if (Number.isNaN(d.getTime())) {
+    return new Date().toLocaleDateString("en-GB", {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    });
+  }
+  return d.toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+export function defaultExplanationFor(
+  level: ConfidenceLevel,
+  asOf?: Date | string | null
+): string {
+  const when = formatAsOfDate(asOf);
   if (level === "High Confidence") {
-    return "Plazore has substantial commerce evidence supporting this confidence level.";
+    return `As of ${when}, Plazore has substantial commerce evidence supporting this confidence level.`;
   }
   if (level === "Growing Confidence") {
-    return "Plazore is building more evidence from real commerce activity on this listing and seller.";
+    return `As of ${when}, Plazore is building more evidence from real commerce activity on this listing and seller.`;
   }
-  return "There isn’t enough Plazore commerce evidence yet — common for newer listings and sellers.";
+  return `As of ${when}, there isn’t enough Plazore commerce evidence yet — common for newer listings and sellers.`;
 }
 
 /** Listing quality only — capped so it cannot alone produce High Confidence. */
@@ -244,6 +273,7 @@ function sliceScore(
 /**
  * Pure calculation from listing + commerce evidence.
  * Reversible: level can rise or fall with new evidence.
+ * defaultExplanation always includes As of [gatheredAt].
  */
 export function calculateBuyerConfidence(
   listing: ListingInput,
@@ -272,6 +302,8 @@ export function calculateBuyerConfidence(
 
   score = Math.min(100, Math.max(0, Math.round(score)));
   const level = levelFromScore(score);
+  const gatheredAt = commerce.gatheredAt || new Date();
+  const asOf = gatheredAt.toISOString();
 
   const factors = [
     ...productPart.factors.slice(0, 2),
@@ -284,7 +316,8 @@ export function calculateBuyerConfidence(
     score,
     factors,
     evidence: commerce,
-    defaultExplanation: defaultExplanationFor(level),
+    asOf,
+    defaultExplanation: defaultExplanationFor(level, gatheredAt),
   };
 }
 
@@ -362,6 +395,7 @@ export async function gatherCommerceEvidence(
 /**
  * Algorithm-only refresh for one product (no AI call).
  * Updates buyerConfidence when the level/score meaningfully changes.
+ * defaultExplanation always refreshed with current As of date when level moves.
  */
 export async function refreshBuyerConfidenceForProduct(
   productId: string
@@ -411,17 +445,19 @@ export async function refreshBuyerConfidenceForProduct(
     prev.level !== result.level ||
     Math.abs((prev.score || 0) - result.score) >= 4;
 
+  const confidencePayload = {
+    level: result.level,
+    score: result.score,
+    factors: result.factors,
+    asOf: result.asOf,
+  };
+
   if (changed) {
-    aiDoc.buyerConfidence = {
-      level: result.level,
-      score: result.score,
-      factors: result.factors,
-    };
-    // Keep AI prose unless empty; fill calm default if needed
+    aiDoc.buyerConfidence = confidencePayload as any;
+    // Keep AI prose unless empty or level moved — dated default is safer than stale AI line
     if (!aiDoc.confidenceExplanation?.trim()) {
       aiDoc.confidenceExplanation = result.defaultExplanation;
     } else if (prev?.level !== result.level) {
-      // Level moved — prefer accurate default until next AI edit pass
       aiDoc.confidenceExplanation = result.defaultExplanation;
     }
     (aiDoc as any).commerceEvidence = {
@@ -432,6 +468,11 @@ export async function refreshBuyerConfidenceForProduct(
     (aiDoc as any).lastAlgorithmAt = new Date();
     await aiDoc.save();
   } else {
+    // Still refresh snapshot + asOf even if level/score unchanged
+    aiDoc.buyerConfidence = {
+      ...(prev || {}),
+      ...confidencePayload,
+    } as any;
     (aiDoc as any).lastAlgorithmAt = new Date();
     (aiDoc as any).commerceEvidence = {
       seller: commerce.seller,

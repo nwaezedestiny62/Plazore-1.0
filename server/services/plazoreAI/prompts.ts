@@ -1,7 +1,32 @@
 import { AIGenerationInput } from "./types.js";
 
 export const PROMPT_VERSION =
-  Number(process.env.PLAZORE_AI_PROMPT_VERSION) || 3;
+  Number(process.env.PLAZORE_AI_PROMPT_VERSION) || 4;
+
+/** Prefer backend snapshot date; fall back to UTC calendar day. */
+function confidenceAsOfDate(input: AIGenerationInput): string {
+  const fromInput =
+    (input as any)?.buyerConfidence?.asOf ||
+    (input as any)?.confidenceAsOf ||
+    (input as any)?.statsAsOf ||
+    null;
+  if (fromInput) {
+    const d = new Date(fromInput);
+    if (!Number.isNaN(d.getTime())) {
+      return d.toLocaleDateString("en-GB", {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+      });
+    }
+    return String(fromInput);
+  }
+  return new Date().toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+}
 
 export function buildSystemPrompt(): string {
   return `
@@ -84,6 +109,23 @@ RULES
 - Keep every section very short. Clarity over cleverness.
 
 --------------------------------------------------
+CONFIDENCE, ORDER HISTORY & “AS OF” (MANDATORY)
+
+Whenever you mention commerce evidence, order history, sales activity,
+fulfillment track record, or buyer/seller confidence factors that depend on
+platform stats (for this product or this seller), you MUST ground the line in time:
+
+• Include the phrase **As of [date]** in that same sentence (use the exact date
+  supplied in the user message under CONFIDENCE SNAPSHOT DATE).
+• Example shape: “As of 12 Oct 2026, this seller has limited completed-order history on Plazore.”
+• Do not state order counts, fulfillment rates, or confidence strength as if they were timeless.
+• confidenceExplanation must include As of [date] when it refers to evidence strength.
+• thingsToConsider items that reference order history / confidence / commerce activity
+  must also include As of [date] in that item.
+• If the factors say evidence is thin or early, say so calmly — still with As of [date].
+• Never invent order numbers or history beyond what the factors describe.
+
+--------------------------------------------------
 SECTIONS (tight)
 
 summary — 1–3 short sentences. What this listing really is. Emoji ok if natural.
@@ -91,8 +133,11 @@ overview — 2–4 short sentences. Decision angle: what’s clear, what to noti
 highlights — 2–4 short items. Useful observations (specs if present). Emojis welcome.
 bestFor — 2–3 short items. Situations this listing actually supports.
 shippingSummary — 1–2 short sentences. Simple shipping facts. 📦 when it fits.
-thingsToConsider — 1–3 short items. Missing info that could matter. Soft, never alarming.
-confidenceExplanation — 1 short sentence. What the given confidence level means for strength of commerce evidence — not a guarantee.
+thingsToConsider — 1–3 short items. Missing info or soft cautions that could matter.
+  Soft, never alarming. If an item touches order history / confidence / commerce evidence,
+  include As of [date] in that sentence.
+confidenceExplanation — 1 short sentence. What the given confidence level means for
+  strength of commerce evidence — not a guarantee. Must include As of [date].
 
 --------------------------------------------------
 OUTPUT — valid JSON only. No markdown.
@@ -112,6 +157,8 @@ Be the friend who knows the product world — and still lets them choose.
 }
 
 export function buildUserPrompt(input: AIGenerationInput): string {
+  const asOf = confidenceAsOfDate(input);
+
   const shippingText = input.shipping
     ? `Method: ${input.shipping.method || "Not specified"}
 Courier: ${input.shipping.courierCompany || "Not specified"}
@@ -177,11 +224,16 @@ SELLER
 Store: ${input.seller?.storeName || "Not provided"}
 Verified: ${input.seller?.isSellerVerified ? "Yes" : "No"}
 
-BUYER CONFIDENCE (do not change — describe evidence strength only, never as a guarantee)
+CONFIDENCE SNAPSHOT DATE (use this exact date with “As of …” whenever you mention order history, commerce evidence, or confidence strength)
+As of: ${asOf}
+
+BUYER CONFIDENCE (do not change score/level — describe evidence strength only, never as a guarantee)
 Level: ${input.buyerConfidence.level}
 Score: ${input.buyerConfidence.score}/100
 Factors:
 ${input.buyerConfidence.factors.map((f) => `• ${f}`).join("\n")}
+
+When confidenceExplanation or thingsToConsider refer to these factors or any order/seller history, write “As of ${asOf}, …” in that sentence.
 
 Keep it short. Talk like a friend who knows this kind of product.
 Help them see clearly — no pressure.

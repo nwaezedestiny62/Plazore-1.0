@@ -40,6 +40,7 @@ function normalizeSpecifications(raw: any): Record<string, string> {
  * Main entry used by the background job / product create-edit path.
  * Generates or regenerates Plazore AI for a listing.
  * Commerce evidence is gathered first so confidence is never reset to “new” on edit.
+ * Snapshot date (gatheredAt) is passed into the prompt as confidence asOf.
  */
 export async function generateProductAI(productId: string): Promise<void> {
   const product = await Product.findById(productId).lean();
@@ -95,10 +96,18 @@ export async function generateProductAI(productId: string): Promise<void> {
     commerce
   );
 
+  const asOfIso = (
+    commerce.gatheredAt instanceof Date
+      ? commerce.gatheredAt
+      : new Date(commerce.gatheredAt || Date.now())
+  ).toISOString();
+
   const buyerConfidence = {
     level: confidenceResult.level,
     score: confidenceResult.score,
     factors: confidenceResult.factors,
+    /** Snapshot time for “As of …” in AI + UI copy */
+    asOf: asOfIso,
   };
 
   const commerceEvidence = {
@@ -121,8 +130,9 @@ export async function generateProductAI(productId: string): Promise<void> {
     specifications,
     verificationDocuments,
     seller: seller || undefined,
-    buyerConfidence,
-  };
+    buyerConfidence: buyerConfidence as any,
+    confidenceAsOf: asOfIso,
+  } as AIGenerationInput;
 
   if (aiDoc) {
     aiDoc.status = "pending";
@@ -188,6 +198,10 @@ export async function generateProductAI(productId: string): Promise<void> {
     // Keep confidence + commerce snapshot even on failed generation
     aiDoc.buyerConfidence = buyerConfidence as any;
     aiDoc.commerceEvidence = commerceEvidence as any;
+    // Fallback copy still dated
+    if (!aiDoc.confidenceExplanation?.trim()) {
+      aiDoc.confidenceExplanation = confidenceResult.defaultExplanation;
+    }
     await aiDoc.save();
 
     throw err;
