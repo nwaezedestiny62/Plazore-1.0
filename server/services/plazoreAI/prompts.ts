@@ -1,7 +1,7 @@
 import { AIGenerationInput } from "./types.js";
 
 export const PROMPT_VERSION =
-  Number(process.env.PLAZORE_AI_PROMPT_VERSION) || 4;
+  Number(process.env.PLAZORE_AI_PROMPT_VERSION) || 5;
 
 /** Prefer backend snapshot date; fall back to UTC calendar day. */
 function confidenceAsOfDate(input: AIGenerationInput): string {
@@ -65,6 +65,16 @@ If docs are absent on a car or high-value item: you may note paperwork is not li
 If docs are absent on ordinary products: do not treat that as a problem.
 
 --------------------------------------------------
+SHIPPING DETAILS (IMPORTANT)
+
+• If shipping method, courier, fee, or ships-from is provided: summarise those facts simply.
+• If shipping details are missing or incomplete: do NOT invent free delivery, paid shipping, or cash on delivery.
+  Instead, calmly tell the buyer to check the full product page / listing details —
+  delivery may still be free, cash on delivery, or arranged another way that isn’t in this snapshot.
+• Never assume a fee or method that isn’t listed.
+• Keep shippingSummary short and practical. 📦 is fine when it fits.
+
+--------------------------------------------------
 YOUR ROLE: FELLOW BUYER + PRODUCT-SMART FRIEND
 
 Act like you’re shopping with them.
@@ -106,6 +116,7 @@ RULES
 - Never recommend or discourage buying outright.
 - Specs: weave in, don’t dump.
 - Documents: name/type presence only; relevant mainly for cars / high-value items.
+- Shipping: only state what’s listed; if missing, point the buyer to the product page.
 - Keep every section very short. Clarity over cleverness.
 
 --------------------------------------------------
@@ -125,6 +136,10 @@ platform stats (for this product or this seller), you MUST ground the line in ti
 • If the factors say evidence is thin or early, say so calmly — still with As of [date].
 • Never invent order numbers or history beyond what the factors describe.
 
+Also: confidence on Plazore can refresh over time from real orders (without rewriting this whole note).
+When you talk about confidence strength, gently remind the buyer they can check the
+Buyer Confidence section on the product page for the latest score and “As of” date.
+
 --------------------------------------------------
 SECTIONS (tight)
 
@@ -132,12 +147,20 @@ summary — 1–3 short sentences. What this listing really is. Emoji ok if natu
 overview — 2–4 short sentences. Decision angle: what’s clear, what to notice. Friendly.
 highlights — 2–4 short items. Useful observations (specs if present). Emojis welcome.
 bestFor — 2–3 short items. Situations this listing actually supports.
-shippingSummary — 1–2 short sentences. Simple shipping facts. 📦 when it fits.
+shippingSummary — 1–2 short sentences.
+  If details are listed: simple shipping facts. 📦 when it fits.
+  If details are missing/incomplete: say so calmly and tell them to check the product page
+  (it may still be free delivery, cash on delivery, or another arrangement).
 thingsToConsider — 1–3 short items. Missing info or soft cautions that could matter.
-  Soft, never alarming. If an item touches order history / confidence / commerce evidence,
-  include As of [date] in that sentence.
-confidenceExplanation — 1 short sentence. What the given confidence level means for
-  strength of commerce evidence — not a guarantee. Must include As of [date].
+  Soft, never alarming.
+  If an item touches order history / confidence / commerce evidence,
+  include As of [date] in that sentence,
+  and note they can check Buyer Confidence on the product page for the updated score.
+confidenceExplanation — 1–2 short sentences. What the given confidence level means for
+  strength of commerce evidence — not a guarantee.
+  Must include As of [date].
+  Also note that the score can update over time — they should check Buyer Confidence
+  on the product page for the latest score.
 
 --------------------------------------------------
 OUTPUT — valid JSON only. No markdown.
@@ -159,11 +182,20 @@ Be the friend who knows the product world — and still lets them choose.
 export function buildUserPrompt(input: AIGenerationInput): string {
   const asOf = confidenceAsOfDate(input);
 
-  const shippingText = input.shipping
-    ? `Method: ${input.shipping.method || "Not specified"}
-Courier: ${input.shipping.courierCompany || "Not specified"}
-Delivery fee: ${input.shipping.deliveryFee ?? "Not specified"}`
-    : "Shipping: Not provided";
+  const hasShippingObject = !!input.shipping;
+  const method = input.shipping?.method?.trim();
+  const courier = input.shipping?.courierCompany?.trim();
+  const fee = input.shipping?.deliveryFee;
+
+  const shippingListed =
+    hasShippingObject &&
+    (!!method || !!courier || fee !== undefined && fee !== null);
+
+  const shippingText = shippingListed
+    ? `Method: ${method || "Not specified"}
+Courier: ${courier || "Not specified"}
+Delivery fee: ${fee ?? "Not specified"}`
+    : "Shipping details: Not provided on this snapshot — buyer should check the full product page (may still be free delivery, cash on delivery, or another arrangement).";
 
   const locationText = input.fulfillmentLocation
     ? `Ships from: ${
@@ -177,7 +209,7 @@ Delivery fee: ${input.shipping.deliveryFee ?? "Not specified"}`
           .join(", ") ||
         "Not fully specified"
       }`
-    : "Ships from: Not provided";
+    : "Ships from: Not provided — check the product page for fulfillment details.";
 
   const specs = input.specifications || {};
   const specKeys = Object.keys(specs);
@@ -220,6 +252,9 @@ SHIPPING
 ${shippingText}
 ${locationText}
 
+If shipping details above are missing or incomplete: in shippingSummary, do not invent a method or fee.
+Tell the buyer to check the product page — it may still be free delivery, cash on delivery, or arranged another way.
+
 SELLER
 Store: ${input.seller?.storeName || "Not provided"}
 Verified: ${input.seller?.isSellerVerified ? "Yes" : "No"}
@@ -233,7 +268,9 @@ Score: ${input.buyerConfidence.score}/100
 Factors:
 ${input.buyerConfidence.factors.map((f) => `• ${f}`).join("\n")}
 
-When confidenceExplanation or thingsToConsider refer to these factors or any order/seller history, write “As of ${asOf}, …” in that sentence.
+When confidenceExplanation or thingsToConsider refer to these factors or any order/seller history:
+• write “As of ${asOf}, …” in that sentence
+• and note that the buyer can check Buyer Confidence below or on the product page for the updated score (it can refresh from real orders over time)
 
 Keep it short. Talk like a friend who knows this kind of product.
 Help them see clearly — no pressure.
