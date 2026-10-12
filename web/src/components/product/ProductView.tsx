@@ -1556,8 +1556,8 @@ export function ProductView({ product }: { product: Product }) {
      <div
   className="
     grid min-h-0 min-w-0 flex-1 overflow-hidden
-    grid-rows-[minmax(180px,28dvh)_minmax(0,1fr)]
-    sm:grid-rows-[minmax(200px,32dvh)_minmax(0,1fr)]
+    grid-rows-[minmax(180px,30dvh)_minmax(0,1fr)]
+    sm:grid-rows-[minmax(200px,36dvh)_minmax(0,1fr)]
     lg:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)]
     lg:grid-rows-1
   "
