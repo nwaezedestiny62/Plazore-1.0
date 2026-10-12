@@ -26,7 +26,8 @@ import {
 import { ProductCard } from "./ProductCard";
 import { ShowroomFlyCartProvider, useShowroomFlyCart } from "./ShowroomFlyCart";
 
-const API = process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com/api";
+const API =
+  process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com/api";
 const PENDING_KEY = "plazore_pending_action";
 
 const ROOM_CAPACITY = {
@@ -61,6 +62,10 @@ type SplitRooms = {
   four: Product[];
   titles: RoomTitles;
 };
+
+/** Horizontal product rail — no page scroll chaining */
+const RAIL_CLASS =
+  "flex gap-2 overflow-x-auto overscroll-x-contain px-4 pb-2 sm:gap-3 sm:px-6 md:px-10 lg:px-16 [scrollbar-width:none] [-webkit-overflow-scrolling:touch] [&::-webkit-scrollbar]:hidden";
 
 function heroHeadlineSize(text: string): string {
   const n = (text || "").trim().length;
@@ -138,7 +143,7 @@ function isBagVisible(el: HTMLElement | null): boolean {
   );
 }
 
-/** Native smooth scroll to an element — no snap, no lock, respects free scroll. */
+/** Click-only smooth jump. Never applied to document scroll. */
 function smoothScrollToEl(el: HTMLElement | null) {
   if (!el || typeof window === "undefined") return;
   el.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -181,7 +186,6 @@ function MallChrome({
     user?.primaryEmailAddress?.emailAddress ||
     "Account";
 
-  /** Always register the bag that is actually visible (mobile vs desktop). */
   useEffect(() => {
     if (!fly) return;
 
@@ -238,8 +242,8 @@ function MallChrome({
     <>
       {/* Desktop header */}
       <header
-        className={`fixed inset-x-0 top-0 z-50 hidden h-16 items-center justify-between px-6 transition-all duration-500 md:flex lg:px-10 ${
-          solid ? "bg-[#090B0F]/80 backdrop-blur-xl" : "bg-transparent"
+        className={`fixed inset-x-0 top-0 z-50 hidden h-14 items-center justify-between px-5 transition-colors duration-300 md:flex lg:h-16 lg:px-10 ${
+          solid ? "bg-[#090B0F]/85 backdrop-blur-xl" : "bg-transparent"
         }`}
         style={{
           borderBottom: solid
@@ -247,11 +251,15 @@ function MallChrome({
             : "1px solid transparent",
         }}
       >
-        <Link href="/" className="flex items-center gap-3">
+        <Link href="/" className="flex shrink-0 items-center gap-2.5 lg:gap-3">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/logo.png" alt="Plazore" className="h-8 w-8 object-contain" />
+          <img
+            src="/logo.png"
+            alt="Plazore"
+            className="h-7 w-7 object-contain lg:h-8 lg:w-8"
+          />
           <span
-            className={`text-[13px] font-semibold tracking-[0.22em] uppercase ${
+            className={`text-[12px] font-semibold tracking-[0.22em] uppercase lg:text-[13px] ${
               atTop ? "text-white/90" : "text-text"
             }`}
           >
@@ -259,23 +267,23 @@ function MallChrome({
           </span>
         </Link>
 
-        <nav className="flex items-center gap-6 lg:gap-8">
+        <nav className="flex items-center gap-4 lg:gap-8">
           <Link
             href="/"
-            className="text-[11px] font-semibold tracking-[0.2em] uppercase text-text"
+            className="text-[10px] font-semibold tracking-[0.2em] uppercase text-text lg:text-[11px]"
           >
             Mall
           </Link>
           <Link
             href="/browse"
-            className="text-[11px] font-semibold tracking-[0.2em] uppercase text-white/55 transition hover:text-text"
+            className="text-[10px] font-semibold tracking-[0.2em] uppercase text-white/55 transition hover:text-text lg:text-[11px]"
           >
             Browse
           </Link>
 
           <Link
             href="/lounge"
-            className="group relative inline-flex items-center gap-2.5 overflow-hidden border border-white/15 px-4 py-2 text-[11px] font-extrabold tracking-[0.22em] uppercase text-white transition duration-200 hover:brightness-110 active:translate-y-[1px]"
+            className="group relative inline-flex items-center gap-2 overflow-hidden border border-white/15 px-3 py-1.5 text-[10px] font-extrabold tracking-[0.22em] uppercase text-white transition duration-200 hover:brightness-110 active:translate-y-[1px] lg:gap-2.5 lg:px-4 lg:py-2 lg:text-[11px]"
             style={{
               background:
                 "linear-gradient(135deg, #00E575 0%, #0ECF7A 38%, #2B6DE8 72%, #3B82F6 100%)",
@@ -305,25 +313,25 @@ function MallChrome({
           <button
             type="button"
             onClick={() => setPrompt("wishlist")}
-            className="text-[11px] font-semibold tracking-[0.2em] uppercase text-white/55 transition hover:text-text"
+            className="text-[10px] font-semibold tracking-[0.2em] uppercase text-white/55 transition hover:text-text lg:text-[11px]"
           >
             Wishlist
           </button>
         </nav>
 
-        <div className="flex items-center gap-1.5">
+        <div className="flex shrink-0 items-center gap-1">
           <Link
             href="/notifications"
-            className="relative flex h-10 w-10 items-center justify-center text-white/80 transition hover:text-text"
+            className="relative flex h-9 w-9 items-center justify-center text-white/80 transition hover:text-text lg:h-10 lg:w-10"
             aria-label={
               notifN > 0
                 ? `Notifications, ${notifN} unread`
                 : "Notifications"
             }
           >
-            <Bell className="h-[18px] w-[18px]" strokeWidth={1.75} />
+            <Bell className="h-[17px] w-[17px] lg:h-[18px] lg:w-[18px]" strokeWidth={1.75} />
             {notifN > 0 ? (
-              <span className="absolute right-1 top-1.5 flex min-w-[16px] items-center justify-center rounded-full bg-[#00E575] px-1 text-center text-[9px] font-extrabold leading-none text-[#041412]">
+              <span className="absolute right-0.5 top-1 flex min-w-[15px] items-center justify-center rounded-full bg-[#00E575] px-1 text-center text-[9px] font-extrabold leading-none text-[#041412]">
                 {notifN > 99 ? "99+" : notifN}
               </span>
             ) : null}
@@ -332,13 +340,16 @@ function MallChrome({
           <Link
             ref={bagRefDesktop}
             href="/cart"
-            className="relative flex h-10 w-10 items-center justify-center text-white/80 transition hover:text-text"
+            className="relative flex h-9 w-9 items-center justify-center text-white/80 transition hover:text-text lg:h-10 lg:w-10"
             aria-label="Cart"
             data-plazore-cart-icon
           >
-            <ShoppingBag className="h-[18px] w-[18px]" strokeWidth={1.75} />
+            <ShoppingBag
+              className="h-[17px] w-[17px] lg:h-[18px] lg:w-[18px]"
+              strokeWidth={1.75}
+            />
             {bagN > 0 ? (
-              <span className="absolute right-1.5 top-1.5 min-w-[16px] rounded-full bg-[#00E575] px-1 text-center text-[9px] font-extrabold text-[#041412]">
+              <span className="absolute right-1 top-1 min-w-[15px] rounded-full bg-[#00E575] px-1 text-center text-[9px] font-extrabold text-[#041412]">
                 {bagN > 9 ? "9+" : bagN}
               </span>
             ) : null}
@@ -347,7 +358,7 @@ function MallChrome({
           {isSignedIn ? (
             <Link
               href="/profile"
-              className="ml-1.5 flex h-8 w-8 items-center justify-center overflow-hidden rounded-full ring-1 ring-white/15 transition hover:ring-white/35"
+              className="ml-1 flex h-7 w-7 items-center justify-center overflow-hidden rounded-full ring-1 ring-white/15 transition hover:ring-white/35 lg:h-8 lg:w-8"
               aria-label="Profile"
               title={avatarAlt}
             >
@@ -371,13 +382,13 @@ function MallChrome({
 
       {/* Mobile header */}
       <header
-        className={`fixed inset-x-0 top-0 z-50 flex h-14 items-center justify-between px-3.5 transition-all duration-400 md:hidden ${
-          solid ? "bg-[#090B0F]/88 backdrop-blur-xl" : "bg-transparent"
+        className={`fixed inset-x-0 top-0 z-50 flex h-12 items-center justify-between px-2.5 transition-colors duration-300 sm:h-14 sm:px-3.5 md:hidden ${
+          solid ? "bg-[#090B0F]/90 backdrop-blur-xl" : "bg-transparent"
         }`}
       >
         <Link
           href="/lounge"
-          className="flex h-10 w-10 items-center justify-center text-white/90"
+          className="flex h-9 w-9 items-center justify-center text-white/90 sm:h-10 sm:w-10"
           aria-label="Open Lounge"
         >
           <CustomBarIcon />
@@ -388,29 +399,33 @@ function MallChrome({
           className="absolute left-1/2 flex -translate-x-1/2 items-center"
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/logo.png" alt="Plazore" className="h-7 w-7 object-contain" />
+          <img
+            src="/logo.png"
+            alt="Plazore"
+            className="h-6 w-6 object-contain sm:h-7 sm:w-7"
+          />
         </Link>
 
-        <div className="flex items-center gap-0.5">
+        <div className="flex items-center">
           <Link
             href="/browse"
-            className="flex h-10 w-10 items-center justify-center text-white/90"
+            className="flex h-9 w-9 items-center justify-center text-white/90 sm:h-10 sm:w-10"
             aria-label="Search"
           >
-            <Search className="h-[18px] w-[18px]" strokeWidth={1.75} />
+            <Search className="h-[17px] w-[17px]" strokeWidth={1.75} />
           </Link>
           <Link
             href="/notifications"
-            className="relative flex h-10 w-10 items-center justify-center text-white/90"
+            className="relative flex h-9 w-9 items-center justify-center text-white/90 sm:h-10 sm:w-10"
             aria-label={
               notifN > 0
                 ? `Notifications, ${notifN} unread`
                 : "Notifications"
             }
           >
-            <Bell className="h-[18px] w-[18px]" strokeWidth={1.75} />
+            <Bell className="h-[17px] w-[17px]" strokeWidth={1.75} />
             {notifN > 0 ? (
-              <span className="absolute right-1 top-1.5 flex min-w-[15px] items-center justify-center rounded-full bg-[#00E575] px-0.5 text-center text-[8.5px] font-extrabold leading-none text-[#041412]">
+              <span className="absolute right-0.5 top-1 flex min-w-[14px] items-center justify-center rounded-full bg-[#00E575] px-0.5 text-center text-[8px] font-extrabold leading-none text-[#041412]">
                 {notifN > 99 ? "99+" : notifN}
               </span>
             ) : null}
@@ -419,7 +434,7 @@ function MallChrome({
           <Link
             ref={bagRefMobile}
             href="/cart"
-            className="relative flex h-10 w-10 items-center justify-center text-white/90"
+            className="relative flex h-9 w-9 items-center justify-center text-white/90 sm:h-10 sm:w-10"
             aria-label="Cart"
             data-plazore-cart-icon
           >
@@ -428,11 +443,11 @@ function MallChrome({
               className="pointer-events-none absolute inset-1 rounded-full bg-[#00E575]/12 blur-[5px]"
             />
             <ShoppingCart
-              className="relative h-[18px] w-[18px]"
+              className="relative h-[17px] w-[17px]"
               strokeWidth={1.75}
             />
             {bagN > 0 ? (
-              <span className="absolute -right-0.5 -top-0.5 flex min-w-[16px] items-center justify-center rounded-full bg-gradient-to-r from-[#00E575] to-[#3B82F6] px-1 text-[8.5px] font-extrabold text-[#041412] shadow-[0_0_10px_rgba(0,229,117,0.45)]">
+              <span className="absolute -right-0.5 -top-0.5 flex min-w-[15px] items-center justify-center rounded-full bg-gradient-to-r from-[#00E575] to-[#3B82F6] px-1 text-[8px] font-extrabold text-[#041412] shadow-[0_0_10px_rgba(0,229,117,0.45)]">
                 {bagN > 9 ? "9+" : bagN}
               </span>
             ) : null}
@@ -441,7 +456,7 @@ function MallChrome({
           {isSignedIn ? (
             <Link
               href="/profile"
-              className="ml-0.5 flex h-7 w-7 items-center justify-center overflow-hidden rounded-full ring-1 ring-white/15 transition hover:ring-white/35"
+              className="ml-0.5 flex h-6 w-6 items-center justify-center overflow-hidden rounded-full ring-1 ring-white/15 transition hover:ring-white/35 sm:h-7 sm:w-7"
               aria-label="Profile"
               title={avatarAlt}
             >
@@ -567,7 +582,7 @@ function RoomThreeStage({ products }: { products: Product[] }) {
 
   return (
     <div className="w-full">
-      <div className="relative mx-auto w-full max-w-[560px] lg:max-w-[640px]">
+      <div className="relative mx-auto w-full max-w-[min(100%,420px)] sm:max-w-[520px] lg:max-w-[600px]">
         <div className="relative aspect-[4/5] w-full overflow-hidden bg-[#111] sm:aspect-[5/6]">
           {products.map((p, i) => (
             <div
@@ -588,7 +603,9 @@ function RoomThreeStage({ products }: { products: Product[] }) {
                     style={{
                       transform: i === current ? "scale(1.04)" : "scale(1)",
                       transition:
-                        i === current ? "transform 5.2s linear" : "transform 0s",
+                        i === current
+                          ? "transform 5.2s linear"
+                          : "transform 0s",
                     }}
                   />
                 ) : (
@@ -609,12 +626,12 @@ function RoomThreeStage({ products }: { products: Product[] }) {
           </button>
         </div>
 
-        <div className="mt-5 px-0">
+        <div className="mt-4 px-1 sm:mt-5">
           <Link href={`/product/${active._id}`}>
-            <p className="text-[17px] font-medium leading-snug text-white">
+            <p className="text-[15px] font-medium leading-snug text-white sm:text-[17px]">
               {active.name}
             </p>
-            <p className="mt-1.5 text-[13px] text-white/55">
+            <p className="mt-1 text-[12px] text-white/55 sm:mt-1.5 sm:text-[13px]">
               <span>{(active.brand || "plazore").toLowerCase()}</span>
               <span className="text-white/35"> | </span>
               <span className="font-medium text-white">
@@ -629,7 +646,7 @@ function RoomThreeStage({ products }: { products: Product[] }) {
         </div>
 
         {products.length > 1 ? (
-          <div className="mt-7 flex justify-center gap-2">
+          <div className="mt-5 flex justify-center gap-2 sm:mt-7">
             {products.map((_, i) => (
               <button
                 key={i}
@@ -678,14 +695,27 @@ function MallInner({
   const roomRefs = useRef<Record<number, HTMLElement | null>>({});
   const fetchedRef = useRef(false);
   const heroFetchedRef = useRef(false);
+  const lastRoomRef = useRef(1);
 
-  /* Native smooth scroll on this page — no snap, no section lock */
+  /**
+   * CRITICAL: do NOT set html/body scroll-behavior: smooth.
+   * That makes the page keep easing after you stop — the “hook”.
+   * Smooth is only used in smoothScrollToEl on intentional clicks.
+   */
   useEffect(() => {
     const html = document.documentElement;
-    const prev = html.style.scrollBehavior;
-    html.style.scrollBehavior = "smooth";
+    const body = document.body;
+    const prevHtml = html.style.scrollBehavior;
+    const prevBody = body.style.scrollBehavior;
+    html.style.scrollBehavior = "auto";
+    body.style.scrollBehavior = "auto";
+    html.style.overflowX = "hidden";
+    body.style.overflowX = "hidden";
     return () => {
-      html.style.scrollBehavior = prev;
+      html.style.scrollBehavior = prevHtml;
+      body.style.scrollBehavior = prevBody;
+      html.style.overflowX = "";
+      body.style.overflowX = "";
     };
   }, []);
 
@@ -888,9 +918,8 @@ function MallInner({
   }, [heroSlides.length]);
 
   /**
-   * Progress + active room only — read-only.
-   * No scroll hijack, no snap-on-stop, no section hold.
-   * User stops wherever they are; we only observe.
+   * Observe only. Never scroll the page from here.
+   * activeRoom only updates when the room actually changes (fewer re-renders).
    */
   useEffect(() => {
     let ticking = false;
@@ -905,14 +934,17 @@ function MallInner({
 
         const probe = y + window.innerHeight * 0.3;
         let current = 1;
-        for (const n of [1, 2, 3, 4]) {
+        for (const n of [1, 2, 3, 4] as const) {
           const el = roomRefs.current[n];
           if (el) {
             const top = el.getBoundingClientRect().top + y;
             if (top <= probe) current = n;
           }
         }
-        setActiveRoom(current);
+        if (current !== lastRoomRef.current) {
+          lastRoomRef.current = current;
+          setActiveRoom(current);
+        }
         ticking = false;
       });
     };
@@ -930,26 +962,19 @@ function MallInner({
     smoothScrollToEl(roomRefs.current[n] ?? null);
   };
 
-  const current =
-    heroSlides[slide % Math.max(heroSlides.length, 1)] || HERO_SLIDES[0];
   const roomNavOn = progress > 0.42;
-  const headlineFs = heroHeadlineSize(current?.headline || "");
-  const subClass = heroSubSize(current?.subheadline || "");
 
   return (
-    <div
-      className="min-h-dvh bg-bg text-text"
-      style={{ scrollBehavior: "smooth" }}
-    >
+    <div className="min-h-dvh w-full max-w-[100vw] overflow-x-hidden bg-bg text-text">
       <MallChrome progress={progress} bagN={bagN} notifN={notifN} />
 
       <HeroStage slides={heroSlides} onEnterShowroom={enterShowroom} />
 
-      {/* Desktop room dots — optional jump only; never auto-snap */}
+      {/* Desktop room dots — click only */}
       <div
-        className={`fixed right-4 top-1/2 z-40 hidden -translate-y-1/2 flex-col gap-2.5 md:flex ${
+        className={`fixed right-3 top-1/2 z-40 hidden -translate-y-1/2 flex-col gap-2.5 md:flex lg:right-4 ${
           roomNavOn ? "opacity-100" : "pointer-events-none opacity-0"
-        } transition-opacity duration-400`}
+        } transition-opacity duration-300`}
       >
         {Array.from({ length: roomCount }, (_, i) => i + 1).map((n) => (
           <button
@@ -966,19 +991,22 @@ function MallInner({
         ))}
       </div>
 
-      {/* Mobile room pills — optional jump only */}
+      {/* Mobile room pills — click only; safe-area aware */}
       <div
-        className={`fixed inset-x-0 bottom-5 z-40 flex justify-center px-4 md:hidden ${
+        className={`fixed inset-x-0 z-40 flex justify-center px-4 md:hidden ${
           roomNavOn ? "opacity-100" : "pointer-events-none opacity-0"
-        } transition-opacity duration-400`}
+        } transition-opacity duration-300`}
+        style={{
+          bottom: "max(1rem, env(safe-area-inset-bottom, 0px))",
+        }}
       >
-        <div className="flex items-center gap-1 rounded-full border border-white/10 bg-[#11141A]/90 px-2 py-1.5 backdrop-blur-xl">
+        <div className="flex items-center gap-1 rounded-full border border-white/10 bg-[#11141A]/92 px-2 py-1.5 backdrop-blur-xl">
           {Array.from({ length: roomCount }, (_, i) => i + 1).map((n) => (
             <button
               key={n}
               type="button"
               onClick={() => goRoom(n)}
-              className={`min-w-[36px] rounded-full px-2.5 py-1.5 text-[10px] font-bold tracking-wide ${
+              className={`min-w-[32px] rounded-full px-2 py-1.5 text-[10px] font-bold tracking-wide sm:min-w-[36px] sm:px-2.5 ${
                 activeRoom === n ? "bg-white text-[#090B0F]" : "text-white/50"
               }`}
             >
@@ -988,13 +1016,13 @@ function MallInner({
         </div>
       </div>
 
-      <section ref={showroomRef}>
+      <section ref={showroomRef} className="w-full overflow-x-hidden">
         {loading ? (
-          <div className="flex h-[50vh] items-center justify-center text-muted">
+          <div className="flex h-[40vh] items-center justify-center text-muted sm:h-[50vh]">
             Loading the mall…
           </div>
         ) : !showroomHasItems ? (
-          <div className="flex h-[40vh] items-center justify-center text-secondary">
+          <div className="flex h-[36vh] items-center justify-center px-4 text-center text-secondary sm:h-[40vh]">
             The showroom is quiet right now.
           </div>
         ) : (
@@ -1004,9 +1032,9 @@ function MallInner({
                 ref={(el) => {
                   roomRefs.current[1] = el;
                 }}
-                className="bg-[#0C0F14] pb-16"
+                className="bg-[#0C0F14] pb-12 sm:pb-16"
               >
-                <div className="relative h-[34vh] min-h-[220px] max-h-[360px] overflow-hidden sm:h-[38vh]">
+                <div className="relative h-[28vh] min-h-[180px] max-h-[280px] overflow-hidden sm:h-[34vh] sm:min-h-[220px] sm:max-h-[360px] md:h-[38vh]">
                   {rooms.one[0]?.images?.[0] ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
@@ -1016,22 +1044,22 @@ function MallInner({
                     />
                   ) : null}
                   <div className="absolute inset-0 bg-[rgba(6,8,12,0.58)]" />
-                  <div className="absolute bottom-8 left-5 right-5 sm:left-8 md:left-16">
-                    <p className="text-[11px] font-semibold tracking-[0.28em] text-white/50">
+                  <div className="absolute bottom-6 left-4 right-4 sm:bottom-8 sm:left-6 md:left-10 lg:left-16">
+                    <p className="text-[10px] font-semibold tracking-[0.28em] text-white/50 sm:text-[11px]">
                       {rooms.titles.one[0]}
                     </p>
-                    <p className="mt-2 font-display text-[1.75rem] font-bold tracking-tight text-white sm:text-4xl md:text-5xl">
+                    <p className="mt-1.5 font-display text-[1.5rem] font-bold tracking-tight text-white sm:mt-2 sm:text-[1.75rem] md:text-4xl lg:text-5xl">
                       {rooms.titles.one[1]}
                     </p>
                   </div>
                 </div>
 
                 {railA.length > 0 ? (
-                  <div className="pt-8">
-                    <p className="mb-4 px-5 text-[11px] font-semibold tracking-[0.22em] text-white/38 sm:px-8">
+                  <div className="pt-6 sm:pt-8">
+                    <p className="mb-3 px-4 text-[10px] font-semibold tracking-[0.22em] text-white/38 sm:mb-4 sm:px-6 sm:text-[11px] md:px-10 lg:px-16">
                       NOW SHOWING
                     </p>
-                    <div className="flex gap-2 overflow-x-auto px-5 pb-2 sm:gap-3 sm:px-8 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                    <div className={RAIL_CLASS}>
                       {railA.map((p) => (
                         <ProductCard
                           key={`r1a-${p._id}`}
@@ -1045,8 +1073,8 @@ function MallInner({
                 ) : null}
 
                 {railB.length > 0 ? (
-                  <div className="pt-7">
-                    <div className="flex gap-2 overflow-x-auto px-5 pb-2 sm:gap-3 sm:px-8 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                  <div className="pt-5 sm:pt-7">
+                    <div className={RAIL_CLASS}>
                       {railB.map((p) => (
                         <ProductCard
                           key={`r1b-${p._id}`}
@@ -1066,17 +1094,17 @@ function MallInner({
                 ref={(el) => {
                   roomRefs.current[2] = el;
                 }}
-                className="bg-chamber px-4 py-14 text-chamber-ink sm:px-8 md:px-16 md:py-20"
+                className="bg-chamber px-3 py-10 text-chamber-ink sm:px-6 sm:py-14 md:px-10 md:py-20 lg:px-16"
               >
-                <p className="text-[11px] font-semibold tracking-[0.28em] text-[#8C7B6B]">
+                <p className="text-[10px] font-semibold tracking-[0.28em] text-[#8C7B6B] sm:text-[11px]">
                   {rooms.titles.two[0]}
                 </p>
-                <p className="mt-2 font-display text-[1.75rem] font-bold tracking-tight sm:text-4xl">
+                <p className="mt-1.5 font-display text-[1.5rem] font-bold tracking-tight sm:mt-2 sm:text-[1.75rem] md:text-4xl">
                   {rooms.titles.two[1]}
                 </p>
-                <div className="mt-4 h-[1.5px] w-12 bg-chamber-ink/20" />
+                <div className="mt-3 h-[1.5px] w-12 bg-chamber-ink/20 sm:mt-4" />
 
-                <div className="mx-auto mt-10 grid max-w-[720px] grid-cols-2 gap-3 sm:gap-5 md:gap-6 lg:max-w-[800px]">
+                <div className="mx-auto mt-8 grid max-w-[720px] grid-cols-2 gap-2.5 sm:mt-10 sm:gap-4 md:gap-6 lg:max-w-[800px]">
                   {rooms.two.slice(0, 2).map((p) => (
                     <div
                       key={p._id}
@@ -1088,7 +1116,7 @@ function MallInner({
                 </div>
 
                 {rooms.two.length > 2 ? (
-                  <div className="mx-auto mt-8 grid max-w-[720px] grid-cols-2 gap-3 sm:gap-5 lg:max-w-[800px]">
+                  <div className="mx-auto mt-6 grid max-w-[720px] grid-cols-2 gap-2.5 sm:mt-8 sm:gap-4 lg:max-w-[800px]">
                     {rooms.two.slice(2, ROOM_CAPACITY[2]).map((p) => (
                       <div
                         key={p._id}
@@ -1107,15 +1135,15 @@ function MallInner({
                 ref={(el) => {
                   roomRefs.current[3] = el;
                 }}
-                className="bg-[#07080C] px-5 py-14 sm:px-8 md:px-16 md:py-20"
+                className="bg-[#07080C] px-4 py-10 sm:px-6 sm:py-14 md:px-10 md:py-20 lg:px-16"
               >
-                <p className="text-[11px] font-semibold tracking-[0.28em] text-white/40">
+                <p className="text-[10px] font-semibold tracking-[0.28em] text-white/40 sm:text-[11px]">
                   {rooms.titles.three[0]}
                 </p>
-                <p className="mt-2 font-display text-[1.75rem] font-bold text-white sm:text-4xl md:text-5xl">
+                <p className="mt-1.5 font-display text-[1.5rem] font-bold text-white sm:mt-2 sm:text-[1.75rem] md:text-4xl lg:text-5xl">
                   {rooms.titles.three[1]}
                 </p>
-                <div className="mt-10">
+                <div className="mt-8 sm:mt-10">
                   <RoomThreeStage products={rooms.three} />
                 </div>
               </section>
@@ -1126,20 +1154,20 @@ function MallInner({
                 ref={(el) => {
                   roomRefs.current[4] = el;
                 }}
-                className="bg-[#F7F1E9] px-0 py-14 md:py-20"
+                className="bg-[#F7F1E9] px-0 py-10 sm:py-14 md:py-20"
               >
-                <div className="px-5 sm:px-8 md:px-16">
-                  <p className="text-[11px] font-semibold tracking-[0.28em] text-[#9C8B7A]">
+                <div className="px-4 sm:px-6 md:px-10 lg:px-16">
+                  <p className="text-[10px] font-semibold tracking-[0.28em] text-[#9C8B7A] sm:text-[11px]">
                     {rooms.titles.four[0]}
                   </p>
-                  <p className="mt-2 font-display text-[1.75rem] font-bold tracking-tight text-[#2C241B] sm:text-4xl">
+                  <p className="mt-1.5 font-display text-[1.5rem] font-bold tracking-tight text-[#2C241B] sm:mt-2 sm:text-[1.75rem] md:text-4xl">
                     {rooms.titles.four[1]}
                   </p>
-                  <p className="mt-2 text-sm text-[#8C7B6B]">
+                  <p className="mt-1.5 text-[13px] text-[#8C7B6B] sm:mt-2 sm:text-sm">
                     A closer look at what&apos;s moving around you.
                   </p>
                 </div>
-                <div className="mt-10 flex gap-1 overflow-x-auto px-5 pb-4 sm:px-8 md:px-16 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                <div className={`mt-8 sm:mt-10 ${RAIL_CLASS} pb-4`}>
                   {rooms.four.map((p) => (
                     <ProductCard
                       key={`r4-${p._id}`}
@@ -1156,7 +1184,7 @@ function MallInner({
         )}
       </section>
 
-      <p className="pb-10 pt-6 text-center text-[11px] tracking-wide text-muted">
+      <p className="pb-8 pt-5 text-center text-[10px] tracking-wide text-muted sm:pb-10 sm:pt-6 sm:text-[11px]">
         Plazore · Digital Mall
       </p>
     </div>
