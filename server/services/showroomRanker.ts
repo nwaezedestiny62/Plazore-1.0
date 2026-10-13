@@ -1,13 +1,13 @@
 /**
- * Plazore Showroom Ranker (V1)
+ * Plazore Showroom Ranker (V2)
  * FULLNESS FIRST · ADAPTABILITY SECOND
  *
- * Capacities:
- *   Room 1 = 50 unique
- *   Room 2 = 14 unique
+ * Capacities (unchanged):
+ *   Room 1 = 50 unique   (THE HORIZON / Expanded View)     rotate ~2h
+ *   Room 2 = 14 unique   (THE CHAMBER / Private Selection) rotate ~3h
  *   Room 1 + Room 2 = 64 unique (no overlap)
- *   Room 3 = 16
- *   Room 4 = 30
+ *   Room 3 = 16          (THE SIGNAL / The Watch)          rotate ~20m · user activity
+ *   Room 4 = 30          (THE LOCALE)                      always live · regional top
  *   Full mall = 110 slots
  *
  * Eligible = isActive === true AND stock > 0
@@ -17,6 +17,9 @@
  *   → show every real eligible product
  *   → never pad / never duplicate just to look full
  *   → no seller / category caps that hide inventory
+ *
+ * Plan visibility boost applies to Rooms 1, 2, 4 ONLY (not Room 3).
+ * Room 3 is pure user-activity signal.
  *
  * Rooms 3 & 4 may reuse Room 1/2 products ONLY when adaptive is ON
  * and a real ranking signal justifies another appearance.
@@ -45,6 +48,15 @@ export const FULL_SHOWROOM_SLOTS =
 
 export const ADAPTIVE_THRESHOLD = FULL_SHOWROOM_SLOTS;
 
+/** Per-room cache / rotation windows */
+export const ROOM_TTL_MS = {
+  1: 1000 * 60 * 60 * 2, // 2 hours — Expanded View
+  2: 1000 * 60 * 60 * 3, // 3 hours — Private Selection
+  3: 1000 * 60 * 20, // 20 minutes — The Watch (user activity)
+  4: 0, // always live — The Locale
+} as const;
+
+/** Session document TTL (longest room + buffer) */
 export const SESSION_TTL_MS = 1000 * 60 * 60 * 6;
 
 const SELLER_PUBLIC_FIELDS =
@@ -63,6 +75,7 @@ type InterestProfile = {
   subCategories: Map<string, number>;
   sellers: Map<string, number>;
   priceBands: Map<string, number>;
+  productIds: Map<string, number>; // products user engaged with most
 };
 
 function priceBand(price: number): string {
@@ -87,6 +100,18 @@ function productId(p: any): string {
   return String(p?._id || p || "");
 }
 
+function categoryKey(p: any): string {
+  return String(p?.category || "")
+    .trim()
+    .toLowerCase();
+}
+
+function subCategoryKey(p: any): string {
+  return String(p?.subCategory || "")
+    .trim()
+    .toLowerCase();
+}
+
 async function buildInterestProfile(
   userId: string | null,
   sessionId: string
@@ -96,6 +121,7 @@ async function buildInterestProfile(
     subCategories: new Map(),
     sellers: new Map(),
     priceBands: new Map(),
+    productIds: new Map(),
   };
 
   const query: any = { sessionId };
@@ -105,39 +131,44 @@ async function buildInterestProfile(
 
   const events = await ShowroomEvent.find(query)
     .sort({ createdAt: -1 })
-    .limit(120)
+    .limit(200)
     .populate("product", "category subCategory seller price")
     .lean();
 
   const now = Date.now();
 
-  for (const ev of events) {
-    const product: any = ev.product;
-    if (!product) continue;
+  for (const raw of events as any[]) {
+    const product: any = raw?.product;
+    if (product == null) continue;
 
-    const ageHours =
-      (now - new Date((ev as any).createdAt).getTime()) / (1000 * 60 * 60);
-    const decay = Math.exp(-ageHours / 72);
+    const createdAt = raw?.createdAt ? new Date(raw.createdAt).getTime() : now;
+    const ageHours = (now - createdAt) / (1000 * 60 * 60);
+    // Room 3 is more reactive — shorter decay window
+    const decay = Math.exp(-ageHours / 48);
 
+    const eventType = String(raw?.type || "");
     let weight = 0;
-    switch (ev.type) {
+    switch (eventType) {
       case "purchase":
-        weight = 12;
+        weight = 14;
         break;
       case "cart":
-        weight = 7;
+        weight = 8;
         break;
       case "wishlist":
-        weight = 5;
+        weight = 6;
         break;
       case "open":
-        weight = 3;
+        weight = 4;
         break;
       case "impression":
-        weight = 0.4;
+        weight = 0.5;
         break;
       case "skip":
-        weight = -2;
+        weight = -2.5;
+        break;
+      case "search":
+        weight = 3;
         break;
       default:
         weight = 0;
@@ -146,11 +177,17 @@ async function buildInterestProfile(
     const w = weight * decay;
     if (!w) continue;
 
-    const cat = String(product.category || "").trim();
-    const sub = String(product.subCategory || "").trim();
-    const seller = String(product.seller || "").trim();
-    const band = priceBand(Number(product.price) || 0);
+    // product may be populated doc OR plain ObjectId / string
+    const isDoc = typeof product === "object" && product !== null;
+    const pid = isDoc ? productId(product) : String(product || "");
+    if (!pid) continue;
 
+    const cat = isDoc ? String(product.category || "").trim() : "";
+    const sub = isDoc ? String(product.subCategory || "").trim() : "";
+    const seller = isDoc ? String(product.seller || "").trim() : "";
+    const band = isDoc ? priceBand(Number(product.price) || 0) : "";
+
+    profile.productIds.set(pid, (profile.productIds.get(pid) || 0) + w);
     if (cat) profile.categories.set(cat, (profile.categories.get(cat) || 0) + w);
     if (sub)
       profile.subCategories.set(sub, (profile.subCategories.get(sub) || 0) + w);
@@ -162,7 +199,6 @@ async function buildInterestProfile(
 
   return profile;
 }
-
 
 /** Batch load discoveryPriority + visibility for seller IDs (one query). */
 async function loadSellerPlanBoosts(
@@ -183,17 +219,12 @@ async function loadSellerPlanBoosts(
     const now = Date.now();
     for (const sub of subs as any[]) {
       let planId = String(sub.planId || "free") as PlanId;
-      // Expired paid/promo → treat as free for ranking
       if (
         planId !== "free" &&
         sub.expiresAt &&
         new Date(sub.expiresAt).getTime() < now
       ) {
         planId = "free";
-      }
-      // pending_payment keeps previous active planId on doc; if still pending and free default ok
-      if (sub.status === "pending_payment" && planId === "free") {
-        // no boost until paid
       }
       const benefits = getPlanBenefits(planId);
       map.set(String(sub.seller), {
@@ -202,24 +233,30 @@ async function loadSellerPlanBoosts(
       });
     }
   } catch (e) {
-    // Ranking must never fail hard if subscriptions collection missing
     console.error("[showroomRanker] plan boost load failed", e);
   }
 
   return map;
 }
 
-function scoreProduct(opts: {
+/**
+ * Base commerce / quality / freshness score shared across rooms.
+ * Plan boost is optional (rooms 1, 2, 4 only).
+ */
+function scoreProductBase(opts: {
   product: any;
   perf: any | null;
   region: string;
   interest: InterestProfile;
   exposureCount: number;
   searchQuery?: string;
-  softInterest?: boolean;
-  /** 0–100 from seller active plan (free=10 … global_reach=100) */
+  applyPlanBoost: boolean;
   planDiscoveryPriority?: number;
   planVisibility?: string;
+  /** Extra weight on user interest (Room 3) */
+  interestMultiplier?: number;
+  /** Extra weight on regional commerce (Room 4) */
+  regionalCommerceBoost?: boolean;
 }): ScoredProduct {
   const {
     product,
@@ -228,24 +265,27 @@ function scoreProduct(opts: {
     interest,
     exposureCount,
     searchQuery,
-    softInterest = true,
+    applyPlanBoost,
     planDiscoveryPriority = 10,
     planVisibility = "standard",
+    interestMultiplier = 1,
+    regionalCommerceBoost = false,
   } = opts;
+
   const reasons: string[] = [];
   let score = 0;
 
   const pRegion = String(product.region || "").toUpperCase();
   const uRegion = String(region || "NG").toUpperCase();
-  let regional = 0.4;
+  let regional = 0.35;
   if (pRegion === uRegion) {
     regional = 1;
     reasons.push("local_region");
   } else if (pRegion && uRegion && pRegion.slice(0, 2) === uRegion.slice(0, 2)) {
-    regional = 0.7;
+    regional = 0.65;
     reasons.push("nearby_region");
   }
-  score += regional * 1.35;
+  score += regional * (regionalCommerceBoost ? 1.85 : 1.25);
 
   const views = perf?.views || 0;
   const carts = perf?.cartAdds || 0;
@@ -257,22 +297,29 @@ function scoreProduct(opts: {
   const commerceRaw =
     purchases * 15 + carts * 5 + views * 0.4 + wishlist * 2 + conversion * 40;
   const commerce = Math.log10(1 + commerceRaw) / 3;
-  score += clamp(commerce) * 1.15;
+  const commerceWeight = regionalCommerceBoost ? 1.55 : 1.1;
+  score += clamp(commerce) * commerceWeight;
   if (purchases > 0 || carts > 2) reasons.push("commerce_signal");
 
   const age = daysSince(product.createdAt);
   const freshness = clamp(1 - age / 21);
-  score += freshness * 1.0;
+  score += freshness * 0.95;
   if (age <= 7) reasons.push("fresh");
 
+  // User interest
   let interestScore = 0;
   const cat = String(product.category || "").trim();
   const sub = String(product.subCategory || "").trim();
   const sellerId = String(product.seller?._id || product.seller || "");
   const band = priceBand(Number(product.price) || 0);
+  const pid = productId(product);
 
+  if (pid && interest.productIds.has(pid)) {
+    interestScore += clamp(interest.productIds.get(pid)! / 18) * 0.7;
+    reasons.push("user_engaged_product");
+  }
   if (cat && interest.categories.has(cat)) {
-    interestScore += clamp(interest.categories.get(cat)! / 20) * 0.55;
+    interestScore += clamp(interest.categories.get(cat)! / 20) * 0.5;
   }
   if (sub && interest.subCategories.has(sub)) {
     interestScore += clamp(interest.subCategories.get(sub)! / 12) * 0.3;
@@ -283,20 +330,20 @@ function scoreProduct(opts: {
   if (band && interest.priceBands.has(band)) {
     interestScore += clamp(interest.priceBands.get(band)! / 15) * 0.15;
   }
-  const interestWeight = softInterest ? 1.15 : 1.6;
-  score += clamp(interestScore) * interestWeight;
-  if (interestScore > 0.15) reasons.push("matches_interest");
+  score += clamp(interestScore) * 1.2 * interestMultiplier;
+  if (interestScore > 0.12) reasons.push("matches_interest");
 
+  // Exploration / underexposed (strong for Room 1)
   let exploration = 0;
   if (age <= 14 && (views < 30 || purchases === 0)) {
     exploration += 0.55;
     reasons.push("exploration_new");
   }
   if (views < 8 && carts === 0) {
-    exploration += 0.25;
+    exploration += 0.28;
     reasons.push("underexposed");
   }
-  score += exploration * 0.9;
+  score += exploration * 0.95;
 
   let quality = 0.3;
   if (product.isActive !== false) quality += 0.2;
@@ -320,37 +367,38 @@ function scoreProduct(opts: {
     if (searchHit > 0) reasons.push("search_match");
   }
 
-  // ★ Seller plan discovery / visibility (from active subscription)
-  // free=10, dominant=40, business_plus=70, global_reach=100
-  const planPri = Number(planDiscoveryPriority) || 10;
-  const planBoost = clamp(planPri / 100) * 1.45;
-  score += planBoost;
-  if (planPri >= 100) {
-    reasons.push("plan_global_reach");
-  } else if (planPri >= 70) {
-    reasons.push("plan_business_plus");
-  } else if (planPri >= 40) {
-    reasons.push("plan_dominant");
-  }
-  if (planVisibility === "maximum" || planVisibility === "high") {
-    score += 0.2;
-    reasons.push("plan_visibility_" + planVisibility);
-  }
-  if (planVisibility === "increased") {
-    score += 0.1;
-    reasons.push("plan_visibility_increased");
+  // Plan boost — Rooms 1, 2, 4 only
+  if (applyPlanBoost) {
+    const planPri = Number(planDiscoveryPriority) || 10;
+    const planBoost = clamp(planPri / 100) * 1.45;
+    score += planBoost;
+    if (planPri >= 100) reasons.push("plan_global_reach");
+    else if (planPri >= 70) reasons.push("plan_business_plus");
+    else if (planPri >= 40) reasons.push("plan_dominant");
+
+    if (planVisibility === "maximum" || planVisibility === "high") {
+      score += 0.22;
+      reasons.push("plan_visibility_" + planVisibility);
+    } else if (planVisibility === "increased") {
+      score += 0.1;
+      reasons.push("plan_visibility_increased");
+    }
   }
 
   const positiveSignal = purchases * 3 + carts * 2 + wishlist;
   const rawPenalty = Math.max(0, exposureCount - positiveSignal * 0.5);
   const exposurePenalty = Math.min(1.4, rawPenalty * 0.22);
-  score -= exposurePenalty * 1.3;
+  score -= exposurePenalty * 1.25;
   if (exposurePenalty > 0.3) reasons.push("exposure_penalty");
+
+  // Slight deterministic jitter so room 1 doesn't feel static within a window
+  const idHash = [...pid].reduce((a, c) => a + c.charCodeAt(0), 0);
+  score += ((idHash % 17) / 17) * 0.08;
 
   return { product, score, reasons };
 }
 
-/** Unique sequential pick. No seller/category hiding. Never fabricates rows. */
+/** Unique sequential pick. Never fabricates rows. */
 function takeUnique(
   scored: ScoredProduct[],
   capacity: number,
@@ -422,9 +470,102 @@ function selectWithDiversity(
   return selected;
 }
 
+/**
+ * Room 2 — Private Selection
+ * Pair similar products side-by-side (same category preferred, then subcategory).
+ * Returns up to `capacity` unique products ordered as pairs: [A1, A2, B1, B2, ...]
+ */
+function selectComparisonPairs(
+  scored: ScoredProduct[],
+  capacity: number,
+  exclude: Set<string>
+): ScoredProduct[] {
+  if (capacity <= 0) return [];
+
+  // Group by category
+  const byCat = new Map<string, ScoredProduct[]>();
+  for (const s of scored) {
+    const id = productId(s.product);
+    if (!id || exclude.has(id)) continue;
+    const cat = categoryKey(s.product) || "other";
+    if (!byCat.has(cat)) byCat.set(cat, []);
+    byCat.get(cat)!.push(s);
+  }
+
+  // Sort each category by score
+  for (const list of byCat.values()) {
+    list.sort((a, b) => b.score - a.score);
+  }
+
+  // Categories ordered by best score in group (attractiveness)
+  const catOrder = [...byCat.entries()].sort(
+    (a, b) => (b[1][0]?.score || 0) - (a[1][0]?.score || 0)
+  );
+
+  const selected: ScoredProduct[] = [];
+  const used = new Set<string>();
+
+  const pushPair = (a: ScoredProduct, b: ScoredProduct | null) => {
+    const idA = productId(a.product);
+    if (used.has(idA) || selected.length >= capacity) return;
+    selected.push({
+      ...a,
+      reasons: [...a.reasons, "comparison_pair"],
+    });
+    used.add(idA);
+    if (b && selected.length < capacity) {
+      const idB = productId(b.product);
+      if (!used.has(idB)) {
+        selected.push({
+          ...b,
+          reasons: [...b.reasons, "comparison_pair"],
+        });
+        used.add(idB);
+      }
+    }
+  };
+
+  // Prefer pairs within same category; second item prefers same subcategory
+  for (const [, list] of catOrder) {
+    if (selected.length >= capacity) break;
+    const remaining = list.filter((s) => !used.has(productId(s.product)));
+    for (let i = 0; i < remaining.length; i++) {
+      if (selected.length >= capacity) break;
+      if (used.has(productId(remaining[i].product))) continue;
+      const a = remaining[i];
+      const subA = subCategoryKey(a.product);
+      let partner: ScoredProduct | null = null;
+      for (let j = i + 1; j < remaining.length; j++) {
+        const cand = remaining[j];
+        if (used.has(productId(cand.product))) continue;
+        if (subA && subCategoryKey(cand.product) === subA) {
+          partner = cand;
+          break;
+        }
+        if (!partner) partner = cand; // fallback same category
+      }
+      pushPair(a, partner);
+    }
+  }
+
+  // Fill remainder with top remaining unique scores
+  if (selected.length < capacity) {
+    for (const s of scored) {
+      if (selected.length >= capacity) break;
+      const id = productId(s.product);
+      if (!id || used.has(id) || exclude.has(id)) continue;
+      selected.push(s);
+      used.add(id);
+    }
+  }
+
+  return selected.slice(0, capacity);
+}
+
 function hasReuseReason(s: ScoredProduct): boolean {
   return (
     s.reasons.includes("matches_interest") ||
+    s.reasons.includes("user_engaged_product") ||
     s.reasons.includes("commerce_signal") ||
     s.reasons.includes("local_region") ||
     s.reasons.includes("fresh") ||
@@ -483,12 +624,8 @@ function selectAdaptiveWithControlledReuse(
 
 /**
  * INVENTORY FIRST (eligibleCount < 110)
- *
  * Put every unique eligible product on the floor.
- * Room 1 fills first (up to 50), leftover unique items go 2 → 3 → 4.
- * Zero seller/category caps. Zero padding. Zero clones.
- *
- * 5 products from one seller → Room 1 shows all 5.
+ * Room 1 fills first (up to 50), leftover unique → 2 → 3 → 4.
  */
 function distributeInventoryFirst(scored: ScoredProduct[]): {
   room1: ScoredProduct[];
@@ -506,8 +643,10 @@ function distributeInventoryFirst(scored: ScoredProduct[]): {
   const room1 = takeUnique(scored, Math.min(ROOM_CAPACITY[1], n), used);
   room1.forEach((s) => used.add(productId(s.product)));
 
-  const room2 = takeUnique(
-    scored,
+  // Room 2 still tries comparison pairing from remaining
+  const remaining = scored.filter((s) => !used.has(productId(s.product)));
+  const room2 = selectComparisonPairs(
+    remaining,
     Math.min(ROOM_CAPACITY[2], n - used.size),
     used
   );
@@ -531,47 +670,56 @@ function distributeInventoryFirst(scored: ScoredProduct[]): {
 
 /**
  * ADAPTIVE ON (eligibleCount >= 110)
- * Fill 50 / 14 / 16 / 30. Rooms 1+2 unique. 3/4 may carefully reuse.
+ *
+ * Room 1 — strong exploration + plan visibility (unique)
+ * Room 2 — intelligent similar pairs (unique vs room 1)
+ * Room 3 — user activity heavy, NO plan boost
+ * Room 4 — regional top performers + plan visibility, live
  */
-function distributeAdaptive(scored: ScoredProduct[]): {
+function distributeAdaptive(opts: {
+  scoredRoom1: ScoredProduct[];
+  scoredRoom2: ScoredProduct[];
+  scoredRoom3: ScoredProduct[];
+  scoredRoom4: ScoredProduct[];
+}): {
   room1: ScoredProduct[];
   room2: ScoredProduct[];
   room3: ScoredProduct[];
   room4: ScoredProduct[];
 } {
-  const room1 = selectWithDiversity(scored, ROOM_CAPACITY[1], {
+  const { scoredRoom1, scoredRoom2, scoredRoom3, scoredRoom4 } = opts;
+
+  const room1 = selectWithDiversity(scoredRoom1, ROOM_CAPACITY[1], {
     maxPerCategory: 14,
     maxPerSeller: 7,
   });
   const used1 = new Set(room1.map((s) => productId(s.product)));
 
-  const room2 = selectWithDiversity(
-    scored.filter((s) => !used1.has(productId(s.product))),
+  const room2 = selectComparisonPairs(
+    scoredRoom2.filter((s) => !used1.has(productId(s.product))),
     ROOM_CAPACITY[2],
-    {
-      maxPerCategory: 8,
-      maxPerSeller: 4,
-      excludeIds: used1,
-    }
+    used1
   );
   const used12 = new Set([
     ...used1,
     ...room2.map((s) => productId(s.product)),
   ]);
 
+  // Room 3 — activity first; may carefully reuse high-interest items
   const room3 = selectAdaptiveWithControlledReuse(
-    scored,
+    scoredRoom3,
     ROOM_CAPACITY[3],
     used12,
     {
       maxPerCategory: 6,
       maxPerSeller: 3,
-      reuseMinScoreRatio: 0.75,
+      reuseMinScoreRatio: 0.68,
     }
   );
 
+  // Room 4 — regional commerce; may carefully reuse
   const room4 = selectAdaptiveWithControlledReuse(
-    scored,
+    scoredRoom4,
     ROOM_CAPACITY[4],
     used12,
     {
@@ -583,12 +731,13 @@ function distributeAdaptive(scored: ScoredProduct[]): {
 
   const fillUniqueOnly = (
     room: ScoredProduct[],
+    pool: ScoredProduct[],
     cap: number,
     exclude: Set<string>
   ) => {
     if (room.length >= cap) return room;
     const have = new Set(room.map((r) => productId(r.product)));
-    for (const s of scored) {
+    for (const s of pool) {
       if (room.length >= cap) break;
       const id = productId(s.product);
       if (!id || have.has(id) || exclude.has(id)) continue;
@@ -598,8 +747,8 @@ function distributeAdaptive(scored: ScoredProduct[]): {
     return room;
   };
 
-  fillUniqueOnly(room3, ROOM_CAPACITY[3], used12);
-  fillUniqueOnly(room4, ROOM_CAPACITY[4], new Set());
+  fillUniqueOnly(room3, scoredRoom3, ROOM_CAPACITY[3], used12);
+  fillUniqueOnly(room4, scoredRoom4, ROOM_CAPACITY[4], new Set());
 
   return { room1, room2, room3, room4 };
 }
@@ -612,6 +761,54 @@ function cachedUniqueIds(session: any): string[] {
     ...(session.productIdsByRoom?.[4] || []),
   ];
   return [...new Set(allIds.map(String).filter(Boolean))];
+}
+
+/**
+ * Decide which rooms need a rebuild based on per-room TTL.
+ * Room 4 is always rebuilt (live).
+ */
+function roomsNeedingRefresh(
+  session: any | null,
+  forceRefresh: boolean
+): Set<number> {
+  const need = new Set<number>();
+  if (forceRefresh || !session) {
+    need.add(1);
+    need.add(2);
+    need.add(3);
+    need.add(4);
+    return need;
+  }
+
+  const now = Date.now();
+  const sess: any = session;
+  const builtAtRaw = sess?.roomBuiltAt || {};
+  const builtAt: Record<string, any> =
+    builtAtRaw instanceof Map
+      ? Object.fromEntries(builtAtRaw as Map<string, any>)
+      : typeof builtAtRaw === "object" && builtAtRaw
+        ? builtAtRaw
+        : {};
+
+  for (const r of [1, 2, 3, 4] as const) {
+    if (ROOM_TTL_MS[r] === 0) {
+      need.add(r); // always live
+      continue;
+    }
+    const t = builtAt[String(r)] || builtAt[r as any];
+    const ts = t ? new Date(t).getTime() : 0;
+    if (!ts || now - ts >= ROOM_TTL_MS[r]) {
+      need.add(r);
+    }
+  }
+
+  // Also refresh if room is empty in cache
+  for (const r of [1, 2, 3, 4] as const) {
+    const ids = sess?.productIdsByRoom?.[r] || [];
+    if (!ids.length) need.add(r);
+  }
+
+  return need;
 }
 
 export async function generateShowroom(opts: {
@@ -632,16 +829,17 @@ export async function generateShowroom(opts: {
 
   const eligibleCountLive = await Product.countDocuments(ELIGIBLE_FILTER);
 
-  const cacheIsFresh =
+  const needRefresh = roomsNeedingRefresh(session, !!opts.forceRefresh || !!searchQuery);
+
+  // Full cache hit only if no room needs refresh and inventory didn't grow past cached set
+  if (
     session &&
     !opts.forceRefresh &&
-    session.expiresAt > now &&
-    !searchQuery;
-
-  if (cacheIsFresh) {
+    !searchQuery &&
+    needRefresh.size === 0 &&
+    session.expiresAt > now
+  ) {
     const uniqueIds = cachedUniqueIds(session);
-
-    // Inventory grew (e.g. 4 cached, 5 listed) → rebuild. Do not serve a stale mall.
     const inventoryGrew = eligibleCountLive > uniqueIds.length;
 
     if (!inventoryGrew && uniqueIds.length > 0) {
@@ -671,11 +869,18 @@ export async function generateShowroom(opts: {
           fromCache: true,
           eligibleCount: eligibleCountLive,
           adaptiveThreshold: ADAPTIVE_THRESHOLD,
+          roomTtlMs: { ...ROOM_TTL_MS },
         },
       };
     }
+    // Fall through to rebuild if inventory grew
+    needRefresh.add(1);
+    needRefresh.add(2);
+    needRefresh.add(3);
+    needRefresh.add(4);
   }
 
+  // Load candidates
   const localProducts = await Product.find({
     ...ELIGIBLE_FILTER,
     region,
@@ -699,7 +904,6 @@ export async function generateShowroom(opts: {
     .lean();
 
   candidates = [...candidates, ...extra];
-
   const eligibleCount = candidates.length;
 
   if (eligibleCount === 0) {
@@ -712,6 +916,7 @@ export async function generateShowroom(opts: {
         adaptive: false,
         eligibleCount: 0,
         adaptiveThreshold: ADAPTIVE_THRESHOLD,
+        roomTtlMs: { ...ROOM_TTL_MS },
       },
     };
   }
@@ -734,37 +939,107 @@ export async function generateShowroom(opts: {
 
   const adaptiveOn = eligibleCount >= ADAPTIVE_THRESHOLD;
 
-  // Batch seller plan boosts (discovery priority + visibility)
   const sellerIds = candidates.map((p: any) =>
     String(p.seller?._id || p.seller || "")
   );
   const planBoostMap = await loadSellerPlanBoosts(sellerIds);
 
-  const scored = candidates
-    .map((product: any) => {
-      const sid = String(product.seller?._id || product.seller || "");
-      const boost = planBoostMap.get(sid) || {
-        priority: 10,
-        visibility: "standard",
-      };
-      return scoreProduct({
-        product,
-        perf: perfMap.get(String(product._id)) || null,
-        region,
-        interest,
-        exposureCount: Number(exposureCounts[String(product._id)] || 0),
-        searchQuery,
-        softInterest: true,
-        planDiscoveryPriority: boost.priority,
-        planVisibility: boost.visibility,
-      });
-    })
-    .sort((a, b) => b.score - a.score);
+  const scoreFor = (
+    applyPlanBoost: boolean,
+    interestMultiplier: number,
+    regionalCommerceBoost: boolean
+  ) =>
+    candidates
+      .map((product: any) => {
+        const sid = String(product.seller?._id || product.seller || "");
+        const boost = planBoostMap.get(sid) || {
+          priority: 10,
+          visibility: "standard",
+        };
+        return scoreProductBase({
+          product,
+          perf: perfMap.get(String(product._id)) || null,
+          region,
+          interest,
+          exposureCount: Number(exposureCounts[String(product._id)] || 0),
+          searchQuery,
+          applyPlanBoost,
+          planDiscoveryPriority: boost.priority,
+          planVisibility: boost.visibility,
+          interestMultiplier,
+          regionalCommerceBoost,
+        });
+      })
+      .sort((a, b) => b.score - a.score);
 
-  const { room1, room2, room3, room4 } = adaptiveOn
-    ? distributeAdaptive(scored)
-    : distributeInventoryFirst(scored);
+  // Room-specific score lists
+  // Room 1: exploration + plan (default weights)
+  const scoredRoom1 = scoreFor(true, 1.0, false);
+  // Room 2: similarity pairs use same plan-boosted scores (pairing does the intelligence)
+  const scoredRoom2 = scoredRoom1;
+  // Room 3: NO plan boost, heavy interest
+  const scoredRoom3 = scoreFor(false, 2.15, false);
+  // Room 4: plan boost + regional commerce emphasis
+  const scoredRoom4 = scoreFor(true, 0.85, true);
 
+  let room1: ScoredProduct[];
+  let room2: ScoredProduct[];
+  let room3: ScoredProduct[];
+  let room4: ScoredProduct[];
+
+  if (!adaptiveOn) {
+    // Inventory-first uses one ranked list (plan on for overall quality)
+    const dist = distributeInventoryFirst(scoredRoom1);
+    room1 = dist.room1;
+    room2 = dist.room2;
+    room3 = dist.room3;
+    room4 = dist.room4;
+  } else {
+    const dist = distributeAdaptive({
+      scoredRoom1,
+      scoredRoom2,
+      scoredRoom3,
+      scoredRoom4,
+    });
+    room1 = dist.room1;
+    room2 = dist.room2;
+    room3 = dist.room3;
+    room4 = dist.room4;
+  }
+
+  // Partial refresh: keep cached rooms that are still fresh
+  if (session && needRefresh.size < 4 && !searchQuery && !opts.forceRefresh) {
+    const uniqueIds = cachedUniqueIds(session);
+    if (uniqueIds.length) {
+      const products = await Product.find({
+        _id: { $in: uniqueIds },
+        ...ELIGIBLE_FILTER,
+      })
+        .populate("seller", SELLER_PUBLIC_FIELDS)
+        .lean();
+      const map = new Map(products.map((p: any) => [String(p._id), p]));
+      const hydrateScored = (ids: string[]): ScoredProduct[] =>
+        (ids || [])
+          .map((id) => {
+            const p = map.get(String(id));
+            return p ? { product: p, score: 0, reasons: ["cached"] } : null;
+          })
+          .filter(Boolean) as ScoredProduct[];
+
+      if (!needRefresh.has(1) && session.productIdsByRoom?.[1]?.length) {
+        room1 = hydrateScored(session.productIdsByRoom[1]);
+      }
+      if (!needRefresh.has(2) && session.productIdsByRoom?.[2]?.length) {
+        room2 = hydrateScored(session.productIdsByRoom[2]);
+      }
+      if (!needRefresh.has(3) && session.productIdsByRoom?.[3]?.length) {
+        room3 = hydrateScored(session.productIdsByRoom[3]);
+      }
+      // Room 4 always live — never keep stale from partial path when needRefresh has 4
+    }
+  }
+
+  // Enforce uniqueness between room 1 and 2
   const ids1 = new Set(room1.map((s) => productId(s.product)));
   const final2 = room2.filter((s) => !ids1.has(productId(s.product)));
 
@@ -786,6 +1061,26 @@ export async function generateShowroom(opts: {
     nextExposure[id] = (nextExposure[id] || 0) + 1;
   }
 
+  const roomBuiltAt: Record<string, Date> = {};
+  const sessAny: any = session;
+  const prevBuiltRaw = sessAny?.roomBuiltAt || {};
+  const prevBuilt: Record<string, any> =
+    prevBuiltRaw instanceof Map
+      ? Object.fromEntries(prevBuiltRaw as Map<string, any>)
+      : typeof prevBuiltRaw === "object" && prevBuiltRaw
+        ? prevBuiltRaw
+        : {};
+
+  for (const r of [1, 2, 3, 4] as const) {
+    if (needRefresh.has(r) || !prevBuilt[String(r)]) {
+      roomBuiltAt[String(r)] = now;
+    } else {
+      roomBuiltAt[String(r)] = new Date(prevBuilt[String(r)]);
+    }
+  }
+  // Room 4 always stamped as live
+  roomBuiltAt["4"] = now;
+
   const expiresAt = new Date(Date.now() + SESSION_TTL_MS);
 
   await ShowroomSession.findOneAndUpdate(
@@ -801,6 +1096,7 @@ export async function generateShowroom(opts: {
           : "inventory_first",
       productIdsByRoom,
       exposureCounts: nextExposure,
+      roomBuiltAt,
       expiresAt,
     },
     { upsert: true, returnDocument: "after" }
@@ -822,6 +1118,9 @@ export async function generateShowroom(opts: {
       adaptiveThreshold: ADAPTIVE_THRESHOLD,
       localCount: localProducts.length,
       planBoostEnabled: true,
+      planBoostRooms: [1, 2, 4],
+      roomTtlMs: { ...ROOM_TTL_MS },
+      roomsRefreshed: [...needRefresh],
       roomSizes: {
         1: room1.length,
         2: final2.length,
@@ -863,16 +1162,18 @@ export async function rankProductsForSearch(opts: {
         priority: 10,
         visibility: "standard",
       };
-      return scoreProduct({
+      return scoreProductBase({
         product,
         perf: perfMap.get(String(product._id)) || null,
         region,
         interest,
         exposureCount: 0,
         searchQuery: opts.searchQuery,
-        softInterest: true,
+        applyPlanBoost: true,
         planDiscoveryPriority: boost.priority,
         planVisibility: boost.visibility,
+        interestMultiplier: 1.2,
+        regionalCommerceBoost: false,
       });
     })
     .sort((a, b) => b.score - a.score);

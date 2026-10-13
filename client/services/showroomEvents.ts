@@ -33,10 +33,11 @@ export async function saveShowroomSessionId(id: string) {
 
 export async function trackShowroomEvent(opts: {
   productId: string
-  type: 'impression' | 'open' | 'cart' | 'wishlist' | 'purchase' | 'skip'
+  type: 'impression' | 'open' | 'cart' | 'wishlist' | 'purchase' | 'skip' | 'search'
   room?: number
   position?: number
   region?: string
+  query?: string
 }) {
   try {
     if (!opts.productId || !opts.type) return
@@ -50,6 +51,7 @@ export async function trackShowroomEvent(opts: {
       room: opts.room,
       position: opts.position ?? 0,
       region: opts.region || 'NG',
+      query: opts.query || '',
     })
   } catch {
     // never block UI for analytics

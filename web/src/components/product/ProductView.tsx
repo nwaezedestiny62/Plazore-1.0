@@ -655,6 +655,8 @@ function Gallery({ images, name }: { images: string[]; name: string }) {
 
 
 
+type OptionKind = "color" | "size" | "type";
+
 const COLOR_SWATCH: Record<string, string> = {
   black: "#0D0D0D",
   white: "#F7F7F5",
@@ -743,15 +745,15 @@ function hexToRgb(hex: string): string | null {
   return `${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}`;
 }
 
-function isColorGroup(opt: { name: string; values: string[] }) {
+function classifyOption(opt: { name: string; values: string[] }): OptionKind {
   const n = opt.name.toLowerCase();
-  if (/(color|colour|shade|hue|finish|tone)/.test(n)) return true;
-  const hits = opt.values.filter((v) => swatchFor(v)).length;
-  return hits >= Math.ceil(opt.values.length * 0.5);
-}
-
-function isSizeGroup(opt: { name: string }) {
-  return /(size|fit|length|width|dimension)/i.test(opt.name);
+  if (/(color|colour|shade|hue|finish|tone)/.test(n)) return "color";
+  const colorHits = opt.values.filter((v) => swatchFor(v)).length;
+  if (opt.values.length > 0 && colorHits >= Math.ceil(opt.values.length * 0.5))
+    return "color";
+  if (/(size|fit|length|width|dimension|capacity|volume|weight)/i.test(n))
+    return "size";
+  return "type";
 }
 
 function CinematicVariantPicker({
@@ -768,10 +770,13 @@ function CinematicVariantPicker({
   const picked = options.filter((o) => selected[o.name]).length;
   const total = options.length;
 
-  const colorOpt = options.find((o) => isColorGroup(o));
+  const colorOpt = options.find((o) => classifyOption(o) === "color");
   const activeColorVal = colorOpt ? selected[colorOpt.name] : "";
   const activeSwatch = activeColorVal ? swatchFor(activeColorVal) : null;
-  const rgb = activeSwatch && activeSwatch.startsWith("#") ? hexToRgb(activeSwatch) : null;
+  const rgb =
+    activeSwatch && activeSwatch.startsWith("#")
+      ? hexToRgb(activeSwatch)
+      : null;
 
   const valuePossible = (name: string, val: string) => {
     const trial = { ...selected, [name]: val };
@@ -822,10 +827,10 @@ function CinematicVariantPicker({
         <div className="mb-5 flex items-end justify-between gap-3">
           <div className="min-w-0">
             <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-white/36">
-              The floor
+              Configure
             </p>
             <p className="mt-1 truncate font-display text-[18px] font-semibold tracking-tight text-white sm:text-[20px]">
-              {activeColorVal || "Choose your look"}
+              {activeColorVal || "Choose your exact piece"}
             </p>
           </div>
           <p className="shrink-0 text-[11px] tabular-nums text-white/38">
@@ -835,8 +840,7 @@ function CinematicVariantPicker({
 
         <div className="space-y-7">
           {options.map((opt, gi) => {
-            const colorMode = isColorGroup(opt);
-            const sizeMode = !colorMode && isSizeGroup(opt);
+            const kind = classifyOption(opt);
             return (
               <div
                 key={opt.id || opt.name}
@@ -850,13 +854,17 @@ function CinematicVariantPicker({
                   </p>
                   <p
                     className="text-[12px] font-medium"
-                    style={{ color: selected[opt.name] ? "#00E575" : "rgba(255,255,255,0.28)" }}
+                    style={{
+                      color: selected[opt.name]
+                        ? "#00E575"
+                        : "rgba(255,255,255,0.28)",
+                    }}
                   >
                     {selected[opt.name] || "—"}
                   </p>
                 </div>
 
-                {colorMode ? (
+                {kind === "color" ? (
                   <div className="-mx-1 flex gap-2.5 overflow-x-auto px-1 pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                     {opt.values.map((val) => {
                       const on = selected[opt.name] === val;
@@ -885,7 +893,9 @@ function CinematicVariantPicker({
                               boxShadow: on
                                 ? `0 0 0 1px #00E575, 0 16px 36px rgba(0,0,0,0.45)`
                                 : "0 8px 18px rgba(0,0,0,0.22)",
-                              transform: on ? "translateY(-4px) scale(1.04)" : "none",
+                              transform: on
+                                ? "translateY(-4px) scale(1.04)"
+                                : "none",
                               transition:
                                 "transform 0.4s cubic-bezier(0.16,1,0.3,1), box-shadow 0.4s ease, border-color 0.3s ease",
                             }}
@@ -907,8 +917,12 @@ function CinematicVariantPicker({
                           <span
                             className="mt-1.5 block truncate text-center text-[10.5px] font-semibold"
                             style={{
-                              color: on ? "#F5F7FA" : "rgba(255,255,255,0.55)",
-                              textDecoration: possible ? "none" : "line-through",
+                              color: on
+                                ? "#F5F7FA"
+                                : "rgba(255,255,255,0.55)",
+                              textDecoration: possible
+                                ? "none"
+                                : "line-through",
                             }}
                           >
                             {val}
@@ -917,7 +931,7 @@ function CinematicVariantPicker({
                       );
                     })}
                   </div>
-                ) : sizeMode ? (
+                ) : kind === "size" ? (
                   <div className="flex flex-wrap gap-2">
                     {opt.values.map((val) => {
                       const on = selected[opt.name] === val;
@@ -931,12 +945,20 @@ function CinematicVariantPicker({
                           className="relative flex h-12 min-w-[48px] items-center justify-center px-3.5 text-[14px] font-bold tracking-wide sm:h-14 sm:min-w-[56px]"
                           style={{
                             backgroundImage: on ? GRAD : undefined,
-                            backgroundColor: on ? undefined : "rgba(255,255,255,0.04)",
-                            color: on ? "#041412" : possible ? "rgba(245,247,250,0.9)" : "rgba(255,255,255,0.22)",
+                            backgroundColor: on
+                              ? undefined
+                              : "rgba(255,255,255,0.04)",
+                            color: on
+                              ? "#041412"
+                              : possible
+                                ? "rgba(245,247,250,0.9)"
+                                : "rgba(255,255,255,0.22)",
                             border: on
                               ? "1px solid transparent"
                               : "1px solid rgba(255,255,255,0.12)",
-                            boxShadow: on ? "0 12px 28px rgba(0,229,117,0.16)" : "none",
+                            boxShadow: on
+                              ? "0 12px 28px rgba(0,229,117,0.16)"
+                              : "none",
                             textDecoration: possible ? "none" : "line-through",
                             cursor: possible ? "pointer" : "not-allowed",
                             transform: on ? "translateY(-2px)" : "none",
@@ -964,15 +986,26 @@ function CinematicVariantPicker({
                           className="flex min-h-[44px] items-center gap-2.5 px-3.5 text-[13px] font-semibold"
                           style={{
                             backgroundImage: on && !sw ? GRAD : undefined,
-                            backgroundColor: on ? undefined : "rgba(255,255,255,0.04)",
-                            color: on && !sw ? "#041412" : possible ? "#F5F7FA" : "rgba(255,255,255,0.22)",
+                            backgroundColor: on
+                              ? undefined
+                              : "rgba(255,255,255,0.04)",
+                            color:
+                              on && !sw
+                                ? "#041412"
+                                : possible
+                                  ? "#F5F7FA"
+                                  : "rgba(255,255,255,0.22)",
                             border: on
                               ? "1px solid rgba(255,255,255,0.2)"
                               : "1px solid rgba(255,255,255,0.12)",
                             textDecoration: possible ? "none" : "line-through",
                             cursor: possible ? "pointer" : "not-allowed",
-                            transition: "transform 0.28s ease, box-shadow 0.28s ease",
+                            transition:
+                              "transform 0.28s ease, box-shadow 0.28s ease",
                             transform: on ? "translateY(-1px)" : "none",
+                            boxShadow: on
+                              ? "0 10px 24px rgba(0,229,117,0.12)"
+                              : "none",
                           }}
                         >
                           {sw ? (
@@ -1043,9 +1076,23 @@ export function ProductView({ product }: { product: Product }) {
 
   /** Buyer option picks: optionName → value */
   const [selected, setSelected] = useState<Record<string, string>>({});
+  const [isOffline, setIsOffline] = useState(false);
 
   useEffect(() => {
     setMounted(true);
+  }, []);
+
+  // Offline detection when product page opens
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const update = () => setIsOffline(!navigator.onLine);
+    update();
+    window.addEventListener("online", update);
+    window.addEventListener("offline", update);
+    return () => {
+      window.removeEventListener("online", update);
+      window.removeEventListener("offline", update);
+    };
   }, []);
 
   // Reset selection when product changes
@@ -1526,7 +1573,40 @@ export function ProductView({ product }: { product: Product }) {
 
   const canPurchase = selectionComplete && inStock;
 
-  return (
+    if (isOffline) {
+    return (
+      <div className="flex min-h-dvh flex-col items-center justify-center bg-bg px-8 text-center text-text">
+        <span className="flex h-14 w-14 items-center justify-center rounded-full border border-line bg-surface">
+          <Package className="h-6 w-6 text-ai-green" />
+        </span>
+        <p className="mt-4 font-semibold">You&apos;re offline</p>
+        <p className="mt-2 max-w-sm text-sm text-muted">
+          Check your connection and try again to open this product.
+        </p>
+        <button
+          type="button"
+          onClick={() => {
+            if (typeof navigator !== "undefined" && navigator.onLine) {
+              setIsOffline(false);
+              window.location.reload();
+            }
+          }}
+          className="mt-6 rounded-full bg-text px-6 py-2.5 text-sm font-bold text-bg"
+        >
+          Try again
+        </button>
+        <button
+          type="button"
+          onClick={() => router.back()}
+          className="mt-3 text-sm font-semibold text-muted"
+        >
+          Go back
+        </button>
+      </div>
+    );
+  }
+
+return (
     <div className="flex h-[100dvh] min-h-0 flex-col overflow-hidden bg-bg text-text">
       <header className="z-40 flex h-12 shrink-0 items-center justify-between border-b border-white/8 bg-bg/95 px-3 pt-[env(safe-area-inset-top)] backdrop-blur sm:px-4 lg:h-14 lg:px-6">
         <ChromeBtn onClick={() => router.back()} label="Back">

@@ -9,6 +9,12 @@ import RoomFour from './RoomFour'
 /**
  * Same contract as web `@/lib/api` ShowroomRooms + Mall ROOM_CAPACITY.
  * Backend `showroomRanker` ROOM_CAPACITY: 50 / 14 / 16 / 30.
+ *
+ * Room meaning:
+ *  1 THE HORIZON  — Expanded View (explore, strong, unique, ~2h)
+ *  2 THE CHAMBER  — Private Selection (similar pairs, unique, ~3h)
+ *  3 THE SIGNAL   — The Watch (user activity, ~20m, no plan boost)
+ *  4 THE LOCALE   — regional best (always live)
  */
 export type ShowroomRooms = {
   1?: Product[]
@@ -24,7 +30,6 @@ interface AdaptiveShowroomProps {
   onRoomLayout?: (roomNumber: number, y: number) => void
 }
 
-/** Exact web mall + backend capacities */
 const ROOM_CAPACITY = {
   1: 50,
   2: 14,
@@ -56,12 +61,6 @@ function uniqueCount(rooms?: ShowroomRooms | null, products?: Product[]) {
   return ids.size
 }
 
-/**
- * Same as web Mall.takeUnique:
- * - prefer server order
- * - never invent products
- * - optional shared `used` so Room 1 + 2 stay unique (web buildRooms)
- */
 function takeUnique(
   list: Product[] | undefined,
   cap: number,
@@ -81,7 +80,7 @@ function takeUnique(
 }
 
 /**
- * Mirror web Mall.buildRooms exactly:
+ * Mirror web Mall.buildRooms:
  * - Server rooms: Room1 + Room2 share one seen set (no overlap).
  *   Room3 / Room4 use their own lists (backend may allow controlled reuse).
  * - Fallback: sequential unique slices from flat products list.
@@ -154,7 +153,6 @@ function AdaptiveShowroom({
     ].filter((s) => s.products.length > 0)
   }, [split])
 
-  // Keep previous rooms mounted while refreshing — prevents card re-animation
   if (loading && count === 0) {
     return (
       <View style={styles.center}>

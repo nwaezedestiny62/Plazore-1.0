@@ -1,4 +1,5 @@
 import { Request, Response } from "express";
+import mongoose from "mongoose";
 import Product from "../models/Products.js";
 import User from "../models/User.js";
 import ShowroomEvent from "../models/ShowroomEvent.js";
@@ -224,11 +225,9 @@ function parseOptionsAndVariants(body: any): {
       }
     }
 
-    // Validate option names/values against defined options
     for (const opt of options) {
       const chosen = optMap[opt.name];
       if (!chosen || !opt.values.includes(chosen)) {
-        // allow missing if seller disabled incomplete combos — skip invalid
         optMap = {};
         break;
       }
@@ -265,21 +264,16 @@ function parseOptionsAndVariants(body: any): {
   }
 
   if (variants.length === 0) {
-    // Options defined but no valid variants — treat as simple product
     return { hasVariants: false, options: [], variants: [] };
   }
 
   return { hasVariants: true, options, variants };
 }
 
-/** Keys that only affect inventory — must NOT trigger Plazore AI */
 function isInventoryOnlyUpdate(updates: Record<string, any>): boolean {
   const keys = Object.keys(updates);
   if (keys.length === 0) return true;
-
   const inventoryKeys = new Set(["stock", "variants"]);
-  // variants payload only counts as inventory-only if structure is unchanged
-  // Caller should pass contentFingerprintChanged separately for structure.
   return keys.every((k) => inventoryKeys.has(k));
 }
 
@@ -553,7 +547,6 @@ export const getProducts = async (req: Request, res: Response) => {
       filters.push({ price: { $lte: maxPrice } });
     }
 
-    // In stock: simple stock OR any available variant with stock
     if (inStockOnly) {
       filters.push({
         $or: [
@@ -734,8 +727,6 @@ export const createProduct = async (req: Request, res: Response) => {
       });
     }
 
-    // Plan image limit BEFORE Cloudinary — Free=6, Dominant=12, Business+/Global=20
-    // Avoids uploading files that would be rejected by plan.
     try {
       await assertImageLimit(user._id.toString(), imageFiles.length);
     } catch (limitErr: any) {
@@ -873,7 +864,6 @@ export const createProduct = async (req: Request, res: Response) => {
       });
     }
 
-    // When variants exist, product.stock is sum of available variant stocks (display helper)
     let finalStock = safeStock;
     if (optionsPayload.hasVariants) {
       finalStock = optionsPayload.variants
@@ -966,8 +956,6 @@ export const updateProduct = async (req: Request, res: Response) => {
     const keptUrls = parseExistingImageUrls(req.body);
     const imageFiles = getImageFiles(req);
 
-    // Early plan check: kept + new files (order may dedupe later, so this is upper bound)
-    // Final exact check still runs after merge.
     const clientWillTouchImages =
       req.body.existingImages !== undefined ||
       req.body.keepImages !== undefined ||
@@ -1090,7 +1078,6 @@ export const updateProduct = async (req: Request, res: Response) => {
         raw === true || raw === "true" || raw === 1 || raw === "1";
     }
 
-    // Options / variants (structure or stock)
     let optionsStructureChanged = false;
     if (req.body.options !== undefined || req.body.variants !== undefined) {
       let optionsPayload: ReturnType<typeof parseOptionsAndVariants>;
@@ -1134,7 +1121,6 @@ export const updateProduct = async (req: Request, res: Response) => {
       }
     }
 
-    // Shipping
     {
       let shipBody: any = null;
       if (req.body.shipping !== undefined) {
@@ -1221,7 +1207,6 @@ export const updateProduct = async (req: Request, res: Response) => {
       }
     }
 
-    // Fulfillment
     {
       const hasFulfillmentTouch =
         req.body.fulfillmentLocation !== undefined ||
@@ -1308,7 +1293,6 @@ export const updateProduct = async (req: Request, res: Response) => {
       const onlyVisibility =
         Object.keys(updates).length === 1 && updates.isActive !== undefined;
 
-      // Inventory-only: stock and/or variants where structure did not change
       const onlyInventory =
         !onlyVisibility &&
         !optionsStructureChanged &&
@@ -1499,8 +1483,14 @@ export const getShowroom = async (req: Request, res: Response) => {
 export const trackShowroomEvent = async (req: Request, res: Response) => {
   try {
     const user = getUser(req);
-    const { sessionId, productId, type, room, position, region } =
-      req.body || {};
+    const body = req.body || {};
+    const sessionId = body.sessionId;
+    const productId = body.productId;
+    const type = body.type;
+    const room = body.room;
+    const position = body.position;
+    const region = body.region;
+    const query = body.query;
 
     const allowed = [
       "impression",
@@ -1509,6 +1499,7 @@ export const trackShowroomEvent = async (req: Request, res: Response) => {
       "wishlist",
       "purchase",
       "skip",
+      "search",
     ] as const;
 
     type EventType = (typeof allowed)[number];
@@ -1518,37 +1509,54 @@ export const trackShowroomEvent = async (req: Request, res: Response) => {
       return res.status(400).json({
         success: false,
         message:
-          "sessionId, productId and type (impression|open|cart|wishlist|purchase|skip) required",
+          "sessionId, productId and type (impression|open|cart|wishlist|purchase|skip|search) required",
       });
     }
+
+    const productRef = String(productId).trim();
+    if (!mongoose.Types.ObjectId.isValid(productRef)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid productId",
+      });
+    }
+
+    const productObjectId = new mongoose.Types.ObjectId(productRef);
 
     const doc = await ShowroomEvent.create({
       sessionId: String(sessionId),
       user: user?._id || null,
-      product: productId,
+      product: productObjectId,
       type: eventType,
-      room: room != null ? Number(room) : undefined,
-      position: position != null ? Number(position) : 0,
+      room:
+        room != null && room !== "" && !Number.isNaN(Number(room))
+          ? Number(room)
+          : undefined,
+      position:
+        position != null && position !== "" && !Number.isNaN(Number(position))
+          ? Number(position)
+          : 0,
       region: String(region || "NG").trim() || "NG",
+      query: String(query || "").trim(),
     });
 
     if (eventType === "open") {
       trackProductPerformance({
-        productId: String(productId),
+        productId: productRef,
         action: "view",
         actorUserId: user?._id?.toString?.() || null,
       }).catch(() => {});
     }
     if (eventType === "cart") {
       trackProductPerformance({
-        productId: String(productId),
+        productId: productRef,
         action: "cart",
         actorUserId: user?._id?.toString?.() || null,
       }).catch(() => {});
     }
     if (eventType === "purchase") {
       trackProductPerformance({
-        productId: String(productId),
+        productId: productRef,
         action: "purchase",
         actorUserId: user?._id?.toString?.() || null,
       }).catch(() => {});

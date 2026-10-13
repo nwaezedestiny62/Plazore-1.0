@@ -50,7 +50,7 @@ type RoomTitles = {
 
 const ROOM_TITLES: RoomTitles = {
   one: ["THE HORIZON", "Expanded View"],
-  two: ["THE CHAMBER", "Private Selection"],
+  two: ["THE CHAMBER", "Natural Selection"],
   three: ["THE SIGNAL", "Worth Your Attention"],
   four: ["THE LOCALE", "From Your Region"],
 };

@@ -15,6 +15,12 @@ interface RoomTwoProps {
   subtitle?: string
 }
 
+/**
+ * THE CHAMBER — Private Selection
+ * Backend pairs similar products (same category / subcategory).
+ * UI shows them side-by-side so the user can compare and choose.
+ * Capacity: 14 unique (never overlaps Room 1).
+ */
 export default function RoomTwo({
   products,
   title = 'THE CHAMBER',
@@ -33,46 +39,38 @@ export default function RoomTwo({
     return out
   }, [products])
 
-  const left = list[0]
-  const right = list[1]
-  const rest = list.slice(2)
+  // Pair layout: [0,1], [2,3], ...
+  const pairs: Product[][] = []
+  for (let i = 0; i < list.length; i += 2) {
+    pairs.push(list.slice(i, i + 2))
+  }
 
   return (
     <View style={styles.room}>
       <View style={styles.header}>
         <Text style={styles.kicker}>{title}</Text>
         <Text style={styles.title}>{subtitle}</Text>
+        <Text style={styles.hint}>Compare side by side · pick what fits you</Text>
         <View style={styles.line} />
       </View>
 
-      {(left || right) && (
-        <View style={styles.dual}>
-          {left ? (
-            <View style={styles.dualItem}>
-              <ShowroomProductCard product={left} room={2} position={0} />
-            </View>
-          ) : null}
-          {right ? (
-            <View style={styles.dualItem}>
-              <ShowroomProductCard product={right} room={2} position={1} />
-            </View>
-          ) : null}
-        </View>
-      )}
-
-      {rest.length > 0 ? (
-        <View style={styles.secondary}>
-          {rest.map((product, index) => (
-            <View key={String(product._id)} style={styles.secondaryItem}>
+      {pairs.map((pair, pairIndex) => (
+        <View
+          key={`pair-${pairIndex}-${String(pair[0]?._id || pairIndex)}`}
+          style={[styles.dual, pairIndex > 0 && styles.dualNext]}
+        >
+          {pair.map((product, i) => (
+            <View key={String(product._id)} style={styles.dualItem}>
               <ShowroomProductCard
                 product={product}
                 room={2}
-                position={2 + index}
+                position={pairIndex * 2 + i}
               />
             </View>
           ))}
+          {pair.length === 1 ? <View style={styles.dualItem} /> : null}
         </View>
-      ) : null}
+      ))}
     </View>
   )
 }
@@ -101,6 +99,11 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     letterSpacing: -0.4,
     color: '#111',
+    marginBottom: 6,
+  },
+  hint: {
+    fontSize: 12,
+    color: 'rgba(0,0,0,0.42)',
     marginBottom: 14,
   },
   line: {
@@ -113,17 +116,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: PAD,
     gap: GAP,
   },
+  dualNext: {
+    marginTop: 20,
+  },
   dualItem: {
-    width: HALF,
-  },
-  secondary: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    paddingHorizontal: PAD,
-    paddingTop: 20,
-    gap: GAP,
-  },
-  secondaryItem: {
     width: HALF,
   },
 })

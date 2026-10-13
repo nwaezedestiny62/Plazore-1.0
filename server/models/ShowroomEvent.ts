@@ -1,35 +1,47 @@
 import mongoose from "mongoose";
 
-const showroomEventSchema = new mongoose.Schema(
+/**
+ * ShowroomSession
+ * Caches product IDs per room with per-room build timestamps
+ * so Room 1 / 2 / 3 / 4 can rotate on different schedules:
+ *   Room 1 → 2h
+ *   Room 2 → 3h
+ *   Room 3 → 20m
+ *   Room 4 → always live (TTL 0)
+ */
+const showroomSessionSchema = new mongoose.Schema(
   {
-    sessionId: { type: String, required: true, index: true },
+    sessionId: { type: String, required: true, unique: true, index: true },
     user: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       default: null,
       index: true,
     },
-    product: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Product",
-      required: true,
-      index: true,
+    region: { type: String, default: "NG" },
+    behaviorSig: { type: String, default: "" },
+    productIdsByRoom: {
+      1: [{ type: String }],
+      2: [{ type: String }],
+      3: [{ type: String }],
+      4: [{ type: String }],
     },
-    type: {
-      type: String,
-      enum: ["impression", "open", "cart", "wishlist", "purchase", "skip"],
-      required: true,
-      index: true,
+    /** When each room was last rebuilt (ISO date per room key "1"|"2"|"3"|"4") */
+    roomBuiltAt: {
+      type: Map,
+      of: Date,
+      default: {},
     },
-    room: { type: Number, min: 1, max: 4, index: true },
-    position: { type: Number, default: 0 },
-    region: { type: String, default: "NG", index: true },
+    exposureCounts: { type: Map, of: Number, default: {} },
+    expiresAt: { type: Date, required: true, index: true },
   },
   { timestamps: true }
 );
 
-showroomEventSchema.index({ sessionId: 1, createdAt: -1 });
-showroomEventSchema.index({ user: 1, createdAt: -1 });
+showroomSessionSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
-const ShowroomEvent = mongoose.model("ShowroomEvent", showroomEventSchema);
-export default ShowroomEvent;
+const ShowroomSession = mongoose.model(
+  "ShowroomSession",
+  showroomSessionSchema
+);
+export default ShowroomSession;
