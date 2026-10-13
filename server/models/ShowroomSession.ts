@@ -1,5 +1,9 @@
 import mongoose from "mongoose";
 
+/**
+ * ShowroomSession — caches product IDs per room + per-room build times.
+ * MUST stay separate from ShowroomEvent.
+ */
 const showroomSessionSchema = new mongoose.Schema(
   {
     sessionId: { type: String, required: true, unique: true, index: true },
@@ -17,6 +21,11 @@ const showroomSessionSchema = new mongoose.Schema(
       3: [{ type: String }],
       4: [{ type: String }],
     },
+    roomBuiltAt: {
+      type: Map,
+      of: Date,
+      default: {},
+    },
     exposureCounts: { type: Map, of: Number, default: {} },
     expiresAt: { type: Date, required: true, index: true },
   },
@@ -25,5 +34,8 @@ const showroomSessionSchema = new mongoose.Schema(
 
 showroomSessionSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
-const ShowroomSession = mongoose.model("ShowroomSession", showroomSessionSchema);
+const ShowroomSession = mongoose.model(
+  "ShowroomSession",
+  showroomSessionSchema
+);
 export default ShowroomSession;
