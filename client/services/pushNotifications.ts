@@ -1,13 +1,10 @@
 /**
  * client/services/pushNotifications.ts
- * Channel id MUST be new. Android will not upgrade an old channel.
- * Server must send channelId: "plazore_popup".
+ * Register token + turn a notification tap into an in-app route.
  */
 import { Platform } from "react-native";
 import Constants from "expo-constants";
 import api from "@/constants/api";
-
-export const POPUP_CHANNEL = "plazore_popup";
 
 type NotificationsModule = typeof import("expo-notifications");
 type DeviceModule = typeof import("expo-device");
@@ -29,7 +26,6 @@ async function loadNativeModules(): Promise<boolean> {
     Device = await import("expo-device");
     Notifications.setNotificationHandler({
       handleNotification: async () => ({
-        shouldShowAlert: true,
         shouldPlaySound: true,
         shouldSetBadge: true,
         shouldShowBanner: true,
@@ -44,15 +40,22 @@ async function loadNativeModules(): Promise<boolean> {
   }
 }
 
-async function ensurePopupChannel() {
+async function ensureChannels() {
   if (!Notifications || Platform.OS !== "android") return;
-  await Notifications.setNotificationChannelAsync(POPUP_CHANNEL, {
-    name: "Plazore alerts",
+  await Notifications.setNotificationChannelAsync("plazore_critical", {
+    name: "Plazore Critical",
     importance: Notifications.AndroidImportance.MAX,
     vibrationPattern: [0, 250, 250, 250],
-    lightColor: "#22C55E",
+    lightColor: "#00E575",
     lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
-    bypassDnd: false,
+    enableVibrate: true,
+    showBadge: true,
+  });
+  await Notifications.setNotificationChannelAsync("plazore_default", {
+    name: "Plazore",
+    importance: Notifications.AndroidImportance.HIGH,
+    vibrationPattern: [0, 180, 120, 180],
+    lightColor: "#22D3EE",
     enableVibrate: true,
     showBadge: true,
   });
@@ -65,7 +68,7 @@ export async function registerForPushNotifications(
     const ok = await loadNativeModules();
     if (!ok || !Notifications || !Device?.isDevice) return null;
 
-    await ensurePopupChannel();
+    await ensureChannels();
 
     let settings = await Notifications.getPermissionsAsync();
     if (settings.status !== "granted") {
@@ -101,4 +104,57 @@ export async function registerForPushNotifications(
     console.warn("[push] register failed", e);
     return null;
   }
+}
+
+/** Where a tap should go. Prefers the link saved with the indoor notification. */
+export function hrefFromPushData(data: Record<string, unknown> | undefined): string {
+  const link = String(data?.link || "");
+  if (link.startsWith("/") && !link.startsWith("//")) return link;
+
+  const type = String(data?.type || "");
+  const orderId = String(data?.orderId || "");
+  const conversationId = String(data?.conversationId || "");
+
+  if (type === "chat_message" && conversationId) return `/chat/${conversationId}`;
+  if (type === "showroom_refresh") return "/showroom";
+  if (
+    (type === "ship_required" || type === "new_order") &&
+    orderId
+  ) {
+    return `/seller/orders/${orderId}`;
+  }
+  if (orderId) return `/orders/${orderId}`;
+  if (type === "announcement") return "/notifications";
+  return "/notifications";
+}
+
+export function setupNotificationListeners(opts: {
+  onTap: (href: string) => void;
+}): () => void {
+  let sub: { remove: () => void } | null = null;
+  let cancelled = false;
+
+  loadNativeModules().then(async (ok) => {
+    if (!ok || !Notifications || cancelled) return;
+
+    const open = (response: any) => {
+      const data = response?.notification?.request?.content?.data || {};
+      const href = hrefFromPushData(data);
+      if (href) opts.onTap(href);
+    };
+
+    sub = Notifications.addNotificationResponseReceivedListener(open);
+
+    try {
+      const last = await Notifications.getLastNotificationResponseAsync();
+      if (!cancelled && last) open(last);
+    } catch {
+      /* ignore */
+    }
+  });
+
+  return () => {
+    cancelled = true;
+    sub?.remove();
+  };
 }

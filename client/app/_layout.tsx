@@ -25,6 +25,7 @@ import {
   useFonts,
 } from '@expo-google-fonts/poppins'
 import { Stack } from 'expo-router'
+import PushTapBridge from '@/components/PushTapBridge'
 import { StatusBar as ExpoStatusBar } from 'expo-status-bar'
 import * as SplashScreen from 'expo-splash-screen'
 import React, { useEffect, useRef, useState } from 'react'
@@ -139,6 +140,7 @@ function AppShell() {
           statusBarTranslucent: false,
         }}
       />
+      <PushTapBridge />
 
       {!showOpener ? <NetworkStatusBanner /> : null}
 

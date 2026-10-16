@@ -35,6 +35,7 @@ import {
   getPlanBenefits,
   type PlanId,
 } from "../config/plans.js";
+import { notifyShowroomRefresh } from "../utils/sendNotification.js";
 
 export const ROOM_CAPACITY = {
   1: 50,
@@ -1101,6 +1102,17 @@ export async function generateShowroom(opts: {
     },
     { upsert: true, returnDocument: "after" }
   );
+
+  // Expanded View (1) and Private Selection (2) only — not every Room 4 live refresh.
+  if (userId && !searchQuery) {
+    const changed = [...needRefresh].filter((r) => r === 1 || r === 2);
+    if (changed.length) {
+      notifyShowroomRefresh({
+        userId: String(userId),
+        rooms: changed,
+      }).catch((err) => console.error("[showroom] push failed", err));
+    }
+  }
 
   return {
     sessionId,
