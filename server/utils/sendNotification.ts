@@ -1,7 +1,7 @@
 /**
- * Plazore — dual delivery:
- *  1) Indoor Notification document
- *  2) Native Expo push when user has expoPushToken
+ * Plazore — dual delivery.
+ * Native push ALWAYS runs when the user has a token.
+ * Indoor Notification.create failure must NOT cancel the popup.
  */
 
 import Notification, {
@@ -13,25 +13,6 @@ import { sendPushToToken } from "./sendExpoPush.js";
 
 export type { NotificationType };
 export { NOTIFICATION_TYPES };
-
-const CRITICAL_TYPES = new Set<string>([
-  "new_order",
-  "ship_required",
-  "confirm_delivery",
-  "payment_released",
-  "payment_pending_release",
-  "order_shipped",
-  "order_delivered",
-]);
-
-/** Map any unknown type → schema-safe enum value */
-function normalizeType(raw: string | undefined): NotificationType {
-  const t = String(raw || "general").trim();
-  if ((NOTIFICATION_TYPES as readonly string[]).includes(t)) {
-    return t as NotificationType;
-  }
-  return "general";
-}
 
 export interface SendNotificationOptions {
   userId: string;
@@ -51,6 +32,14 @@ export interface SendNotificationOptions {
   skipPush?: boolean;
 }
 
+function normalizeType(raw: string | undefined): NotificationType {
+  const t = String(raw || "general").trim();
+  if ((NOTIFICATION_TYPES as readonly string[]).includes(t)) {
+    return t as NotificationType;
+  }
+  return "general";
+}
+
 function formatReleaseTiming(releaseAt?: string | Date | null): string {
   if (!releaseAt) return "";
   const d = new Date(releaseAt);
@@ -67,89 +56,86 @@ function formatReleaseTiming(releaseAt?: string | Date | null): string {
   return `~${mins}m until payment release`;
 }
 
+function isObjectIdLike(value?: string): boolean {
+  return !!value && /^[a-fA-F0-9]{24}$/.test(value);
+}
+
 export async function sendNotification(opts: SendNotificationOptions) {
+  const userId = String(opts.userId || "").trim();
+  if (!userId) return null;
+
+  const type = normalizeType(opts.type);
+  let fullMessage = opts.message || "";
+  const timing = formatReleaseTiming(opts.releaseAt);
+  if (
+    timing &&
+    !fullMessage.includes("payment release") &&
+    !fullMessage.includes("until")
+  ) {
+    fullMessage = `${fullMessage} ${timing}`.trim();
+  }
+
+  // Indoor record — never block the push
+  let doc: unknown = null;
   try {
-    const {
-      userId,
-      title,
-      message,
-      orderId,
-      orderNumber,
-      conversationId,
-      productId,
-      productName,
-      link,
-      contactId,
-      reportId,
-      announcementId,
-      releaseAt,
-      skipPush,
-    } = opts;
-
-    if (!userId) return null;
-
-    const type = normalizeType(opts.type);
-
-    let fullMessage = message;
-    const timing = formatReleaseTiming(releaseAt);
-    if (timing && !message.includes("payment release") && !message.includes("until")) {
-      fullMessage = `${message} ${timing}`.trim();
-    }
-
     const base: Record<string, unknown> = {
       user: userId,
       type,
-      title,
+      title: opts.title,
       message: fullMessage,
       isRead: false,
-      link: link || "",
+      link: opts.link || "",
     };
+    if (isObjectIdLike(opts.orderId)) base.order = opts.orderId;
+    if (opts.orderNumber) base.orderNumber = opts.orderNumber;
+    if (isObjectIdLike(opts.conversationId)) base.conversation = opts.conversationId;
+    if (isObjectIdLike(opts.productId)) base.product = opts.productId;
+    if (opts.productName) base.productName = opts.productName;
+    if (isObjectIdLike(opts.contactId)) base.contact = opts.contactId;
+    if (isObjectIdLike(opts.reportId)) base.report = opts.reportId;
+    if (isObjectIdLike(opts.announcementId)) base.announcement = opts.announcementId;
 
-    if (orderId) base.order = orderId;
-    if (orderNumber) base.orderNumber = orderNumber;
-    if (conversationId) base.conversation = conversationId;
-    if (productId) base.product = productId;
-    if (productName) base.productName = productName;
-    if (contactId) base.contact = contactId;
-    if (reportId) base.report = reportId;
-    if (announcementId) base.announcement = announcementId;
-
-    let doc: unknown = null;
     try {
       doc = await Notification.create(base);
-    } catch (firstErr: unknown) {
-      // Last-resort: force type general if enum still lagging in DB
-      try {
-        doc = await Notification.create({
-          ...base,
-          type: "general" as NotificationType,
-        });
-      } catch (e) {
-        console.error("Failed to send notification:", firstErr);
-        return null;
-      }
+    } catch (firstErr) {
+      console.error("[notify] indoor create failed, retry general:", firstErr);
+      doc = await Notification.create({
+        user: userId,
+        type: "general",
+        title: opts.title,
+        message: fullMessage,
+        isRead: false,
+        link: opts.link || "",
+        orderNumber: opts.orderNumber || undefined,
+        productName: opts.productName || undefined,
+      });
     }
+  } catch (indoorErr) {
+    console.error("[notify] indoor notification skipped:", indoorErr);
+  }
 
-    if (!skipPush) {
-      pushNative({
+  if (!opts.skipPush) {
+    try {
+      await pushNative({
         userId,
         type,
-        title,
+        title: opts.title,
         body: fullMessage,
-        orderId,
-        orderNumber,
-        conversationId,
-        productId,
-        link,
-        releaseAt: releaseAt ? new Date(releaseAt).toISOString() : undefined,
-      }).catch((err) => console.error("native push failed:", err));
+        orderId: opts.orderId,
+        orderNumber: opts.orderNumber,
+        conversationId: opts.conversationId,
+        productId: opts.productId,
+        link: opts.link,
+        releaseAt: opts.releaseAt
+          ? new Date(opts.releaseAt).toISOString()
+          : undefined,
+      });
+    } catch (err) {
+      console.error("[notify] native push failed:", err);
     }
-
-    return doc;
-  } catch (error) {
-    console.error("Failed to send notification:", error);
-    return null;
   }
+
+  return doc;
 }
 
 async function pushNative(opts: {
@@ -164,38 +150,53 @@ async function pushNative(opts: {
   link?: string;
   releaseAt?: string;
 }) {
-  try {
-    const user = await User.findById(opts.userId)
-      .select("expoPushToken pushEnabled")
-      .lean();
-
-    const token = (user as any)?.expoPushToken;
-    if (!token || (user as any)?.pushEnabled === false) return;
-
-    const isCritical = CRITICAL_TYPES.has(opts.type);
-
-    await sendPushToToken({
-      token: String(token),
-      title: opts.title,
-      body: opts.body,
-      data: {
-        type: opts.type,
-        orderId: opts.orderId || "",
-        orderNumber: opts.orderNumber || "",
-        conversationId: opts.conversationId || "",
-        productId: opts.productId || "",
-        link: opts.link || "",
-        releaseAt: opts.releaseAt || "",
-      },
-      channelId: isCritical ? "plazore_critical" : "plazore_default",
-      priority: isCritical ? "high" : "default",
-    });
-  } catch (e) {
-    console.error("pushNative error:", e);
+  if (!isObjectIdLike(opts.userId)) {
+    console.warn("[pushNative] userId is not an ObjectId", opts.userId);
+    return;
   }
-}
 
-// ─── Critical helpers ───────────────────────────────────────────
+  const user = await User.findById(opts.userId)
+    .select("expoPushToken pushEnabled")
+    .lean();
+
+  const token = String((user as any)?.expoPushToken || "").trim();
+  if (!user) {
+    console.warn("[pushNative] user not found", opts.userId);
+    return;
+  }
+  if ((user as any)?.pushEnabled === false) {
+    console.warn("[pushNative] push disabled", opts.userId);
+    return;
+  }
+  if (!token) {
+    console.warn("[pushNative] no expoPushToken on user", opts.userId);
+    return;
+  }
+
+  console.log(
+    "[pushNative] sending",
+    opts.type,
+    "to",
+    opts.userId,
+    token.slice(0, 28)
+  );
+
+  await sendPushToToken({
+    token,
+    title: opts.title,
+    body: opts.body,
+    priority: "high",
+    data: {
+      type: opts.type,
+      orderId: opts.orderId || "",
+      orderNumber: opts.orderNumber || "",
+      conversationId: opts.conversationId || "",
+      productId: opts.productId || "",
+      link: opts.link || "",
+      releaseAt: opts.releaseAt || "",
+    },
+  });
+}
 
 export async function notifySellerShipRequired(opts: {
   sellerId: string;

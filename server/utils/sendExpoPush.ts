@@ -1,6 +1,6 @@
 /**
  * server/utils/sendExpoPush.ts
- * Posts to Expo Push API. No third-party SDK required.
+ * Always logs Expo ticket so Render shows why a popup did or did not send.
  */
 
 type PushPayload = {
@@ -19,8 +19,23 @@ export async function sendPushToToken(opts: PushPayload): Promise<boolean> {
     !token.startsWith("ExponentPushToken[") &&
     !token.startsWith("ExpoPushToken[")
   ) {
-    console.warn("[sendExpoPush] invalid token shape");
+    console.warn("[sendExpoPush] invalid token shape", token.slice(0, 24));
     return false;
+  }
+
+  const message: Record<string, unknown> = {
+    to: token,
+    title: opts.title,
+    body: opts.body,
+    data: opts.data || {},
+    sound: opts.sound === null ? null : "default",
+    priority: "high",
+  };
+
+  // Only attach a channel if one was explicitly requested AND created in the app.
+  // A missing/broken channelId makes Android drop the banner.
+  if (opts.channelId) {
+    message.channelId = opts.channelId;
   }
 
   try {
@@ -31,29 +46,35 @@ export async function sendPushToToken(opts: PushPayload): Promise<boolean> {
         "Accept-Encoding": "gzip, deflate",
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        to: token,
-        title: opts.title,
-        body: opts.body,
-        data: opts.data || {},
-        sound: opts.sound === null ? null : "default",
-        priority: opts.priority === "high" ? "high" : "default",
-        channelId: opts.channelId || "plazore_default",
-      }),
+      body: JSON.stringify(message),
     });
 
+    const text = await res.text().catch(() => "");
+    let json: any = null;
+    try {
+      json = text ? JSON.parse(text) : null;
+    } catch {
+      json = null;
+    }
+
     if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      console.error("[sendExpoPush] HTTP", res.status, text);
+      console.error("[sendExpoPush] HTTP", res.status, text.slice(0, 500));
       return false;
     }
 
-    const json: any = await res.json().catch(() => null);
     const ticket = Array.isArray(json?.data) ? json.data[0] : json?.data;
     if (ticket?.status === "error") {
-      console.error("[sendExpoPush] ticket error", ticket);
+      console.error("[sendExpoPush] ticket error", JSON.stringify(ticket));
       return false;
     }
+
+    console.log(
+      "[sendExpoPush] ok",
+      ticket?.status || "sent",
+      ticket?.id || "",
+      "token",
+      token.slice(0, 28)
+    );
     return true;
   } catch (e) {
     console.error("[sendExpoPush] failed", e);
