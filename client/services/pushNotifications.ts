@@ -1,16 +1,6 @@
 /**
  * client/services/pushNotifications.ts
- *
- * Expo Go (Android, SDK 53+) does NOT support remote push.
- * Top-level `import * as Notifications` crashes with:
- *   Cannot find native module 'ExpoTopicSubscriptionModule'
- *
- * This file loads expo-notifications only when available and never
- * throws at import time so the rest of the app still boots.
- *
- * Real device popups require a development build:
- *   npx expo install expo-dev-client
- *   npx eas build --profile development --platform android
+ * Do NOT set channel sound to "default" — Expo treats it as a missing custom file.
  */
 
 import { Platform } from "react-native";
@@ -26,7 +16,6 @@ let loadAttempted = false;
 let loadError: string | null = null;
 
 function isExpoGo(): boolean {
-  // appOwnership === 'expo' means Expo Go
   return Constants.appOwnership === "expo";
 }
 
@@ -34,7 +23,6 @@ async function loadNativeModules(): Promise<boolean> {
   if (loadAttempted) return !!(Notifications && Device);
   loadAttempted = true;
 
-  // Remote push is unavailable in Expo Go on Android SDK 53+
   if (isExpoGo() && Platform.OS === "android") {
     loadError =
       "Push unavailable in Expo Go on Android (SDK 53+). Use a development build.";
@@ -85,14 +73,12 @@ export async function ensureNotificationPermissions(): Promise<{
       importance: Notifications.AndroidImportance.HIGH,
       vibrationPattern: [0, 250, 250, 250],
       lightColor: "#22D3EE",
-      sound: "default",
     });
     await Notifications.setNotificationChannelAsync("plazore_critical", {
       name: "Plazore Critical",
       importance: Notifications.AndroidImportance.MAX,
       vibrationPattern: [0, 400, 200, 400],
       lightColor: "#22C55E",
-      sound: "default",
     });
   }
 
@@ -121,10 +107,6 @@ export async function ensureNotificationPermissions(): Promise<{
   return { granted: status === "granted", status };
 }
 
-/**
- * Register for Expo push + save token to server.
- * Safe to call in Expo Go — returns null without crashing.
- */
 export async function registerForPushNotifications(
   getToken?: () => Promise<string | null>
 ): Promise<string | null> {
@@ -143,9 +125,7 @@ export async function registerForPushNotifications(
       process.env.EXPO_PUBLIC_EAS_PROJECT_ID;
 
     if (!projectId) {
-      console.warn(
-        "[push] missing EAS projectId — set extra.eas.projectId in app.json"
-      );
+      console.warn("[push] missing EAS projectId");
       return null;
     }
 
@@ -155,17 +135,20 @@ export async function registerForPushNotifications(
     const token = tokenRes?.data;
     if (!token) return null;
 
+    console.log("[push] token prefix:", String(token).slice(0, 28));
+
     try {
       const authToken = getToken ? await getToken() : null;
       const headers = authToken
         ? { Authorization: `Bearer ${authToken}` }
         : undefined;
 
-      await api.post(
+      const res = await api.post(
         "/users/push-token",
         { token, platform: Platform.OS },
         headers ? { headers } : undefined
       );
+      console.log("[push] token saved to server:", res?.data?.success !== false);
     } catch (e) {
       console.warn("[push] save token failed", e);
     }
@@ -181,7 +164,6 @@ export function setupNotificationListeners(opts?: {
   onReceive?: (n: any) => void;
   onResponse?: (r: any) => void;
 }): () => void {
-  // Sync API for callers; loads modules in background
   let subReceive: { remove: () => void } | null = null;
   let subResponse: { remove: () => void } | null = null;
   let cancelled = false;

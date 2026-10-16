@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "162839835304",
+    "project_id": "plazore",
+    "storage_bucket": "plazore.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:162839835304:android:c722b7713b69c38ad7c89d",
+        "android_client_info": {
+          "package_name": "com.plazore.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA5uYd1kyH8awoYZJowsWskQCiDkbLhyx4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

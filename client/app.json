@@ -34,7 +34,8 @@
         "android.permission.POST_NOTIFICATIONS",
         "android.permission.VIBRATE",
         "android.permission.RECEIVE_BOOT_COMPLETED"
-      ]
+      ],
+      "googleServicesFile": "./google-services.json"
     },
     "web": {
       "favicon": "./assets/logo-0.png"
@@ -59,8 +60,7 @@
         {
           "icon": "./assets/logo-0.png",
           "color": "#090B0F",
-          "defaultChannel": "plazore_default",
-          "sounds": []
+          "defaultChannel": "plazore_default"
         }
       ],
       "expo-asset",
