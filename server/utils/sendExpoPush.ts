@@ -28,15 +28,12 @@ export async function sendPushToToken(opts: PushPayload): Promise<boolean> {
     title: opts.title,
     body: opts.body,
     data: opts.data || {},
-    sound: opts.sound === null ? null : "default",
+    sound: "default",
     priority: "high",
+    // Must match the MAX-importance channel created in the app.
+    // Old plazore_default was created broken and Android will not upgrade it.
+    channelId: "plazore_popup",
   };
-
-  // Only attach a channel if one was explicitly requested AND created in the app.
-  // A missing/broken channelId makes Android drop the banner.
-  if (opts.channelId) {
-    message.channelId = opts.channelId;
-  }
 
   try {
     const res = await fetch("https://exp.host/--/api/v2/push/send", {
