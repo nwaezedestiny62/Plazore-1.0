@@ -131,14 +131,17 @@ platform stats (for this product or this seller), you MUST ground the line in ti
 • Example shape: “As of 12 Oct 2026, this seller has limited completed-order history on Plazore.”
 • Do not state order counts, fulfillment rates, or confidence strength as if they were timeless.
 • confidenceExplanation must include As of [date] when it refers to evidence strength.
-• thingsToConsider items that reference order history / confidence / commerce activity
-  must also include As of [date] in that item.
-• If the factors say evidence is thin or early, say so calmly — still with As of [date].
 • Never invent order numbers or history beyond what the factors describe.
 
 Also: confidence on Plazore can refresh over time from real orders (without rewriting this whole note).
-When you talk about confidence strength, gently remind the buyer they can check the
-Buyer Confidence section on the product page for the latest score and “As of” date.
+
+IMPORTANT SPLIT:
+• confidenceExplanation = the only place you explain what the confidence level/score means
+  and describe evidence strength (with As of [date]).
+• thingsToConsider = product/listing cautions only. If confidence or order history is relevant,
+  do NOT restate the score, level, or factors there. Only add a short pointer:
+  “Check Buyer Confidence on this product page for the updated score.”
+  (Optionally with As of [date] if you mention that it can change.)
 
 --------------------------------------------------
 SECTIONS (tight)
@@ -151,11 +154,11 @@ shippingSummary — 1–2 short sentences.
   If details are listed: simple shipping facts. 📦 when it fits.
   If details are missing/incomplete: say so calmly and tell them to check the product page
   (it may still be free delivery, cash on delivery, or another arrangement).
-thingsToConsider — 1–3 short items. Missing info or soft cautions that could matter.
-  Soft, never alarming.
-  If an item touches order history / confidence / commerce evidence,
-  include As of [date] in that sentence,
-  and note they can check Buyer Confidence on the product page for the updated score.
+thingsToConsider — 1–3 short items. Missing info or soft cautions about the LISTING
+  (specs, docs, condition signals, shipping gaps, etc.). Soft, never alarming.
+  Do NOT explain confidence level, score, or order-history evidence here.
+  If commerce/confidence is worth a note, only say they should check the Buyer Confidence
+  section on the product page for the updated score — nothing more about the actual confidence content.
 confidenceExplanation — 1–2 short sentences. What the given confidence level means for
   strength of commerce evidence — not a guarantee.
   Must include As of [date].
@@ -189,7 +192,7 @@ export function buildUserPrompt(input: AIGenerationInput): string {
 
   const shippingListed =
     hasShippingObject &&
-    (!!method || !!courier || fee !== undefined && fee !== null);
+    (!!method || !!courier || (fee !== undefined && fee !== null));
 
   const shippingText = shippingListed
     ? `Method: ${method || "Not specified"}
@@ -268,9 +271,14 @@ Score: ${input.buyerConfidence.score}/100
 Factors:
 ${input.buyerConfidence.factors.map((f) => `• ${f}`).join("\n")}
 
-When confidenceExplanation or thingsToConsider refer to these factors or any order/seller history:
-• write “As of ${asOf}, …” in that sentence
-• and note that the buyer can check Buyer Confidence below or on the product page for the updated score (it can refresh from real orders over time)
+SECTION RULES FOR CONFIDENCE:
+• confidenceExplanation ONLY: explain what Level/Score/Factors mean for evidence strength.
+  Must include “As of ${asOf}, …” and note the score can update — check Buyer Confidence on the product page for the latest score.
+• thingsToConsider: listing cautions only (missing specs, docs, shipping gaps, etc.).
+  Do NOT restate confidence level, score, factors, or order-history analysis there.
+  If confidence is relevant at all, only add a short pointer like:
+  “Check Buyer Confidence on the product page or below for the updated score.”
+  — nothing more about the actual confidence content.
 
 Keep it short. Talk like a friend who knows this kind of product.
 Help them see clearly — no pressure.

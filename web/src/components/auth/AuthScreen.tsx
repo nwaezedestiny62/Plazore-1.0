@@ -652,7 +652,7 @@ export function AuthScreen({ initialMode = "login" }: { initialMode?: Mode }) {
             className="h-9 w-auto object-contain opacity-90"
           />
           <p className="mt-4 max-w-sm text-sm leading-6 text-white/70">
-            A quieter way to discover what matters.
+            The Next Era of Buying and Selling.
           </p>
         </div>
       </div>

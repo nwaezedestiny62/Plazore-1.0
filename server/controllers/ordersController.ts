@@ -4,7 +4,13 @@ import Order from "../models/Order.js";
 import Cart from "../models/Cart.js";
 import Product from "../models/Products.js";
 import User from "../models/User.js";
-import { sendNotification } from "../utils/sendNotification.js";
+import {
+  sendNotification,
+  notifySellerShipRequired,
+  notifySellerPaymentReleased,
+  notifyBuyerConfirmDelivery,
+  notifyBuyerPaymentTiming,
+} from "../utils/sendNotification.js";
 import { trackProductPerformance } from "../utils/performance.js";
 import {
   DELIVERY_CONFIRMATION_WINDOW_MS,
@@ -39,6 +45,12 @@ function resolveListingRegion(product: any): string {
     .trim()
     .toUpperCase();
   return raw || "NG";
+}
+
+function firstProductName(order: any): string {
+  const items = order?.items || [];
+  if (!items.length) return "";
+  return String(items[0]?.name || "").trim();
 }
 
 export const createOrder = async (req: Request, res: Response) => {
@@ -200,7 +212,6 @@ export const createOrder = async (req: Request, res: Response) => {
       const currency =
         String(sellerItems[0]?.currency || "").trim().toUpperCase() ||
         currencyForRegion(region);
-      // 3-arg signature: (subtotal, shippingCost, currency)
       const fees = calculateSellerPayout(subtotal, shippingCost, currency);
 
       const order = await Order.create({
@@ -265,6 +276,7 @@ export const createOrder = async (req: Request, res: Response) => {
         }
       }
 
+      // Indoor + native (awaiting payment)
       await sendNotification({
         userId: sellerId,
         type: "new_order",
@@ -276,6 +288,8 @@ export const createOrder = async (req: Request, res: Response) => {
           : `A new order has been placed. Order: ${order.orderNumber}. Awaiting payment (${currency}).`,
         orderId: order._id.toString(),
         orderNumber: order.orderNumber,
+        productName: firstProductName(order),
+        link: `/seller/orders/${order._id}`,
       });
 
       createdOrders.push(order);
@@ -302,6 +316,22 @@ export const createOrder = async (req: Request, res: Response) => {
     res.status(500).json({ success: false, message: error.message });
   }
 };
+
+/**
+ * Call from payment webhook / checkout success when paymentStatus → paid.
+ * Critical native push: seller must ship.
+ */
+export async function onOrderPaidNotify(order: any) {
+  if (!order) return;
+  const sellerId = String(order.seller?._id || order.seller || "");
+  if (!sellerId) return;
+  await notifySellerShipRequired({
+    sellerId,
+    orderId: String(order._id),
+    orderNumber: String(order.orderNumber || ""),
+    productName: firstProductName(order),
+  });
+}
 
 export const getMyOrders = async (req: Request, res: Response) => {
   try {
@@ -438,8 +468,7 @@ export const shipOrder = async (req: Request, res: Response) => {
           ? String(deliveryCompany || frozenCompany || "").trim()
           : "",
       trackingNumber:
-        method === "courier" ? String(trackingNumber || "").trim() : ""
-      ,
+        method === "courier" ? String(trackingNumber || "").trim() : "",
       estimatedDelivery: estimatedDelivery
         ? new Date(estimatedDelivery)
         : undefined,
@@ -457,6 +486,8 @@ export const shipOrder = async (req: Request, res: Response) => {
       message: `Order ${order.orderNumber} is now on its way.`,
       orderId: order._id.toString(),
       orderNumber: order.orderNumber,
+      productName: firstProductName(order),
+      link: `/orders/${order._id}`,
     });
 
     res.json({ success: true, data: order });
@@ -500,6 +531,10 @@ export const deliverOrder = async (req: Request, res: Response) => {
       });
     }
 
+    const confirmationDeadline = new Date(
+      Date.now() + DELIVERY_CONFIRMATION_WINDOW_MS
+    );
+
     order.orderStatus = "Delivered";
     order.deliveredAt = new Date();
     (order as any).buyerConfirmation = {
@@ -507,9 +542,7 @@ export const deliverOrder = async (req: Request, res: Response) => {
       confirmedAt: undefined,
       issueReportedAt: undefined,
       issueContactId: null,
-      confirmationDeadline: new Date(
-        Date.now() + DELIVERY_CONFIRMATION_WINDOW_MS
-      ),
+      confirmationDeadline,
     };
     (order as any).payout = {
       status: "awaiting_buyer",
@@ -519,13 +552,13 @@ export const deliverOrder = async (req: Request, res: Response) => {
     (order as any).paymentLifecycle = "DELIVERED";
     await order.save();
 
-    await sendNotification({
-      userId: order.buyer.toString(),
-      type: "order_delivered",
-      title: "Order Delivered",
-      message: `Order ${order.orderNumber} has been delivered. Please confirm you received it within 17 hours.`,
+    // Critical buyer push: confirm delivery + release timing
+    await notifyBuyerConfirmDelivery({
+      buyerId: order.buyer.toString(),
       orderId: order._id.toString(),
       orderNumber: order.orderNumber,
+      productName: firstProductName(order),
+      releaseAt: confirmationDeadline,
     });
 
     res.json({ success: true, data: order });
@@ -640,11 +673,12 @@ export const confirmDelivery = async (req: Request, res: Response) => {
       String((order as any).currency || "").toUpperCase() ||
       currencyForRegion(String((order as any).region || "NG"));
 
-    // 3-arg: (subtotal, shippingCost, currency)
     const fees =
       (order as any).feeBreakdown?.sellerPayoutAmount != null
         ? (order as any).feeBreakdown
         : calculateSellerPayout(order.subtotal, order.shippingCost, cur);
+
+    const eligibleAt = new Date();
 
     (order as any).buyerConfirmation = {
       ...(order as any).buyerConfirmation,
@@ -656,7 +690,7 @@ export const confirmDelivery = async (req: Request, res: Response) => {
     };
     (order as any).payout = {
       status: "eligible",
-      eligibleAt: new Date(),
+      eligibleAt,
       blockedReason: "",
       amount: fees.sellerPayoutAmount,
       platformFee: fees.platformFee,
@@ -664,6 +698,7 @@ export const confirmDelivery = async (req: Request, res: Response) => {
     (order as any).paymentLifecycle = "DELIVERY_CONFIRMED";
     await order.save();
 
+    // Seller: payment moving toward release
     await sendNotification({
       userId: order.seller.toString(),
       type: "order_delivered",
@@ -671,6 +706,15 @@ export const confirmDelivery = async (req: Request, res: Response) => {
       message: `Buyer confirmed delivery for ${order.orderNumber}. Payout is pending.`,
       orderId: order._id.toString(),
       orderNumber: order.orderNumber,
+      link: `/seller/orders/${order._id}`,
+    });
+
+    // Buyer: release timing
+    await notifyBuyerPaymentTiming({
+      buyerId: order.buyer.toString(),
+      orderId: order._id.toString(),
+      orderNumber: order.orderNumber,
+      releaseAt: eligibleAt,
     });
 
     res.json({ success: true, data: order });
@@ -678,6 +722,21 @@ export const confirmDelivery = async (req: Request, res: Response) => {
     res.status(500).json({ success: false, message: error.message });
   }
 };
+
+/**
+ * Call when seller payout actually completes / funds released.
+ */
+export async function onPayoutReleasedNotify(order: any, amountLabel?: string) {
+  if (!order) return;
+  const sellerId = String(order.seller?._id || order.seller || "");
+  if (!sellerId) return;
+  await notifySellerPaymentReleased({
+    sellerId,
+    orderId: String(order._id),
+    orderNumber: String(order.orderNumber || ""),
+    amountLabel,
+  });
+}
 
 export const reportDeliveryIssue = async (req: Request, res: Response) => {
   try {
@@ -741,6 +800,16 @@ export const reportDeliveryIssue = async (req: Request, res: Response) => {
     };
     (order as any).paymentLifecycle = "DISPUTED";
     await order.save();
+
+    await sendNotification({
+      userId: order.seller.toString(),
+      type: "general",
+      title: "Delivery issue reported",
+      message: `Buyer reported an issue on order ${order.orderNumber}. Payout is on hold while Plazore reviews.`,
+      orderId: order._id.toString(),
+      orderNumber: order.orderNumber,
+      link: `/seller/orders/${order._id}`,
+    });
 
     res.json({ success: true, data: order });
   } catch (error: any) {
@@ -849,6 +918,7 @@ export const cancelOrderBySeller = async (req: Request, res: Response) => {
       message: `Unfortunately, the seller was unable to fulfill your order.\nReason: "${displayReason}"\nYour order has been cancelled successfully.`,
       orderId: order._id.toString(),
       orderNumber: order.orderNumber,
+      link: `/orders/${order._id}`,
     });
 
     res.json({ success: true, data: order });

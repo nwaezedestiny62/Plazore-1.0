@@ -16,7 +16,7 @@ interface RoomTwoProps {
 }
 
 /**
- * THE CHAMBER — Private Selection
+ * THE CHAMBER — Natural Selection
  * Backend pairs similar products (same category / subcategory).
  * UI shows them side-by-side so the user can compare and choose.
  * Capacity: 14 unique (never overlaps Room 1).
@@ -24,7 +24,7 @@ interface RoomTwoProps {
 export default function RoomTwo({
   products,
   title = 'THE CHAMBER',
-  subtitle = 'Private Selection',
+  subtitle = 'Natural Selection',
 }: RoomTwoProps) {
   const list = useMemo(() => {
     const seen = new Set<string>()

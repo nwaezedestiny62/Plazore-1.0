@@ -943,7 +943,7 @@ export default function AboutPage() {
               THE NEW WAY TO SHOP AND EARN.
             </p>
             <p className="relative mt-4 text-base font-bold tracking-wide">
-              SHOP AND EARN LIKE IT’S 2040.
+              SHOP LIKE IT’S 2040.
             </p>
             <p className="relative mt-5 text-sm text-[#A7ADB8]">
               Discover differently. Buy confidently. Sell intelligently.

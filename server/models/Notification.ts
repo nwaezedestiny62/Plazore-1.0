@@ -1,5 +1,31 @@
 import mongoose from "mongoose";
 
+/**
+ * Keep enum in sync with server/utils/sendNotification.ts NotificationType
+ */
+export const NOTIFICATION_TYPES = [
+  "new_order",
+  "order_shipped",
+  "order_delivered",
+  "order_cancelled",
+  "order_reminder",
+  "order_shipped_reminder",
+  "confirm_delivery",
+  "payment_released",
+  "payment_pending_release",
+  "ship_required",
+  "showroom_refresh",
+  "general",
+  "contact_reply",
+  "contact_need_info",
+  "report_received",
+  "report_update",
+  "announcement",
+  "chat_message",
+] as const;
+
+export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
+
 const notificationSchema = new mongoose.Schema(
   {
     user: {
@@ -11,21 +37,7 @@ const notificationSchema = new mongoose.Schema(
 
     type: {
       type: String,
-      enum: [
-        "new_order",
-        "order_shipped",
-        "order_delivered",
-        "order_cancelled",
-        "order_reminder",
-        "order_shipped_reminder",
-        "general",
-        "contact_reply",
-        "contact_need_info",
-        "report_received",
-        "report_update",
-        "announcement",
-        "chat_message",
-      ],
+      enum: NOTIFICATION_TYPES,
       required: true,
     },
 
@@ -55,7 +67,10 @@ const notificationSchema = new mongoose.Schema(
 
     contact: { type: mongoose.Schema.Types.ObjectId, ref: "ContactMessage" },
     report: { type: mongoose.Schema.Types.ObjectId, ref: "Report" },
-    announcement: { type: mongoose.Schema.Types.ObjectId, ref: "Announcement" },
+    announcement: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Announcement",
+    },
     conversation: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Conversation",

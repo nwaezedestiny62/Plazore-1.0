@@ -4,7 +4,7 @@
  *
  * Capacities (unchanged):
  *   Room 1 = 50 unique   (THE HORIZON / Expanded View)     rotate ~2h
- *   Room 2 = 14 unique   (THE CHAMBER / Private Selection) rotate ~3h
+ *   Room 2 = 14 unique   (THE CHAMBER / Natural Selection) rotate ~3h
  *   Room 1 + Room 2 = 64 unique (no overlap)
  *   Room 3 = 16          (THE SIGNAL / The Watch)          rotate ~20m · user activity
  *   Room 4 = 30          (THE LOCALE)                      always live · regional top
@@ -51,7 +51,7 @@ export const ADAPTIVE_THRESHOLD = FULL_SHOWROOM_SLOTS;
 /** Per-room cache / rotation windows */
 export const ROOM_TTL_MS = {
   1: 1000 * 60 * 60 * 2, // 2 hours — Expanded View
-  2: 1000 * 60 * 60 * 3, // 3 hours — Private Selection
+  2: 1000 * 60 * 60 * 3, // 3 hours — Natural Selection
   3: 1000 * 60 * 20, // 20 minutes — The Watch (user activity)
   4: 0, // always live — The Locale
 } as const;
@@ -471,7 +471,7 @@ function selectWithDiversity(
 }
 
 /**
- * Room 2 — Private Selection
+ * Room 2 — Natural Selection
  * Pair similar products side-by-side (same category preferred, then subcategory).
  * Returns up to `capacity` unique products ordered as pairs: [A1, A2, B1, B2, ...]
  */

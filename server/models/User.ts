@@ -94,6 +94,12 @@ const userSchema = new mongoose.Schema(
     /** Set later when Stripe Connect onboarding returns acct_… */
     stripeAccountId: { type: String, default: null },
 
+    // ── Native push (Expo) ──
+    expoPushToken: { type: String, default: null, index: true },
+    pushEnabled: { type: Boolean, default: true },
+    pushPlatform: { type: String, default: "" },
+    pushUpdatedAt: { type: Date, default: null },
+
     shippingDefaults: {
       address: {
         street: { type: String },

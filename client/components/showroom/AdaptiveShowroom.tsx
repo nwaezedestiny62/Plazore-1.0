@@ -12,7 +12,7 @@ import RoomFour from './RoomFour'
  *
  * Room meaning:
  *  1 THE HORIZON  — Expanded View (explore, strong, unique, ~2h)
- *  2 THE CHAMBER  — Private Selection (similar pairs, unique, ~3h)
+ *  2 THE CHAMBER  — Natural Selection (similar pairs, unique, ~3h)
  *  3 THE SIGNAL   — The Watch (user activity, ~20m, no plan boost)
  *  4 THE LOCALE   — regional best (always live)
  */
@@ -39,7 +39,7 @@ const ROOM_CAPACITY = {
 
 const ROOM_TITLES = {
   one: { title: 'THE HORIZON', subtitle: 'Expanded View' },
-  two: { title: 'THE CHAMBER', subtitle: 'Private Selection' },
+  two: { title: 'THE CHAMBER', subtitle: 'Natural Selection' },
   three: { title: 'THE SIGNAL', subtitle: 'Worth Your Attention' },
   four: {
     title: 'THE LOCALE',

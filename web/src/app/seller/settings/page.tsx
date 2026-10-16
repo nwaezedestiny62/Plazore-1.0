@@ -175,7 +175,7 @@ export default function SellerSettingsPage() {
 
         <Section title="About">
           <SettingsRow
-            href="/settings/about"
+            href="/about"
             icon={Info}
             title="About Plazore"
             subtitle="Version and application information"

@@ -884,7 +884,7 @@ export default function AboutPlazore() {
                 THE NEW WAY TO SHOP AND EARN.
               </Text>
               <Text style={styles.closing2040}>
-                SHOP AND EARN LIKE IT’S 2040.
+                SHOP LIKE IT’S 2040.
               </Text>
               <Text style={styles.closingLine}>
                 Discover differently. Buy confidently. Sell intelligently.
