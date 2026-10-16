@@ -16,7 +16,10 @@
       "supportsTablet": true,
       "userInterfaceStyle": "dark",
       "icon": "./assets/logo-0.png",
-      "bundleIdentifier": "com.plazore.app"
+      "bundleIdentifier": "com.plazore.app",
+      "infoPlist": {
+        "UIBackgroundModes": ["remote-notification"]
+      }
     },
     "android": {
       "package": "com.plazore.app",
@@ -26,7 +29,12 @@
       "adaptiveIcon": {
         "foregroundImage": "./assets/logo-0.png",
         "backgroundColor": "#090B0F"
-      }
+      },
+      "permissions": [
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.VIBRATE",
+        "android.permission.RECEIVE_BOOT_COMPLETED"
+      ]
     },
     "web": {
       "favicon": "./assets/logo-0.png"
@@ -44,6 +52,15 @@
             "image": "./assets/logo-0.png",
             "backgroundColor": "#090B0F"
           }
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/logo-0.png",
+          "color": "#090B0F",
+          "defaultChannel": "plazore_default",
+          "sounds": []
         }
       ],
       "expo-asset",

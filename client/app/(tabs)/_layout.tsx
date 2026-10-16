@@ -9,6 +9,8 @@ import {
   usePlazoreChrome,
 } from '@/context/PlazoreChromeContext'
 import { useSoundtrack } from '@/context/SoundtrackContext'
+import { registerForPushNotifications } from '@/services/pushNotifications'
+import { useAuth } from '@clerk/clerk-expo'
 import { Ionicons } from '@expo/vector-icons'
 import { BottomTabBarProps } from '@react-navigation/bottom-tabs'
 import { BlurView } from 'expo-blur'
@@ -225,6 +227,17 @@ function TabItem({
 
 export default function TabLayout() {
   const { hubOpen, closeHub } = usePlazoreChrome()
+  const { isSignedIn, getToken } = useAuth()
+
+  // Register native push after Clerk sign-in (saves expoPushToken to server)
+  useEffect(() => {
+    if (!isSignedIn) return
+    registerForPushNotifications(getToken).then((token) => {
+      if (__DEV__) {
+        console.log('[push] registered:', token ? 'yes' : 'no')
+      }
+    })
+  }, [isSignedIn, getToken])
 
   return (
     <ShowroomFlyCartProvider>

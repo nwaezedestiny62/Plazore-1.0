@@ -29,7 +29,11 @@ import {
   retrievePaymentIntent,
 } from "./stripe/paymentIntents.js";
 import { writePaymentAudit } from "../utils/paymentAudit.js";
-import { sendNotification } from "../utils/sendNotification.js";
+import {
+  sendNotification,
+  notifySellerShipRequired,
+} from "../utils/sendNotification.js";
+import { formatMoney } from "../utils/formatMoney.js";
 
 /** Snapshot frozen on Order.feeBreakdown (includes planId from planEnforcement). */
 type FeeBreakdownSnap = {
@@ -900,13 +904,29 @@ async function markPaymentSuccess(
   });
 
   if (!order.isSellerOwnedPurchase) {
+    const productName = String(order.items?.[0]?.name || "").trim();
+    const amountLabel = formatMoney(
+      payment.amount,
+      payment.currency || order.currency
+    );
+
+    // Critical: seller must ship (indoor + native)
+    await notifySellerShipRequired({
+      sellerId: order.seller.toString(),
+      orderId: order._id.toString(),
+      orderNumber: order.orderNumber,
+      productName,
+    }).catch(() => {});
+
     await sendNotification({
       userId: order.seller.toString(),
       type: "new_order",
-      title: "New paid order",
-      message: `Payment confirmed for order ${order.orderNumber} (${payment.currency}). Please process it.`,
+      title: "Payment confirmed — ship now",
+      message: `Paid ${amountLabel} for ${order.orderNumber}. Ship this order as soon as you can.`,
       orderId: order._id.toString(),
       orderNumber: order.orderNumber,
+      productName,
+      link: `/seller/orders/${order._id}`,
     }).catch(() => {});
   }
 

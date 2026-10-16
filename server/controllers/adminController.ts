@@ -11,7 +11,10 @@ import { assessMerchantIntegrity } from "../services/admin/merchantIntegrity.js"
 import Wishlist from "../models/Wishlist.js";
 import Report from "../models/Report.js";
 import Cart from "../models/Cart.js";
-import Notification from "../models/Notification.js";
+import {
+  sendNotification,
+  type NotificationType,
+} from "../utils/sendNotification.js";
 
 const COUNTRY_ALIASES: Record<string, string[]> = {
   NG: ["NG", "Nigeria"],
@@ -28,46 +31,40 @@ function escapeRegex(s: string) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-type NotificationType =
-  | "new_order"
-  | "order_shipped"
-  | "order_delivered"
-  | "order_cancelled"
-  | "order_reminder"
-  | "order_shipped_reminder"
-  | "general"
-  | "contact_reply"
-  | "contact_need_info"
-  | "report_received"
-  | "report_update"
-  | "announcement";
-
 async function safeNotify(payload: {
   user: any;
   title: string;
   message: string;
-  type?: NotificationType;
+  type?: NotificationType | string;
   contact?: any;
   report?: any;
   announcement?: any;
   link?: string;
+  orderId?: string;
+  orderNumber?: string;
 }) {
   if (!payload.user) return;
   try {
-    await Notification.create({
-      user: payload.user,
-      type: payload.type || "general",
+    const userId = String(payload.user._id || payload.user);
+    await sendNotification({
+      userId,
+      type: (payload.type as any) || "general",
       title: payload.title,
       message: payload.message,
-      contact: payload.contact,
-      report: payload.report,
-      announcement: payload.announcement,
+      contactId: payload.contact ? String(payload.contact) : undefined,
+      reportId: payload.report ? String(payload.report) : undefined,
+      announcementId: payload.announcement
+        ? String(payload.announcement)
+        : undefined,
+      orderId: payload.orderId,
+      orderNumber: payload.orderNumber,
       link: payload.link || "",
     });
   } catch (e) {
     console.error("Notification create skipped:", (e as any)?.message);
   }
 }
+
 
 // ─────────────────────────────────────────────────────────────
 // DASHBOARD

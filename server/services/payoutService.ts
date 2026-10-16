@@ -17,7 +17,11 @@ import { isPaystackConfigured } from "./paystack/client.js";
 import { isStripeConfigured } from "./stripe/client.js";
 import { createTransfer as createStripeTransfer } from "./stripe/transfers.js";
 import { writePaymentAudit } from "../utils/paymentAudit.js";
-import { sendNotification } from "../utils/sendNotification.js";
+import {
+  sendNotification,
+  notifySellerPaymentReleased,
+} from "../utils/sendNotification.js";
+import { formatMoney, moneyFromOrder } from "../utils/formatMoney.js";
 
 function generatePayoutRef(): string {
   return `PLZPO_${Date.now().toString(36).toUpperCase()}_${crypto
@@ -576,13 +580,25 @@ export async function markPayoutSuccess(reference: string, payload?: any) {
     meta: payload || {},
   });
 
-  await sendNotification({
-    userId: payout.seller.toString(),
-    type: "order_delivered",
-    title: "Payout released",
-    message: `Your payout for order has been released.`,
-    orderId: payout.order.toString(),
-  }).catch(() => {});
+  if (order) {
+    const amountLabel = formatMoney(
+      payout.amount,
+      payout.currency || (order as any).currency
+    );
+    await notifySellerPaymentReleased({
+      sellerId: payout.seller.toString(),
+      orderId: payout.order.toString(),
+      orderNumber: String(order.orderNumber || ""),
+      amountLabel,
+    }).catch(() => {});
+  } else {
+    await notifySellerPaymentReleased({
+      sellerId: payout.seller.toString(),
+      orderId: payout.order.toString(),
+      orderNumber: "",
+      amountLabel: formatMoney(payout.amount, payout.currency),
+    }).catch(() => {});
+  }
 
   return { ok: true, duplicate: false };
 }
