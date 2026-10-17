@@ -26,6 +26,7 @@
       "versionCode": 1,
       "userInterfaceStyle": "dark",
       "predictiveBackGestureEnabled": false,
+      "edgeToEdgeEnabled": false,
       "adaptiveIcon": {
         "foregroundImage": "./assets/logo-0.png",
         "backgroundColor": "#090B0F"
@@ -58,8 +59,8 @@
       [
         "expo-notifications",
         {
-          "icon": "./assets/logo-0.png",
-          "color": "#090B0F",
+          "icon": "./assets/images/android-icon-monochrome.png",
+          "color": "#00E575",
           "defaultChannel": "plazore_default"
         }
       ],

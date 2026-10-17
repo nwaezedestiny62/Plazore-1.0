@@ -8,19 +8,33 @@ import cloudinary from "../config/cloudinary.js";
 import { isPaystackConfigured } from "../services/paystack/client.js";
 import { paystackRequest } from "../services/paystack/client.js";
 import { createTransferRecipient } from "../services/paystack/transfers.js";
+import { getActivePlanForSeller } from "../services/subscriptionService.js";
+import { currencyForBusinessCountry } from "../config/plans.js";
 
 function httpError(statusCode: number, message: string) {
   return Object.assign(new Error(message), { statusCode });
 }
 
+/** Prefer shared plans map; local fallback for older deploys. */
 function regionCurrency(region: string) {
-  const code = String(region || "NG").trim().toUpperCase();
-  if (code === "NG") return "NGN";
-  if (code === "US") return "USD";
-  if (code === "DE") return "EUR";
-  if (code === "KE") return "KES";
-  if (code === "GB") return "GBP";
-  return "USD";
+  try {
+    return currencyForBusinessCountry(region);
+  } catch {
+    const code = String(region || "NG").trim().toUpperCase();
+    if (code === "NG") return "NGN";
+    if (code === "GH") return "GHS";
+    if (code === "KE") return "KES";
+    if (code === "ZA") return "ZAR";
+    if (code === "EG") return "EGP";
+    if (code === "US") return "USD";
+    if (code === "CA") return "CAD";
+    if (code === "GB" || code === "UK") return "GBP";
+    if (code === "DE" || code === "FR") return "EUR";
+    if (code === "AU") return "AUD";
+    if (code === "BJ") return "XOF";
+    if (code === "CM") return "XAF";
+    return "USD";
+  }
 }
 
 /**
@@ -98,7 +112,7 @@ async function buildNgnPayout(input: {
   };
 }
 
-/** US / DE / KE / other: do not collect a Nigerian account. Stripe Connect later. */
+/** Non-NG: Stripe Connect later. Do not collect a Nigerian account. */
 function buildConnectPayout(region: string) {
   const country = String(region || "US").trim().toUpperCase();
   return {
@@ -158,6 +172,25 @@ function orderCountsAsPaidMoney(order: any): boolean {
     order.paymentLifecycle !== "CANCELLED"
   );
 }
+
+const getUser = (req: Request) => (req as any).user;
+
+const uploadOne = (file: any, folder: string): Promise<string> =>
+  new Promise((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream(
+      { folder },
+      (err, result) => {
+        if (err) reject(err);
+        else resolve(result!.secure_url);
+      }
+    );
+    stream.end(file.buffer);
+  });
+
+const STORE_SELECT =
+  "name email phone storeName storeDescription businessGoal storeLogo storeBanner payout shippingDefaults isSellerVerified sellerAppliedAt role marketplaceRegion";
+
+const CURRENT_ONBOARDING_VERSION = 1;
 
 // Apply to become a seller
 export const applyAsSeller = async (req: Request, res: Response) => {
@@ -271,23 +304,25 @@ export const applyAsSeller = async (req: Request, res: Response) => {
 
 /**
  * Seller dashboard stats — revenue is net seller payout amount.
- * Returns totalRevenue, pendingPayout, paidOut for the wallet UI.
+ * Plan comes from SellerSubscription (live), not stale User fields.
  */
 export const getSellerDashboard = async (req: Request, res: Response) => {
   try {
     const sellerId = (req as any).user._id;
     const user = (req as any).user;
 
-    const [totalProducts, activeProducts, orders] = await Promise.all([
-      Product.countDocuments({ seller: sellerId }),
-      Product.countDocuments({ seller: sellerId, isActive: true }),
-      Order.find({
-        seller: sellerId,
-        isSellerOwnedPurchase: { $ne: true },
-      })
-        .sort({ createdAt: -1 })
-        .lean(),
-    ]);
+    const [totalProducts, activeProducts, orders, activePlan] =
+      await Promise.all([
+        Product.countDocuments({ seller: sellerId }),
+        Product.countDocuments({ seller: sellerId, isActive: true }),
+        Order.find({
+          seller: sellerId,
+          isSellerOwnedPurchase: { $ne: true },
+        })
+          .sort({ createdAt: -1 })
+          .lean(),
+        getActivePlanForSeller(String(sellerId)).catch(() => null),
+      ]);
 
     let totalRevenue = 0;
     let pendingPayout = 0;
@@ -330,7 +365,6 @@ export const getSellerDashboard = async (req: Request, res: Response) => {
       }
     }
 
-    // Prefer Payout collection when transfer records exist
     try {
       const payoutAgg = await Payout.aggregate([
         {
@@ -355,18 +389,29 @@ export const getSellerDashboard = async (req: Request, res: Response) => {
       if (fromDocsPaid > 0) paidOut = fromDocsPaid;
       if (fromDocsPending > 0) pendingPayout = fromDocsPending;
     } catch {
-      // Order-based numbers still apply if Payout query fails
+      /* order-based numbers still apply */
     }
 
-    const plan =
+    const planId =
+      activePlan?.planId ||
       user?.subscription?.planId ||
       user?.subscription?.plan ||
       user?.sellerPlan ||
       user?.plan ||
       "free";
 
-    const region = String(user?.marketplaceRegion || "NG").toUpperCase();
+    const region = String(
+      activePlan?.country ||
+        user?.businessLocation?.country ||
+        user?.marketplaceRegion ||
+        "NG"
+    )
+      .trim()
+      .toUpperCase()
+      .split(/[-_]/)[0];
+
     const currency =
+      (activePlan?.currency && String(activePlan.currency).toUpperCase()) ||
       orders.find((o: any) => o.currency)?.currency ||
       regionCurrency(region);
 
@@ -385,7 +430,20 @@ export const getSellerDashboard = async (req: Request, res: Response) => {
         currency,
         storeName: user.storeName || "",
         isVerified: !!user.isSellerVerified,
-        plan,
+        plan: planId,
+        subscription: {
+          planId,
+          status: activePlan?.status || "active",
+          transactionFeeRate:
+            activePlan?.transactionFeeRate ??
+            (planId === "free" ? 0.08 : undefined),
+          maxImagesPerProduct: activePlan?.maxImagesPerProduct,
+          isPromotional: !!activePlan?.isPromotional,
+          expiresAt: activePlan?.expiresAt || null,
+          country: region,
+          currency,
+          provider: activePlan?.provider || null,
+        },
       },
     });
   } catch (error: any) {
@@ -393,25 +451,6 @@ export const getSellerDashboard = async (req: Request, res: Response) => {
     res.status(500).json({ success: false, message: error.message });
   }
 };
-
-// ====================== MY STORE ======================
-
-const getUser = (req: Request) => (req as any).user;
-
-const uploadOne = (file: any, folder: string): Promise<string> =>
-  new Promise((resolve, reject) => {
-    const stream = cloudinary.uploader.upload_stream(
-      { folder },
-      (err, result) => {
-        if (err) reject(err);
-        else resolve(result!.secure_url);
-      }
-    );
-    stream.end(file.buffer);
-  });
-
-const STORE_SELECT =
-  "name email phone storeName storeDescription businessGoal storeLogo storeBanner payout shippingDefaults isSellerVerified sellerAppliedAt role marketplaceRegion";
 
 // GET /api/seller/store
 export const getMyStore = async (req: Request, res: Response) => {
@@ -605,9 +644,11 @@ export const getPublicStorefront = async (req: Request, res: Response) => {
 // Get seller's own products
 export const getMyProducts = async (req: Request, res: Response) => {
   try {
-    const products = await Product.find({ seller: req.user._id }).sort({
-      createdAt: -1,
-    });
+    const products = await Product.find({ seller: (req as any).user._id }).sort(
+      {
+        createdAt: -1,
+      }
+    );
     res.json({ success: true, data: products });
   } catch (error: any) {
     res.status(500).json({ success: false, message: error.message });
@@ -728,8 +769,6 @@ export const verifyPayoutAccess = async (req: Request, res: Response) => {
 };
 
 // ====================== SELLER ONBOARDING ======================
-
-const CURRENT_ONBOARDING_VERSION = 1;
 
 export const getOnboardingStatus = async (req: Request, res: Response) => {
   try {

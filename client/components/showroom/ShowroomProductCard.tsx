@@ -27,15 +27,15 @@ WebBrowser.maybeCompleteAuthSession()
 const H_PADDING = 16
 const GAP = 4
 const IMAGE_ASPECT = 1.08
-
 const SURFACE = '#11141A'
 const LINE = 'rgba(255,255,255,0.1)'
 const TEXT = '#F5F7FA'
 const SECONDARY = 'rgba(255,255,255,0.55)'
 const GREEN = '#00E575'
-
 const PENDING_KEY = 'plazore_pending_action'
 const RETURN_KEY = 'plazore_return_to'
+
+// Official Google "G" (multi-color)
 const GOOGLE_G =
   'https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg'
 
@@ -107,10 +107,21 @@ function resolveShipLocation(product: Product): string {
   return ''
 }
 
+/**
+ * Brand shown on the card = the seller who listed the product.
+ * Priority: seller.storeName → product.brand → "plazore"
+ */
 function resolveBrand(product: Product): string {
-  if (product.brand) return product.brand
-  if (typeof product.seller === 'object' && product.seller?.storeName) {
-    return product.seller.storeName
+  const seller = product.seller
+  if (seller && typeof seller === 'object') {
+    const store =
+      (seller as any).storeName ||
+      (seller as any).name ||
+      (seller as any).store?.name
+    if (typeof store === 'string' && store.trim()) return store.trim()
+  }
+  if (product.brand && String(product.brand).trim()) {
+    return String(product.brand).trim()
   }
   return 'plazore'
 }
@@ -194,7 +205,6 @@ function ShowroomProductCard({
   const pendingCartRef = useRef<Product | null>(null)
   const cartBtnRef = useRef<View>(null)
   const impressed = useRef(false)
-  /** Blocks double onPress from RN Pressable inside ScrollView */
   const addLockRef = useRef(false)
 
   const defaultW = (screenW - H_PADDING * 2 - GAP) / 2
@@ -232,6 +242,7 @@ function ShowroomProductCard({
 
   const location = useMemo(() => resolveShipLocation(product), [product])
   const brand = useMemo(() => resolveBrand(product), [product])
+
   const priceLabel = useMemo(
     () => formatProduct(unitPrice, product.region),
     [formatProduct, unitPrice, product.region],
@@ -281,26 +292,21 @@ function ShowroomProductCard({
         position,
         region: p.region,
       })
-
       if (!flyCart) {
         addToCart(p, variantPayload)
         return
       }
-
-      // Ensure measure callback can only add once
       let added = false
       const safeAdd = () => {
         if (added) return
         added = true
         addToCart(p, variantPayload)
       }
-
       cartBtnRef.current?.measureInWindow((x, y, width, height) => {
         if (width <= 0 || height <= 0) {
           safeAdd()
           return
         }
-        // flyAdd calls addToCart once internally
         flyCart.flyAdd(p, { x, y, width, height }, variantPayload)
       })
     },
@@ -309,7 +315,6 @@ function ShowroomProductCard({
 
   useEffect(() => {
     if (!isLoaded || !isSignedIn) return
-
     const run = async () => {
       let pending = pendingCartRef.current
       if (!pending) {
@@ -351,7 +356,6 @@ function ShowroomProductCard({
 
   const handleAddToCart = useCallback(() => {
     if (!isLoaded) return
-    // Guard double onPress
     if (addLockRef.current) return
     addLockRef.current = true
     setTimeout(() => {
@@ -364,13 +368,11 @@ function ShowroomProductCard({
       setAuthOpen(true)
       return
     }
-
     if (hasVar) {
       setSelected({})
       setVariantOpen(true)
       return
     }
-
     doAddToCart(product)
   }, [isLoaded, isSignedIn, product, doAddToCart, hasVar, pathname])
 
@@ -449,7 +451,6 @@ function ShowroomProductCard({
             )}
           </Pressable>
         </Link>
-
         <Pressable
           ref={cartBtnRef}
           onPress={handleAddToCart}
@@ -470,7 +471,7 @@ function ShowroomProductCard({
               style={[styles.brand, { color: textSecondary }]}
               numberOfLines={1}
             >
-              {brand.toLowerCase()}
+              {brand}
             </Text>
             <Text style={[styles.divider, { color: textMuted }]}> · </Text>
             <Text style={[styles.price, { color: textSecondary }]}>
@@ -488,6 +489,7 @@ function ShowroomProductCard({
         </Pressable>
       </Link>
 
+      {/* ── Variant picker ── */}
       <Modal
         visible={variantOpen}
         transparent
@@ -518,7 +520,6 @@ function ShowroomProductCard({
                 <Ionicons name="close" size={18} color="rgba(255,255,255,0.5)" />
               </Pressable>
             </View>
-
             <ScrollView
               style={{ maxHeight: 340 }}
               showsVerticalScrollIndicator={false}
@@ -555,7 +556,6 @@ function ShowroomProductCard({
                 </View>
               ))}
             </ScrollView>
-
             <View style={styles.variantFooter}>
               <View style={{ flex: 1 }}>
                 <Text style={styles.variantPriceLabel}>
@@ -591,6 +591,7 @@ function ShowroomProductCard({
         </Pressable>
       </Modal>
 
+      {/* ── Auth popup (smooth + Google branded) ── */}
       <Modal
         visible={authOpen}
         transparent
@@ -611,6 +612,9 @@ function ShowroomProductCard({
             style={styles.authSheet}
             onPress={(e) => e.stopPropagation()}
           >
+            {/* subtle top accent */}
+            <View style={styles.authTopAccent} />
+
             <View style={styles.authHead}>
               <View style={{ flex: 1, paddingRight: 12 }}>
                 <Text style={styles.authKicker}>Account required</Text>
@@ -632,35 +636,47 @@ function ShowroomProductCard({
             </View>
 
             <View style={styles.authActions}>
+              {/* Google button — official white + multi-color G */}
               <Pressable
                 onPress={onContinueGoogle}
-                style={styles.authGoogleWhite}
+                style={({ pressed }) => [
+                  styles.googleBtn,
+                  pressed && styles.googleBtnPressed,
+                  googleBusy && styles.googleBtnDisabled,
+                ]}
                 disabled={googleBusy}
               >
                 {googleBusy ? (
-                  <ActivityIndicator color="#111" />
+                  <ActivityIndicator color="#4285F4" />
                 ) : (
                   <>
-                    <Image
-                      source={{ uri: GOOGLE_G }}
-                      style={{ width: 20, height: 20 }}
-                      resizeMode="contain"
-                    />
-                    <Text style={styles.authGoogleWhiteText}>
+                    <View style={styles.googleIconWrap}>
+                      <Image
+                        source={{ uri: GOOGLE_G }}
+                        style={styles.googleIcon}
+                        resizeMode="contain"
+                      />
+                    </View>
+                    <Text style={styles.googleBtnText}>
                       Continue with Google
                     </Text>
                   </>
                 )}
               </Pressable>
 
+              {/* Email / password sign-in */}
               <Pressable
                 onPress={onSignIn}
-                style={styles.authPrimaryDark}
+                style={({ pressed }) => [
+                  styles.authSecondaryBtn,
+                  pressed && styles.authSecondaryBtnPressed,
+                ]}
                 disabled={googleBusy}
               >
-                <Text style={styles.authPrimaryDarkText}>Sign in</Text>
+                <Text style={styles.authSecondaryBtnText}>Sign in</Text>
               </Pressable>
 
+              {/* Create account */}
               <Pressable
                 onPress={() => {
                   pendingCartRef.current = product
@@ -674,8 +690,11 @@ function ShowroomProductCard({
                   })
                 }}
                 disabled={googleBusy}
+                style={styles.authSignupWrap}
               >
-                <Text style={styles.authSignup}>Create a Plazore account</Text>
+                <Text style={styles.authSignup}>
+                  Create a Plazore account
+                </Text>
               </Pressable>
             </View>
           </Pressable>
@@ -742,39 +761,47 @@ const styles = StyleSheet.create({
     marginTop: 3,
   },
 
+  /* ── Shared modal scrim ── */
   authScrim: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.78)',
+    backgroundColor: 'rgba(0,0,0,0.72)',
     justifyContent: Platform.OS === 'ios' ? 'flex-end' : 'center',
     paddingHorizontal: Platform.OS === 'ios' ? 0 : 20,
   },
+
+  /* ── Auth sheet ── */
   authSheet: {
     backgroundColor: SURFACE,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderColor: LINE,
-    paddingTop: 20,
-    paddingBottom: Platform.OS === 'ios' ? 36 : 24,
-    paddingHorizontal: 20,
-  },
-  variantSheet: {
-    backgroundColor: SURFACE,
+    borderTopLeftRadius: Platform.OS === 'ios' ? 20 : 16,
+    borderTopRightRadius: Platform.OS === 'ios' ? 20 : 16,
+    borderRadius: Platform.OS === 'ios' ? 0 : 16,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderColor: LINE,
     paddingTop: 0,
-    paddingBottom: Platform.OS === 'ios' ? 36 : 24,
-    paddingHorizontal: 20,
-    maxHeight: '88%',
+    paddingBottom: Platform.OS === 'ios' ? 40 : 28,
+    paddingHorizontal: 22,
+    overflow: 'hidden',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: -8 },
+        shadowOpacity: 0.35,
+        shadowRadius: 24,
+      },
+      android: { elevation: 24 },
+    }),
   },
-  variantAccent: {
-    height: 2,
-    marginHorizontal: -20,
-    marginBottom: 16,
+  authTopAccent: {
+    height: 3,
+    marginHorizontal: -22,
+    marginBottom: 18,
     backgroundColor: GREEN,
+    opacity: 0.9,
   },
   authHead: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    marginBottom: 16,
+    marginBottom: 22,
   },
   authKicker: {
     color: 'rgba(255,255,255,0.38)',
@@ -782,90 +809,126 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     letterSpacing: 1.8,
     textTransform: 'uppercase',
-    marginBottom: 2,
-  },
-  authGoogleWhite: {
-    height: 48,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: LINE,
-    backgroundColor: '#FFFFFF',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10,
-  },
-  authGoogleWhiteText: {
-    color: '#111111',
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  authPrimaryDark: {
-    height: 48,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: LINE,
-    backgroundColor: '#161A20',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  authPrimaryDarkText: {
-    color: TEXT,
-    fontSize: 14,
-    fontWeight: '700',
+    marginBottom: 4,
   },
   authTitle: {
     color: TEXT,
-    fontSize: 16,
+    fontSize: 17,
     fontWeight: '800',
-    letterSpacing: -0.2,
+    letterSpacing: -0.3,
   },
   authSub: {
     color: SECONDARY,
-    fontSize: 13,
-    lineHeight: 19,
+    fontSize: 13.5,
+    lineHeight: 20,
     marginTop: 6,
   },
   authClose: {
-    width: 32,
-    height: 32,
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: 'rgba(255,255,255,0.07)',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  authActions: { gap: 10 },
-  authPrimary: {
-    height: 48,
+  authActions: { gap: 12 },
+
+  /* Google button — official look */
+  googleBtn: {
+    height: 52,
+    borderRadius: 12,
     backgroundColor: '#FFFFFF',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  authPrimaryText: {
-    color: '#1F1F1F',
-    fontSize: 14,
-    fontWeight: '800',
-  },
-  authGoogle: {
-    height: 48,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: LINE,
-    backgroundColor: 'rgba(255,255,255,0.04)',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 10,
+    gap: 12,
+    // subtle Google-blue glow on the edge
+    borderWidth: 1.5,
+    borderColor: 'rgba(66,133,244,0.35)',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#4285F4',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.18,
+        shadowRadius: 10,
+      },
+      android: { elevation: 4 },
+    }),
   },
-  authGoogleText: {
-    color: TEXT,
-    fontSize: 14,
+  googleBtnPressed: {
+    backgroundColor: '#F7F9FC',
+    transform: [{ scale: 0.985 }],
+  },
+  googleBtnDisabled: {
+    opacity: 0.7,
+  },
+  googleIconWrap: {
+    width: 22,
+    height: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  googleIcon: {
+    width: 20,
+    height: 20,
+  },
+  googleBtnText: {
+    color: '#1F1F1F',
+    fontSize: 15,
     fontWeight: '700',
+    letterSpacing: 0.1,
+  },
+
+  /* Secondary Sign in */
+  authSecondaryBtn: {
+    height: 52,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: LINE,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  authSecondaryBtnPressed: {
+    backgroundColor: 'rgba(255,255,255,0.1)',
+  },
+  authSecondaryBtnText: {
+    color: TEXT,
+    fontSize: 15,
+    fontWeight: '700',
+  },
+
+  authSignupWrap: {
+    paddingVertical: 6,
   },
   authSignup: {
     textAlign: 'center',
     color: GREEN,
-    fontSize: 14,
+    fontSize: 14.5,
     fontWeight: '700',
-    paddingVertical: 12,
+    paddingVertical: 8,
   },
 
+  /* ── Variant sheet (unchanged logic, slight polish) ── */
+  variantSheet: {
+    backgroundColor: SURFACE,
+    borderTopLeftRadius: Platform.OS === 'ios' ? 20 : 16,
+    borderTopRightRadius: Platform.OS === 'ios' ? 20 : 16,
+    borderRadius: Platform.OS === 'ios' ? 0 : 16,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderColor: LINE,
+    paddingTop: 0,
+    paddingBottom: Platform.OS === 'ios' ? 36 : 24,
+    paddingHorizontal: 20,
+    maxHeight: '88%',
+    overflow: 'hidden',
+  },
+  variantAccent: {
+    height: 3,
+    marginHorizontal: -20,
+    marginBottom: 16,
+    backgroundColor: GREEN,
+  },
   optGroup: { marginBottom: 18 },
   optLabel: {
     color: 'rgba(255,255,255,0.4)',
@@ -879,6 +942,7 @@ const styles = StyleSheet.create({
   optChip: {
     paddingHorizontal: 14,
     paddingVertical: 10,
+    borderRadius: 10,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: LINE,
     backgroundColor: 'rgba(255,255,255,0.03)',
@@ -926,6 +990,7 @@ const styles = StyleSheet.create({
   variantAdd: {
     minWidth: 108,
     height: 48,
+    borderRadius: 12,
     backgroundColor: GREEN,
     alignItems: 'center',
     justifyContent: 'center',

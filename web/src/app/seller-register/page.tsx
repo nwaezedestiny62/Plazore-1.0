@@ -1,5 +1,10 @@
 "use client";
 
+/**
+ * Web seller register — hardened
+ * Logo + banner required. NG Paystack NUBAN resolve on server. Other regions Stripe Connect.
+ */
+
 import { useAuth, useUser } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -23,7 +28,6 @@ const API =
 const BG_IMAGE =
   "https://images.unsplash.com/photo-1441986300917-64674bd600d8?auto=format&fit=crop&w=1600&q=80";
 
-/** Paystack NGN bank codes. Display name is not enough to pay out. */
 const NGN_BANKS = [
   { code: "044", name: "Access Bank" },
   { code: "063", name: "Access Bank (Diamond)" },
@@ -130,6 +134,10 @@ export default function SellerRegisterPage() {
     };
   }, [logoPreview, bannerPreview]);
 
+  useEffect(() => {
+    setAccountName("");
+  }, [bankCode, accountNumber, marketplaceRegion]);
+
   const selectedRegion = useMemo(
     () =>
       REGION_LIST.find((r) => r.code === marketplaceRegion) || REGION_LIST[0],
@@ -176,19 +184,22 @@ export default function SellerRegisterPage() {
   const handleRegister = async () => {
     setError("");
 
-    if (!storeName.trim()) return setError("Please enter your store name");
-    if (!storeDescription.trim())
-      return setError("Please enter a business description");
-    if (!businessGoal.trim())
-      return setError("Please enter your business goal");
-    if (!phone.trim() || phone.trim().length < 7)
-      return setError("Please enter a valid phone number");
+    if (!logoFile) return setError("Upload a store logo (required).");
+    if (!bannerFile) return setError("Upload a store banner (required).");
+    if (!storeName.trim() || storeName.trim().length < 2)
+      return setError("Enter a valid store name (min 2 characters).");
+    if (!storeDescription.trim() || storeDescription.trim().length < 20)
+      return setError("Business description must be at least 20 characters.");
+    if (!businessGoal.trim() || businessGoal.trim().length < 10)
+      return setError("Business goal must be at least 10 characters.");
+    if (!phone.trim() || phone.replace(/\D/g, "").length < 10)
+      return setError("Enter a valid phone number (at least 10 digits).");
     if (!marketplaceRegion)
       return setError("Please select your marketplace region");
     if (isNigeria) {
-      if (!bankCode) return setError("Select your bank");
+      if (!bankCode) return setError("Select your bank from the official list.");
       if (!/^\d{10}$/.test(accountNumber.replace(/\D/g, "")))
-        return setError("Nigerian account number must be 10 digits");
+        return setError("Nigerian account number must be exactly 10 digits.");
     }
 
     try {
@@ -225,19 +236,21 @@ export default function SellerRegisterPage() {
         throw new Error(json?.message || "Registration failed");
       }
 
-      if (logoFile || bannerFile) {
-        try {
-          const fd = new FormData();
-          if (logoFile) fd.append("storeLogo", logoFile);
-          if (bannerFile) fd.append("storeBanner", bannerFile);
-          await fetch(`${API}/seller/store`, {
-            method: "PUT",
-            headers: { Authorization: `Bearer ${token}` },
-            body: fd,
-          });
-        } catch {
-          /* store exists; images can be fixed in settings */
-        }
+      // Logo + banner MUST succeed
+      const fd = new FormData();
+      fd.append("storeLogo", logoFile);
+      fd.append("storeBanner", bannerFile);
+      const imgRes = await fetch(`${API}/seller/store`, {
+        method: "PUT",
+        headers: { Authorization: `Bearer ${token}` },
+        body: fd,
+      });
+      const imgJson = await imgRes.json().catch(() => ({}));
+      if (!imgRes.ok || imgJson?.success === false) {
+        throw new Error(
+          imgJson?.message ||
+            "Store created but logo/banner upload failed. Open settings and upload them before selling.",
+        );
       }
 
       await user?.reload();
@@ -272,8 +285,9 @@ export default function SellerRegisterPage() {
             Welcome to the Seller Lounge
           </h1>
           <p className="mt-3 text-[15px] leading-relaxed text-white/65">
-            Your seller account is active. Next, complete a short orientation
-            and set your business location before entering the dashboard.
+            {isNigeria
+              ? "Paystack will verify your NUBAN when keys are live. Complete orientation and business location next."
+              : "Stripe Connect is required before payouts in this region. Complete orientation next."}
           </p>
           <button
             type="button"
@@ -294,7 +308,6 @@ export default function SellerRegisterPage() {
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={BG_IMAGE} alt="" className="h-full w-full object-cover" />
         <div className="absolute inset-0 bg-gradient-to-b from-[rgba(5,8,12,0.72)] via-[rgba(9,11,15,0.86)] to-[rgba(9,11,15,0.97)]" />
-        <div className="absolute inset-0 bg-gradient-to-r from-[rgba(6,18,16,0.35)] via-transparent to-[rgba(9,11,15,0.25)]" />
       </div>
 
       <div className="relative z-10 mx-auto flex min-h-dvh w-full max-w-6xl flex-col px-4 pb-16 pt-4 sm:px-6 lg:px-10">
@@ -325,36 +338,28 @@ export default function SellerRegisterPage() {
               Open your store
             </h2>
             <p className="mt-4 max-w-lg text-[15px] leading-relaxed text-white/70 sm:text-base">
-              Create your seller profile with logo and banner. You receive access
-              to the Lounge after registration is complete.
+              Every field is required. Logo and banner are mandatory. Nigeria
+              uses live Paystack account resolve — incomplete accounts cannot
+              register.
             </p>
-            <div className="mt-8 hidden space-y-3 border border-white/10 bg-white/[0.04] p-5 lg:block">
-              <p className="text-[12px] font-semibold uppercase tracking-[0.18em] text-white/45">
-                What you get
-              </p>
-              <ul className="space-y-2.5 text-[14px] text-white/70">
-                <li>• Your own storefront on Plazore</li>
-                <li>• Logo + banner stored on Cloudinary</li>
-                <li>• Product, order, and performance tools</li>
-                <li>• Direct access to the Seller Lounge</li>
-              </ul>
-            </div>
           </section>
 
           <section className="w-full">
             <div className="border border-white/10 bg-[rgba(9,11,15,0.55)] p-4 backdrop-blur-md sm:p-6 md:p-7">
               <p className="mb-4 text-[15px] font-bold tracking-wide">
-                Store identity
+                Store identity *
               </p>
 
               <label className="mb-2 block text-[11px] font-bold uppercase tracking-[0.08em] text-white/55">
-                Store logo
+                Store logo *
               </label>
               <div className="mb-2 flex flex-wrap items-center gap-3">
                 <button
                   type="button"
                   onClick={() => logoRef.current?.click()}
-                  className="relative flex h-24 w-24 items-center justify-center overflow-hidden border border-dashed border-white/25 bg-white/[0.06] transition hover:border-white/40"
+                  className={`relative flex h-24 w-24 items-center justify-center overflow-hidden border border-dashed bg-white/[0.06] transition hover:border-white/40 ${
+                    logoPreview ? "border-white/25" : "border-red-400/40"
+                  }`}
                 >
                   {logoPreview ? (
                     // eslint-disable-next-line @next/next/no-img-element
@@ -387,17 +392,16 @@ export default function SellerRegisterPage() {
                   onChange={onLogoChange}
                 />
               </div>
-              <p className="mb-4 text-[11px] text-white/45">
-                Square image · shown on storefront cards
-              </p>
 
               <label className="mb-2 block text-[11px] font-bold uppercase tracking-[0.08em] text-white/55">
-                Store banner (backdrop)
+                Store banner *
               </label>
               <button
                 type="button"
                 onClick={() => bannerRef.current?.click()}
-                className="relative mb-2 flex h-[7.5rem] w-full items-center justify-center overflow-hidden border border-dashed border-white/25 bg-white/[0.06] transition hover:border-white/40 sm:h-32"
+                className={`relative mb-2 flex h-[7.5rem] w-full items-center justify-center overflow-hidden border border-dashed bg-white/[0.06] transition hover:border-white/40 sm:h-32 ${
+                  bannerPreview ? "border-white/25" : "border-red-400/40"
+                }`}
               >
                 {bannerPreview ? (
                   // eslint-disable-next-line @next/next/no-img-element
@@ -431,11 +435,10 @@ export default function SellerRegisterPage() {
                 className="hidden"
                 onChange={onBannerChange}
               />
-              <p className="mb-6 text-[11px] text-white/45">
-                Wide image · header backdrop on your store
-              </p>
 
-              <p className="mb-4 text-[15px] font-bold tracking-wide">Store</p>
+              <p className="mb-4 mt-6 text-[15px] font-bold tracking-wide">
+                Store *
+              </p>
 
               <label className="mb-2 block text-[11px] font-bold uppercase tracking-[0.08em] text-white/55">
                 Business / store name *
@@ -452,7 +455,7 @@ export default function SellerRegisterPage() {
               </div>
 
               <label className="mb-2 block text-[11px] font-bold uppercase tracking-[0.08em] text-white/55">
-                Business description *
+                Business description * (min 20)
               </label>
               <div
                 className={`${fieldClass("desc")} mb-4 min-h-[110px] items-start py-3`}
@@ -521,7 +524,8 @@ export default function SellerRegisterPage() {
                     {selectedRegion?.name}
                   </span>
                   <span className="mt-0.5 block text-[12px] text-white/55">
-                    Currency {selectedRegion?.currency?.symbol}
+                    {isNigeria ? "Paystack payouts" : "Stripe Connect payouts"} ·{" "}
+                    {selectedRegion?.currency?.symbol}
                   </span>
                 </span>
                 {showRegions ? (
@@ -543,6 +547,8 @@ export default function SellerRegisterPage() {
                           setMarketplaceRegion(r.code);
                           setShowRegions(false);
                           setBankCode("");
+                          setAccountNumber("");
+                          setAccountName("");
                         }}
                         className={`flex w-full items-center gap-3 border-b border-white/[0.08] px-3.5 py-3 text-left last:border-b-0 ${
                           on ? "bg-[#00E575]/10" : "hover:bg-white/[0.04]"
@@ -558,15 +564,15 @@ export default function SellerRegisterPage() {
               )}
 
               <p className="mb-4 mt-7 text-[15px] font-bold tracking-wide">
-                Payout
+                Payout wallet *
               </p>
 
               <div className="mb-5 flex gap-3 border border-[#00E575]/28 bg-[#00E575]/[0.08] p-3.5">
                 <ShieldCheck className="mt-0.5 h-[18px] w-[18px] shrink-0 text-[#00E575]" />
                 <p className="text-[13px] leading-[1.45] text-white/75">
                   {isNigeria
-                    ? "Nigeria pays through Paystack. Pick the bank, then the 10-digit account number. When Paystack keys are on, Plazore checks the account name before saving. Changing it later needs the last four digits."
-                    : "This region pays through Stripe Connect, not a Nigerian account number. You can open the store now. Payouts stay held until Connect is linked."}
+                    ? "Nigeria: bank code + 10-digit NUBAN must resolve on Paystack. Fake accounts are rejected. Account name is filled by Paystack."
+                    : "This region uses Stripe Connect — not a Nigerian account. Store can open now; payouts stay held until Connect is linked."}
                 </p>
               </div>
 
@@ -614,28 +620,14 @@ export default function SellerRegisterPage() {
                   )}
 
                   <label className="mb-2 block text-[11px] font-bold uppercase tracking-[0.08em] text-white/55">
-                    Account name
+                    Account number * (10 digits)
                   </label>
-                  <div className={`${fieldClass("accName")} mb-4`}>
-                    <input
-                      value={accountName}
-                      onChange={(e) => setAccountName(e.target.value)}
-                      onFocus={() => setFocus("accName")}
-                      onBlur={() => setFocus(null)}
-                      placeholder="Paystack overwrites this when keys are set"
-                      className="w-full bg-transparent text-[16px] text-white outline-none placeholder:text-white/35"
-                    />
-                  </div>
-
-                  <label className="mb-2 block text-[11px] font-bold uppercase tracking-[0.08em] text-white/55">
-                    Account number *
-                  </label>
-                  <div className={`${fieldClass("accNum")} mb-2`}>
+                  <div className={`${fieldClass("accNum")} mb-4`}>
                     <input
                       value={accountNumber}
                       onChange={(e) =>
                         setAccountNumber(
-                          e.target.value.replace(/\D/g, "").slice(0, 10)
+                          e.target.value.replace(/\D/g, "").slice(0, 10),
                         )
                       }
                       onFocus={() => setFocus("accNum")}
@@ -645,8 +637,26 @@ export default function SellerRegisterPage() {
                       className="w-full bg-transparent text-[16px] text-white outline-none placeholder:text-white/35"
                     />
                   </div>
+
+                  <label className="mb-2 block text-[11px] font-bold uppercase tracking-[0.08em] text-white/55">
+                    Account name (Paystack)
+                  </label>
+                  <div className={`${fieldClass("accName")} mb-2 opacity-80`}>
+                    <input
+                      value={accountName}
+                      readOnly
+                      placeholder="Filled automatically when Paystack verifies"
+                      className="w-full bg-transparent text-[16px] text-white outline-none placeholder:text-white/35"
+                    />
+                  </div>
                 </>
-              ) : null}
+              ) : (
+                <div className="mb-4 border border-[#5C3D1E] bg-[#2A1F14] p-3.5 text-[13px] leading-relaxed text-[#C4A882]">
+                  Stripe Connect will collect bank details securely after
+                  onboarding. No Nigerian NUBAN is stored for{" "}
+                  {selectedRegion?.name}.
+                </div>
+              )}
 
               {error && (
                 <p className="mt-4 border border-red-400/30 bg-red-500/10 px-3 py-2.5 text-[13px] text-red-200">
@@ -671,9 +681,8 @@ export default function SellerRegisterPage() {
               </button>
 
               <p className="mt-4 text-center text-[12px] leading-relaxed text-white/55">
-                By continuing, your store, images, and payout information are
-                saved to your Plazore account. You can manage details later from
-                Seller Lounge, subject to verification.
+                Incomplete profiles are rejected. Logo, banner, store details,
+                and payout destination must be accurate.
               </p>
             </div>
           </section>

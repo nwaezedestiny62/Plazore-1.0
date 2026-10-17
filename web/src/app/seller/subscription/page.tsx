@@ -18,6 +18,7 @@ import {
   fetchSellerPlans,
   initiatePlan,
   verifyPlan,
+  providerForCountry,
   type PlanId,
   type PlanRow,
   type PlansResponse,
@@ -171,7 +172,8 @@ export default function SellerSubscriptionPage() {
           ? `${window.location.origin}/seller/subscription`
           : undefined;
 
-      const res = await initiatePlan(token, planId, callbackUrl);
+      const provider = providerForCountry(country);
+      const res = await initiatePlan(token, planId, callbackUrl, provider);
       if (res.data?.activated) {
         setToast(res.data.message || "Plan activated.");
         await load();
@@ -231,7 +233,8 @@ export default function SellerSubscriptionPage() {
         </h1>
         <p className="mb-5 mt-2.5 text-sm leading-[21px] text-[#A7ADB8]">
           Pricing follows your <strong className="text-white/80">business location</strong>{" "}
-          ({country} · {currency}) — not the marketplace you browse. Fees apply
+          ({country} · {currency}) — not browse region. Nigeria uses local NGN prices;
+          other countries use the international tier converted to {currency}. Fees apply
           to product price only, never delivery.
         </p>
 
@@ -425,8 +428,7 @@ export default function SellerSubscriptionPage() {
         </div>
 
         <p className="mt-5 px-2 text-center text-xs leading-[18px] text-[#737A86]">
-          Paid plans activate only after Paystack confirms payment on the
-          server. Cancelling or declining leaves your current plan unchanged.
+          Nigeria bills via Paystack. Other business locations use Stripe at the international tier converted to local currency. Cancelling leaves your current plan unchanged.
         </p>
       </div>
     </div>

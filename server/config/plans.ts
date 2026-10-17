@@ -29,10 +29,16 @@ export type PlanDefinition = {
   prices: Record<string, PlanPrice>;
 };
 
-/** Country/region code → subscription currency */
+/**
+ * Country/region code → subscription currency.
+ * Nigeria → NGN (local tier). Every other Plazore region → that region's currency
+ * with international USD-based amounts converted in PLANS.prices.
+ */
 export const BUSINESS_COUNTRY_CURRENCY: Record<string, string> = {
   NG: "NGN",
   GH: "GHS",
+  BJ: "XOF",
+  CM: "XAF",
   KE: "KES",
   ZA: "ZAR",
   EG: "EGP",
@@ -49,7 +55,6 @@ export const BUSINESS_COUNTRY_CURRENCY: Record<string, string> = {
   IT: "EUR",
   ES: "EUR",
   AU: "AUD",
-  // default fallback handled in helper
 };
 
 export const PLANS: Record<PlanId, PlanDefinition> = {
@@ -64,14 +69,7 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
       bannerEligible: false,
       priorityDiscovery: false,
     },
-    prices: {
-      NGN: { amount: 0, currency: "NGN", interval: "month" },
-      USD: { amount: 0, currency: "USD", interval: "month" },
-      EUR: { amount: 0, currency: "EUR", interval: "month" },
-      GBP: { amount: 0, currency: "GBP", interval: "month" },
-      GHS: { amount: 0, currency: "GHS", interval: "month" },
-      KES: { amount: 0, currency: "KES", interval: "month" },
-    },
+    prices: zeroPrices(),
   },
   dominant: {
     id: "dominant",
@@ -84,13 +82,23 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
       bannerEligible: false,
       priorityDiscovery: false,
     },
+    // NG local tier; all other currencies = international USD $12 converted
     prices: {
       NGN: { amount: 12000, currency: "NGN", interval: "month" },
       USD: { amount: 12, currency: "USD", interval: "month" },
-      EUR: { amount: 12, currency: "EUR", interval: "month" },
+      EUR: { amount: 11, currency: "EUR", interval: "month" },
       GBP: { amount: 10, currency: "GBP", interval: "month" },
+      CAD: { amount: 16, currency: "CAD", interval: "month" },
+      AUD: { amount: 18, currency: "AUD", interval: "month" },
       GHS: { amount: 150, currency: "GHS", interval: "month" },
-      KES: { amount: 1500, currency: "KES", interval: "month" },
+      KES: { amount: 1550, currency: "KES", interval: "month" },
+      ZAR: { amount: 220, currency: "ZAR", interval: "month" },
+      EGP: { amount: 580, currency: "EGP", interval: "month" },
+      XOF: { amount: 7500, currency: "XOF", interval: "month" },
+      XAF: { amount: 7500, currency: "XAF", interval: "month" },
+      UGX: { amount: 45000, currency: "UGX", interval: "month" },
+      TZS: { amount: 30000, currency: "TZS", interval: "month" },
+      RWF: { amount: 15500, currency: "RWF", interval: "month" },
     },
   },
   business_plus: {
@@ -104,13 +112,23 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
       bannerEligible: false,
       priorityDiscovery: true,
     },
+    // NG local tier; international ≈ USD $30 converted
     prices: {
       NGN: { amount: 30000, currency: "NGN", interval: "month" },
       USD: { amount: 30, currency: "USD", interval: "month" },
       EUR: { amount: 28, currency: "EUR", interval: "month" },
-      GBP: { amount: 25, currency: "GBP", interval: "month" },
+      GBP: { amount: 24, currency: "GBP", interval: "month" },
+      CAD: { amount: 41, currency: "CAD", interval: "month" },
+      AUD: { amount: 46, currency: "AUD", interval: "month" },
       GHS: { amount: 380, currency: "GHS", interval: "month" },
-      KES: { amount: 3800, currency: "KES", interval: "month" },
+      KES: { amount: 3900, currency: "KES", interval: "month" },
+      ZAR: { amount: 550, currency: "ZAR", interval: "month" },
+      EGP: { amount: 1450, currency: "EGP", interval: "month" },
+      XOF: { amount: 18500, currency: "XOF", interval: "month" },
+      XAF: { amount: 18500, currency: "XAF", interval: "month" },
+      UGX: { amount: 112000, currency: "UGX", interval: "month" },
+      TZS: { amount: 78000, currency: "TZS", interval: "month" },
+      RWF: { amount: 39000, currency: "RWF", interval: "month" },
     },
   },
   global_reach: {
@@ -124,16 +142,51 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
       bannerEligible: true,
       priorityDiscovery: true,
     },
+    // NG local tier; international ≈ USD $75 converted
     prices: {
       NGN: { amount: 75000, currency: "NGN", interval: "month" },
       USD: { amount: 75, currency: "USD", interval: "month" },
       EUR: { amount: 70, currency: "EUR", interval: "month" },
       GBP: { amount: 60, currency: "GBP", interval: "month" },
+      CAD: { amount: 102, currency: "CAD", interval: "month" },
+      AUD: { amount: 115, currency: "AUD", interval: "month" },
       GHS: { amount: 950, currency: "GHS", interval: "month" },
-      KES: { amount: 9500, currency: "KES", interval: "month" },
+      KES: { amount: 9700, currency: "KES", interval: "month" },
+      ZAR: { amount: 1380, currency: "ZAR", interval: "month" },
+      EGP: { amount: 3650, currency: "EGP", interval: "month" },
+      XOF: { amount: 46500, currency: "XOF", interval: "month" },
+      XAF: { amount: 46500, currency: "XAF", interval: "month" },
+      UGX: { amount: 280000, currency: "UGX", interval: "month" },
+      TZS: { amount: 195000, currency: "TZS", interval: "month" },
+      RWF: { amount: 97000, currency: "RWF", interval: "month" },
     },
   },
 };
+
+function zeroPrices(): Record<string, PlanPrice> {
+  const codes = [
+    "NGN",
+    "USD",
+    "EUR",
+    "GBP",
+    "CAD",
+    "AUD",
+    "GHS",
+    "KES",
+    "ZAR",
+    "EGP",
+    "XOF",
+    "XAF",
+    "UGX",
+    "TZS",
+    "RWF",
+  ];
+  const out: Record<string, PlanPrice> = {};
+  for (const c of codes) {
+    out[c] = { amount: 0, currency: c, interval: "month" };
+  }
+  return out;
+}
 
 /** 200 Dominant Niche free promotional slots (7 months) */
 export const DOMINANT_PROMO = {

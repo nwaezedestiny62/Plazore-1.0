@@ -432,12 +432,12 @@ export default function SellerPayoutPage() {
 
   const requestSave = () => {
     if (isNigeria) {
-      if (!form.bankCode) {
-        toast("Required", "Select your bank", "danger");
+      if (!form.bankCode || !NGN_BANKS.some((b) => b.code === form.bankCode)) {
+        toast("Required", "Select your bank from the official Paystack list", "danger");
         return;
       }
       if (!/^\d{10}$/.test(form.accountNumber.replace(/\D/g, ""))) {
-        toast("Required", "Account number must be 10 digits", "danger");
+        toast("Required", "Account number must be exactly 10 digits", "danger");
         return;
       }
     }
@@ -665,7 +665,7 @@ export default function SellerPayoutPage() {
               ) : (
                 <div className="rounded-[14px] border border-[#5C3D1E] bg-[#2A1F14] px-3.5 py-3">
                   <p className="text-[13px] font-bold text-[#F0C070]">
-                    Stripe Connect not linked
+                    Stripe Connect required for payouts
                   </p>
                   <p className="mt-1 text-xs leading-[18px] text-[#C4A882]">
                     {form.region} sellers are not paid with a Nigerian account

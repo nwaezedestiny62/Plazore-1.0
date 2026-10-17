@@ -1,7 +1,8 @@
 /**
- * Secure Payout & Shipping
- * NG: Paystack bank code + 10-digit NUBAN.
+ * Secure Payout & Shipping — hardened
+ * NG: Paystack bank code + 10-digit NUBAN (server resolves; fake rejected).
  * Other regions: Stripe Connect pending. No fake Nigerian account.
+ * Account name is server-filled when verified.
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react'
@@ -437,12 +438,12 @@ export default function SecurePayoutScreen() {
 
   const requestSave = () => {
     if (isNigeria) {
-      if (!form.bankCode) {
-        toast('Required', 'Select your bank', 'danger')
+      if (!form.bankCode || !NGN_BANKS.some((b) => b.code === form.bankCode)) {
+        toast('Required', 'Select your bank from the official Paystack list', 'danger')
         return
       }
       if (!/^\d{10}$/.test(form.accountNumber.replace(/\D/g, ''))) {
-        toast('Required', 'Account number must be 10 digits', 'danger')
+        toast('Required', 'Account number must be exactly 10 digits', 'danger')
         return
       }
     }

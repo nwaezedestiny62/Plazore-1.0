@@ -1,7 +1,8 @@
 /**
  * Seller plans — mobile
  * Business location currency (not browse region).
- * Paystack hosted URL via WebBrowser — no native Payment Sheet.
+ * Dual provider: NG Paystack, other countries Stripe.
+ * Business location currency (not browse region).
  */
 
 import api from "@/constants/api";
@@ -147,9 +148,13 @@ export default function SellerSubscriptionScreen() {
         return;
       }
 
+      // NG → Paystack; other business countries → Stripe (international price in local currency)
+      const provider = String(data?.country || country || "NG").toUpperCase() === "NG"
+        ? "paystack"
+        : "stripe";
       const res = await api.post(
         "/seller/subscriptions/initiate",
-        { planId },
+        { planId, provider },
         { headers: { Authorization: `Bearer ${token}` } }
       );
       const body = res.data?.data || res.data || {};
@@ -252,7 +257,8 @@ export default function SellerSubscriptionScreen() {
         <Text style={styles.eyebrow}>GROWTH</Text>
         <Text style={styles.sub}>
           Pricing follows your business location ({country} · {currency}) — not
-          browse region. Fees on product only.
+          browse region. Nigeria uses local NGN prices; other countries use the
+          international tier converted to {currency}. Fees on product only.
         </Text>
 
         {!!error && (
@@ -379,8 +385,7 @@ export default function SellerSubscriptionScreen() {
         })}
 
         <Text style={styles.footer}>
-          Paid plans activate only after Paystack verifies payment. Cancel =
-          current plan stays.
+          NG plans bill via Paystack; other regions via Stripe. Prices follow business location currency. Cancel = current plan stays.
         </Text>
       </ScrollView>
     </SafeAreaView>
