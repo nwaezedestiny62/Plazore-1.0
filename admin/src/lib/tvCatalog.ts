@@ -80,6 +80,14 @@ export const TV_ROWS: TvRow[] = [
     title: "Marketplace",
     tiles: [
       {
+  href: "/latest",
+  label: "Latest",
+  kicker: "Live commerce",
+  kind: "image",
+  image:
+    "https://images.unsplash.com/photo-1556740738-b6a63e27c4df?auto=format&fit=crop&w=900&q=80",
+},
+      {
         href: "/users",
         label: "People",
         kicker: "Users & sellers",
@@ -208,6 +216,22 @@ export const TV_ROWS: TvRow[] = [
           "https://images.unsplash.com/photo-1563013544-824ae1b704d3?auto=format&fit=crop&w=900&q=80",
       },
       {
+        href: "/monetization/failed-payments",
+        label: "Failed pay",
+        kicker: "Issues desk",
+        kind: "image",
+        image:
+          "https://images.unsplash.com/photo-1563986768609-322da13575f3?auto=format&fit=crop&w=900&q=80",
+      },
+      {
+        href: "/monetization/revenue",
+        label: "Revenue",
+        kicker: "GMV & fees",
+        kind: "image",
+        image:
+          "https://images.unsplash.com/photo-1554224155-6726b3ff858f?auto=format&fit=crop&w=900&q=80",
+      },
+      {
         href: "/monetization/subscriptions",
         label: "Subscriptions",
         kicker: "On-platform",
@@ -224,13 +248,13 @@ export const TV_ROWS: TvRow[] = [
           "https://images.unsplash.com/photo-1639322537228-f710d846310a?auto=format&fit=crop&w=900&q=80",
       },
       {
-      href: "/currency",
-      label: "Rates",
-      kicker: "Currency",
-      kind: "image",
-      image:
-        "https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?auto=format&fit=crop&w=900&q=80",
-    },
+        href: "/currency",
+        label: "Rates",
+        kicker: "Currency",
+        kind: "image",
+        image:
+          "https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?auto=format&fit=crop&w=900&q=80",
+      },
     ],
   },
   {

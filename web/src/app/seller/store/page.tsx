@@ -715,7 +715,7 @@ export default function SellerStorePage() {
             </p>
             <LivePreview
               storeName={form.storeName}
-              storeDescription={form.storeDescription}
+              storebody={form.storeDescription}
               businessGoal={form.businessGoal}
               storeLogo={logoSrc}
               storeBanner={bannerSrc}

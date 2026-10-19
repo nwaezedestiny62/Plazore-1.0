@@ -1,5 +1,11 @@
 import express from "express";
 import { protect, authorize } from "../middleware/auth.js";
+ import {
+   getFailedPaymentsDesk,
+   actOnFailedPayment,
+   getRevenueBoard,
+ } from "../controllers/monetizationAdminController.js";
+ import { getLatestCommerce } from "../controllers/latestCommerceController.js";
 import {
   getDashboardStats,
   getAdminUsers,
@@ -130,6 +136,7 @@ AdminRouter.post(
   ...adminOnly,
   regenerateAdminIntelligence
 );
+AdminRouter.get("/latest", ...adminOnly, getLatestCommerce);
 
 // Announcements
 AdminRouter.get("/announcements", ...adminOnly, getAdminAnnouncements);
@@ -189,6 +196,21 @@ AdminRouter.get(
   ...adminOnly,
   getAdminPersonalDiagnostics
 );
+AdminRouter.get(
+   "/monetization/failed-payments",
+   ...adminOnly,
+   getFailedPaymentsDesk
+ );
+ AdminRouter.post(
+   "/monetization/failed-payments/:orderId/action",
+   ...adminOnly,
+   actOnFailedPayment
+ );
+ AdminRouter.get(
+  "/monetization/revenue",
+   ...adminOnly,
+   getRevenueBoard
+  );
 
 // ─── Subscriptions / Dominant Niche promo ───
 AdminRouter.get(

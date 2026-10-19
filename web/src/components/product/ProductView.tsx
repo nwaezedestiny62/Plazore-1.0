@@ -128,59 +128,44 @@ function productKey(product: Product) {
 
 
 /** Normalize options/variants from API (array, Map, or plain object). */
-function normalizeOptions(raw: unknown): { id?: string; name: string; values: string[] }[] {
-  console.log("[normalizeOptions] raw input:", raw);
-  console.log(
-    "[normalizeOptions] type:",
-    raw === null ? "null" : Array.isArray(raw) ? "array" : typeof raw
-  );
-  if (!raw) {
-    console.log("[normalizeOptions] empty/null → []");
-    return [];
-  }
+function normalizeOptions(
+  raw: unknown
+): { id?: string; name: string; values: string[] }[] {
+  if (!raw) return [];
+
   let list: any[] = [];
   if (Array.isArray(raw)) {
     list = raw;
-    console.log("[normalizeOptions] from array, length:", list.length);
   } else if (typeof raw === "object") {
     // Mongoose Map serialized as object of id -> option
     list = Object.values(raw as Record<string, unknown>);
-    console.log(
-      "[normalizeOptions] from object keys:",
-      Object.keys(raw as object),
-      "values length:",
-      list.length
-    );
   }
+
   const out: { id?: string; name: string; values: string[] }[] = [];
   for (const o of list) {
-    console.log("[normalizeOptions] item:", o);
-    if (!o || typeof o !== "object") {
-      console.log("[normalizeOptions] skip non-object item");
-      continue;
-    }
+    if (!o || typeof o !== "object") continue;
+
     const name = String((o as any).name || "").trim();
-    if (!name) {
-      console.log("[normalizeOptions] skip item with no name");
-      continue;
-    }
+    if (!name) continue;
+
     let values: string[] = [];
     const v = (o as any).values;
-    if (Array.isArray(v)) values = v.map((x) => String(x).trim()).filter(Boolean);
-    else if (typeof v === "string")
-      values = v.split(/[,|]/).map((s) => s.trim()).filter(Boolean);
-    console.log("[normalizeOptions] name:", name, "values:", values, "raw values field:", v);
-    if (!values.length) {
-      console.log("[normalizeOptions] skip — no values for", name);
-      continue;
+    if (Array.isArray(v)) {
+      values = v.map((x) => String(x).trim()).filter(Boolean);
+    } else if (typeof v === "string") {
+      values = v
+        .split(/[,|]/)
+        .map((s) => s.trim())
+        .filter(Boolean);
     }
+    if (!values.length) continue;
+
     out.push({
       id: (o as any).id ? String((o as any).id) : undefined,
       name,
       values,
     });
   }
-  console.log("[normalizeOptions] result:", out);
   return out;
 }
 
@@ -204,36 +189,38 @@ function normalizeVariantOptions(raw: unknown): Record<string, string> {
 }
 
 function normalizeVariants(raw: unknown): ProductVariant[] {
-  console.log("[normalizeVariants] raw input:", raw);
-  console.log(
-    "[normalizeVariants] type:",
-    raw === null ? "null" : Array.isArray(raw) ? "array" : typeof raw
-  );
-  if (!raw) {
-    console.log("[normalizeVariants] empty/null → []");
-    return [];
-  }
+  if (!raw) return [];
+
   let list: any[] = [];
   if (Array.isArray(raw)) list = raw;
-  else if (typeof raw === "object") list = Object.values(raw as Record<string, unknown>);
-  console.log("[normalizeVariants] list length:", list.length);
+  else if (typeof raw === "object") {
+    list = Object.values(raw as Record<string, unknown>);
+  }
+
   const out: ProductVariant[] = [];
   for (const v of list) {
     if (!v || typeof v !== "object") continue;
+
     const options = normalizeVariantOptions((v as any).options);
     const key =
       String((v as any).key || "").trim() ||
       Object.entries(options)
-        .map(([k, val]) => `${k.trim().toLowerCase()}=${String(val).trim().toLowerCase()}`)
+        .map(
+          ([k, val]) =>
+            `${k.trim().toLowerCase()}=${String(val).trim().toLowerCase()}`
+        )
         .sort()
         .join("|");
+
     out.push({
       variantId: String((v as any).variantId || (v as any)._id || key || ""),
       key,
       options,
       stock: Math.max(0, Number((v as any).stock) || 0),
       price:
-        (v as any).price === null || (v as any).price === undefined || (v as any).price === ""
+        (v as any).price === null ||
+        (v as any).price === undefined ||
+        (v as any).price === ""
           ? null
           : Number((v as any).price),
       available: (v as any).available !== false,
@@ -241,13 +228,13 @@ function normalizeVariants(raw: unknown): ProductVariant[] {
       image: (v as any).image ? String((v as any).image) : undefined,
     } as ProductVariant);
   }
-  console.log("[normalizeVariants] result count:", out.length, out);
   return out;
 }
 
 /** Build option groups from variants when options[] is missing. */
-function optionsFromVariants(variants: ProductVariant[]): { name: string; values: string[] }[] {
-  console.log("[optionsFromVariants] variants count:", variants.length);
+function optionsFromVariants(
+  variants: ProductVariant[]
+): { name: string; values: string[] }[] {
   const map = new Map<string, Set<string>>();
   for (const v of variants) {
     for (const [k, val] of Object.entries(v.options || {})) {
@@ -255,12 +242,10 @@ function optionsFromVariants(variants: ProductVariant[]): { name: string; values
       map.get(k)!.add(String(val));
     }
   }
-  const derived = Array.from(map.entries()).map(([name, set]) => ({
+  return Array.from(map.entries()).map(([name, set]) => ({
     name,
     values: Array.from(set),
   }));
-  console.log("[optionsFromVariants] derived options:", derived);
-  return derived;
 }
 
 
@@ -756,6 +741,7 @@ function classifyOption(opt: { name: string; values: string[] }): OptionKind {
   return "type";
 }
 
+
 function CinematicVariantPicker({
   options,
   variants,
@@ -777,6 +763,14 @@ function CinematicVariantPicker({
     activeSwatch && activeSwatch.startsWith("#")
       ? hexToRgb(activeSwatch)
       : null;
+
+  // Ambient for non-color picks: Plazore green/blue wash
+  const anySelected = Object.keys(selected).length > 0;
+  const headline =
+    options
+      .map((o) => selected[o.name])
+      .filter(Boolean)
+      .join(" · ") || "Choose your exact piece";
 
   const valuePossible = (name: string, val: string) => {
     const trial = { ...selected, [name]: val };
@@ -806,13 +800,16 @@ function CinematicVariantPicker({
   };
 
   return (
-    <div className="relative mt-6 overflow-hidden border border-white/[0.09]">
+    <div className="relative mt-6 overflow-hidden rounded-2xl border border-white/[0.09]">
+      {/* Ambient field — color-tinted or Plazore gradient */}
       <div
         className="pointer-events-none absolute inset-0 transition-[background] duration-700 ease-out"
         style={{
           background: rgb
             ? `radial-gradient(120% 90% at 8% 0%, rgba(${rgb},0.34), transparent 58%), linear-gradient(180deg, rgba(${rgb},0.12), rgba(8,10,14,0.55))`
-            : "linear-gradient(180deg, rgba(16,22,30,0.9), rgba(9,11,15,0.96))",
+            : anySelected
+              ? "radial-gradient(100% 80% at 12% 0%, rgba(0,229,117,0.16), transparent 55%), radial-gradient(90% 70% at 100% 100%, rgba(59,130,246,0.14), transparent 50%), linear-gradient(180deg, rgba(16,22,30,0.92), rgba(9,11,15,0.97))"
+              : "linear-gradient(180deg, rgba(16,22,30,0.9), rgba(9,11,15,0.96))",
         }}
       />
       <div
@@ -823,6 +820,16 @@ function CinematicVariantPicker({
         }}
       />
 
+      {/* Soft grid texture */}
+      <div
+        className="pointer-events-none absolute inset-0 opacity-[0.04]"
+        style={{
+          backgroundImage:
+            "linear-gradient(rgba(255,255,255,0.5) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.5) 1px, transparent 1px)",
+          backgroundSize: "24px 24px",
+        }}
+      />
+
       <div className="relative px-4 py-5 sm:px-5 sm:py-6">
         <div className="mb-5 flex items-end justify-between gap-3">
           <div className="min-w-0">
@@ -830,15 +837,26 @@ function CinematicVariantPicker({
               Configure
             </p>
             <p className="mt-1 truncate font-display text-[18px] font-semibold tracking-tight text-white sm:text-[20px]">
-              {activeColorVal || "Choose your exact piece"}
+              {headline}
             </p>
           </div>
-          <p className="shrink-0 text-[11px] tabular-nums text-white/38">
-            {picked}/{total}
-          </p>
+          <div className="flex shrink-0 flex-col items-end gap-1">
+            <p className="text-[11px] tabular-nums text-white/38">
+              {picked}/{total}
+            </p>
+            <div className="flex h-1 w-14 overflow-hidden rounded-full bg-white/10">
+              <div
+                className="h-full rounded-full transition-all duration-500 ease-out"
+                style={{
+                  width: total ? `${(picked / total) * 100}%` : "0%",
+                  backgroundImage: GRAD,
+                }}
+              />
+            </div>
+          </div>
         </div>
 
-        <div className="space-y-7">
+        <div className="space-y-8">
           {options.map((opt, gi) => {
             const kind = classifyOption(opt);
             return (
@@ -848,7 +866,7 @@ function CinematicVariantPicker({
                   animation: `plazore-rise-soft 0.55s cubic-bezier(0.16,1,0.3,1) ${gi * 80}ms both`,
                 }}
               >
-                <div className="mb-3 flex items-baseline justify-between gap-2">
+                <div className="mb-3.5 flex items-baseline justify-between gap-2">
                   <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-white/48">
                     {opt.name}
                   </p>
@@ -864,6 +882,7 @@ function CinematicVariantPicker({
                   </p>
                 </div>
 
+                {/* ── COLOR: vertical fashion cards ── */}
                 {kind === "color" ? (
                   <div className="-mx-1 flex gap-2.5 overflow-x-auto px-1 pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                     {opt.values.map((val) => {
@@ -891,7 +910,7 @@ function CinematicVariantPicker({
                                 ? "rgba(255,255,255,0.92)"
                                 : "rgba(255,255,255,0.14)",
                               boxShadow: on
-                                ? `0 0 0 1px #00E575, 0 16px 36px rgba(0,0,0,0.45)`
+                                ? "0 0 0 1px #00E575, 0 16px 36px rgba(0,0,0,0.45)"
                                 : "0 8px 18px rgba(0,0,0,0.22)",
                               transform: on
                                 ? "translateY(-4px) scale(1.04)"
@@ -932,7 +951,8 @@ function CinematicVariantPicker({
                     })}
                   </div>
                 ) : kind === "size" ? (
-                  <div className="flex flex-wrap gap-2">
+                  /* ── SIZE: premium slabs / pods ── */
+                  <div className="grid grid-cols-3 gap-2.5 sm:grid-cols-4 sm:gap-3">
                     {opt.values.map((val) => {
                       const on = selected[opt.name] === val;
                       const possible = valuePossible(opt.name, val);
@@ -942,79 +962,176 @@ function CinematicVariantPicker({
                           type="button"
                           disabled={!possible && !on}
                           onClick={() => possible && pick(opt.name, val)}
-                          className="relative flex h-12 min-w-[48px] items-center justify-center px-3.5 text-[14px] font-bold tracking-wide sm:h-14 sm:min-w-[56px]"
+                          className="group relative flex min-h-[64px] flex-col items-center justify-center overflow-hidden rounded-xl px-2 py-3 sm:min-h-[72px]"
                           style={{
-                            backgroundImage: on ? GRAD : undefined,
-                            backgroundColor: on
-                              ? undefined
-                              : "rgba(255,255,255,0.04)",
-                            color: on
-                              ? "#041412"
-                              : possible
-                                ? "rgba(245,247,250,0.9)"
-                                : "rgba(255,255,255,0.22)",
-                            border: on
-                              ? "1px solid transparent"
-                              : "1px solid rgba(255,255,255,0.12)",
-                            boxShadow: on
-                              ? "0 12px 28px rgba(0,229,117,0.16)"
-                              : "none",
-                            textDecoration: possible ? "none" : "line-through",
                             cursor: possible ? "pointer" : "not-allowed",
-                            transform: on ? "translateY(-2px)" : "none",
+                            opacity: possible || on ? 1 : 0.32,
+                            background: on
+                              ? "linear-gradient(165deg, rgba(0,229,117,0.18), rgba(59,130,246,0.12))"
+                              : "rgba(255,255,255,0.035)",
+                            border: on
+                              ? "1px solid rgba(0,229,117,0.55)"
+                              : "1px solid rgba(255,255,255,0.1)",
+                            boxShadow: on
+                              ? "0 0 0 1px rgba(0,229,117,0.25), 0 14px 32px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.08)"
+                              : "inset 0 1px 0 rgba(255,255,255,0.04)",
+                            transform: on ? "translateY(-3px)" : "none",
                             transition:
-                              "transform 0.32s cubic-bezier(0.16,1,0.3,1), box-shadow 0.32s ease, background-color 0.2s ease",
+                              "transform 0.35s cubic-bezier(0.16,1,0.3,1), box-shadow 0.35s ease, border-color 0.25s ease, background 0.25s ease",
                           }}
                         >
-                          {val}
+                          {/* corner accent */}
+                          <span
+                            className="pointer-events-none absolute left-0 top-0 h-8 w-8 opacity-60"
+                            style={{
+                              background: on
+                                ? "radial-gradient(circle at 0 0, rgba(0,229,117,0.45), transparent 70%)"
+                                : "radial-gradient(circle at 0 0, rgba(255,255,255,0.08), transparent 70%)",
+                            }}
+                          />
+                          <span
+                            className="relative text-[17px] font-extrabold tracking-tight sm:text-[19px]"
+                            style={{
+                              color: on
+                                ? "#F5F7FA"
+                                : possible
+                                  ? "rgba(245,247,250,0.88)"
+                                  : "rgba(255,255,255,0.25)",
+                              textDecoration: possible
+                                ? "none"
+                                : "line-through",
+                              backgroundImage: on ? GRAD : undefined,
+                              WebkitBackgroundClip: on ? "text" : undefined,
+                              WebkitTextFillColor: on ? "transparent" : undefined,
+                            }}
+                          >
+                            {val}
+                          </span>
+                          {on ? (
+                            <span
+                              className="relative mt-1.5 h-[2px] w-6 rounded-full"
+                              style={{ backgroundImage: GRAD }}
+                            />
+                          ) : (
+                            <span className="mt-1.5 h-[2px] w-6 rounded-full bg-white/0" />
+                          )}
                         </button>
                       );
                     })}
                   </div>
                 ) : (
-                  <div className="flex flex-wrap gap-2">
+                  /* ── TYPE / OTHER: futuristic option cards ── */
+                  <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
                     {opt.values.map((val) => {
                       const on = selected[opt.name] === val;
                       const possible = valuePossible(opt.name, val);
                       const sw = swatchFor(val);
+                      const initial = (val.trim()[0] || "?").toUpperCase();
                       return (
                         <button
                           key={val}
                           type="button"
                           disabled={!possible && !on}
                           onClick={() => possible && pick(opt.name, val)}
-                          className="flex min-h-[44px] items-center gap-2.5 px-3.5 text-[13px] font-semibold"
+                          className="group relative flex min-h-[56px] items-center gap-3.5 overflow-hidden rounded-xl px-3.5 py-3 text-left"
                           style={{
-                            backgroundImage: on && !sw ? GRAD : undefined,
-                            backgroundColor: on
-                              ? undefined
-                              : "rgba(255,255,255,0.04)",
-                            color:
-                              on && !sw
-                                ? "#041412"
-                                : possible
-                                  ? "#F5F7FA"
-                                  : "rgba(255,255,255,0.22)",
-                            border: on
-                              ? "1px solid rgba(255,255,255,0.2)"
-                              : "1px solid rgba(255,255,255,0.12)",
-                            textDecoration: possible ? "none" : "line-through",
                             cursor: possible ? "pointer" : "not-allowed",
-                            transition:
-                              "transform 0.28s ease, box-shadow 0.28s ease",
-                            transform: on ? "translateY(-1px)" : "none",
+                            opacity: possible || on ? 1 : 0.32,
+                            background: on
+                              ? "linear-gradient(120deg, rgba(0,229,117,0.14), rgba(59,130,246,0.1))"
+                              : "rgba(255,255,255,0.035)",
+                            border: on
+                              ? "1px solid rgba(0,229,117,0.45)"
+                              : "1px solid rgba(255,255,255,0.1)",
                             boxShadow: on
-                              ? "0 10px 24px rgba(0,229,117,0.12)"
+                              ? "0 12px 28px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.06)"
                               : "none",
+                            transform: on ? "translateY(-2px)" : "none",
+                            transition:
+                              "transform 0.32s cubic-bezier(0.16,1,0.3,1), box-shadow 0.32s ease, border-color 0.25s ease",
                           }}
                         >
-                          {sw ? (
+                          {/* leading mark */}
+                          <span
+                            className="relative flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-lg border"
+                            style={{
+                              borderColor: on
+                                ? "rgba(0,229,117,0.4)"
+                                : "rgba(255,255,255,0.12)",
+                              background: sw
+                                ? sw
+                                : on
+                                  ? "linear-gradient(145deg, rgba(0,229,117,0.25), rgba(59,130,246,0.2))"
+                                  : "rgba(255,255,255,0.06)",
+                            }}
+                          >
+                            {!sw ? (
+                              <span
+                                className="text-[15px] font-extrabold"
+                                style={{
+                                  color: on
+                                    ? "#00E575"
+                                    : "rgba(255,255,255,0.55)",
+                                }}
+                              >
+                                {initial}
+                              </span>
+                            ) : (
+                              <span
+                                className="pointer-events-none absolute inset-0"
+                                style={{
+                                  background:
+                                    "linear-gradient(180deg, rgba(255,255,255,0.22), transparent 55%)",
+                                }}
+                              />
+                            )}
+                          </span>
+                          <span className="min-w-0 flex-1">
                             <span
-                              className="h-5 w-5 shrink-0 border border-white/25"
-                              style={{ background: sw }}
+                              className="block truncate text-[14px] font-bold tracking-tight"
+                              style={{
+                                color: on
+                                  ? "#F5F7FA"
+                                  : possible
+                                    ? "rgba(245,247,250,0.9)"
+                                    : "rgba(255,255,255,0.28)",
+                                textDecoration: possible
+                                  ? "none"
+                                  : "line-through",
+                              }}
+                            >
+                              {val}
+                            </span>
+                            <span className="mt-0.5 block text-[10px] font-semibold uppercase tracking-[0.14em] text-white/30">
+                              {opt.name}
+                            </span>
+                          </span>
+                          {on ? (
+                            <span
+                              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full"
+                              style={{ backgroundImage: GRAD }}
+                            >
+                              <svg
+                                viewBox="0 0 24 24"
+                                className="h-3.5 w-3.5"
+                                fill="none"
+                                stroke="#041412"
+                                strokeWidth="3"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              >
+                                <path d="M5 13l4 4L19 7" />
+                              </svg>
+                            </span>
+                          ) : (
+                            <span className="h-6 w-6 shrink-0 rounded-full border border-white/10" />
+                          )}
+                          {on ? (
+                            <span
+                              className="pointer-events-none absolute bottom-0 left-0 right-0 h-[2px]"
+                              style={{ backgroundImage: GRAD }}
                             />
                           ) : null}
-                          {val}
                         </button>
                       );
                     })}

@@ -19,6 +19,7 @@ import {
   User,
 } from "lucide-react";
 import { DEFAULT_REGION, REGION_LIST, type RegionCode } from "@/lib/regions";
+import { useMarketplace } from "@/context/MarketplaceContext";
 
 const BASE =
   process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com/api";
@@ -153,6 +154,7 @@ export default function CompleteProfilePage() {
   const { user, isLoaded: userLoaded } = useUser();
   const { getToken, isSignedIn } = useAuth();
   const router = useRouter();
+  const { setRegionLocal } = useMarketplace();
   const checkedRef = useRef(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const bgSrc = useProfileBackground();
@@ -235,11 +237,13 @@ export default function CompleteProfilePage() {
         const u = json?.data;
 
         if (profileComplete(u)) {
+          const region = String(u.marketplaceRegion || DEFAULT_REGION);
           markLocalComplete({
             name: String(u.name).trim(),
             phone: String(u.phone).trim(),
-            region: String(u.marketplaceRegion || DEFAULT_REGION),
+            region,
           });
+          setRegionLocal(region);
           router.replace("/");
           return;
         }
@@ -317,6 +321,9 @@ export default function CompleteProfilePage() {
         region: country,
       });
 
+      // Sync mall region + currency immediately
+      setRegionLocal(country);
+
       router.replace("/");
     } catch (e: unknown) {
       setFormError(e instanceof Error ? e.message : "Could not reach server");
@@ -362,27 +369,34 @@ export default function CompleteProfilePage() {
       />
       <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-black/55 via-[#090B0F]/80 to-[#090B0F]/96" />
       <div className="pointer-events-none absolute inset-0 bg-gradient-to-r from-[#061210]/40 via-transparent to-transparent" />
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top_left,rgba(0,229,117,0.12),transparent_50%),radial-gradient(ellipse_at_bottom_right,rgba(59,130,246,0.1),transparent_45%)]" />
 
       <div className="relative mx-auto max-w-lg px-5 pb-20 pt-8 sm:px-6">
-        <div className="mb-4 flex items-center gap-2">
-          <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-[#00E575]" />
+        <div className="mb-5 flex items-center gap-2.5">
+          <span className="relative flex h-2.5 w-2.5">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#00E575] opacity-40" />
+            <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-gradient-to-r from-[#00E575] to-[#14B8A6]" />
+          </span>
           <p className="text-[12px] font-semibold tracking-wide text-white/50">
             Warming up the mall…
           </p>
         </div>
 
-        <p className="mb-2 text-xs font-bold uppercase tracking-[0.2em] text-[#00E575]">
-          One last step
-        </p>
-        <h1 className="text-[28px] font-extrabold tracking-tight sm:text-[30px]">
+        <div className="mb-2 flex items-center gap-2.5">
+          <span className="h-[3px] w-7 rounded-full bg-gradient-to-r from-[#00E575] via-[#14B8A6] to-[#3B82F6]" />
+          <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-[#00E575]">
+            One last step
+          </p>
+        </div>
+        <h1 className="text-[30px] font-extrabold tracking-tight text-white sm:text-[32px]">
           Finish your profile
         </h1>
-        <p className="mt-2 text-[15px] leading-[22px] text-white/78">
-          Country, a real phone number, and your name are required before you
-          enter Plazore. This only happens once.
+        <p className="mt-3 max-w-md text-[15px] leading-[22px] text-white/70">
+          Country sets your mall region and currency. Phone and name unlock
+          Plazore — required once only.
         </p>
 
-        <div className="mb-5 mt-6 flex items-center gap-3.5 border border-white/14 bg-white/10 p-3.5 backdrop-blur-sm">
+        <div className="mb-6 mt-7 flex items-center gap-3.5 rounded-2xl border border-white/[0.1] bg-white/[0.07] p-4 shadow-[0_8px_32px_rgba(0,0,0,0.25)] backdrop-blur-md">
           {avatar ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
@@ -391,7 +405,7 @@ export default function CompleteProfilePage() {
               className="h-14 w-14 object-cover"
             />
           ) : (
-            <span className="flex h-14 w-14 items-center justify-center bg-black/35">
+            <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-[#00E575]/20 to-[#3B82F6]/15 ring-1 ring-white/10">
               <User className="h-6 w-6 text-white/55" />
             </span>
           )}
@@ -407,7 +421,7 @@ export default function CompleteProfilePage() {
         </div>
 
         {formError ? (
-          <div className="mb-3.5 flex items-center gap-2 border border-red-500/40 bg-red-500/18 px-3 py-2.5">
+          <div className="mb-3.5 flex items-center gap-2 rounded-xl border border-red-500/40 bg-red-500/18 px-3.5 py-2.5">
             <AlertCircle className="h-4 w-4 shrink-0 text-red-300" />
             <p className="text-[13px] leading-[18px] text-red-200">{formError}</p>
           </div>
@@ -427,10 +441,10 @@ export default function CompleteProfilePage() {
             onClick={() => setCountryOpen((o) => !o)}
             aria-haspopup="listbox"
             aria-expanded={countryOpen}
-            className={`flex h-[54px] w-full items-center gap-3 border px-3.5 text-left transition backdrop-blur-sm ${
+            className={`flex h-[56px] w-full items-center gap-3 rounded-xl border px-3.5 text-left transition-all duration-200 backdrop-blur-md ${
               countryOpen
-                ? "border-[#00E575] bg-[rgba(0,229,117,0.08)]"
-                : "border-white/14 bg-white/10 hover:border-white/25"
+                ? "border-[#00E575]/60 bg-[rgba(0,229,117,0.1)] shadow-[0_0_0_3px_rgba(0,229,117,0.12)]"
+                : "border-white/12 bg-white/[0.08] hover:border-white/22 hover:bg-white/[0.1]"
             }`}
           >
             <span className="text-[22px] leading-none" aria-hidden>
@@ -463,7 +477,7 @@ export default function CompleteProfilePage() {
           {countryOpen ? (
             <div
               role="listbox"
-              className="absolute left-0 right-0 top-[calc(100%+8px)] max-h-[min(280px,50vh)] overflow-y-auto overscroll-contain border border-white/12 bg-[#11141A]/98 shadow-[0_16px_40px_rgba(0,0,0,0.55)] backdrop-blur-xl"
+              className="absolute left-0 right-0 top-[calc(100%+8px)] max-h-[min(280px,50vh)] overflow-y-auto overscroll-contain rounded-xl border border-white/12 bg-[#0E1116]/98 shadow-[0_20px_50px_rgba(0,0,0,0.55)] backdrop-blur-xl"
               style={{
                 animation: "cpDropIn 0.22s cubic-bezier(0.22, 1, 0.36, 1)",
               }}
@@ -516,10 +530,10 @@ export default function CompleteProfilePage() {
           Phone *
         </p>
         <label
-          className={`mb-1 flex h-[54px] items-center border px-3.5 backdrop-blur-sm ${
+          className={`mb-1 flex h-[56px] items-center rounded-xl border px-3.5 transition-all duration-200 backdrop-blur-md ${
             !country
               ? "cursor-not-allowed border-white/10 bg-white/5 opacity-60"
-              : "border-white/14 bg-white/10 focus-within:border-[#00E575] focus-within:bg-[rgba(0,229,117,0.06)]"
+              : "border-white/12 bg-white/[0.08] focus-within:border-[#00E575]/55 focus-within:bg-[rgba(0,229,117,0.07)] focus-within:shadow-[0_0_0_3px_rgba(0,229,117,0.1)]"
           }`}
         >
           <span
@@ -559,7 +573,7 @@ export default function CompleteProfilePage() {
         <p className="mb-2 text-[11px] font-bold uppercase tracking-wide text-white/55">
           Full name *
         </p>
-        <label className="mb-2 flex h-[54px] items-center border border-white/14 bg-white/10 px-3.5 backdrop-blur-sm focus-within:border-[#00E575] focus-within:bg-[rgba(0,229,117,0.06)]">
+        <label className="mb-2 flex h-[56px] items-center rounded-xl border border-white/12 bg-white/[0.08] px-3.5 transition-all duration-200 backdrop-blur-md focus-within:border-[#00E575]/55 focus-within:bg-[rgba(0,229,117,0.07)] focus-within:shadow-[0_0_0_3px_rgba(0,229,117,0.1)]">
           <User className="mr-2.5 h-[18px] w-[18px] shrink-0 text-white/55" />
           <input
             value={name}
@@ -577,7 +591,11 @@ export default function CompleteProfilePage() {
           type="button"
           onClick={onSave}
           disabled={!formReady || loading}
-          className="mt-7 flex h-14 w-full items-center justify-center gap-2 text-base font-extrabold disabled:cursor-not-allowed"
+          className={`mt-8 flex h-14 w-full items-center justify-center gap-2 rounded-xl text-base font-extrabold transition-all duration-200 disabled:cursor-not-allowed ${
+            formReady
+              ? "shadow-[0_12px_32px_rgba(0,229,117,0.22)] hover:brightness-105 active:scale-[0.99]"
+              : ""
+          }`}
           style={
             formReady
               ? { backgroundImage: GRAD, color: "#041412" }
@@ -607,11 +625,11 @@ export default function CompleteProfilePage() {
         @keyframes cpDropIn {
           from {
             opacity: 0;
-            transform: translateY(-6px);
+            transform: translateY(-8px) scale(0.98);
           }
           to {
             opacity: 1;
-            transform: translateY(0);
+            transform: translateY(0) scale(1);
           }
         }
       `}</style>
