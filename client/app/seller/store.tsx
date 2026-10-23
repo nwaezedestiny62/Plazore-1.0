@@ -1131,7 +1131,7 @@ export default function MyStore() {
 
         <LiveStorefrontPreview
           storeName={form.storeName}
-          storebody={form.storeDescription}
+          storeDescription={form.storeDescription}
           businessGoal={form.businessGoal}
           storeLogo={logoSource}
           storeBanner={bannerSource}
