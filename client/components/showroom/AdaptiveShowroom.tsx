@@ -15,6 +15,11 @@ import RoomFour from './RoomFour'
  *  2 THE CHAMBER  — Natural Selection (similar pairs, unique, ~3h)
  *  3 THE SIGNAL   — The Watch (user activity, ~20m, no plan boost)
  *  4 THE LOCALE   — regional best (always live)
+ *
+ * This component is presentation-only.
+ * All eligibility + ranking decisions live in server/services/showroomRanker.ts.
+ * When the server is in inventory-first mode (< 110 eligible), every eligible
+ * product is already distributed across the rooms — we just render them.
  */
 export type ShowroomRooms = {
   1?: Product[]
@@ -106,6 +111,7 @@ function buildRooms(
     return { one, two, three, four }
   }
 
+  // Fallback when server has not yet returned rooms
   const seen = new Set<string>()
   return {
     one: takeUnique(products, ROOM_CAPACITY[1], seen),

@@ -1,5 +1,5 @@
 /**
- * Plazore Showroom Ranker (V2)
+ * Plazore Showroom Ranker (V2.1)
  * FULLNESS FIRST · ADAPTABILITY SECOND
  *
  * Capacities (unchanged):
@@ -10,7 +10,9 @@
  *   Room 4 = 30          (THE LOCALE)                      always live · regional top
  *   Full mall = 110 slots
  *
- * Eligible = isActive === true AND stock > 0
+ * Eligible =
+ *   isActive === true
+ *   AND has sellable stock (top-level stock > 0  OR  any available variant with stock > 0)
  *
  * Adaptive ON  only when eligibleCount >= 110
  * Adaptive OFF when eligibleCount < 110
@@ -63,7 +65,58 @@ export const SESSION_TTL_MS = 1000 * 60 * 60 * 6;
 const SELLER_PUBLIC_FIELDS =
   "name storeName storeLogo storeDescription isSellerVerified marketplaceRegion shippingDefaults";
 
-const ELIGIBLE_FILTER = { isActive: true, stock: { $gt: 0 } } as const;
+/**
+ * Robust eligibility:
+ * - isActive must be true
+ * - has sellable stock either at product level OR on any available variant
+ *
+ * This is the primary fix for products that use variants (top-level stock can be 0
+ * while variants still have inventory).
+ *
+ * Use buildEligibleQuery() when you need to AND extra fields (region, _id $nin, etc).
+ * Never spread this object directly with other top-level keys that collide with $or.
+ */
+export function buildEligibleQuery(extra: Record<string, any> = {}): any {
+  const stockOr = {
+    $or: [
+      { stock: { $gt: 0 } },
+      {
+        hasVariants: true,
+        variants: {
+          $elemMatch: {
+            available: { $ne: false },
+            stock: { $gt: 0 },
+          },
+        },
+      },
+    ],
+  };
+
+  const parts: any[] = [{ isActive: true }, stockOr];
+
+  for (const [key, value] of Object.entries(extra)) {
+    if (value === undefined) continue;
+    parts.push({ [key]: value });
+  }
+
+  return parts.length === 1 ? parts[0] : { $and: parts };
+}
+
+/** Legacy export kept for any external imports that still expect ELIGIBLE_FILTER */
+export const ELIGIBLE_FILTER = buildEligibleQuery();
+
+/** In-memory check (used after hydrate / for safety) */
+export function isProductEligible(p: any): boolean {
+  if (!p || p.isActive === false) return false;
+  const topStock = Number(p.stock) || 0;
+  if (topStock > 0) return true;
+  if (p.hasVariants && Array.isArray(p.variants)) {
+    return p.variants.some(
+      (v: any) => v && v.available !== false && Number(v.stock) > 0
+    );
+  }
+  return false;
+}
 
 type ScoredProduct = {
   product: any;
@@ -76,7 +129,7 @@ type InterestProfile = {
   subCategories: Map<string, number>;
   sellers: Map<string, number>;
   priceBands: Map<string, number>;
-  productIds: Map<string, number>; // products user engaged with most
+  productIds: Map<string, number>;
 };
 
 function priceBand(price: number): string {
@@ -144,7 +197,6 @@ async function buildInterestProfile(
 
     const createdAt = raw?.createdAt ? new Date(raw.createdAt).getTime() : now;
     const ageHours = (now - createdAt) / (1000 * 60 * 60);
-    // Room 3 is more reactive — shorter decay window
     const decay = Math.exp(-ageHours / 48);
 
     const eventType = String(raw?.type || "");
@@ -178,7 +230,6 @@ async function buildInterestProfile(
     const w = weight * decay;
     if (!w) continue;
 
-    // product may be populated doc OR plain ObjectId / string
     const isDoc = typeof product === "object" && product !== null;
     const pid = isDoc ? productId(product) : String(product || "");
     if (!pid) continue;
@@ -201,7 +252,6 @@ async function buildInterestProfile(
   return profile;
 }
 
-/** Batch load discoveryPriority + visibility for seller IDs (one query). */
 async function loadSellerPlanBoosts(
   sellerIds: string[]
 ): Promise<Map<string, { priority: number; visibility: string }>> {
@@ -240,10 +290,6 @@ async function loadSellerPlanBoosts(
   return map;
 }
 
-/**
- * Base commerce / quality / freshness score shared across rooms.
- * Plan boost is optional (rooms 1, 2, 4 only).
- */
 function scoreProductBase(opts: {
   product: any;
   perf: any | null;
@@ -254,9 +300,7 @@ function scoreProductBase(opts: {
   applyPlanBoost: boolean;
   planDiscoveryPriority?: number;
   planVisibility?: string;
-  /** Extra weight on user interest (Room 3) */
   interestMultiplier?: number;
-  /** Extra weight on regional commerce (Room 4) */
   regionalCommerceBoost?: boolean;
 }): ScoredProduct {
   const {
@@ -307,7 +351,6 @@ function scoreProductBase(opts: {
   score += freshness * 0.95;
   if (age <= 7) reasons.push("fresh");
 
-  // User interest
   let interestScore = 0;
   const cat = String(product.category || "").trim();
   const sub = String(product.subCategory || "").trim();
@@ -334,7 +377,6 @@ function scoreProductBase(opts: {
   score += clamp(interestScore) * 1.2 * interestMultiplier;
   if (interestScore > 0.12) reasons.push("matches_interest");
 
-  // Exploration / underexposed (strong for Room 1)
   let exploration = 0;
   if (age <= 14 && (views < 30 || purchases === 0)) {
     exploration += 0.55;
@@ -348,7 +390,7 @@ function scoreProductBase(opts: {
 
   let quality = 0.3;
   if (product.isActive !== false) quality += 0.2;
-  if ((product.stock || 0) > 0) quality += 0.25;
+  if (isProductEligible(product)) quality += 0.25;
   if (product.images?.length > 0) quality += 0.15;
   if (product.isFeatured) quality += 0.2;
   score += quality * 0.5;
@@ -368,7 +410,6 @@ function scoreProductBase(opts: {
     if (searchHit > 0) reasons.push("search_match");
   }
 
-  // Plan boost — Rooms 1, 2, 4 only
   if (applyPlanBoost) {
     const planPri = Number(planDiscoveryPriority) || 10;
     const planBoost = clamp(planPri / 100) * 1.45;
@@ -392,14 +433,12 @@ function scoreProductBase(opts: {
   score -= exposurePenalty * 1.25;
   if (exposurePenalty > 0.3) reasons.push("exposure_penalty");
 
-  // Slight deterministic jitter so room 1 doesn't feel static within a window
   const idHash = [...pid].reduce((a, c) => a + c.charCodeAt(0), 0);
   score += ((idHash % 17) / 17) * 0.08;
 
   return { product, score, reasons };
 }
 
-/** Unique sequential pick. Never fabricates rows. */
 function takeUnique(
   scored: ScoredProduct[],
   capacity: number,
@@ -420,10 +459,6 @@ function takeUnique(
   return selected;
 }
 
-/**
- * Adaptive-mode diversity pick.
- * Second pass relaxes caps so we still fill from real inventory, never clones.
- */
 function selectWithDiversity(
   scored: ScoredProduct[],
   capacity: number,
@@ -471,11 +506,6 @@ function selectWithDiversity(
   return selected;
 }
 
-/**
- * Room 2 — Natural Selection
- * Pair similar products side-by-side (same category preferred, then subcategory).
- * Returns up to `capacity` unique products ordered as pairs: [A1, A2, B1, B2, ...]
- */
 function selectComparisonPairs(
   scored: ScoredProduct[],
   capacity: number,
@@ -483,7 +513,6 @@ function selectComparisonPairs(
 ): ScoredProduct[] {
   if (capacity <= 0) return [];
 
-  // Group by category
   const byCat = new Map<string, ScoredProduct[]>();
   for (const s of scored) {
     const id = productId(s.product);
@@ -493,12 +522,10 @@ function selectComparisonPairs(
     byCat.get(cat)!.push(s);
   }
 
-  // Sort each category by score
   for (const list of byCat.values()) {
     list.sort((a, b) => b.score - a.score);
   }
 
-  // Categories ordered by best score in group (attractiveness)
   const catOrder = [...byCat.entries()].sort(
     (a, b) => (b[1][0]?.score || 0) - (a[1][0]?.score || 0)
   );
@@ -526,7 +553,6 @@ function selectComparisonPairs(
     }
   };
 
-  // Prefer pairs within same category; second item prefers same subcategory
   for (const [, list] of catOrder) {
     if (selected.length >= capacity) break;
     const remaining = list.filter((s) => !used.has(productId(s.product)));
@@ -543,13 +569,12 @@ function selectComparisonPairs(
           partner = cand;
           break;
         }
-        if (!partner) partner = cand; // fallback same category
+        if (!partner) partner = cand;
       }
       pushPair(a, partner);
     }
   }
 
-  // Fill remainder with top remaining unique scores
   if (selected.length < capacity) {
     for (const s of scored) {
       if (selected.length >= capacity) break;
@@ -578,10 +603,6 @@ function hasReuseReason(s: ScoredProduct): boolean {
   );
 }
 
-/**
- * Rooms 3/4 reuse of Room 1/2 — only when adaptive is ON
- * and the product actually earned another look.
- */
 function selectAdaptiveWithControlledReuse(
   scored: ScoredProduct[],
   capacity: number,
@@ -627,6 +648,7 @@ function selectAdaptiveWithControlledReuse(
  * INVENTORY FIRST (eligibleCount < 110)
  * Put every unique eligible product on the floor.
  * Room 1 fills first (up to 50), leftover unique → 2 → 3 → 4.
+ * No caps. No hiding. Fullness over adaptiveness.
  */
 function distributeInventoryFirst(scored: ScoredProduct[]): {
   room1: ScoredProduct[];
@@ -644,7 +666,6 @@ function distributeInventoryFirst(scored: ScoredProduct[]): {
   const room1 = takeUnique(scored, Math.min(ROOM_CAPACITY[1], n), used);
   room1.forEach((s) => used.add(productId(s.product)));
 
-  // Room 2 still tries comparison pairing from remaining
   const remaining = scored.filter((s) => !used.has(productId(s.product)));
   const room2 = selectComparisonPairs(
     remaining,
@@ -669,14 +690,6 @@ function distributeInventoryFirst(scored: ScoredProduct[]): {
   return { room1, room2, room3, room4 };
 }
 
-/**
- * ADAPTIVE ON (eligibleCount >= 110)
- *
- * Room 1 — strong exploration + plan visibility (unique)
- * Room 2 — intelligent similar pairs (unique vs room 1)
- * Room 3 — user activity heavy, NO plan boost
- * Room 4 — regional top performers + plan visibility, live
- */
 function distributeAdaptive(opts: {
   scoredRoom1: ScoredProduct[];
   scoredRoom2: ScoredProduct[];
@@ -706,7 +719,6 @@ function distributeAdaptive(opts: {
     ...room2.map((s) => productId(s.product)),
   ]);
 
-  // Room 3 — activity first; may carefully reuse high-interest items
   const room3 = selectAdaptiveWithControlledReuse(
     scoredRoom3,
     ROOM_CAPACITY[3],
@@ -718,7 +730,6 @@ function distributeAdaptive(opts: {
     }
   );
 
-  // Room 4 — regional commerce; may carefully reuse
   const room4 = selectAdaptiveWithControlledReuse(
     scoredRoom4,
     ROOM_CAPACITY[4],
@@ -767,10 +778,12 @@ function cachedUniqueIds(session: any): string[] {
 /**
  * Decide which rooms need a rebuild based on per-room TTL.
  * Room 4 is always rebuilt (live).
+ * Also force rebuild when a room is empty or under-filled relative to inventory.
  */
 function roomsNeedingRefresh(
   session: any | null,
-  forceRefresh: boolean
+  forceRefresh: boolean,
+  eligibleCount: number
 ): Set<number> {
   const need = new Set<number>();
   if (forceRefresh || !session) {
@@ -793,7 +806,7 @@ function roomsNeedingRefresh(
 
   for (const r of [1, 2, 3, 4] as const) {
     if (ROOM_TTL_MS[r] === 0) {
-      need.add(r); // always live
+      need.add(r);
       continue;
     }
     const t = builtAt[String(r)] || builtAt[r as any];
@@ -803,10 +816,25 @@ function roomsNeedingRefresh(
     }
   }
 
-  // Also refresh if room is empty in cache
+  // Empty room → rebuild
   for (const r of [1, 2, 3, 4] as const) {
     const ids = sess?.productIdsByRoom?.[r] || [];
     if (!ids.length) need.add(r);
+  }
+
+  // Inventory-first underfill protection:
+  // If we still have fewer unique products than eligible inventory (and under 110),
+  // force a full rebuild so new listings enter immediately.
+  const cachedUnique = cachedUniqueIds(session).length;
+  if (
+    eligibleCount > 0 &&
+    eligibleCount < ADAPTIVE_THRESHOLD &&
+    cachedUnique < eligibleCount
+  ) {
+    need.add(1);
+    need.add(2);
+    need.add(3);
+    need.add(4);
   }
 
   return need;
@@ -828,11 +856,16 @@ export async function generateShowroom(opts: {
   let session = await ShowroomSession.findOne({ sessionId });
   const now = new Date();
 
-  const eligibleCountLive = await Product.countDocuments(ELIGIBLE_FILTER);
+  // Live eligible count using the robust filter
+  const eligibleCountLive = await Product.countDocuments(buildEligibleQuery());
 
-  const needRefresh = roomsNeedingRefresh(session, !!opts.forceRefresh || !!searchQuery);
+  const needRefresh = roomsNeedingRefresh(
+    session,
+    !!opts.forceRefresh || !!searchQuery,
+    eligibleCountLive
+  );
 
-  // Full cache hit only if no room needs refresh and inventory didn't grow past cached set
+  // Full cache hit only if no room needs refresh and inventory didn't grow
   if (
     session &&
     !opts.forceRefresh &&
@@ -844,14 +877,17 @@ export async function generateShowroom(opts: {
     const inventoryGrew = eligibleCountLive > uniqueIds.length;
 
     if (!inventoryGrew && uniqueIds.length > 0) {
-      const products = await Product.find({
-        _id: { $in: uniqueIds },
-        ...ELIGIBLE_FILTER,
-      })
+      const products = await Product.find(
+        buildEligibleQuery({ _id: { $in: uniqueIds } })
+      )
         .populate("seller", SELLER_PUBLIC_FIELDS)
         .lean();
 
-      const map = new Map(products.map((p: any) => [String(p._id), p]));
+      // Safety: drop anything that somehow became ineligible
+      const eligibleProducts = (products as any[]).filter(isProductEligible);
+      const map = new Map(
+        eligibleProducts.map((p: any) => [String(p._id), p])
+      );
       const hydrate = (ids: string[]) =>
         (ids || []).map((id) => map.get(String(id))).filter(Boolean);
 
@@ -874,18 +910,15 @@ export async function generateShowroom(opts: {
         },
       };
     }
-    // Fall through to rebuild if inventory grew
+    // Fall through to rebuild if inventory grew or under-filled
     needRefresh.add(1);
     needRefresh.add(2);
     needRefresh.add(3);
     needRefresh.add(4);
   }
 
-  // Load candidates
-  const localProducts = await Product.find({
-    ...ELIGIBLE_FILTER,
-    region,
-  })
+  // Load candidates with robust filter (never spread $or with sibling keys)
+  const localProducts = await Product.find(buildEligibleQuery({ region }))
     .populate("seller", SELLER_PUBLIC_FIELDS)
     .sort({ isFeatured: -1, createdAt: -1 })
     .limit(800)
@@ -893,18 +926,21 @@ export async function generateShowroom(opts: {
 
   let candidates = [...localProducts];
 
-  const extra = await Product.find({
-    ...ELIGIBLE_FILTER,
-    ...(localProducts.length
-      ? { _id: { $nin: localProducts.map((p: any) => p._id) } }
-      : {}),
-  })
+  const excludeIds = localProducts.map((p: any) => p._id);
+  const extra = await Product.find(
+    buildEligibleQuery(
+      excludeIds.length ? { _id: { $nin: excludeIds } } : {}
+    )
+  )
     .populate("seller", SELLER_PUBLIC_FIELDS)
     .sort({ isFeatured: -1, createdAt: -1 })
     .limit(1200)
     .lean();
 
   candidates = [...candidates, ...extra];
+
+  // Final in-memory safety net
+  candidates = candidates.filter(isProductEligible);
   const eligibleCount = candidates.length;
 
   if (eligibleCount === 0) {
@@ -973,14 +1009,9 @@ export async function generateShowroom(opts: {
       })
       .sort((a, b) => b.score - a.score);
 
-  // Room-specific score lists
-  // Room 1: exploration + plan (default weights)
   const scoredRoom1 = scoreFor(true, 1.0, false);
-  // Room 2: similarity pairs use same plan-boosted scores (pairing does the intelligence)
   const scoredRoom2 = scoredRoom1;
-  // Room 3: NO plan boost, heavy interest
   const scoredRoom3 = scoreFor(false, 2.15, false);
-  // Room 4: plan boost + regional commerce emphasis
   const scoredRoom4 = scoreFor(true, 0.85, true);
 
   let room1: ScoredProduct[];
@@ -989,7 +1020,7 @@ export async function generateShowroom(opts: {
   let room4: ScoredProduct[];
 
   if (!adaptiveOn) {
-    // Inventory-first uses one ranked list (plan on for overall quality)
+    // FULLNESS FIRST — every eligible product goes in
     const dist = distributeInventoryFirst(scoredRoom1);
     room1 = dist.room1;
     room2 = dist.room2;
@@ -1012,13 +1043,16 @@ export async function generateShowroom(opts: {
   if (session && needRefresh.size < 4 && !searchQuery && !opts.forceRefresh) {
     const uniqueIds = cachedUniqueIds(session);
     if (uniqueIds.length) {
-      const products = await Product.find({
-        _id: { $in: uniqueIds },
-        ...ELIGIBLE_FILTER,
-      })
+      const products = await Product.find(
+        buildEligibleQuery({ _id: { $in: uniqueIds } })
+      )
         .populate("seller", SELLER_PUBLIC_FIELDS)
         .lean();
-      const map = new Map(products.map((p: any) => [String(p._id), p]));
+      const map = new Map(
+        (products as any[])
+          .filter(isProductEligible)
+          .map((p: any) => [String(p._id), p])
+      );
       const hydrateScored = (ids: string[]): ScoredProduct[] =>
         (ids || [])
           .map((id) => {
@@ -1036,7 +1070,6 @@ export async function generateShowroom(opts: {
       if (!needRefresh.has(3) && session.productIdsByRoom?.[3]?.length) {
         room3 = hydrateScored(session.productIdsByRoom[3]);
       }
-      // Room 4 always live — never keep stale from partial path when needRefresh has 4
     }
   }
 
@@ -1079,7 +1112,6 @@ export async function generateShowroom(opts: {
       roomBuiltAt[String(r)] = new Date(prevBuilt[String(r)]);
     }
   }
-  // Room 4 always stamped as live
   roomBuiltAt["4"] = now;
 
   const expiresAt = new Date(Date.now() + SESSION_TTL_MS);
@@ -1103,7 +1135,6 @@ export async function generateShowroom(opts: {
     { upsert: true, returnDocument: "after" }
   );
 
-  // Expanded View (1) and Private Selection (2) only — not every Room 4 live refresh.
   if (userId && !searchQuery) {
     const changed = [...needRefresh].filter((r) => r === 1 || r === 2);
     if (changed.length) {
@@ -1139,6 +1170,7 @@ export async function generateShowroom(opts: {
         3: room3.length,
         4: room4.length,
       },
+      mode: adaptiveOn ? "adaptive" : "inventory_first",
     },
   };
 }
