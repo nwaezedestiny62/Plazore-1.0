@@ -1798,9 +1798,6 @@ function BrowseInner() {
               <p className="text-[11px] font-bold tracking-[0.12em] text-muted">
                 MOVING NOW
               </p>
-              <p className="mt-1 text-[12px] text-secondary">
-                Highest viewed on Plazore
-              </p>
               {loading ? (
                 <OrbLoader compact label="Loading…" />
               ) : movingNow.length === 0 ? (
