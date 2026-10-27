@@ -8,7 +8,6 @@ import {
   Bell,
   Search,
   ShoppingBag,
-  ShoppingCart,
 } from "lucide-react";
 import { AppFeaturePrompt, type AppFeature } from "@/components/app/AppFeaturePrompt";
 import { useAuth, useUser } from "@clerk/nextjs";
@@ -251,20 +250,14 @@ function MallChrome({
             : "1px solid transparent",
         }}
       >
-        <Link href="/" className="flex shrink-0 items-center gap-2.5 lg:gap-3">
+        <Link href="/" className="flex shrink-0 items-center">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            src="/logo.png"
+            src="/logo-4.png"
             alt="Plazore"
-            className="h-7 w-7 object-contain lg:h-8 lg:w-8"
+            className="h-8 w-auto object-contain lg:h-9"
+            draggable={false}
           />
-          <span
-            className={`text-[12px] font-semibold tracking-[0.22em] uppercase lg:text-[13px] ${
-              atTop ? "text-white/90" : "text-text"
-            }`}
-          >
-            Plazore
-          </span>
         </Link>
 
         <nav className="flex items-center gap-4 lg:gap-8">
@@ -341,7 +334,7 @@ function MallChrome({
             ref={bagRefDesktop}
             href="/cart"
             className="relative flex h-9 w-9 items-center justify-center text-white/80 transition hover:text-text lg:h-10 lg:w-10"
-            aria-label="Cart"
+            aria-label="Shopping bag"
             data-plazore-cart-icon
           >
             <ShoppingBag
@@ -435,14 +428,14 @@ function MallChrome({
             ref={bagRefMobile}
             href="/cart"
             className="relative flex h-9 w-9 items-center justify-center text-white/90 sm:h-10 sm:w-10"
-            aria-label="Cart"
+            aria-label="Shopping bag"
             data-plazore-cart-icon
           >
             <span
               aria-hidden
               className="pointer-events-none absolute inset-1 rounded-full bg-[#00E575]/12 blur-[5px]"
             />
-            <ShoppingCart
+            <ShoppingBag
               className="relative h-[17px] w-[17px]"
               strokeWidth={1.75}
             />
@@ -619,10 +612,10 @@ function RoomThreeStage({ products }: { products: Product[] }) {
             ref={cartBtnRef}
             type="button"
             onClick={handleAddToCart}
-            aria-label="Add to cart"
+            aria-label="Add to bag"
             className="absolute bottom-3 right-3 z-20 flex h-[34px] w-[34px] items-center justify-center bg-white text-[#111] shadow-[0_1px_6px_rgba(0,0,0,0.18)] transition hover:scale-105 active:scale-95"
           >
-            <ShoppingCart className="h-4 w-4" strokeWidth={2} />
+            <ShoppingBag className="h-4 w-4" strokeWidth={2} />
           </button>
         </div>
 

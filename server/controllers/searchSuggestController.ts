@@ -1,24 +1,64 @@
-import { Request, Response } from 'express'
-import Product from '../models/Products.js'
+import { Request, Response } from "express";
+import Product from "../models/Products.js";
+import User from "../models/User.js";
 
+function escapeRegex(q: string) {
+  return q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function asMapSpecs(raw: any): Record<string, string> {
+  if (!raw || typeof raw !== "object") return {};
+  const out: Record<string, string> = {};
+  if (raw instanceof Map) {
+    raw.forEach((v: any, k: any) => {
+      const key = String(k || "").trim();
+      const val = String(v ?? "").trim();
+      if (key && val) out[key] = val;
+    });
+    return out;
+  }
+  Object.entries(raw).forEach(([k, v]) => {
+    const key = String(k || "").trim();
+    const val = String(v ?? "").trim();
+    if (key && val) out[key] = val;
+  });
+  return out;
+}
+
+/**
+ * GET /api/search/suggest?q=iphone&region=NG
+ * Rich typed suggestions for Browse / mobile search.
+ */
 export const searchSuggest = async (req: Request, res: Response) => {
   try {
-    const q = String(req.query.q || '').trim()
+    const q = String(req.query.q || "").trim();
+    const region = String(req.query.region || "").trim().toUpperCase();
 
     if (q.length < 1) {
       return res.json({
         success: true,
-        data: { products: [], suggestions: [], floors: [] },
-      })
+        data: {
+          items: [],
+          products: [],
+          stores: [],
+          brands: [],
+          categories: [],
+          specs: [],
+          locations: [],
+        },
+      });
     }
 
-    // Escape special regex characters
-    const cleanQ = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    const regex = new RegExp(cleanQ, 'i')
+    const cleanQ = escapeRegex(q);
+    const regex = new RegExp(cleanQ, "i");
+    const ql = q.toLowerCase();
 
-    // 1. Product matches
+    const baseFilter: any = { isActive: true };
+    if (region) baseFilter.region = region;
+
+    // ── Products ──────────────────────────────────────────────
     const products = await Product.find({
-      isActive: true,
+      ...baseFilter,
       $or: [
         { name: regex },
         { brand: regex },
@@ -27,73 +67,207 @@ export const searchSuggest = async (req: Request, res: Response) => {
         { description: regex },
       ],
     })
-      .select('name brand category subCategory images price region seller')
-      .populate('seller', 'storeName name storeLogo')
+      .select(
+        "name brand category subCategory images price region seller specifications fulfillmentLocation",
+      )
+      .populate("seller", "storeName name storeLogo")
       .limit(8)
-      .lean()
+      .lean();
 
-    // 2. Matching categories (floors)
-    const matchingCategories = await Product.distinct('category', {
-      isActive: true,
+    // ── Distinct categories / brands ──────────────────────────
+    const [matchingCategories, matchingBrands] = await Promise.all([
+      Product.distinct("category", {
+        ...baseFilter,
+        $or: [{ category: regex }, { subCategory: regex }, { name: regex }],
+      }),
+      Product.distinct("brand", {
+        ...baseFilter,
+        brand: { $exists: true, $ne: "" },
+        $or: [{ brand: regex }, { name: regex }],
+      }),
+    ]);
+
+    const categories = (matchingCategories || [])
+      .filter((c: any) => c && String(c).trim())
+      .map((c: any) => String(c).trim())
+      .filter((c) => c.toLowerCase().includes(ql) || true)
+      .slice(0, 6);
+
+    const brands = (matchingBrands || [])
+      .filter((b: any) => b && String(b).trim())
+      .map((b: any) => String(b).trim())
+      .filter((b) => b.toLowerCase().includes(ql))
+      .slice(0, 6);
+
+    // ── Stores (sellers) ──────────────────────────────────────
+    const storeDocs = await User.find({
+      role: "seller",
       $or: [
-        { category: regex },
-        { subCategory: regex },
-        { brand: regex },
+        { storeName: regex },
         { name: regex },
       ],
     })
+      .select("storeName name storeLogo")
+      .limit(6)
+      .lean();
 
-    // 3. Generate smart suggestions from real data
-    const relatedProducts = await Product.find({
-      isActive: true,
-      $or: [{ name: regex }, { brand: regex }, { subCategory: regex }],
+    const stores = storeDocs.map((s: any) => ({
+      _id: String(s._id),
+      storeName: s.storeName || s.name || "Store",
+      storeLogo: s.storeLogo || "",
+    }));
+
+    // ── Specs from a wider product slice ──────────────────────
+    const specPool = await Product.find({
+      ...baseFilter,
+      $or: [
+        { name: regex },
+        { brand: regex },
+        { category: regex },
+        { subCategory: regex },
+      ],
     })
-      .select('name brand subCategory')
-      .limit(12)
-      .lean()
+      .select("specifications")
+      .limit(80)
+      .lean();
 
-    const suggestionSet = new Set<string>()
-
-    relatedProducts.forEach((p) => {
-      // Prefer brand if it matches
-      if (p.brand && p.brand.toLowerCase().includes(q.toLowerCase())) {
-        suggestionSet.add(p.brand.trim())
+    const specHits: { key: string; value: string }[] = [];
+    const specSeen = new Set<string>();
+    for (const p of specPool as any[]) {
+      const specs = asMapSpecs(p.specifications);
+      for (const [key, value] of Object.entries(specs)) {
+        const blob = `${key} ${value}`.toLowerCase();
+        if (
+          key.toLowerCase().includes(ql) ||
+          value.toLowerCase().includes(ql) ||
+          blob.includes(ql)
+        ) {
+          const id = `${key}::${value}`.toLowerCase();
+          if (specSeen.has(id)) continue;
+          specSeen.add(id);
+          specHits.push({ key, value });
+        }
       }
+    }
+    const specs = specHits.slice(0, 8);
 
-      // Prefer subcategory
-      if (p.subCategory && p.subCategory.toLowerCase().includes(q.toLowerCase())) {
-        suggestionSet.add(p.subCategory.trim())
-      }
-
-      // Take first 2 words of product name as a phrase
-      const words = p.name.trim().split(/\s+/)
-      if (words.length >= 2) {
-        suggestionSet.add(`${words[0]} ${words[1]}`)
-      } else if (words.length === 1) {
-        suggestionSet.add(words[0])
-      }
+    // ── Locations from fulfillment ────────────────────────────
+    const locPool = await Product.find({
+      ...baseFilter,
+      "fulfillmentLocation.city": { $exists: true },
     })
+      .select("region fulfillmentLocation")
+      .limit(120)
+      .lean();
 
-    // Remove the original query itself from suggestions
-    suggestionSet.delete(q)
-    suggestionSet.delete(q.toLowerCase())
+    const locSeen = new Set<string>();
+    const locations: {
+      kind: "city" | "state" | "region";
+      name: string;
+    }[] = [];
 
-    const suggestions = Array.from(suggestionSet).slice(0, 5)
-    const floors = matchingCategories.slice(0, 4)
+    for (const p of locPool as any[]) {
+      const fl = p.fulfillmentLocation || {};
+      const candidates: { kind: "city" | "state" | "region"; name: string }[] = [
+        { kind: "city", name: String(fl.city || "").trim() },
+        { kind: "state", name: String(fl.state || "").trim() },
+        {
+          kind: "region",
+          name: String(p.region || fl.country || "").trim(),
+        },
+      ];
+      for (const c of candidates) {
+        if (!c.name) continue;
+        if (!c.name.toLowerCase().includes(ql) && ql.length > 1) continue;
+        const id = `${c.kind}:${c.name}`.toLowerCase();
+        if (locSeen.has(id)) continue;
+        locSeen.add(id);
+        locations.push(c);
+      }
+    }
+    const locationsOut = locations.slice(0, 8);
+
+    // ── Flat typed items (for UI ranking) ─────────────────────
+    const items: any[] = [];
+
+    for (const p of products as any[]) {
+      items.push({
+        kind: "product",
+        id: String(p._id),
+        label: p.name,
+        sub: p.brand || p.category || undefined,
+        value: p.name,
+        meta: String(p._id),
+        image: p.images?.[0] || undefined,
+      });
+    }
+    for (const s of stores) {
+      items.push({
+        kind: "store",
+        id: s._id,
+        label: s.storeName,
+        sub: "Storefront",
+        value: s.storeName,
+        meta: s._id,
+        image: s.storeLogo || undefined,
+      });
+    }
+    for (const b of brands) {
+      items.push({
+        kind: "brand",
+        id: `brand-${b}`,
+        label: b,
+        sub: "Brand",
+        value: b,
+      });
+    }
+    for (const c of categories) {
+      items.push({
+        kind: "category",
+        id: `cat-${c}`,
+        label: c,
+        sub: "Category",
+        value: c,
+      });
+    }
+    for (const s of specs) {
+      items.push({
+        kind: "spec",
+        id: `spec-${s.key}-${s.value}`,
+        label: s.value,
+        sub: s.key,
+        value: `${s.key}: ${s.value}`,
+        meta: JSON.stringify({ key: s.key, value: s.value }),
+      });
+    }
+    for (const l of locationsOut) {
+      items.push({
+        kind: "location",
+        id: `loc-${l.kind}-${l.name}`,
+        label: l.name,
+        sub: l.kind,
+        value: l.name,
+        meta: l.kind,
+      });
+    }
 
     return res.json({
       success: true,
       data: {
+        items: items.slice(0, 16),
         products,
-        suggestions,
-        floors,
+        stores,
+        brands,
+        categories,
+        specs,
+        locations: locationsOut,
       },
-    })
+    });
   } catch (error: any) {
-    console.error('searchSuggest algorithmic error:', error)
+    console.error("searchSuggest error:", error);
     return res.status(500).json({
       success: false,
-      message: error.message || 'Search suggest failed',
-    })
+      message: error.message || "Search suggest failed",
+    });
   }
-}
+};

@@ -44,6 +44,71 @@ export type ProductsResponse = {
   data: import("./types").Product[];
 };
 
+export type SearchSuggestItem = {
+  kind:
+    | "product"
+    | "store"
+    | "brand"
+    | "category"
+    | "spec"
+    | "location"
+    | "recent";
+  id: string;
+  label: string;
+  sub?: string;
+  value: string;
+  meta?: string;
+  image?: string;
+};
+
+export type SearchSuggestResponse = {
+  success: boolean;
+  data: {
+    items: SearchSuggestItem[];
+    products: import("./types").Product[];
+    stores: {
+      _id: string;
+      storeName: string;
+      storeLogo?: string;
+    }[];
+    brands: string[];
+    categories: string[];
+    specs: { key: string; value: string }[];
+    locations: { kind: "city" | "state" | "region"; name: string }[];
+  };
+};
+
+/** API-backed typeahead — falls back to empty on failure */
+export async function fetchSearchSuggest(
+  q: string,
+  opts?: { region?: string },
+): Promise<SearchSuggestResponse["data"]> {
+  const empty = {
+    items: [] as SearchSuggestItem[],
+    products: [],
+    stores: [],
+    brands: [] as string[],
+    categories: [] as string[],
+    specs: [] as { key: string; value: string }[],
+    locations: [] as { kind: "city" | "state" | "region"; name: string }[],
+  };
+  const query = (q || "").trim();
+  if (!query) return empty;
+
+  try {
+    const qs = new URLSearchParams();
+    qs.set("q", query);
+    if (opts?.region) qs.set("region", opts.region);
+    const json = await apiGet<SearchSuggestResponse>(
+      `/search/suggest?${qs.toString()}`,
+    );
+    return json.data || empty;
+  } catch {
+    return empty;
+  }
+}
+
+/** @deprecated use fetchSearchSuggest */
 export async function searchSuggest(q: string) {
   return fetchMallProducts({ q, limit: 48, sort: "relevance" });
 }

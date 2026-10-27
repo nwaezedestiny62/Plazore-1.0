@@ -8,6 +8,7 @@ import makeAdmin from "./scripts/makeAdmin.js";
 
 import ProductRouter from "./routes/productsRoutes.js";
 import CartRouter from "./routes/cartRoutes.js";
+import SearchRouter from "./routes/searchRoutes.js";
 import ContentRouter from "./routes/contentRoutes.js";
 import AdminTeamRouter from "./routes/adminTeamRoutes.js";
 import OrderRouter from "./routes/ordersRoutes.js";
@@ -148,6 +149,7 @@ app.use("/api/content", ContentRouter);
 app.use("/api/announcements", AnnouncementRouter);
 app.use("/api/currency", CurrencyRouter);
 app.use("/api/admin/team", AdminTeamRouter);
+app.use("/api/search", SearchRouter);
 app.use(telemetryMiddleware);
 
 // Single moderation mount (covers /me + admin actions)

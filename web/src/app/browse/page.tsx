@@ -1,30 +1,40 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import {
   useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
+  Suspense,
 } from "react";
-import { ShoppingBag } from "lucide-react";
+import { ShoppingBag, SlidersHorizontal, MapPin, Tag } from "lucide-react";
 import { AppFeaturePrompt, type AppFeature } from "@/components/app/AppFeaturePrompt";
 import { ProductCard } from "@/components/mall/ProductCard";
 import {
   ShowroomFlyCartProvider,
   useShowroomFlyCart,
 } from "@/components/mall/ShowroomFlyCart";
-import { fetchMallProducts } from "@/lib/api";
+import {
+  fetchMallProducts,
+  fetchSearchSuggest,
+  type SearchSuggestItem,
+} from "@/lib/api";
 import { cartCount } from "@/lib/cart";
 import { CATEGORY_TO_FLOOR, FLOORS } from "@/lib/floors";
 import { CATEGORY_LIST } from "@/lib/productCatalog";
 import type { Product } from "@/lib/types";
+import { useMarketplace } from "@/context/MarketplaceContext";
+import { DEFAULT_REGION } from "@/lib/regions";
 
 const RECENT_KEY = "plazore_recent_searches";
 const MAX_RECENT = 8;
 const MOVING_NOW_MAX = 14;
 const PAGE_SIZE = 20;
+const SUGGEST_DEBOUNCE_MS = 140;
+const SEARCH_DEBOUNCE_MS = 180;
 
 type SellerInfo = {
   _id: string;
@@ -49,6 +59,21 @@ type LocFilter = {
   region: string | null;
   state: string | null;
   city: string | null;
+};
+
+/** Multi-select: key → list of selected values */
+type SpecFilter = Record<string, string[]>;
+
+type SuggestionKind = SearchSuggestItem["kind"] | "recent";
+
+type Suggestion = {
+  id: string;
+  kind: SuggestionKind;
+  label: string;
+  sub?: string;
+  value: string;
+  meta?: string;
+  image?: string;
 };
 
 function categoryOf(p: Product) {
@@ -105,6 +130,26 @@ function productCreated(p: Product) {
   return Number.isFinite(t) ? t : 0;
 }
 
+function getSpecs(p: Product): Record<string, string> {
+  const raw = (p as any).specifications;
+  if (!raw || typeof raw !== "object") return {};
+  const out: Record<string, string> = {};
+  if (raw instanceof Map) {
+    raw.forEach((v: any, k: any) => {
+      const key = String(k || "").trim();
+      const val = String(v ?? "").trim();
+      if (key && val) out[key] = val;
+    });
+    return out;
+  }
+  Object.entries(raw).forEach(([k, v]) => {
+    const key = String(k || "").trim();
+    const val = String(v ?? "").trim();
+    if (key && val) out[key] = val;
+  });
+  return out;
+}
+
 function locationBlob(p: Product) {
   const fl = (p as any).fulfillmentLocation || {};
   return [
@@ -145,8 +190,9 @@ function matchesFloor(p: Product, active: string) {
 function textMatch(hay: string, q: string) {
   if (!q) return true;
   const h = hay.toLowerCase();
-  if (h.includes(q)) return true;
-  const tokens = q.split(/\s+/).filter((t) => t.length > 1);
+  const ql = q.toLowerCase().trim();
+  if (h.includes(ql)) return true;
+  const tokens = ql.split(/\s+/).filter((t) => t.length > 1);
   if (tokens.length <= 1) return false;
   return tokens.every((t) => h.includes(t));
 }
@@ -156,12 +202,19 @@ function matchesSearch(p: Product, q: string) {
   const ql = q.toLowerCase().trim();
   const seller = getSeller(p);
   const store = (seller?.storeName || seller?.name || "").toLowerCase();
+  const specs = getSpecs(p);
+  const specBlob = Object.entries(specs)
+    .map(([k, v]) => `${k} ${v}`)
+    .join(" ")
+    .toLowerCase();
   return (
     textMatch((p.name || "").toLowerCase(), ql) ||
     textMatch(((p as any).brand || "").toLowerCase(), ql) ||
     textMatch(categoryOf(p).toLowerCase(), ql) ||
     textMatch(locationBlob(p), ql) ||
-    textMatch(store, ql)
+    textMatch(store, ql) ||
+    textMatch(specBlob, ql) ||
+    textMatch(String((p as any).description || "").toLowerCase(), ql)
   );
 }
 
@@ -229,6 +282,36 @@ function resolveCategoryParam(active: string | null): string | undefined {
   return active;
 }
 
+/** Highlight matched tokens in suggestion label */
+function HighlightText({ text, query }: { text: string; query: string }) {
+  const q = query.trim();
+  if (!q || !text) return <>{text}</>;
+  const tokens = q
+    .split(/\s+/)
+    .filter((t) => t.length > 0)
+    .map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  if (!tokens.length) return <>{text}</>;
+  const re = new RegExp(`(${tokens.join("|")})`, "ig");
+  const parts = text.split(re);
+  return (
+    <>
+      {parts.map((part, i) =>
+        re.test(part) ? (
+          <span
+            key={i}
+            className="font-semibold text-[#00E575]"
+            style={{ textShadow: "0 0 12px rgba(0,229,117,0.35)" }}
+          >
+            {part}
+          </span>
+        ) : (
+          <span key={i}>{part}</span>
+        ),
+      )}
+    </>
+  );
+}
+
 const SORT_OPTIONS: { key: SortKey; label: string }[] = [
   { key: "relevance", label: "Relevance" },
   { key: "newest", label: "Newest first" },
@@ -256,44 +339,18 @@ function MenuLines() {
   );
 }
 
-/**
- * Full-bleed grid: columns fill the row; gap-y is always larger than gap-x
- * so rows never look glued together on mobile or desktop.
- */
 const PRODUCT_GRID =
-  "grid w-full grid-cols-2 " +
-  "gap-x-3 gap-y-8 " +
-  "sm:grid-cols-2 sm:gap-x-5 sm:gap-y-10 " +
-  "md:grid-cols-3 md:gap-x-6 md:gap-y-11 " +
-  "lg:grid-cols-4 lg:gap-x-6 lg:gap-y-12 " +
-  "xl:grid-cols-5 xl:gap-x-7 xl:gap-y-12";
+  "grid w-full grid-cols-2 gap-x-3 gap-y-8 sm:grid-cols-2 sm:gap-x-5 sm:gap-y-10 md:grid-cols-3 md:gap-x-6 md:gap-y-11 lg:grid-cols-4 lg:gap-x-6 lg:gap-y-12 xl:grid-cols-5 xl:gap-x-7 xl:gap-y-12";
 
-/**
- * Force ProductCard (and any fixed-width inner link) to use 100% of the cell.
- * min-w-0 stops grid blowout; width 100% + max-width none overrides card shrink.
- */
 function ProductCell({ product }: { product: Product }) {
   return (
-    <div
-      className={
-        "plazore-product-cell min-w-0 w-full max-w-full " +
-        "[&>*]:!block [&>*]:!h-full [&>*]:!w-full [&>*]:!max-w-none " +
-        "[&_a]:!block [&_a]:!w-full [&_a]:!max-w-none " +
-        "[&_img]:!w-full"
-      }
-    >
+    <div className="plazore-product-cell min-w-0 w-full max-w-full [&>*]:!block [&>*]:!h-full [&>*]:!w-full [&>*]:!max-w-none [&_a]:!block [&_a]:!w-full [&_a]:!max-w-none [&_img]:!w-full">
       <ProductCard product={product} />
     </div>
   );
 }
 
-function OrbLoader({
-  label,
-  compact = false,
-}: {
-  label?: string;
-  compact?: boolean;
-}) {
+function OrbLoader({ label, compact = false }: { label?: string; compact?: boolean }) {
   return (
     <div
       className={`flex flex-col items-center justify-center ${
@@ -317,27 +374,88 @@ function OrbLoader({
           <img
             src="/logo.png"
             alt=""
-            className={`object-contain ${
-              compact ? "h-5 w-5 sm:h-6 sm:w-6" : "h-7 w-7 sm:h-8 sm:w-8"
-            }`}
+            className={`object-contain ${compact ? "h-5 w-5 sm:h-6 sm:w-6" : "h-7 w-7 sm:h-8 sm:w-8"}`}
           />
         </div>
       </div>
       {label ? (
-        <p className="mt-5 text-center text-[13px] text-muted sm:text-sm">
-          {label}
-        </p>
+        <p className="mt-5 text-center text-[13px] text-muted sm:text-sm">{label}</p>
       ) : null}
     </div>
   );
 }
 
+function kindAccent(kind: SuggestionKind) {
+  switch (kind) {
+    case "product":
+      return "from-[#00E575]/25 to-[#3B82F6]/15 text-[#00E575]";
+    case "store":
+      return "from-[#3B82F6]/25 to-[#00E575]/10 text-[#60A5FA]";
+    case "brand":
+      return "from-[#00E575]/20 to-transparent text-[#34D399]";
+    case "category":
+      return "from-[#3B82F6]/20 to-transparent text-[#93C5FD]";
+    case "spec":
+      return "from-[#22D3EE]/20 to-[#00E575]/10 text-[#67E8F9]";
+    case "location":
+      return "from-[#A78BFA]/20 to-[#3B82F6]/10 text-[#C4B5FD]";
+    case "recent":
+      return "from-white/10 to-transparent text-white/50";
+    default:
+      return "from-white/10 to-transparent text-white/60";
+  }
+}
+
+function kindLabel(kind: SuggestionKind) {
+  switch (kind) {
+    case "product":
+      return "Product";
+    case "store":
+      return "Store";
+    case "brand":
+      return "Brand";
+    case "category":
+      return "Category";
+    case "spec":
+      return "Spec";
+    case "location":
+      return "Place";
+    case "recent":
+      return "Recent";
+    default:
+      return "";
+  }
+}
+
+function parseSpecsFromParams(sp: URLSearchParams): SpecFilter {
+  const out: SpecFilter = {};
+  sp.forEach((val, key) => {
+    if (!key.startsWith("spec.")) return;
+    const specKey = key.slice(5);
+    if (!specKey || !val) return;
+    out[specKey] = val
+      .split(",")
+      .map((v) => v.trim())
+      .filter(Boolean);
+  });
+  return out;
+}
+
 function BrowseInner() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const flyCart = useShowroomFlyCart();
   const bagRef = useRef<HTMLAnchorElement | null>(null);
+  const searchWrapRef = useRef<HTMLDivElement | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const skipUrlWrite = useRef(false);
+  const marketplace = useMarketplace() as { region?: string } | null;
+  const marketplaceRegion = marketplace?.region || DEFAULT_REGION;
 
   const [query, setQuery] = useState("");
   const [debounced, setDebounced] = useState("");
+  const [suggestQ, setSuggestQ] = useState("");
   const [allProducts, setAllProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [recent, setRecent] = useState<string[]>([]);
@@ -348,9 +466,9 @@ function BrowseInner() {
   const [sortOpen, setSortOpen] = useState(false);
   const [priceOpen, setPriceOpen] = useState(false);
   const [locOpen, setLocOpen] = useState(false);
+  const [specOpen, setSpecOpen] = useState(false);
   const [sortKey, setSortKey] = useState<SortKey>("relevance");
-  const [structure, setStructure] =
-    useState<StructureOrder>("products_first");
+  const [structure, setStructure] = useState<StructureOrder>("products_first");
   const [minPrice, setMinPrice] = useState("");
   const [maxPrice, setMaxPrice] = useState("");
   const [inStockOnly, setInStockOnly] = useState(false);
@@ -362,9 +480,89 @@ function BrowseInner() {
     state: null,
     city: null,
   });
+  const [specs, setSpecs] = useState<SpecFilter>({});
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [bagCount, setBagCount] = useState(0);
   const [appFeature, setAppFeature] = useState<AppFeature | null>(null);
+  const [suggestOpen, setSuggestOpen] = useState(false);
+  const [activeSuggest, setActiveSuggest] = useState(0);
+  const [apiSuggestions, setApiSuggestions] = useState<Suggestion[]>([]);
+  const [suggestLoading, setSuggestLoading] = useState(false);
+  const hydrated = useRef(false);
+
+  // ── Hydrate from URL once ───────────────────────────────────
+  useEffect(() => {
+    if (hydrated.current) return;
+    hydrated.current = true;
+    const q = searchParams.get("q") || "";
+    const cat = searchParams.get("category");
+    const region = searchParams.get("region");
+    const state = searchParams.get("state");
+    const city = searchParams.get("city");
+    const min = searchParams.get("min") || "";
+    const max = searchParams.get("max") || "";
+    const stock = searchParams.get("stock") === "1";
+    const sort = (searchParams.get("sort") as SortKey) || "relevance";
+    const parsedSpecs = parseSpecsFromParams(searchParams);
+
+    skipUrlWrite.current = true;
+    if (q) {
+      setQuery(q);
+      setDebounced(q);
+      setSuggestQ(q);
+    }
+    if (cat) setActiveCategory(cat);
+    setLoc({
+      region: region || null,
+      state: state || null,
+      city: city || null,
+    });
+    setMinPrice(min);
+    setMaxPrice(max);
+    setInStockOnly(stock);
+    if (SORT_OPTIONS.some((o) => o.key === sort)) setSortKey(sort);
+    setSpecs(parsedSpecs);
+    // allow URL writes after first paint
+    requestAnimationFrame(() => {
+      skipUrlWrite.current = false;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ── Write filters → URL ─────────────────────────────────────
+  useEffect(() => {
+    if (skipUrlWrite.current) return;
+    const params = new URLSearchParams();
+    if (debounced) params.set("q", debounced);
+    if (activeCategory) params.set("category", activeCategory);
+    if (loc.region) params.set("region", loc.region);
+    if (loc.state) params.set("state", loc.state);
+    if (loc.city) params.set("city", loc.city);
+    if (minPrice) params.set("min", minPrice);
+    if (maxPrice) params.set("max", maxPrice);
+    if (inStockOnly) params.set("stock", "1");
+    if (sortKey !== "relevance") params.set("sort", sortKey);
+    Object.entries(specs).forEach(([k, vals]) => {
+      if (vals?.length) params.set(`spec.${k}`, vals.join(","));
+    });
+    const qs = params.toString();
+    const next = qs ? `${pathname}?${qs}` : pathname;
+    const current = `${pathname}${window.location.search}`;
+    if (next !== current) {
+      router.replace(next, { scroll: false });
+    }
+  }, [
+    debounced,
+    activeCategory,
+    loc,
+    minPrice,
+    maxPrice,
+    inStockOnly,
+    sortKey,
+    specs,
+    pathname,
+    router,
+  ]);
 
   useEffect(() => {
     const el = bagRef.current;
@@ -399,10 +597,7 @@ function BrowseInner() {
     return () => {
       window.removeEventListener("storage", onStorage);
       window.removeEventListener("plazore-cart", onStorage as EventListener);
-      window.removeEventListener(
-        "plazore-cart-change",
-        onStorage as EventListener,
-      );
+      window.removeEventListener("plazore-cart-change", onStorage as EventListener);
       clearInterval(t);
     };
   }, [refreshBag]);
@@ -410,7 +605,7 @@ function BrowseInner() {
   useEffect(() => {
     let alive = true;
     (async () => {
-      const list = await fetchMallProducts({ limit: 50, sort: "trending" });
+      const list = await fetchMallProducts({ limit: 80, sort: "trending" });
       if (!alive) return;
       setAllProducts(list);
       try {
@@ -430,13 +625,70 @@ function BrowseInner() {
   }, []);
 
   useEffect(() => {
-    const t = setTimeout(() => setDebounced(query.trim()), 220);
+    const t = setTimeout(() => setDebounced(query.trim()), SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(t);
+  }, [query]);
+
+  useEffect(() => {
+    const t = setTimeout(() => setSuggestQ(query.trim()), SUGGEST_DEBOUNCE_MS);
     return () => clearTimeout(t);
   }, [query]);
 
   useEffect(() => {
     setVisibleCount(PAGE_SIZE);
-  }, [debounced, activeCategory, sortKey, minPrice, maxPrice, inStockOnly, loc]);
+  }, [debounced, activeCategory, sortKey, minPrice, maxPrice, inStockOnly, loc, specs]);
+
+  // ── API-backed suggestions ──────────────────────────────────
+  useEffect(() => {
+    if (!suggestQ) {
+      setApiSuggestions(
+        recent.slice(0, 5).map((r, i) => ({
+          id: `recent-${i}`,
+          kind: "recent" as const,
+          label: r,
+          value: r,
+        })),
+      );
+      setSuggestLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setSuggestLoading(true);
+    fetchSearchSuggest(suggestQ, { region: marketplaceRegion }).then((data) => {
+      if (cancelled) return;
+      const items: Suggestion[] = (data.items || []).map((it) => ({
+        id: it.id,
+        kind: it.kind,
+        label: it.label,
+        sub: it.sub,
+        value: it.value,
+        meta: it.meta,
+        image: it.image,
+      }));
+      // Client fallback enrichment if API empty
+      if (!items.length && allProducts.length) {
+        const ql = suggestQ.toLowerCase();
+        allProducts
+          .filter((p) => textMatch((p.name || "").toLowerCase(), ql))
+          .slice(0, 5)
+          .forEach((p) =>
+            items.push({
+              id: `p-${p._id}`,
+              kind: "product",
+              label: p.name || "Product",
+              sub: (p as any).brand || categoryOf(p),
+              value: p.name || "",
+              meta: p._id,
+            }),
+          );
+      }
+      setApiSuggestions(items.slice(0, 14));
+      setSuggestLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [suggestQ, marketplaceRegion, recent, allProducts]);
 
   useEffect(() => {
     if (debounced.length < 1 && !activeCategory) {
@@ -451,11 +703,12 @@ function BrowseInner() {
     fetchMallProducts({
       q: activeCategory ? undefined : debounced || undefined,
       category: resolveCategoryParam(activeCategory),
-      limit: 50,
+      limit: 60,
       minPrice: minPrice || undefined,
       maxPrice: maxPrice || undefined,
       inStock: inStockOnly || undefined,
       sort: apiSort,
+      region: loc.region || undefined,
     }).then((products) => {
       if (!cancelled) {
         setServerProducts(products);
@@ -465,7 +718,17 @@ function BrowseInner() {
     return () => {
       cancelled = true;
     };
-  }, [debounced, activeCategory, minPrice, maxPrice, inStockOnly, sortKey]);
+  }, [debounced, activeCategory, minPrice, maxPrice, inStockOnly, sortKey, loc.region]);
+
+  useEffect(() => {
+    const onDown = (e: MouseEvent) => {
+      if (!searchWrapRef.current?.contains(e.target as Node)) {
+        setSuggestOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, []);
 
   const locationIndex = useMemo(() => {
     const regions = new Map<string, number>();
@@ -488,6 +751,36 @@ function BrowseInner() {
     };
   }, [allProducts]);
 
+  const specIndex = useMemo(() => {
+    const pool = serverProducts.length > 0 ? serverProducts : allProducts;
+    const map = new Map<string, Map<string, number>>();
+    pool.forEach((p) => {
+      const s = getSpecs(p);
+      Object.entries(s).forEach(([k, v]) => {
+        if (!map.has(k)) map.set(k, new Map());
+        const values = map.get(k)!;
+        values.set(v, (values.get(v) || 0) + 1);
+      });
+    });
+    return Array.from(map.entries())
+      .map(([key, values]) => ({
+        key,
+        values: Array.from(values.entries())
+          .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+          .slice(0, 24)
+          .map(([name, count]) => ({ name, count })),
+      }))
+      .filter((g) => g.values.length > 0)
+      .sort((a, b) => b.values.length - a.values.length || a.key.localeCompare(b.key))
+      .slice(0, 12);
+  }, [serverProducts, allProducts]);
+
+  const suggestions = apiSuggestions;
+
+  useEffect(() => {
+    setActiveSuggest(0);
+  }, [suggestions]);
+
   const movingNow = useMemo(
     () => sortProducts(allProducts, "views").slice(0, MOVING_NOW_MAX),
     [allProducts],
@@ -508,6 +801,22 @@ function BrowseInner() {
     [loc],
   );
 
+  /** Multi-select: product must match at least one selected value per active key */
+  const applySpecs = useCallback(
+    (list: Product[]) => {
+      const active = Object.entries(specs).filter(([, vals]) => vals?.length);
+      if (!active.length) return list;
+      return list.filter((p) => {
+        const s = getSpecs(p);
+        return active.every(([k, vals]) => {
+          const val = String(s[k] || "").toLowerCase();
+          return vals.some((v) => val === String(v).toLowerCase());
+        });
+      });
+    },
+    [specs],
+  );
+
   const applyPriceStock = useCallback(
     (list: Product[]) => {
       let products = list;
@@ -518,7 +827,17 @@ function BrowseInner() {
       if (Number.isFinite(max) && max > 0)
         products = products.filter((p) => productPrice(p) <= max);
       if (inStockOnly)
-        products = products.filter((p) => Number((p as any).stock ?? 0) > 0);
+        products = products.filter((p) => {
+          const top = Number((p as any).stock ?? 0);
+          if (top > 0) return true;
+          const variants = (p as any).variants;
+          if (Array.isArray(variants)) {
+            return variants.some(
+              (v: any) => v && v.available !== false && Number(v.stock) > 0,
+            );
+          }
+          return false;
+        });
       return products;
     },
     [minPrice, maxPrice, inStockOnly],
@@ -534,6 +853,7 @@ function BrowseInner() {
       products = products.filter((p) => matchesSearch(p, q));
     }
     products = applyLoc(products);
+    products = applySpecs(products);
     products = applyPriceStock(products);
     let effective: SortKey = sortKey;
     if (sortKey === "relevance") effective = q ? "views" : "newest";
@@ -544,6 +864,7 @@ function BrowseInner() {
     serverProducts,
     allProducts,
     applyLoc,
+    applySpecs,
     applyPriceStock,
     sortKey,
   ]);
@@ -609,6 +930,7 @@ function BrowseInner() {
   const clearAll = () => {
     setQuery("");
     setDebounced("");
+    setSuggestQ("");
     setActiveCategory(null);
     setServerProducts([]);
     setCategoryLoading(false);
@@ -619,16 +941,101 @@ function BrowseInner() {
     setDraftMax("");
     setDraftStock(false);
     setLoc({ region: null, state: null, city: null });
+    setSpecs({});
     setSortKey("relevance");
     setVisibleCount(PAGE_SIZE);
+    setSuggestOpen(false);
   };
 
   const selectFloor = (id: string) => {
     setQuery("");
     setDebounced("");
+    setSuggestQ("");
+    setSuggestOpen(false);
     setCategoryLoading(true);
     setActiveCategory(id);
     setTimeout(() => setCategoryLoading(false), 400);
+  };
+
+  const toggleSpecValue = (key: string, value: string) => {
+    setSpecs((prev) => {
+      const cur = prev[key] || [];
+      const has = cur.some((v) => v.toLowerCase() === value.toLowerCase());
+      const next = has
+        ? cur.filter((v) => v.toLowerCase() !== value.toLowerCase())
+        : [...cur, value];
+      const out = { ...prev };
+      if (next.length) out[key] = next;
+      else delete out[key];
+      return out;
+    });
+  };
+
+  const applySuggestion = (s: Suggestion) => {
+    if (s.kind === "category") {
+      selectFloor(s.value);
+      pushRecent(s.value);
+      return;
+    }
+    if (s.kind === "store" && s.meta) {
+      window.location.href = `/store/${s.meta}`;
+      return;
+    }
+    if (s.kind === "product" && s.meta) {
+      window.location.href = `/product/${s.meta}`;
+      return;
+    }
+    if (s.kind === "location") {
+      const kind = s.meta as "city" | "state" | "region" | undefined;
+      if (kind === "city") setLoc((p) => ({ ...p, city: s.value }));
+      else if (kind === "state") setLoc((p) => ({ ...p, state: s.value }));
+      else if (kind === "region") setLoc((p) => ({ ...p, region: s.value }));
+      else {
+        const cityHit = locationIndex.cities.find(
+          (c) => c.name.toLowerCase() === s.value.toLowerCase(),
+        );
+        const stateHit = locationIndex.states.find(
+          (c) => c.name.toLowerCase() === s.value.toLowerCase(),
+        );
+        const regionHit = locationIndex.regions.find(
+          (c) => c.name.toLowerCase() === s.value.toLowerCase(),
+        );
+        if (cityHit) setLoc((p) => ({ ...p, city: cityHit.name }));
+        else if (stateHit) setLoc((p) => ({ ...p, state: stateHit.name }));
+        else if (regionHit) setLoc((p) => ({ ...p, region: regionHit.name }));
+      }
+      setQuery(s.value);
+      setDebounced(s.value);
+      pushRecent(s.value);
+      setSuggestOpen(false);
+      return;
+    }
+    if (s.kind === "spec") {
+      try {
+        const parsed = s.meta ? JSON.parse(s.meta) : null;
+        if (parsed?.key && parsed?.value) {
+          toggleSpecValue(parsed.key, parsed.value);
+        } else {
+          const [key, ...rest] = s.value.split(":");
+          const val = rest.join(":").trim();
+          if (key && val) toggleSpecValue(key.trim(), val);
+        }
+      } catch {
+        const [key, ...rest] = s.value.split(":");
+        const val = rest.join(":").trim();
+        if (key && val) toggleSpecValue(key.trim(), val);
+      }
+      setQuery(s.label);
+      setDebounced(s.label);
+      pushRecent(s.label);
+      setSuggestOpen(false);
+      return;
+    }
+    setQuery(s.value);
+    setDebounced(s.value);
+    pushRecent(s.value);
+    setSuggestOpen(false);
+    setActiveCategory(null);
   };
 
   const openPrice = () => {
@@ -658,7 +1065,10 @@ function BrowseInner() {
   const locActive = !!(loc.region || loc.state || loc.city);
   const priceActive = !!(minPrice || maxPrice) || inStockOnly;
   const sortActive = sortKey !== "relevance";
+  const specActive = Object.values(specs).some((v) => v?.length);
   const showFilterBar = isSearching;
+  const showSuggestPanel =
+    suggestOpen && (suggestions.length > 0 || query.trim().length > 0 || suggestLoading);
 
   const renderProductsBlock = (products: Product[]) =>
     products.length > 0 ? (
@@ -701,11 +1111,7 @@ function BrowseInner() {
               <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center overflow-hidden bg-surface-2 sm:h-14 sm:w-14">
                 {s.storeLogo ? (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={s.storeLogo}
-                    alt=""
-                    className="h-full w-full object-cover"
-                  />
+                  <img src={s.storeLogo} alt="" className="h-full w-full object-cover" />
                 ) : (
                   <span className="text-muted">⌂</span>
                 )}
@@ -801,7 +1207,6 @@ function BrowseInner() {
   return (
     <div className="min-h-screen w-full overflow-x-hidden bg-bg text-text">
       <style jsx global>{`
-        /* Kill fixed widths inside ProductCard so grid cells fill edge-to-edge */
         .plazore-product-cell,
         .plazore-product-cell > *,
         .plazore-product-cell a {
@@ -811,6 +1216,19 @@ function BrowseInner() {
         }
         .plazore-product-cell img {
           width: 100%;
+        }
+        @keyframes plazore-suggest-in {
+          from {
+            opacity: 0;
+            transform: translateY(-6px) scale(0.985);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0) scale(1);
+          }
+        }
+        .plazore-suggest-panel {
+          animation: plazore-suggest-in 0.22s cubic-bezier(0.22, 1, 0.36, 1);
         }
       `}</style>
 
@@ -824,16 +1242,20 @@ function BrowseInner() {
             >
               <MenuLines />
             </Link>
-            <Link href="/" className="flex items-center gap-2 sm:gap-2.5">
+            <Link href="/" className="flex items-center">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/logo-4.png"
+                alt="Plazore"
+                className="hidden h-8 w-auto object-contain sm:block lg:h-9"
+                draggable={false}
+              />
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src="/logo.png"
                 alt="Plazore"
-                className="h-6 w-6 object-contain sm:h-7 sm:w-7"
+                className="h-6 w-6 object-contain sm:hidden"
               />
-              <span className="hidden text-sm tracking-[0.2em] uppercase sm:inline">
-                Plazore
-              </span>
             </Link>
           </div>
 
@@ -864,19 +1286,7 @@ function BrowseInner() {
                 aria-hidden
                 className="pointer-events-none absolute inset-x-0 top-0 h-[45%] bg-gradient-to-b from-white/25 to-transparent"
               />
-              <span
-                aria-hidden
-                className="pointer-events-none absolute left-0 top-0 h-full w-[3px] bg-[#00E575]"
-              />
-              <span
-                aria-hidden
-                className="pointer-events-none absolute right-0 top-0 h-full w-[3px] bg-[#3B82F6]"
-              />
               <span className="relative">Lounge</span>
-              <span className="relative flex h-1.5 w-1.5 shrink-0">
-                <span className="absolute inline-flex h-full w-full animate-ping bg-white/80 opacity-45" />
-                <span className="relative inline-flex h-1.5 w-1.5 bg-white shadow-[0_0_8px_rgba(255,255,255,0.8)]" />
-              </span>
             </Link>
             <button
               type="button"
@@ -894,10 +1304,7 @@ function BrowseInner() {
             aria-label={`Bag${bagCount ? `, ${bagCount} items` : ""}`}
             data-plazore-cart-icon
           >
-            <ShoppingBag
-              className="h-5 w-5 sm:h-[22px] sm:w-[22px]"
-              strokeWidth={1.75}
-            />
+            <ShoppingBag className="h-5 w-5 sm:h-[22px] sm:w-[22px]" strokeWidth={1.75} />
             {bagCount > 0 ? (
               <span className="absolute -right-0.5 -top-0.5 flex h-[16px] min-w-[16px] items-center justify-center rounded-full bg-[#00E575] px-1 text-[9px] font-bold leading-none text-[#041412] sm:h-[18px] sm:min-w-[18px] sm:text-[10px]">
                 {bagCount > 99 ? "99+" : bagCount}
@@ -912,42 +1319,165 @@ function BrowseInner() {
           Browse
         </h1>
 
-        <div className="mt-5 flex flex-col gap-2.5 sm:mt-7 sm:flex-row sm:items-stretch sm:gap-3">
-          <label className="flex h-12 min-w-0 flex-1 items-center gap-2.5 border border-line bg-surface px-3.5 sm:h-14 sm:gap-3 sm:px-5">
-            <span className="text-lg text-muted sm:text-xl">⌕</span>
-            <input
-              value={query}
-              onChange={(e) => {
-                setQuery(e.target.value);
-                if (activeCategory) setActiveCategory(null);
-                setCategoryLoading(false);
+        <div className="mt-5 flex flex-col gap-2.5 sm:mt-7 sm:flex-row sm:items-start sm:gap-3">
+          <div ref={searchWrapRef} className="relative min-w-0 flex-1">
+            <div
+              className="relative flex h-12 items-center gap-2.5 bg-[#0C1018]/90 px-3.5 sm:h-14 sm:gap-3 sm:px-5"
+              style={{
+                boxShadow:
+                  "0 0 0 1px rgba(0,229,117,0.12), 0 0 24px rgba(0,229,117,0.06), 0 0 40px rgba(59,130,246,0.05)",
               }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && query.trim()) pushRecent(query);
-              }}
-              placeholder="Name, brand, category, location…"
-              className="w-full bg-transparent text-[15px] text-text outline-none placeholder:text-muted sm:text-base"
-            />
-            {(query || activeCategory || locActive || priceActive) && (
-              <button
-                type="button"
-                onClick={clearAll}
-                className="text-xl leading-none text-muted hover:text-text"
+            >
+              <span
+                className="text-lg sm:text-xl"
+                style={{
+                  background: "linear-gradient(135deg, #00E575, #3B82F6)",
+                  WebkitBackgroundClip: "text",
+                  WebkitTextFillColor: "transparent",
+                }}
               >
-                ×
-              </button>
-            )}
-          </label>
+                ⌕
+              </span>
+              <input
+                ref={inputRef}
+                value={query}
+                onChange={(e) => {
+                  setQuery(e.target.value);
+                  if (activeCategory) setActiveCategory(null);
+                  setCategoryLoading(false);
+                  setSuggestOpen(true);
+                }}
+                onFocus={() => setSuggestOpen(true)}
+                onKeyDown={(e) => {
+                  if (!showSuggestPanel || suggestions.length === 0) {
+                    if (e.key === "Enter" && query.trim()) {
+                      pushRecent(query);
+                      setSuggestOpen(false);
+                    }
+                    return;
+                  }
+                  if (e.key === "ArrowDown") {
+                    e.preventDefault();
+                    setActiveSuggest((i) => Math.min(i + 1, suggestions.length - 1));
+                  } else if (e.key === "ArrowUp") {
+                    e.preventDefault();
+                    setActiveSuggest((i) => Math.max(i - 1, 0));
+                  } else if (e.key === "Enter") {
+                    e.preventDefault();
+                    const s = suggestions[activeSuggest];
+                    if (s) applySuggestion(s);
+                    else if (query.trim()) {
+                      pushRecent(query);
+                      setSuggestOpen(false);
+                    }
+                  } else if (e.key === "Escape") {
+                    setSuggestOpen(false);
+                  }
+                }}
+                placeholder="Search products, stores, brands, specs, places…"
+                className="w-full bg-transparent text-[15px] text-text outline-none placeholder:text-white/30 sm:text-base"
+                autoComplete="off"
+                spellCheck={false}
+              />
+              {(query ||
+                activeCategory ||
+                locActive ||
+                priceActive ||
+                specActive) && (
+                <button
+                  type="button"
+                  onClick={clearAll}
+                  className="text-xl leading-none text-white/40 transition hover:text-white"
+                >
+                  ×
+                </button>
+              )}
+            </div>
+
+            {showSuggestPanel ? (
+              <div
+                className="plazore-suggest-panel absolute left-0 right-0 top-[calc(100%+6px)] z-50 overflow-hidden"
+                style={{
+                  background:
+                    "linear-gradient(165deg, rgba(8,14,22,0.97) 0%, rgba(6,12,20,0.98) 100%)",
+                  boxShadow:
+                    "0 0 0 1px rgba(0,229,117,0.14), 0 0 32px rgba(0,229,117,0.08), 0 0 64px rgba(59,130,246,0.07), 0 20px 50px rgba(0,0,0,0.45)",
+                  backdropFilter: "blur(20px)",
+                }}
+              >
+                <div
+                  className="h-[2px] w-full"
+                  style={{
+                    background:
+                      "linear-gradient(90deg, transparent, #00E575 20%, #3B82F6 80%, transparent)",
+                    opacity: 0.7,
+                  }}
+                />
+                {suggestLoading && suggestions.length === 0 ? (
+                  <p className="px-4 py-5 text-[13px] text-white/40">Searching…</p>
+                ) : suggestions.length === 0 ? (
+                  <p className="px-4 py-5 text-[13px] text-white/40">
+                    No matches yet — try a product, brand, or city.
+                  </p>
+                ) : (
+                  <ul className="max-h-[min(62vh,420px)] overflow-y-auto py-1.5">
+                    {suggestions.map((s, i) => {
+                      const active = i === activeSuggest;
+                      return (
+                        <li key={s.id}>
+                          <button
+                            type="button"
+                            onMouseEnter={() => setActiveSuggest(i)}
+                            onClick={() => applySuggestion(s)}
+                            className={`flex w-full items-center gap-3 px-3.5 py-2.5 text-left transition sm:px-4 sm:py-3 ${
+                              active
+                                ? "bg-gradient-to-r from-[#00E575]/12 via-[#3B82F6]/08 to-transparent"
+                                : "hover:bg-white/[0.03]"
+                            }`}
+                          >
+                            <span
+                              className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br text-[10px] font-bold ${kindAccent(s.kind)}`}
+                            >
+                              {s.kind === "location" ? (
+                                <MapPin className="h-3.5 w-3.5" strokeWidth={2} />
+                              ) : s.kind === "spec" ? (
+                                <Tag className="h-3.5 w-3.5" strokeWidth={2} />
+                              ) : (
+                                kindLabel(s.kind).slice(0, 1)
+                              )}
+                            </span>
+                            <span className="min-w-0 flex-1">
+                              <span className="block truncate text-[14px] font-medium text-white/95 sm:text-[15px]">
+                                <HighlightText text={s.label} query={suggestQ} />
+                              </span>
+                              {s.sub ? (
+                                <span className="mt-0.5 block truncate text-[11px] text-white/40">
+                                  <HighlightText text={s.sub} query={suggestQ} />
+                                </span>
+                              ) : null}
+                            </span>
+                            <span className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/25">
+                              {kindLabel(s.kind)}
+                            </span>
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </div>
+            ) : null}
+          </div>
 
           {showFilterBar ? (
             <div className="flex flex-wrap gap-2 sm:items-stretch">
               <button
                 type="button"
                 onClick={() => setSortOpen(true)}
-                className={`h-11 shrink-0 border px-3.5 text-[11px] font-semibold tracking-wide sm:h-14 sm:px-4 sm:text-xs ${
+                className={`h-11 shrink-0 px-3.5 text-[11px] font-semibold tracking-wide transition sm:h-14 sm:px-4 sm:text-xs ${
                   sortActive || structure !== "products_first"
-                    ? "border-ai-green/40 bg-ai-green/10 text-ai-green"
-                    : "border-line bg-surface-2 text-text"
+                    ? "bg-[#00E575]/12 text-[#00E575] shadow-[0_0_20px_rgba(0,229,117,0.15)]"
+                    : "bg-white/[0.04] text-white/70 hover:bg-white/[0.07]"
                 }`}
               >
                 Sort
@@ -955,10 +1485,10 @@ function BrowseInner() {
               <button
                 type="button"
                 onClick={openPrice}
-                className={`h-11 shrink-0 border px-3.5 text-[11px] font-semibold tracking-wide sm:h-14 sm:px-4 sm:text-xs ${
+                className={`h-11 shrink-0 px-3.5 text-[11px] font-semibold tracking-wide transition sm:h-14 sm:px-4 sm:text-xs ${
                   priceActive
-                    ? "border-ai-green/40 bg-ai-green/10 text-ai-green"
-                    : "border-line bg-surface-2 text-text"
+                    ? "bg-[#00E575]/12 text-[#00E575] shadow-[0_0_20px_rgba(0,229,117,0.15)]"
+                    : "bg-white/[0.04] text-white/70 hover:bg-white/[0.07]"
                 }`}
               >
                 Price
@@ -966,24 +1496,103 @@ function BrowseInner() {
               <button
                 type="button"
                 onClick={() => setLocOpen(true)}
-                className={`h-11 shrink-0 border px-3.5 text-[11px] font-semibold tracking-wide sm:h-14 sm:px-4 sm:text-xs ${
+                className={`h-11 shrink-0 px-3.5 text-[11px] font-semibold tracking-wide transition sm:h-14 sm:px-4 sm:text-xs ${
                   locActive
-                    ? "border-ai-green/40 bg-ai-green/10 text-ai-green"
-                    : "border-line bg-surface-2 text-text"
+                    ? "bg-[#3B82F6]/15 text-[#60A5FA] shadow-[0_0_20px_rgba(59,130,246,0.18)]"
+                    : "bg-white/[0.04] text-white/70 hover:bg-white/[0.07]"
                 }`}
               >
                 Location
               </button>
+              {specIndex.length > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => setSpecOpen(true)}
+                  className={`inline-flex h-11 shrink-0 items-center gap-1.5 px-3.5 text-[11px] font-semibold tracking-wide transition sm:h-14 sm:px-4 sm:text-xs ${
+                    specActive
+                      ? "bg-[#22D3EE]/12 text-[#67E8F9] shadow-[0_0_20px_rgba(34,211,238,0.15)]"
+                      : "bg-white/[0.04] text-white/70 hover:bg-white/[0.07]"
+                  }`}
+                >
+                  <SlidersHorizontal className="h-3.5 w-3.5" strokeWidth={2} />
+                  Specs
+                </button>
+              ) : null}
             </div>
           ) : null}
         </div>
+
+        {/* Active chips — multi-select aware */}
+        {(locActive || priceActive || specActive) && isSearching ? (
+          <div className="mt-3 flex flex-wrap gap-2">
+            {loc.region ? (
+              <button
+                type="button"
+                onClick={() => setLoc((p) => ({ ...p, region: null }))}
+                className="bg-[#3B82F6]/12 px-2.5 py-1 text-[11px] text-[#93C5FD]"
+              >
+                Region: {loc.region} ×
+              </button>
+            ) : null}
+            {loc.state ? (
+              <button
+                type="button"
+                onClick={() => setLoc((p) => ({ ...p, state: null }))}
+                className="bg-[#3B82F6]/12 px-2.5 py-1 text-[11px] text-[#93C5FD]"
+              >
+                State: {loc.state} ×
+              </button>
+            ) : null}
+            {loc.city ? (
+              <button
+                type="button"
+                onClick={() => setLoc((p) => ({ ...p, city: null }))}
+                className="bg-[#3B82F6]/12 px-2.5 py-1 text-[11px] text-[#93C5FD]"
+              >
+                City: {loc.city} ×
+              </button>
+            ) : null}
+            {minPrice || maxPrice ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setMinPrice("");
+                  setMaxPrice("");
+                }}
+                className="bg-[#00E575]/10 px-2.5 py-1 text-[11px] text-[#34D399]"
+              >
+                Price {minPrice || "0"}–{maxPrice || "∞"} ×
+              </button>
+            ) : null}
+            {inStockOnly ? (
+              <button
+                type="button"
+                onClick={() => setInStockOnly(false)}
+                className="bg-[#00E575]/10 px-2.5 py-1 text-[11px] text-[#34D399]"
+              >
+                In stock ×
+              </button>
+            ) : null}
+            {Object.entries(specs).flatMap(([k, vals]) =>
+              (vals || []).map((v) => (
+                <button
+                  key={`${k}-${v}`}
+                  type="button"
+                  onClick={() => toggleSpecValue(k, v)}
+                  className="bg-[#22D3EE]/10 px-2.5 py-1 text-[11px] text-[#67E8F9]"
+                >
+                  {k}: {v} ×
+                </button>
+              )),
+            )}
+          </div>
+        ) : null}
 
         {!isSearching ? (
           <div className="mt-8 w-full sm:mt-10">
             <p className="text-[11px] font-bold tracking-[0.12em] text-muted">
               EXPLORE
             </p>
-
             <div className="-mx-3 mt-3.5 overflow-x-auto px-3 pb-2 scrollbar-none sm:-mx-0 sm:mt-4 sm:px-0">
               <div className="flex w-max gap-3 pr-3 sm:gap-3.5">
                 {FLOORS.map((f) => (
@@ -1040,7 +1649,7 @@ function BrowseInner() {
                         setDebounced(r);
                         pushRecent(r);
                       }}
-                      className="border border-line bg-surface px-3 py-2 text-[13px] sm:px-3.5 sm:text-sm"
+                      className="bg-white/[0.04] px-3 py-2 text-[13px] transition hover:bg-white/[0.07] sm:px-3.5 sm:text-sm"
                     >
                       {r}
                     </button>
@@ -1049,7 +1658,6 @@ function BrowseInner() {
               </div>
             ) : null}
 
-            {/* MOVING NOW */}
             <div className="mt-12 w-full sm:mt-14">
               <p className="text-[11px] font-bold tracking-[0.12em] text-muted">
                 MOVING NOW
@@ -1057,7 +1665,6 @@ function BrowseInner() {
               <p className="mt-1 text-[12px] text-secondary sm:text-xs">
                 Highest viewed products on Plazore
               </p>
-
               {loading ? (
                 <OrbLoader compact label="Loading the mall…" />
               ) : movingNow.length === 0 ? (
@@ -1096,9 +1703,7 @@ function BrowseInner() {
                     live.totalProducts
                       ? `${Math.min(visibleCount, live.totalProducts)} of ${live.totalProducts} products`
                       : null,
-                    live.stores.length
-                      ? `${live.stores.length} storefronts`
-                      : null,
+                    live.stores.length ? `${live.stores.length} storefronts` : null,
                     live.brands.length ? `${live.brands.length} brands` : null,
                     live.categories.length
                       ? `${live.categories.length} categories`
@@ -1121,7 +1726,7 @@ function BrowseInner() {
               <div className="pt-16 text-center sm:pt-20">
                 <p className="font-bold">Nothing found</p>
                 <p className="mt-2 text-sm text-secondary">
-                  Try another search, sort, price, or location.
+                  Try another search, sort, price, location, or spec.
                 </p>
               </div>
             ) : null}
@@ -1129,6 +1734,7 @@ function BrowseInner() {
         )}
       </div>
 
+      {/* Sort / Price / Location sheets — same as before */}
       {sortOpen ? (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/65 md:items-center">
           <button
@@ -1198,22 +1804,17 @@ function BrowseInner() {
           />
           <div className="relative w-full max-w-md border-t border-line bg-surface p-5 sm:p-6 md:border">
             <p className="text-lg font-bold">Price filter</p>
-            <p className="mt-5 text-sm font-semibold text-secondary">Price range</p>
-            <div className="mt-2 flex gap-2">
+            <div className="mt-5 flex gap-2">
               <input
                 value={draftMin}
-                onChange={(e) =>
-                  setDraftMin(e.target.value.replace(/[^\d.]/g, ""))
-                }
+                onChange={(e) => setDraftMin(e.target.value.replace(/[^\d.]/g, ""))}
                 placeholder="Min"
                 inputMode="decimal"
                 className="h-11 flex-1 border border-line bg-surface-2 px-3 text-sm outline-none"
               />
               <input
                 value={draftMax}
-                onChange={(e) =>
-                  setDraftMax(e.target.value.replace(/[^\d.]/g, ""))
-                }
+                onChange={(e) => setDraftMax(e.target.value.replace(/[^\d.]/g, ""))}
                 placeholder="Max"
                 inputMode="decimal"
                 className="h-11 flex-1 border border-line bg-surface-2 px-3 text-sm outline-none"
@@ -1257,100 +1858,53 @@ function BrowseInner() {
           />
           <div className="relative max-h-[85vh] w-full max-w-md overflow-y-auto border-t border-line bg-surface p-5 sm:p-6 md:border">
             <p className="text-lg font-bold">Location</p>
-            <p className="mt-1 text-xs text-muted">
-              From places already on Plazore products
-            </p>
-            {locationIndex.regions.length > 0 ? (
-              <>
-                <p className="mt-5 text-sm font-semibold text-secondary">Region</p>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {locationIndex.regions.map((r) => (
-                    <button
-                      key={r.name}
-                      type="button"
-                      onClick={() =>
-                        setLoc((prev) => ({
-                          ...prev,
-                          region: prev.region === r.name ? null : r.name,
-                        }))
-                      }
-                      className={`border px-3 py-1.5 text-xs font-semibold ${
-                        loc.region === r.name
-                          ? "border-ai-green/40 bg-ai-green/10 text-ai-green"
-                          : "border-line bg-surface-2"
-                      }`}
-                    >
-                      {r.name} · {r.count}
-                    </button>
-                  ))}
+            <p className="mt-1 text-xs text-muted">From Plazore inventory</p>
+            {(["regions", "states", "cities"] as const).map((bucket) => {
+              const list =
+                bucket === "regions"
+                  ? locationIndex.regions
+                  : bucket === "states"
+                    ? locationIndex.states
+                    : locationIndex.cities.slice(0, 48);
+              const field =
+                bucket === "regions" ? "region" : bucket === "states" ? "state" : "city";
+              if (!list.length) return null;
+              return (
+                <div key={bucket}>
+                  <p className="mt-5 text-sm font-semibold capitalize text-secondary">
+                    {field}
+                  </p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {list.map((r) => {
+                      const on = (loc as any)[field] === r.name;
+                      return (
+                        <button
+                          key={r.name}
+                          type="button"
+                          onClick={() =>
+                            setLoc((prev) => ({
+                              ...prev,
+                              [field]: on ? null : r.name,
+                            }))
+                          }
+                          className={`px-3 py-1.5 text-xs font-semibold ${
+                            on
+                              ? "bg-[#3B82F6]/15 text-[#60A5FA]"
+                              : "bg-white/[0.04] text-white/70"
+                          }`}
+                        >
+                          {r.name} · {r.count}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
-              </>
-            ) : null}
-            {locationIndex.states.length > 0 ? (
-              <>
-                <p className="mt-5 text-sm font-semibold text-secondary">State</p>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {locationIndex.states.map((r) => (
-                    <button
-                      key={r.name}
-                      type="button"
-                      onClick={() =>
-                        setLoc((prev) => ({
-                          ...prev,
-                          state: prev.state === r.name ? null : r.name,
-                        }))
-                      }
-                      className={`border px-3 py-1.5 text-xs font-semibold ${
-                        loc.state === r.name
-                          ? "border-ai-green/40 bg-ai-green/10 text-ai-green"
-                          : "border-line bg-surface-2"
-                      }`}
-                    >
-                      {r.name} · {r.count}
-                    </button>
-                  ))}
-                </div>
-              </>
-            ) : null}
-            {locationIndex.cities.length > 0 ? (
-              <>
-                <p className="mt-5 text-sm font-semibold text-secondary">City</p>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {locationIndex.cities.slice(0, 40).map((r) => (
-                    <button
-                      key={r.name}
-                      type="button"
-                      onClick={() =>
-                        setLoc((prev) => ({
-                          ...prev,
-                          city: prev.city === r.name ? null : r.name,
-                        }))
-                      }
-                      className={`border px-3 py-1.5 text-xs font-semibold ${
-                        loc.city === r.name
-                          ? "border-ai-green/40 bg-ai-green/10 text-ai-green"
-                          : "border-line bg-surface-2"
-                      }`}
-                    >
-                      {r.name} · {r.count}
-                    </button>
-                  ))}
-                </div>
-              </>
-            ) : null}
-            {locationIndex.regions.length === 0 &&
-            locationIndex.states.length === 0 &&
-            locationIndex.cities.length === 0 ? (
-              <p className="mt-6 text-sm text-muted">
-                No location data on products yet.
-              </p>
-            ) : null}
+              );
+            })}
             <div className="mt-8 flex gap-3">
               <button
                 type="button"
-                onClick={() =>
-                  setLoc({ region: null, state: null, city: null })
-                }
+                onClick={() => setLoc({ region: null, state: null, city: null })}
                 className="h-12 flex-1 border border-line bg-surface-2 font-semibold text-secondary"
               >
                 Reset
@@ -1367,11 +1921,72 @@ function BrowseInner() {
         </div>
       ) : null}
 
+      {/* Specs — multi-select */}
+      {specOpen ? (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/65 md:items-center">
+          <button
+            type="button"
+            className="absolute inset-0"
+            onClick={() => setSpecOpen(false)}
+            aria-label="Close specs"
+          />
+          <div className="relative max-h-[85vh] w-full max-w-md overflow-y-auto border-t border-line bg-surface p-5 sm:p-6 md:border">
+            <p className="text-lg font-bold">Specifications</p>
+            <p className="mt-1 text-xs text-muted">
+              Multi-select · from current inventory. Match any selected value per field.
+            </p>
+            {specIndex.length === 0 ? (
+              <p className="mt-6 text-sm text-muted">No specs on these products yet.</p>
+            ) : (
+              specIndex.map((group) => (
+                <div key={group.key} className="mt-5">
+                  <p className="text-sm font-semibold text-secondary">{group.key}</p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {group.values.map((v) => {
+                      const on = (specs[group.key] || []).some(
+                        (x) => x.toLowerCase() === v.name.toLowerCase(),
+                      );
+                      return (
+                        <button
+                          key={v.name}
+                          type="button"
+                          onClick={() => toggleSpecValue(group.key, v.name)}
+                          className={`px-3 py-1.5 text-xs font-semibold ${
+                            on
+                              ? "bg-[#22D3EE]/15 text-[#67E8F9]"
+                              : "bg-white/[0.04] text-white/70"
+                          }`}
+                        >
+                          {v.name} · {v.count}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))
+            )}
+            <div className="mt-8 flex gap-3">
+              <button
+                type="button"
+                onClick={() => setSpecs({})}
+                className="h-12 flex-1 border border-line bg-surface-2 font-semibold text-secondary"
+              >
+                Reset
+              </button>
+              <button
+                type="button"
+                onClick={() => setSpecOpen(false)}
+                className="h-12 flex-1 bg-text font-bold text-bg"
+              >
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {appFeature ? (
-        <AppFeaturePrompt
-          feature={appFeature}
-          onClose={() => setAppFeature(null)}
-        />
+        <AppFeaturePrompt feature={appFeature} onClose={() => setAppFeature(null)} />
       ) : null}
     </div>
   );
@@ -1380,7 +1995,15 @@ function BrowseInner() {
 export default function BrowsePage() {
   return (
     <ShowroomFlyCartProvider>
-      <BrowseInner />
+      <Suspense
+        fallback={
+          <div className="flex min-h-screen items-center justify-center bg-bg text-muted">
+            Loading browse…
+          </div>
+        }
+      >
+        <BrowseInner />
+      </Suspense>
     </ShowroomFlyCartProvider>
   );
 }
