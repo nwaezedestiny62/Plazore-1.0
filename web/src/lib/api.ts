@@ -58,7 +58,7 @@ export type SearchSuggestItem = {
   sub?: string;
   value: string;
   meta?: string;
-  image?: string;
+  image?: string; // ← product / store / brand image URL
 };
 
 export type SearchSuggestResponse = {
@@ -66,11 +66,7 @@ export type SearchSuggestResponse = {
   data: {
     items: SearchSuggestItem[];
     products: import("./types").Product[];
-    stores: {
-      _id: string;
-      storeName: string;
-      storeLogo?: string;
-    }[];
+    stores: { _id: string; storeName: string; storeLogo?: string }[];
     brands: string[];
     categories: string[];
     specs: { key: string; value: string }[];
@@ -78,7 +74,6 @@ export type SearchSuggestResponse = {
   };
 };
 
-/** API-backed typeahead — falls back to empty on failure */
 export async function fetchSearchSuggest(
   q: string,
   opts?: { region?: string },
@@ -90,11 +85,13 @@ export async function fetchSearchSuggest(
     brands: [] as string[],
     categories: [] as string[],
     specs: [] as { key: string; value: string }[],
-    locations: [] as { kind: "city" | "state" | "region"; name: string }[],
+    locations: [] as {
+      kind: "city" | "state" | "region";
+      name: string;
+    }[],
   };
   const query = (q || "").trim();
   if (!query) return empty;
-
   try {
     const qs = new URLSearchParams();
     qs.set("q", query);
@@ -106,11 +103,6 @@ export async function fetchSearchSuggest(
   } catch {
     return empty;
   }
-}
-
-/** @deprecated use fetchSearchSuggest */
-export async function searchSuggest(q: string) {
-  return fetchMallProducts({ q, limit: 48, sort: "relevance" });
 }
 
 export async function fetchProduct(id: string) {

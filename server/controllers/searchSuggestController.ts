@@ -6,6 +6,12 @@ function escapeRegex(q: string) {
   return q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+function firstImage(images: any): string | undefined {
+  if (!Array.isArray(images) || !images.length) return undefined;
+  const u = String(images[0] || "").trim();
+  return u || undefined;
+}
+
 function asMapSpecs(raw: any): Record<string, string> {
   if (!raw || typeof raw !== "object") return {};
   const out: Record<string, string> = {};
@@ -27,7 +33,13 @@ function asMapSpecs(raw: any): Record<string, string> {
 
 /**
  * GET /api/search/suggest?q=iphone&region=NG
- * Rich typed suggestions for Browse / mobile search.
+ *
+ * Returns typed items WITH images:
+ *  - product  → product.images[0]
+ *  - store    → storeLogo
+ *  - brand    → first product image for that brand
+ *  - category → (no image on server; client uses floor art)
+ *  - spec / location
  */
 export const searchSuggest = async (req: Request, res: Response) => {
   try {
@@ -56,7 +68,7 @@ export const searchSuggest = async (req: Request, res: Response) => {
     const baseFilter: any = { isActive: true };
     if (region) baseFilter.region = region;
 
-    // ── Products ──────────────────────────────────────────────
+    // ── Products (with images) ───────────────────────────────
     const products = await Product.find({
       ...baseFilter,
       $or: [
@@ -71,10 +83,10 @@ export const searchSuggest = async (req: Request, res: Response) => {
         "name brand category subCategory images price region seller specifications fulfillmentLocation",
       )
       .populate("seller", "storeName name storeLogo")
-      .limit(8)
+      .limit(10)
       .lean();
 
-    // ── Distinct categories / brands ──────────────────────────
+    // ── Brands + categories ──────────────────────────────────
     const [matchingCategories, matchingBrands] = await Promise.all([
       Product.distinct("category", {
         ...baseFilter,
@@ -88,24 +100,40 @@ export const searchSuggest = async (req: Request, res: Response) => {
     ]);
 
     const categories = (matchingCategories || [])
-      .filter((c: any) => c && String(c).trim())
-      .map((c: any) => String(c).trim())
-      .filter((c) => c.toLowerCase().includes(ql) || true)
+      .map((c: any) => String(c || "").trim())
+      .filter(Boolean)
       .slice(0, 6);
 
     const brands = (matchingBrands || [])
-      .filter((b: any) => b && String(b).trim())
-      .map((b: any) => String(b).trim())
-      .filter((b) => b.toLowerCase().includes(ql))
+      .map((b: any) => String(b || "").trim())
+      .filter((b) => b && b.toLowerCase().includes(ql))
       .slice(0, 6);
 
-    // ── Stores (sellers) ──────────────────────────────────────
+    // Brand → sample product image
+    const brandImageMap = new Map<string, string>();
+    if (brands.length) {
+      const brandProducts = await Product.find({
+        ...baseFilter,
+        brand: { $in: brands },
+        images: { $exists: true, $ne: [] },
+      })
+        .select("brand images")
+        .limit(40)
+        .lean();
+
+      for (const p of brandProducts as any[]) {
+        const b = String(p.brand || "").trim();
+        const img = firstImage(p.images);
+        if (b && img && !brandImageMap.has(b.toLowerCase())) {
+          brandImageMap.set(b.toLowerCase(), img);
+        }
+      }
+    }
+
+    // ── Stores (with logos) ──────────────────────────────────
     const storeDocs = await User.find({
       role: "seller",
-      $or: [
-        { storeName: regex },
-        { name: regex },
-      ],
+      $or: [{ storeName: regex }, { name: regex }],
     })
       .select("storeName name storeLogo")
       .limit(6)
@@ -114,10 +142,10 @@ export const searchSuggest = async (req: Request, res: Response) => {
     const stores = storeDocs.map((s: any) => ({
       _id: String(s._id),
       storeName: s.storeName || s.name || "Store",
-      storeLogo: s.storeLogo || "",
+      storeLogo: s.storeLogo ? String(s.storeLogo) : "",
     }));
 
-    // ── Specs from a wider product slice ──────────────────────
+    // ── Specs ────────────────────────────────────────────────
     const specPool = await Product.find({
       ...baseFilter,
       $or: [
@@ -127,14 +155,15 @@ export const searchSuggest = async (req: Request, res: Response) => {
         { subCategory: regex },
       ],
     })
-      .select("specifications")
+      .select("specifications images")
       .limit(80)
       .lean();
 
-    const specHits: { key: string; value: string }[] = [];
+    const specHits: { key: string; value: string; image?: string }[] = [];
     const specSeen = new Set<string>();
     for (const p of specPool as any[]) {
       const specs = asMapSpecs(p.specifications);
+      const img = firstImage(p.images);
       for (const [key, value] of Object.entries(specs)) {
         const blob = `${key} ${value}`.toLowerCase();
         if (
@@ -145,13 +174,13 @@ export const searchSuggest = async (req: Request, res: Response) => {
           const id = `${key}::${value}`.toLowerCase();
           if (specSeen.has(id)) continue;
           specSeen.add(id);
-          specHits.push({ key, value });
+          specHits.push({ key, value, image: img });
         }
       }
     }
     const specs = specHits.slice(0, 8);
 
-    // ── Locations from fulfillment ────────────────────────────
+    // ── Locations ────────────────────────────────────────────
     const locPool = await Product.find({
       ...baseFilter,
       "fulfillmentLocation.city": { $exists: true },
@@ -161,36 +190,29 @@ export const searchSuggest = async (req: Request, res: Response) => {
       .lean();
 
     const locSeen = new Set<string>();
-    const locations: {
-      kind: "city" | "state" | "region";
-      name: string;
-    }[] = [];
-
+    const locations: { kind: "city" | "state" | "region"; name: string }[] = [];
     for (const p of locPool as any[]) {
       const fl = p.fulfillmentLocation || {};
       const candidates: { kind: "city" | "state" | "region"; name: string }[] = [
         { kind: "city", name: String(fl.city || "").trim() },
         { kind: "state", name: String(fl.state || "").trim() },
-        {
-          kind: "region",
-          name: String(p.region || fl.country || "").trim(),
-        },
+        { kind: "region", name: String(p.region || fl.country || "").trim() },
       ];
       for (const c of candidates) {
         if (!c.name) continue;
-        if (!c.name.toLowerCase().includes(ql) && ql.length > 1) continue;
+        if (ql.length > 1 && !c.name.toLowerCase().includes(ql)) continue;
         const id = `${c.kind}:${c.name}`.toLowerCase();
         if (locSeen.has(id)) continue;
         locSeen.add(id);
         locations.push(c);
       }
     }
-    const locationsOut = locations.slice(0, 8);
 
-    // ── Flat typed items (for UI ranking) ─────────────────────
+    // ── Typed items WITH images (this is what Browse uses) ───
     const items: any[] = [];
 
     for (const p of products as any[]) {
+      const seller = p.seller || {};
       items.push({
         kind: "product",
         id: String(p._id),
@@ -198,9 +220,27 @@ export const searchSuggest = async (req: Request, res: Response) => {
         sub: p.brand || p.category || undefined,
         value: p.name,
         meta: String(p._id),
-        image: p.images?.[0] || undefined,
+        image: firstImage(p.images), // ← product photo
       });
+      // also surface store from product seller if name matches
+      const storeName = seller.storeName || seller.name;
+      if (
+        storeName &&
+        String(storeName).toLowerCase().includes(ql) &&
+        seller._id
+      ) {
+        items.push({
+          kind: "store",
+          id: `store-from-p-${seller._id}`,
+          label: storeName,
+          sub: "Storefront",
+          value: storeName,
+          meta: String(seller._id),
+          image: seller.storeLogo || undefined,
+        });
+      }
     }
+
     for (const s of stores) {
       items.push({
         kind: "store",
@@ -209,9 +249,10 @@ export const searchSuggest = async (req: Request, res: Response) => {
         sub: "Storefront",
         value: s.storeName,
         meta: s._id,
-        image: s.storeLogo || undefined,
+        image: s.storeLogo || undefined, // ← store logo
       });
     }
+
     for (const b of brands) {
       items.push({
         kind: "brand",
@@ -219,8 +260,10 @@ export const searchSuggest = async (req: Request, res: Response) => {
         label: b,
         sub: "Brand",
         value: b,
+        image: brandImageMap.get(b.toLowerCase()), // ← sample product image
       });
     }
+
     for (const c of categories) {
       items.push({
         kind: "category",
@@ -228,8 +271,10 @@ export const searchSuggest = async (req: Request, res: Response) => {
         label: c,
         sub: "Category",
         value: c,
+        // image filled on client from FLOORS
       });
     }
+
     for (const s of specs) {
       items.push({
         kind: "spec",
@@ -238,9 +283,11 @@ export const searchSuggest = async (req: Request, res: Response) => {
         sub: s.key,
         value: `${s.key}: ${s.value}`,
         meta: JSON.stringify({ key: s.key, value: s.value }),
+        image: s.image, // product that carries this spec
       });
     }
-    for (const l of locationsOut) {
+
+    for (const l of locations.slice(0, 8)) {
       items.push({
         kind: "location",
         id: `loc-${l.kind}-${l.name}`,
@@ -251,16 +298,26 @@ export const searchSuggest = async (req: Request, res: Response) => {
       });
     }
 
+    // Dedupe by kind+value, prefer ones with image
+    const seen = new Set<string>();
+    const deduped: any[] = [];
+    for (const it of items) {
+      const key = `${it.kind}:${String(it.value || "").toLowerCase()}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      deduped.push(it);
+    }
+
     return res.json({
       success: true,
       data: {
-        items: items.slice(0, 16),
+        items: deduped.slice(0, 16),
         products,
         stores,
         brands,
         categories,
-        specs,
-        locations: locationsOut,
+        specs: specs.map(({ key, value }) => ({ key, value })),
+        locations: locations.slice(0, 8),
       },
     });
   } catch (error: any) {

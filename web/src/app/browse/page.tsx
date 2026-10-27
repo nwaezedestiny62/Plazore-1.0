@@ -8,7 +8,9 @@ import {
   useMemo,
   useRef,
   useState,
+  useTransition,
   Suspense,
+  memo,
 } from "react";
 import {
   ShoppingBag,
@@ -21,6 +23,8 @@ import {
   Clock,
   Layers,
   Building2,
+  Search,
+  X,
 } from "lucide-react";
 import { AppFeaturePrompt, type AppFeature } from "@/components/app/AppFeaturePrompt";
 import { ProductCard } from "@/components/mall/ProductCard";
@@ -44,8 +48,8 @@ const RECENT_KEY = "plazore_recent_searches";
 const MAX_RECENT = 8;
 const MOVING_NOW_MAX = 14;
 const PAGE_SIZE = 20;
-const SUGGEST_DEBOUNCE_MS = 110;
-const SEARCH_DEBOUNCE_MS = 160;
+const SUGGEST_MS = 90;
+const SEARCH_MS = 140;
 
 type SellerInfo = {
   _id: string;
@@ -73,7 +77,6 @@ type LocFilter = {
 };
 
 type SpecFilter = Record<string, string[]>;
-
 type SuggestionKind = SearchSuggestItem["kind"] | "recent";
 
 type Suggestion = {
@@ -86,6 +89,8 @@ type Suggestion = {
   image?: string;
   score?: number;
 };
+
+/* ───────── helpers ───────── */
 
 function categoryOf(p: Product) {
   return typeof p.category === "string"
@@ -114,12 +119,8 @@ function viewScore(p: Product): number {
     x.viewsCount,
     x.impressionCount,
     x.impressions,
-    x.openCount,
-    x.wishlistCount,
     x.stats?.views,
-    x.stats?.impressions,
     x.analytics?.views,
-    x.metrics?.views,
   ]) {
     const n = Number(c);
     if (Number.isFinite(n) && n >= 0) return n;
@@ -129,7 +130,7 @@ function viewScore(p: Product): number {
 
 function productPrice(p: Product) {
   const x = p as any;
-  for (const c of [x.price, x.salePrice, x.displayPrice, x.amount, x.unitPrice]) {
+  for (const c of [x.price, x.salePrice, x.displayPrice, x.amount]) {
     const n = typeof c === "string" ? parseFloat(c) : Number(c);
     if (Number.isFinite(n) && n > 0) return n;
   }
@@ -163,14 +164,7 @@ function getSpecs(p: Product): Record<string, string> {
 
 function locationBlob(p: Product) {
   const fl = (p as any).fulfillmentLocation || {};
-  return [
-    fl.displayLabel,
-    fl.city,
-    fl.state,
-    fl.country,
-    (p as any).region,
-    (p as any).location,
-  ]
+  return [fl.displayLabel, fl.city, fl.state, fl.country, (p as any).region]
     .filter(Boolean)
     .map((s) => String(s).toLowerCase())
     .join(" ");
@@ -208,7 +202,6 @@ function textMatch(hay: string, q: string) {
   return tokens.every((t) => h.includes(t));
 }
 
-/** Smarter relevance score for ranking suggestions */
 function matchScore(label: string, q: string): number {
   const h = (label || "").toLowerCase().trim();
   const ql = q.toLowerCase().trim();
@@ -218,8 +211,7 @@ function matchScore(label: string, q: string): number {
   if (h.includes(ql)) return 60;
   const tokens = ql.split(/\s+/).filter((t) => t.length > 1);
   if (!tokens.length) return 0;
-  const hits = tokens.filter((t) => h.includes(t)).length;
-  return (hits / tokens.length) * 40;
+  return (tokens.filter((t) => h.includes(t)).length / tokens.length) * 40;
 }
 
 function matchesSearch(p: Product, q: string) {
@@ -234,7 +226,7 @@ function matchesSearch(p: Product, q: string) {
     .toLowerCase();
   return (
     textMatch((p.name || "").toLowerCase(), ql) ||
-    textMatch(((p as any).brand || "").toLowerCase(), ql) ||
+    textMatch(String((p as any).brand || "").toLowerCase(), ql) ||
     textMatch(categoryOf(p).toLowerCase(), ql) ||
     textMatch(locationBlob(p), ql) ||
     textMatch(store, ql) ||
@@ -256,15 +248,11 @@ function sortProducts(list: Product[], sort: SortKey): Product[] {
       return arr.sort((a, b) => productPrice(a) - productPrice(b));
     case "name_az":
       return arr.sort((a, b) =>
-        (a.name || "").localeCompare(b.name || "", undefined, {
-          sensitivity: "base",
-        }),
+        (a.name || "").localeCompare(b.name || "", undefined, { sensitivity: "base" }),
       );
     case "name_za":
       return arr.sort((a, b) =>
-        (b.name || "").localeCompare(a.name || "", undefined, {
-          sensitivity: "base",
-        }),
+        (b.name || "").localeCompare(a.name || "", undefined, { sensitivity: "base" }),
       );
     case "views":
     case "relevance":
@@ -315,37 +303,21 @@ function floorImageForCategory(name: string): string | undefined {
   return floor?.images?.[0];
 }
 
-function HighlightText({ text, query }: { text: string; query: string }) {
-  const q = query.trim();
-  if (!q || !text) return <>{text}</>;
-  const tokens = q
-    .split(/\s+/)
-    .filter((t) => t.length > 0)
-    .map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
-  if (!tokens.length) return <>{text}</>;
-  const re = new RegExp(`(${tokens.join("|")})`, "ig");
-  const parts = text.split(re);
-  return (
-    <>
-      {parts.map((part, i) => {
-        const isHit = tokens.some(
-          (t) => part.toLowerCase() === t.replace(/\\/g, "").toLowerCase(),
-        );
-        return isHit ? (
-          <span
-            key={i}
-            className="font-semibold text-[#00E575]"
-            style={{ textShadow: "0 0 14px rgba(0,229,117,0.45)" }}
-          >
-            {part}
-          </span>
-        ) : (
-          <span key={i}>{part}</span>
-        );
-      })}
-    </>
-  );
+function parseSpecsFromParams(sp: URLSearchParams): SpecFilter {
+  const out: SpecFilter = {};
+  sp.forEach((val, key) => {
+    if (!key.startsWith("spec.")) return;
+    const specKey = key.slice(5);
+    if (!specKey || !val) return;
+    out[specKey] = val
+      .split(",")
+      .map((v) => v.trim())
+      .filter(Boolean);
+  });
+  return out;
 }
+
+/* ───────── UI atoms ───────── */
 
 const SORT_OPTIONS: { key: SortKey; label: string }[] = [
   { key: "relevance", label: "Relevance" },
@@ -364,6 +336,9 @@ const STRUCTURE_OPTIONS: { key: StructureOrder; label: string }[] = [
   { key: "categories_first", label: "Categories → Products → Stores" },
 ];
 
+const PRODUCT_GRID =
+  "grid w-full grid-cols-2 gap-x-3 gap-y-8 sm:gap-x-5 sm:gap-y-10 md:grid-cols-3 md:gap-x-6 md:gap-y-11 lg:grid-cols-4 lg:gap-y-12 xl:grid-cols-5 xl:gap-x-7";
+
 function MenuLines() {
   return (
     <span className="inline-flex flex-col justify-center gap-[5px]" aria-hidden>
@@ -374,117 +349,83 @@ function MenuLines() {
   );
 }
 
-const PRODUCT_GRID =
-  "grid w-full grid-cols-2 gap-x-3 gap-y-8 sm:grid-cols-2 sm:gap-x-5 sm:gap-y-10 md:grid-cols-3 md:gap-x-6 md:gap-y-11 lg:grid-cols-4 lg:gap-x-6 lg:gap-y-12 xl:grid-cols-5 xl:gap-x-7 xl:gap-y-12";
-
-function ProductCell({ product }: { product: Product }) {
+const ProductCell = memo(function ProductCell({ product }: { product: Product }) {
   return (
-    <div className="plazore-product-cell min-w-0 w-full max-w-full [&>*]:!block [&>*]:!h-full [&>*]:!w-full [&>*]:!max-w-none [&_a]:!block [&_a]:!w-full [&_a]:!max-w-none [&_img]:!w-full">
+    <div className="plazore-product-cell min-w-0 w-full [&>*]:!block [&>*]:!h-full [&>*]:!w-full [&>*]:!max-w-none [&_a]:!block [&_a]:!w-full [&_img]:!w-full">
       <ProductCard product={product} />
     </div>
   );
-}
+});
 
-function OrbLoader({
-  label,
-  compact = false,
-}: {
-  label?: string;
-  compact?: boolean;
-}) {
+function OrbLoader({ label, compact = false }: { label?: string; compact?: boolean }) {
   return (
     <div
       className={`flex flex-col items-center justify-center ${
-        compact ? "py-16 sm:py-20" : "min-h-[45vh] py-20 sm:min-h-[55vh]"
+        compact ? "py-16" : "min-h-[45vh] py-20 sm:min-h-[55vh]"
       }`}
     >
       <div
         className={`relative flex items-center justify-center ${
-          compact
-            ? "h-[72px] w-[72px] sm:h-[88px] sm:w-[88px]"
-            : "h-[90px] w-[90px] sm:h-[110px] sm:w-[110px]"
+          compact ? "h-16 w-16 sm:h-20 sm:w-20" : "h-[90px] w-[90px] sm:h-[110px] sm:w-[110px]"
         }`}
       >
-        <div className="absolute inset-0 animate-spin rounded-full border-[2.4px] border-transparent border-t-[#00E575] border-r-[#3B82F6] border-l-[#00E575]" />
-        <div
-          className={`flex items-center justify-center rounded-full bg-[#00E575]/10 ${
-            compact ? "h-10 w-10 sm:h-12 sm:w-12" : "h-12 w-12 sm:h-14 sm:w-14"
-          }`}
-        >
+        <div className="absolute inset-0 animate-spin rounded-full border-2 border-transparent border-t-[#00E575] border-r-[#3B82F6]" />
+        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#00E575]/10 sm:h-12 sm:w-12">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src="/logo.png"
-            alt=""
-            className={`object-contain ${
-              compact ? "h-5 w-5 sm:h-6 sm:w-6" : "h-7 w-7 sm:h-8 sm:w-8"
-            }`}
-          />
+          <img src="/logo.png" alt="" className="h-5 w-5 object-contain sm:h-6 sm:w-6" />
         </div>
       </div>
-      {label ? (
-        <p className="mt-5 text-center text-[13px] text-muted sm:text-sm">
-          {label}
-        </p>
-      ) : null}
+      {label ? <p className="mt-5 text-[13px] text-muted">{label}</p> : null}
     </div>
   );
 }
 
-/** Tiny neon spinner for suggest panel */
 function SuggestSpinner() {
   return (
-    <div className="flex items-center justify-center gap-3 px-4 py-6">
-      <span className="relative flex h-5 w-5">
-        <span className="absolute inset-0 animate-spin rounded-full border-[1.5px] border-transparent border-t-[#00E575] border-r-[#3B82F6]" />
-        <span className="absolute inset-[3px] rounded-full bg-[#00E575]/15 shadow-[0_0_12px_rgba(0,229,117,0.4)]" />
-      </span>
-      <span className="h-1 w-1 animate-pulse rounded-full bg-[#00E575]/70" />
-      <span className="h-1 w-1 animate-pulse rounded-full bg-[#3B82F6]/70 [animation-delay:120ms]" />
-      <span className="h-1 w-1 animate-pulse rounded-full bg-[#00E575]/50 [animation-delay:240ms]" />
+    <div className="flex items-center justify-center py-7">
+      <span className="h-5 w-5 animate-spin rounded-full border-[1.5px] border-transparent border-t-[#00E575] border-r-[#3B82F6]" />
     </div>
   );
 }
 
 function kindIcon(kind: SuggestionKind) {
-  const cls = "h-4 w-4";
+  const c = "h-4 w-4";
   switch (kind) {
     case "product":
-      return <Package className={cls} strokeWidth={1.75} />;
+      return <Package className={c} strokeWidth={1.75} />;
     case "store":
-      return <Store className={cls} strokeWidth={1.75} />;
+      return <Store className={c} strokeWidth={1.75} />;
     case "brand":
-      return <Sparkles className={cls} strokeWidth={1.75} />;
+      return <Sparkles className={c} strokeWidth={1.75} />;
     case "category":
-      return <Layers className={cls} strokeWidth={1.75} />;
+      return <Layers className={c} strokeWidth={1.75} />;
     case "spec":
-      return <Tag className={cls} strokeWidth={1.75} />;
+      return <Tag className={c} strokeWidth={1.75} />;
     case "location":
-      return <MapPin className={cls} strokeWidth={1.75} />;
+      return <MapPin className={c} strokeWidth={1.75} />;
     case "recent":
-      return <Clock className={cls} strokeWidth={1.75} />;
+      return <Clock className={c} strokeWidth={1.75} />;
     default:
-      return <Building2 className={cls} strokeWidth={1.75} />;
+      return <Building2 className={c} strokeWidth={1.75} />;
   }
 }
 
 function kindAccent(kind: SuggestionKind) {
   switch (kind) {
     case "product":
-      return "from-[#00E575]/30 to-[#3B82F6]/15 text-[#00E575] ring-[#00E575]/25";
+      return "bg-[#00E575]/12 text-[#00E575]";
     case "store":
-      return "from-[#3B82F6]/30 to-[#00E575]/10 text-[#60A5FA] ring-[#3B82F6]/25";
+      return "bg-[#3B82F6]/15 text-[#60A5FA]";
     case "brand":
-      return "from-[#00E575]/20 to-transparent text-[#34D399] ring-[#00E575]/20";
+      return "bg-[#00E575]/10 text-[#34D399]";
     case "category":
-      return "from-[#3B82F6]/20 to-transparent text-[#93C5FD] ring-[#3B82F6]/20";
+      return "bg-[#3B82F6]/12 text-[#93C5FD]";
     case "spec":
-      return "from-[#22D3EE]/25 to-[#00E575]/10 text-[#67E8F9] ring-[#22D3EE]/25";
+      return "bg-cyan-500/15 text-cyan-300";
     case "location":
-      return "from-[#A78BFA]/25 to-[#3B82F6]/10 text-[#C4B5FD] ring-[#A78BFA]/25";
-    case "recent":
-      return "from-white/10 to-transparent text-white/45 ring-white/10";
+      return "bg-violet-500/15 text-violet-300";
     default:
-      return "from-white/10 to-transparent text-white/55 ring-white/10";
+      return "bg-white/5 text-white/40";
   }
 }
 
@@ -509,28 +450,23 @@ function kindLabel(kind: SuggestionKind) {
   }
 }
 
-function SuggestThumb({
-  s,
-}: {
-  s: Suggestion;
-}) {
+/** Product / store / category image first */
+const SuggestThumb = memo(function SuggestThumb({ s }: { s: Suggestion }) {
   const [broken, setBroken] = useState(false);
-  const img = !broken ? s.image : undefined;
+  const img = !broken && s.image ? s.image : null;
 
   if (img) {
     return (
-      <span className="relative h-11 w-11 shrink-0 overflow-hidden rounded-xl ring-1 ring-white/10 sm:h-12 sm:w-12">
+      <span className="relative h-12 w-12 shrink-0 overflow-hidden rounded-xl bg-white/5 sm:h-[52px] sm:w-[52px]">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={img}
           alt=""
           className="h-full w-full object-cover"
+          loading="lazy"
+          decoding="async"
           onError={() => setBroken(true)}
           draggable={false}
-        />
-        <span
-          aria-hidden
-          className="pointer-events-none absolute inset-0 bg-gradient-to-tr from-black/25 to-transparent"
         />
       </span>
     );
@@ -538,26 +474,42 @@ function SuggestThumb({
 
   return (
     <span
-      className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br ring-1 sm:h-12 sm:w-12 ${kindAccent(s.kind)}`}
+      className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl sm:h-[52px] sm:w-[52px] ${kindAccent(s.kind)}`}
     >
       {kindIcon(s.kind)}
     </span>
   );
+});
+
+function HighlightText({ text, query }: { text: string; query: string }) {
+  const q = query.trim();
+  if (!q || !text) return <>{text}</>;
+  const tokens = q
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  if (!tokens.length) return <>{text}</>;
+  const re = new RegExp(`(${tokens.join("|")})`, "ig");
+  const parts = text.split(re);
+  return (
+    <>
+      {parts.map((part, i) => {
+        const hit = tokens.some(
+          (t) => part.toLowerCase() === t.replace(/\\/g, "").toLowerCase(),
+        );
+        return hit ? (
+          <span key={i} className="font-semibold text-[#00E575]">
+            {part}
+          </span>
+        ) : (
+          <span key={i}>{part}</span>
+        );
+      })}
+    </>
+  );
 }
 
-function parseSpecsFromParams(sp: URLSearchParams): SpecFilter {
-  const out: SpecFilter = {};
-  sp.forEach((val, key) => {
-    if (!key.startsWith("spec.")) return;
-    const specKey = key.slice(5);
-    if (!specKey || !val) return;
-    out[specKey] = val
-      .split(",")
-      .map((v) => v.trim())
-      .filter(Boolean);
-  });
-  return out;
-}
+/* ───────── page ───────── */
 
 function BrowseInner() {
   const router = useRouter();
@@ -566,10 +518,11 @@ function BrowseInner() {
   const flyCart = useShowroomFlyCart();
   const bagRef = useRef<HTMLAnchorElement | null>(null);
   const searchWrapRef = useRef<HTMLDivElement | null>(null);
-  const inputRef = useRef<HTMLInputElement | null>(null);
   const skipUrlWrite = useRef(false);
+  const suggestSeq = useRef(0);
   const marketplace = useMarketplace() as { region?: string } | null;
   const marketplaceRegion = marketplace?.region || DEFAULT_REGION;
+  const [, startTransition] = useTransition();
 
   const [query, setQuery] = useState("");
   const [debounced, setDebounced] = useState("");
@@ -593,11 +546,7 @@ function BrowseInner() {
   const [draftMin, setDraftMin] = useState("");
   const [draftMax, setDraftMax] = useState("");
   const [draftStock, setDraftStock] = useState(false);
-  const [loc, setLoc] = useState<LocFilter>({
-    region: null,
-    state: null,
-    city: null,
-  });
+  const [loc, setLoc] = useState<LocFilter>({ region: null, state: null, city: null });
   const [specs, setSpecs] = useState<SpecFilter>({});
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [bagCount, setBagCount] = useState(0);
@@ -608,6 +557,7 @@ function BrowseInner() {
   const [suggestLoading, setSuggestLoading] = useState(false);
   const hydrated = useRef(false);
 
+  /* hydrate URL once */
   useEffect(() => {
     if (hydrated.current) return;
     hydrated.current = true;
@@ -629,11 +579,7 @@ function BrowseInner() {
       setSuggestQ(q);
     }
     if (cat) setActiveCategory(cat);
-    setLoc({
-      region: region || null,
-      state: state || null,
-      city: city || null,
-    });
+    setLoc({ region: region || null, state: state || null, city: city || null });
     setMinPrice(min);
     setMaxPrice(max);
     setInStockOnly(stock);
@@ -645,6 +591,7 @@ function BrowseInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /* URL sync */
   useEffect(() => {
     if (skipUrlWrite.current) return;
     const params = new URLSearchParams();
@@ -663,9 +610,7 @@ function BrowseInner() {
     const qs = params.toString();
     const next = qs ? `${pathname}?${qs}` : pathname;
     const current = `${pathname}${typeof window !== "undefined" ? window.location.search : ""}`;
-    if (next !== current) {
-      router.replace(next, { scroll: false });
-    }
+    if (next !== current) router.replace(next, { scroll: false });
   }, [
     debounced,
     activeCategory,
@@ -679,18 +624,17 @@ function BrowseInner() {
     router,
   ]);
 
+  /* bag target */
   useEffect(() => {
     const el = bagRef.current;
     if (!el || !flyCart?.registerBagTarget) return;
     const update = () => flyCart.registerBagTarget(el);
     update();
-    const t = window.setTimeout(update, 100);
+    const t = window.setTimeout(update, 80);
     window.addEventListener("resize", update);
-    window.addEventListener("scroll", update, true);
     return () => {
       clearTimeout(t);
       window.removeEventListener("resize", update);
-      window.removeEventListener("scroll", update, true);
     };
   }, [flyCart, bagCount]);
 
@@ -708,18 +652,16 @@ function BrowseInner() {
     window.addEventListener("storage", onStorage);
     window.addEventListener("plazore-cart", onStorage as EventListener);
     window.addEventListener("plazore-cart-change", onStorage as EventListener);
-    const t = setInterval(refreshBag, 1500);
+    const t = setInterval(refreshBag, 2000);
     return () => {
       window.removeEventListener("storage", onStorage);
       window.removeEventListener("plazore-cart", onStorage as EventListener);
-      window.removeEventListener(
-        "plazore-cart-change",
-        onStorage as EventListener,
-      );
+      window.removeEventListener("plazore-cart-change", onStorage as EventListener);
       clearInterval(t);
     };
   }, [refreshBag]);
 
+  /* initial products */
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -733,7 +675,7 @@ function BrowseInner() {
           if (Array.isArray(p)) setRecent(p.slice(0, MAX_RECENT));
         }
       } catch {
-        /* ignore */
+        /* */
       }
       setLoading(false);
     })();
@@ -742,21 +684,24 @@ function BrowseInner() {
     };
   }, []);
 
+  /* dual debounce — fast suggest, slightly slower search */
   useEffect(() => {
-    const t = setTimeout(() => setDebounced(query.trim()), SEARCH_DEBOUNCE_MS);
+    const t = setTimeout(() => setSuggestQ(query.trim()), SUGGEST_MS);
     return () => clearTimeout(t);
   }, [query]);
 
   useEffect(() => {
-    const t = setTimeout(() => setSuggestQ(query.trim()), SUGGEST_DEBOUNCE_MS);
+    const t = setTimeout(() => {
+      startTransition(() => setDebounced(query.trim()));
+    }, SEARCH_MS);
     return () => clearTimeout(t);
-  }, [query]);
+  }, [query, startTransition]);
 
   useEffect(() => {
     setVisibleCount(PAGE_SIZE);
   }, [debounced, activeCategory, sortKey, minPrice, maxPrice, inStockOnly, loc, specs]);
 
-  // Intelligent suggestions: API + client enrichment + ranking + images
+  /* suggestions — seq guard = no race, always image-aware */
   useEffect(() => {
     if (!suggestQ) {
       setApiSuggestions(
@@ -772,14 +717,13 @@ function BrowseInner() {
       return;
     }
 
-    let cancelled = false;
+    const seq = ++suggestSeq.current;
     setSuggestLoading(true);
 
-    const buildClientFallback = (): Suggestion[] => {
+    const buildClient = (): Suggestion[] => {
       const ql = suggestQ.toLowerCase();
       const out: Suggestion[] = [];
       const seen = new Set<string>();
-
       const push = (s: Suggestion) => {
         const k = `${s.kind}:${s.value.toLowerCase()}`;
         if (seen.has(k)) return;
@@ -787,13 +731,12 @@ function BrowseInner() {
         out.push(s);
       };
 
-      // Products with images
       allProducts
         .map((p) => ({
           p,
           score:
-            matchScore(p.name || "", suggestQ) * 1.2 +
-            matchScore(String((p as any).brand || ""), suggestQ) * 0.4,
+            matchScore(p.name || "", suggestQ) * 1.25 +
+            matchScore(String((p as any).brand || ""), suggestQ) * 0.35,
         }))
         .filter((x) => x.score > 8)
         .sort((a, b) => b.score - a.score)
@@ -811,7 +754,6 @@ function BrowseInner() {
           }),
         );
 
-      // Stores
       const stores = new Map<string, SellerInfo>();
       allProducts.forEach((p) => {
         const s = getSeller(p);
@@ -834,7 +776,6 @@ function BrowseInner() {
           }),
         );
 
-      // Brands
       const brands = new Set<string>();
       allProducts.forEach((p) => {
         const b = String((p as any).brand || "").trim();
@@ -842,18 +783,23 @@ function BrowseInner() {
       });
       Array.from(brands)
         .slice(0, 4)
-        .forEach((b, i) =>
+        .forEach((b, i) => {
+          const sample = allProducts.find(
+            (p) =>
+              String((p as any).brand || "").toLowerCase() === b.toLowerCase() &&
+              p.images?.[0],
+          );
           push({
             id: `b-${i}-${b}`,
             kind: "brand",
             label: b,
             sub: "Brand",
             value: b,
+            image: sample?.images?.[0],
             score: matchScore(b, suggestQ) + 3,
-          }),
-        );
+          });
+        });
 
-      // Categories + floor images
       CATEGORY_LIST.filter((c) => textMatch(c.toLowerCase(), ql))
         .slice(0, 4)
         .forEach((c) =>
@@ -873,22 +819,19 @@ function BrowseInner() {
 
     fetchSearchSuggest(suggestQ, { region: marketplaceRegion })
       .then((data) => {
-        if (cancelled) return;
+        if (seq !== suggestSeq.current) return;
 
         const items: Suggestion[] = (data.items || []).map((it) => {
           let image = it.image;
-          // Enrich category with floor art
           if (it.kind === "category" && !image) {
             image = floorImageForCategory(it.label || it.value);
           }
-          // Enrich product images from API product list if missing
           if (it.kind === "product" && !image && it.meta) {
             const hit = (data.products || []).find(
               (p: any) => String(p._id) === String(it.meta),
             );
             image = hit?.images?.[0];
           }
-          // Enrich store logos
           if (it.kind === "store" && !image && it.meta) {
             const hit = (data.stores || []).find(
               (s: any) => String(s._id) === String(it.meta),
@@ -907,17 +850,15 @@ function BrowseInner() {
               matchScore(it.label, suggestQ) +
               (it.kind === "product" ? 12 : 0) +
               (it.kind === "store" ? 8 : 0) +
-              (image ? 4 : 0),
+              (image ? 5 : 0),
           };
         });
 
-        // Merge client fallback for completeness
-        const client = buildClientFallback();
+        const client = buildClient();
         const seen = new Set(items.map((i) => `${i.kind}:${i.value.toLowerCase()}`));
         for (const c of client) {
           const k = `${c.kind}:${c.value.toLowerCase()}`;
           if (seen.has(k)) {
-            // prefer image if API missed it
             const existing = items.find(
               (i) => `${i.kind}:${i.value.toLowerCase()}` === k,
             );
@@ -933,19 +874,17 @@ function BrowseInner() {
         setSuggestLoading(false);
       })
       .catch(() => {
-        if (cancelled) return;
-        const client = buildClientFallback().sort(
-          (a, b) => (b.score || 0) - (a.score || 0),
+        if (seq !== suggestSeq.current) return;
+        setApiSuggestions(
+          buildClient()
+            .sort((a, b) => (b.score || 0) - (a.score || 0))
+            .slice(0, 12),
         );
-        setApiSuggestions(client.slice(0, 12));
         setSuggestLoading(false);
       });
-
-    return () => {
-      cancelled = true;
-    };
   }, [suggestQ, marketplaceRegion, recent, allProducts]);
 
+  /* product search */
   useEffect(() => {
     if (debounced.length < 1 && !activeCategory) {
       setServerProducts([]);
@@ -955,7 +894,6 @@ function BrowseInner() {
     let cancelled = false;
     setSearchLoading(true);
     const hasQuery = debounced.length > 0;
-    const apiSort = toApiSort(sortKey, hasQuery);
     fetchMallProducts({
       q: activeCategory ? undefined : debounced || undefined,
       category: resolveCategoryParam(activeCategory),
@@ -963,26 +901,24 @@ function BrowseInner() {
       minPrice: minPrice || undefined,
       maxPrice: maxPrice || undefined,
       inStock: inStockOnly || undefined,
-      sort: apiSort,
+      sort: toApiSort(sortKey, hasQuery),
       region: loc.region || undefined,
     }).then((products) => {
-      if (!cancelled) {
-        // Client re-rank by text relevance when q present
-        let list = products;
-        if (hasQuery) {
-          list = [...products].sort((a, b) => {
-            const sa =
-              matchScore(a.name || "", debounced) * 2 +
-              matchScore(String((a as any).brand || ""), debounced);
-            const sb =
-              matchScore(b.name || "", debounced) * 2 +
-              matchScore(String((b as any).brand || ""), debounced);
-            return sb - sa || viewScore(b) - viewScore(a);
-          });
-        }
-        setServerProducts(list);
-        setSearchLoading(false);
+      if (cancelled) return;
+      let list = products;
+      if (hasQuery) {
+        list = [...products].sort((a, b) => {
+          const sa =
+            matchScore(a.name || "", debounced) * 2 +
+            matchScore(String((a as any).brand || ""), debounced);
+          const sb =
+            matchScore(b.name || "", debounced) * 2 +
+            matchScore(String((b as any).brand || ""), debounced);
+          return sb - sa || viewScore(b) - viewScore(a);
+        });
       }
+      setServerProducts(list);
+      setSearchLoading(false);
     });
     return () => {
       cancelled = true;
@@ -991,9 +927,7 @@ function BrowseInner() {
 
   useEffect(() => {
     const onDown = (e: MouseEvent) => {
-      if (!searchWrapRef.current?.contains(e.target as Node)) {
-        setSuggestOpen(false);
-      }
+      if (!searchWrapRef.current?.contains(e.target as Node)) setSuggestOpen(false);
     };
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
@@ -1024,8 +958,7 @@ function BrowseInner() {
     const pool = serverProducts.length > 0 ? serverProducts : allProducts;
     const map = new Map<string, Map<string, number>>();
     pool.forEach((p) => {
-      const s = getSpecs(p);
-      Object.entries(s).forEach(([k, v]) => {
+      Object.entries(getSpecs(p)).forEach(([k, v]) => {
         if (!map.has(k)) map.set(k, new Map());
         const values = map.get(k)!;
         values.set(v, (values.get(v) || 0) + 1);
@@ -1040,15 +973,11 @@ function BrowseInner() {
           .map(([name, count]) => ({ name, count })),
       }))
       .filter((g) => g.values.length > 0)
-      .sort(
-        (a, b) =>
-          b.values.length - a.values.length || a.key.localeCompare(b.key),
-      )
+      .sort((a, b) => b.values.length - a.values.length || a.key.localeCompare(b.key))
       .slice(0, 12);
   }, [serverProducts, allProducts]);
 
   const suggestions = apiSuggestions;
-
   useEffect(() => {
     setActiveSuggest(0);
   }, [suggestions]);
@@ -1062,10 +991,7 @@ function BrowseInner() {
     (list: Product[]) =>
       list.filter((p) => {
         const parts = locParts(p);
-        if (
-          loc.region &&
-          parts.region.toLowerCase() !== loc.region.toLowerCase()
-        )
+        if (loc.region && parts.region.toLowerCase() !== loc.region.toLowerCase())
           return false;
         if (loc.state && parts.state.toLowerCase() !== loc.state.toLowerCase())
           return false;
@@ -1082,10 +1008,9 @@ function BrowseInner() {
       if (!active.length) return list;
       return list.filter((p) => {
         const s = getSpecs(p);
-        return active.every(([k, vals]) => {
-          const val = String(s[k] || "").toLowerCase();
-          return vals.some((v) => val === String(v).toLowerCase());
-        });
+        return active.every(([k, vals]) =>
+          vals.some((v) => String(s[k] || "").toLowerCase() === v.toLowerCase()),
+        );
       });
     },
     [specs],
@@ -1102,16 +1027,14 @@ function BrowseInner() {
         products = products.filter((p) => productPrice(p) <= max);
       if (inStockOnly)
         products = products.filter((p) => {
-          const top = Number((p as any).stock ?? 0);
-          if (top > 0) return true;
+          if (Number((p as any).stock ?? 0) > 0) return true;
           const variants = (p as any).variants;
-          if (Array.isArray(variants)) {
-            return variants.some(
-              (v: any) =>
-                v && v.available !== false && Number(v.stock) > 0,
-            );
-          }
-          return false;
+          return (
+            Array.isArray(variants) &&
+            variants.some(
+              (v: any) => v && v.available !== false && Number(v.stock) > 0,
+            )
+          );
         });
       return products;
     },
@@ -1122,14 +1045,10 @@ function BrowseInner() {
     const q = debounced.toLowerCase();
     if (!q && !activeCategory) return [] as Product[];
     let products = serverProducts.length > 0 ? serverProducts : allProducts;
-    if (activeCategory) {
-      products = products.filter((p) => matchesFloor(p, activeCategory));
-    } else if (q && serverProducts.length === 0) {
+    if (activeCategory) products = products.filter((p) => matchesFloor(p, activeCategory));
+    else if (q && serverProducts.length === 0)
       products = products.filter((p) => matchesSearch(p, q));
-    }
-    products = applyLoc(products);
-    products = applySpecs(products);
-    products = applyPriceStock(products);
+    products = applyPriceStock(applySpecs(applyLoc(products)));
     let effective: SortKey = sortKey;
     if (sortKey === "relevance") effective = q ? "views" : "newest";
     return sortProducts(products, effective);
@@ -1156,20 +1075,19 @@ function BrowseInner() {
           const name = (s.storeName || s.name || "").toLowerCase();
           if (name && textMatch(name, q)) storesMap.set(s._id, s);
         }
-        const brand = ((p as any).brand || "").toLowerCase();
+        const brand = String((p as any).brand || "").toLowerCase();
         if (brand && textMatch(brand, q)) brandSet.add((p as any).brand);
       });
     }
-    const categories = CATEGORY_LIST.filter((c) => {
-      if (!q) return false;
-      return textMatch(c.toLowerCase(), q);
-    }).slice(0, 12);
     return {
       products,
       totalProducts: filteredProducts.length,
       stores: Array.from(storesMap.values()).slice(0, 12),
       brands: Array.from(brandSet).slice(0, 12),
-      categories,
+      categories: CATEGORY_LIST.filter((c) => q && textMatch(c.toLowerCase(), q)).slice(
+        0,
+        12,
+      ),
     };
   }, [debounced, filteredProducts, visibleCount, allProducts]);
 
@@ -1196,7 +1114,7 @@ function BrowseInner() {
       try {
         localStorage.setItem(RECENT_KEY, JSON.stringify(next));
       } catch {
-        /* ignore */
+        /* */
       }
       return next;
     });
@@ -1229,7 +1147,7 @@ function BrowseInner() {
     setSuggestOpen(false);
     setCategoryLoading(true);
     setActiveCategory(id);
-    setTimeout(() => setCategoryLoading(false), 400);
+    setTimeout(() => setCategoryLoading(false), 280);
   };
 
   const toggleSpecValue = (key: string, value: string) => {
@@ -1288,9 +1206,8 @@ function BrowseInner() {
     if (s.kind === "spec") {
       try {
         const parsed = s.meta ? JSON.parse(s.meta) : null;
-        if (parsed?.key && parsed?.value) {
-          toggleSpecValue(parsed.key, parsed.value);
-        } else {
+        if (parsed?.key && parsed?.value) toggleSpecValue(parsed.key, parsed.value);
+        else {
           const [key, ...rest] = s.value.split(":");
           const val = rest.join(":").trim();
           if (key && val) toggleSpecValue(key.trim(), val);
@@ -1343,29 +1260,24 @@ function BrowseInner() {
   const specActive = Object.values(specs).some((v) => v?.length);
   const showFilterBar = isSearching;
   const showSuggestPanel =
-    suggestOpen &&
-    (suggestions.length > 0 || query.trim().length > 0 || suggestLoading);
+    suggestOpen && (suggestions.length > 0 || query.trim().length > 0 || suggestLoading);
 
-  // … rest of render (products blocks, sheets) same structure —
-  // KEY UI change is the suggest panel below
-
+  /* blocks */
   const renderProductsBlock = (products: Product[]) =>
     products.length > 0 ? (
       <div className="w-full">
-        <p className="mb-5 text-[11px] font-bold tracking-[0.12em] text-muted sm:mb-6">
-          PRODUCTS
-        </p>
+        <p className="mb-5 text-[11px] font-bold tracking-[0.12em] text-muted">PRODUCTS</p>
         <div className={PRODUCT_GRID}>
           {products.map((p) => (
             <ProductCell key={p._id} product={p} />
           ))}
         </div>
         {live.totalProducts > visibleCount ? (
-          <div className="mt-12 flex justify-center sm:mt-14">
+          <div className="mt-12 flex justify-center">
             <button
               type="button"
               onClick={() => setVisibleCount((c) => c + PAGE_SIZE)}
-              className="border border-white/20 px-6 py-3 text-[11px] font-semibold tracking-[0.18em] uppercase text-white transition hover:border-white hover:bg-white/5 sm:px-8"
+              className="rounded-xl border border-white/15 px-6 py-3 text-[11px] font-semibold tracking-[0.16em] uppercase text-white/80 transition hover:border-white/40 hover:text-white"
             >
               Show more
             </button>
@@ -1376,27 +1288,21 @@ function BrowseInner() {
 
   const renderStoresBlock = () =>
     live.stores.length > 0 ? (
-      <div className="mt-12 first:mt-0 sm:mt-14">
-        <p className="mb-4 text-[11px] font-bold tracking-[0.12em] text-muted">
-          STOREFRONTS
-        </p>
-        <div className="-mx-3 flex gap-3 overflow-x-auto px-3 pb-1 scrollbar-none sm:-mx-0 sm:gap-4 sm:px-0">
+      <div className="mt-12 first:mt-0">
+        <p className="mb-4 text-[11px] font-bold tracking-[0.12em] text-muted">STOREFRONTS</p>
+        <div className="-mx-3 flex gap-3 overflow-x-auto px-3 pb-1 scrollbar-none sm:mx-0 sm:px-0">
           {live.stores.map((s) => (
             <Link
               key={s._id}
               href={`/store/${s._id}`}
-              className="w-[6.5rem] shrink-0 border border-line bg-surface p-3 text-center sm:w-[7rem]"
+              className="w-24 shrink-0 rounded-xl bg-white/[0.03] p-3 text-center transition hover:bg-white/[0.06] sm:w-28"
             >
-              <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center overflow-hidden bg-surface-2 sm:h-14 sm:w-14">
+              <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center overflow-hidden rounded-xl bg-white/5 sm:h-14 sm:w-14">
                 {s.storeLogo ? (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={s.storeLogo}
-                    alt=""
-                    className="h-full w-full object-cover"
-                  />
+                  <img src={s.storeLogo} alt="" className="h-full w-full object-cover" />
                 ) : (
-                  <span className="text-muted">⌂</span>
+                  <Store className="h-5 w-5 text-white/30" />
                 )}
               </div>
               <p className="truncate text-[11px] font-semibold sm:text-xs">
@@ -1410,17 +1316,15 @@ function BrowseInner() {
 
   const renderCategoriesBlock = () =>
     live.categories.length > 0 ? (
-      <div className="mt-12 first:mt-0 sm:mt-14">
-        <p className="mb-4 text-[11px] font-bold tracking-[0.12em] text-muted">
-          CATEGORIES
-        </p>
+      <div className="mt-12 first:mt-0">
+        <p className="mb-4 text-[11px] font-bold tracking-[0.12em] text-muted">CATEGORIES</p>
         <div className="flex flex-wrap gap-2">
           {live.categories.map((c) => (
             <button
               key={c}
               type="button"
               onClick={() => selectFloor(c)}
-              className="border border-line bg-surface px-3 py-2 text-[13px] font-semibold sm:px-3.5 sm:text-sm"
+              className="rounded-full bg-white/[0.04] px-3.5 py-2 text-[13px] font-semibold transition hover:bg-white/[0.08]"
             >
               {c}
             </button>
@@ -1431,10 +1335,8 @@ function BrowseInner() {
 
   const renderBrandsBlock = () =>
     live.brands.length > 0 ? (
-      <div className="mt-12 first:mt-0 sm:mt-14">
-        <p className="mb-4 text-[11px] font-bold tracking-[0.12em] text-muted">
-          BRANDS
-        </p>
+      <div className="mt-12 first:mt-0">
+        <p className="mb-4 text-[11px] font-bold tracking-[0.12em] text-muted">BRANDS</p>
         <div className="flex flex-wrap gap-2">
           {live.brands.map((b) => (
             <button
@@ -1445,7 +1347,7 @@ function BrowseInner() {
                 setDebounced(b);
                 pushRecent(b);
               }}
-              className="border border-ai-green/25 bg-ai-green/10 px-3 py-2 text-[13px] font-semibold text-ai-green sm:px-3.5 sm:text-sm"
+              className="rounded-full bg-[#00E575]/10 px-3.5 py-2 text-[13px] font-semibold text-[#00E575] transition hover:bg-[#00E575]/15"
             >
               {b}
             </button>
@@ -1487,6 +1389,9 @@ function BrowseInner() {
     );
   };
 
+  const chip =
+    "rounded-full px-2.5 py-1 text-[11px] font-medium transition active:scale-[0.97]";
+
   return (
     <div className="min-h-screen w-full overflow-x-hidden bg-bg text-text">
       <style jsx global>{`
@@ -1500,44 +1405,29 @@ function BrowseInner() {
         .plazore-product-cell img {
           width: 100%;
         }
-        @keyframes plazore-suggest-in {
+        @keyframes ps-in {
           from {
             opacity: 0;
-            transform: translateY(-8px) scale(0.98);
-            filter: blur(4px);
+            transform: translateY(-6px);
           }
           to {
             opacity: 1;
-            transform: translateY(0) scale(1);
-            filter: blur(0);
+            transform: translateY(0);
           }
         }
         .plazore-suggest-panel {
-          animation: plazore-suggest-in 0.28s cubic-bezier(0.16, 1, 0.3, 1);
-        }
-        @keyframes plazore-row-in {
-          from {
-            opacity: 0;
-            transform: translateX(-6px);
-          }
-          to {
-            opacity: 1;
-            transform: translateX(0);
-          }
-        }
-        .plazore-suggest-row {
-          animation: plazore-row-in 0.32s cubic-bezier(0.16, 1, 0.3, 1) both;
+          animation: ps-in 0.18s ease-out;
         }
       `}</style>
 
-      {/* header unchanged structurally — logo-4 desktop */}
-      <header className="sticky top-0 z-40 border-b border-white/5 bg-bg/90 backdrop-blur-md">
+      {/* header */}
+      <header className="sticky top-0 z-40 border-b border-white/[0.04] bg-bg/90 backdrop-blur-md">
         <div className="mx-auto flex h-12 max-w-7xl items-center gap-2 px-3 sm:h-14 sm:gap-3 sm:px-6 lg:px-8">
           <div className="flex shrink-0 items-center gap-1.5">
             <Link
               href="/lounge"
-              className="flex h-9 w-9 items-center justify-center text-text sm:h-10 sm:w-10 md:hidden"
-              aria-label="Open Lounge"
+              className="flex h-9 w-9 items-center justify-center md:hidden"
+              aria-label="Lounge"
             >
               <MenuLines />
             </Link>
@@ -1550,11 +1440,7 @@ function BrowseInner() {
                 draggable={false}
               />
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src="/logo.png"
-                alt="Plazore"
-                className="h-6 w-6 object-contain sm:hidden"
-              />
+              <img src="/logo.png" alt="Plazore" className="h-6 w-6 object-contain sm:hidden" />
             </Link>
           </div>
 
@@ -1565,27 +1451,18 @@ function BrowseInner() {
             >
               Mall
             </Link>
-            <Link
-              href="/browse"
-              className="text-xs tracking-[0.16em] uppercase text-text"
-            >
+            <Link href="/browse" className="text-xs tracking-[0.16em] uppercase text-text">
               Browse
             </Link>
             <Link
               href="/lounge"
-              className="group relative inline-flex items-center gap-2.5 overflow-hidden border border-white/15 px-4 py-2 text-[11px] font-extrabold tracking-[0.22em] uppercase text-white transition duration-200 hover:brightness-110 active:translate-y-[1px]"
+              className="relative inline-flex items-center overflow-hidden rounded-lg border border-white/10 px-4 py-2 text-[11px] font-extrabold tracking-[0.2em] uppercase text-white"
               style={{
                 background:
-                  "linear-gradient(135deg, #00E575 0%, #0ECF7A 38%, #2B6DE8 72%, #3B82F6 100%)",
-                boxShadow:
-                  "0 1px 0 rgba(255,255,255,0.35) inset, 0 -2px 0 rgba(0,0,0,0.28) inset, 0 6px 18px rgba(59,130,246,0.28), 0 2px 0 rgba(0,0,0,0.35)",
+                  "linear-gradient(135deg, #00E575 0%, #0ECF7A 40%, #3B82F6 100%)",
               }}
             >
-              <span
-                aria-hidden
-                className="pointer-events-none absolute inset-x-0 top-0 h-[45%] bg-gradient-to-b from-white/25 to-transparent"
-              />
-              <span className="relative">Lounge</span>
+              Lounge
             </Link>
             <button
               type="button"
@@ -1599,16 +1476,13 @@ function BrowseInner() {
           <Link
             ref={bagRef}
             href="/cart"
-            className="relative ml-auto flex h-9 w-9 shrink-0 items-center justify-center text-text transition hover:opacity-80 sm:h-10 sm:w-10 md:ml-16 lg:ml-24 xl:ml-40"
-            aria-label={`Bag${bagCount ? `, ${bagCount} items` : ""}`}
+            className="relative ml-auto flex h-9 w-9 items-center justify-center sm:h-10 sm:w-10"
+            aria-label={`Bag${bagCount ? `, ${bagCount}` : ""}`}
             data-plazore-cart-icon
           >
-            <ShoppingBag
-              className="h-5 w-5 sm:h-[22px] sm:w-[22px]"
-              strokeWidth={1.75}
-            />
+            <ShoppingBag className="h-5 w-5" strokeWidth={1.75} />
             {bagCount > 0 ? (
-              <span className="absolute -right-0.5 -top-0.5 flex h-[16px] min-w-[16px] items-center justify-center rounded-full bg-[#00E575] px-1 text-[9px] font-bold leading-none text-[#041412] sm:h-[18px] sm:min-w-[18px] sm:text-[10px]">
+              <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-[#00E575] px-1 text-[9px] font-bold text-[#041412]">
                 {bagCount > 99 ? "99+" : bagCount}
               </span>
             ) : null}
@@ -1616,34 +1490,17 @@ function BrowseInner() {
         </div>
       </header>
 
-      <div className="mx-auto w-full max-w-7xl px-3 pb-24 pt-5 sm:px-6 sm:pb-28 sm:pt-8 lg:px-8 lg:pt-10">
-        <h1 className="font-display text-2xl tracking-tight sm:text-3xl md:text-4xl lg:text-5xl">
+      <div className="mx-auto w-full max-w-7xl px-3 pb-24 pt-5 sm:px-6 sm:pb-28 sm:pt-8 lg:px-8">
+        <h1 className="font-display text-2xl tracking-tight sm:text-3xl md:text-4xl">
           Browse
         </h1>
 
-        {/* ── Search bar + futuristic suggest ── */}
-        <div className="mt-5 flex flex-col gap-2.5 sm:mt-7 sm:flex-row sm:items-start sm:gap-3">
+        {/* search */}
+        <div className="mt-5 flex flex-col gap-2.5 sm:mt-6 sm:flex-row sm:items-start sm:gap-3">
           <div ref={searchWrapRef} className="relative min-w-0 flex-1">
-            <div
-              className="relative flex h-12 items-center gap-2.5 overflow-hidden rounded-2xl bg-[#070B12]/95 px-3.5 sm:h-14 sm:gap-3 sm:px-5"
-              style={{
-                boxShadow:
-                  "0 0 0 1px rgba(0,229,117,0.18), 0 0 28px rgba(0,229,117,0.08), 0 0 48px rgba(59,130,246,0.06), inset 0 1px 0 rgba(255,255,255,0.06)",
-              }}
-            >
-              <span
-                aria-hidden
-                className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-[#00E575]/50 to-transparent"
-              />
-              <span className="relative flex h-7 w-7 shrink-0 items-center justify-center sm:h-8 sm:w-8">
-                <span className="absolute inset-0 rounded-full bg-[#00E575]/10 blur-[6px]" />
-                <Sparkles
-                  className="relative h-4 w-4 text-[#00E575] sm:h-[17px] sm:w-[17px]"
-                  strokeWidth={1.75}
-                />
-              </span>
+            <div className="relative flex h-12 items-center gap-2.5 rounded-2xl bg-[#0A0E14] px-3.5 ring-1 ring-[#00E575]/20 sm:h-13 sm:px-4">
+              <Search className="h-4 w-4 shrink-0 text-[#00E575]/80" strokeWidth={2} />
               <input
-                ref={inputRef}
                 value={query}
                 onChange={(e) => {
                   setQuery(e.target.value);
@@ -1653,7 +1510,7 @@ function BrowseInner() {
                 }}
                 onFocus={() => setSuggestOpen(true)}
                 onKeyDown={(e) => {
-                  if (!showSuggestPanel || suggestions.length === 0) {
+                  if (!showSuggestPanel || !suggestions.length) {
                     if (e.key === "Enter" && query.trim()) {
                       pushRecent(query);
                       setSuggestOpen(false);
@@ -1662,9 +1519,7 @@ function BrowseInner() {
                   }
                   if (e.key === "ArrowDown") {
                     e.preventDefault();
-                    setActiveSuggest((i) =>
-                      Math.min(i + 1, suggestions.length - 1),
-                    );
+                    setActiveSuggest((i) => Math.min(i + 1, suggestions.length - 1));
                   } else if (e.key === "ArrowUp") {
                     e.preventDefault();
                     setActiveSuggest((i) => Math.max(i - 1, 0));
@@ -1676,110 +1531,69 @@ function BrowseInner() {
                       pushRecent(query);
                       setSuggestOpen(false);
                     }
-                  } else if (e.key === "Escape") {
-                    setSuggestOpen(false);
-                  }
+                  } else if (e.key === "Escape") setSuggestOpen(false);
                 }}
-                placeholder="Search the mall — products, stores, brands, places…"
-                className="w-full bg-transparent text-[15px] text-white/95 outline-none placeholder:text-white/28 sm:text-base"
+                placeholder="Search products, stores, brands…"
+                className="w-full bg-transparent text-[15px] text-white outline-none placeholder:text-white/30"
                 autoComplete="off"
                 spellCheck={false}
               />
               {suggestLoading ? (
-                <span className="relative flex h-4 w-4 shrink-0">
-                  <span className="absolute inset-0 animate-spin rounded-full border-[1.5px] border-transparent border-t-[#00E575] border-r-[#3B82F6]" />
-                </span>
+                <span className="h-3.5 w-3.5 shrink-0 animate-spin rounded-full border border-transparent border-t-[#00E575] border-r-[#3B82F6]" />
               ) : null}
-              {(query ||
-                activeCategory ||
-                locActive ||
-                priceActive ||
-                specActive) && (
+              {(query || activeCategory || locActive || priceActive || specActive) && (
                 <button
                   type="button"
                   onClick={clearAll}
                   className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-white/35 transition hover:bg-white/5 hover:text-white"
+                  aria-label="Clear"
                 >
-                  ×
+                  <X className="h-4 w-4" strokeWidth={2} />
                 </button>
               )}
             </div>
 
-            {/* FUTURISTIC SUGGEST PANEL */}
+            {/* suggest panel — clean */}
             {showSuggestPanel ? (
-              <div
-                className="plazore-suggest-panel absolute left-0 right-0 top-[calc(100%+8px)] z-50 overflow-hidden rounded-2xl"
-                style={{
-                  background:
-                    "linear-gradient(165deg, rgba(6,10,18,0.97) 0%, rgba(5,9,16,0.99) 100%)",
-                  boxShadow:
-                    "0 0 0 1px rgba(0,229,117,0.16), 0 0 40px rgba(0,229,117,0.1), 0 0 80px rgba(59,130,246,0.08), 0 24px 60px rgba(0,0,0,0.55)",
-                  backdropFilter: "blur(24px) saturate(1.4)",
-                }}
-              >
-                <div
-                  className="h-[2px] w-full"
-                  style={{
-                    background:
-                      "linear-gradient(90deg, transparent 0%, #00E575 25%, #3B82F6 75%, transparent 100%)",
-                    opacity: 0.85,
-                  }}
-                />
+              <div className="plazore-suggest-panel absolute left-0 right-0 top-[calc(100%+6px)] z-50 overflow-hidden rounded-2xl bg-[#0A0E14]/98 ring-1 ring-white/10 shadow-2xl shadow-black/50 backdrop-blur-xl">
+                <div className="h-px w-full bg-gradient-to-r from-transparent via-[#00E575]/50 to-transparent" />
 
                 {suggestLoading && suggestions.length === 0 ? (
                   <SuggestSpinner />
                 ) : suggestions.length === 0 ? (
-                  <div className="flex flex-col items-center gap-2 px-4 py-8 text-center">
-                    <Sparkles className="h-5 w-5 text-white/20" strokeWidth={1.5} />
-                    <p className="text-[13px] text-white/40">
-                      Nothing close yet — try a brand, city, or product name
-                    </p>
-                  </div>
+                  <p className="px-4 py-8 text-center text-[13px] text-white/35">
+                    No matches — try a product, brand, or city
+                  </p>
                 ) : (
-                  <ul className="max-h-[min(68vh,460px)] overflow-y-auto overscroll-contain py-2">
+                  <ul className="max-h-[min(65vh,420px)] overflow-y-auto overscroll-contain py-1.5">
                     {suggestions.map((s, i) => {
                       const active = i === activeSuggest;
                       return (
-                        <li
-                          key={s.id}
-                          className="plazore-suggest-row"
-                          style={{ animationDelay: `${Math.min(i, 8) * 28}ms` }}
-                        >
+                        <li key={s.id}>
                           <button
                             type="button"
                             onMouseEnter={() => setActiveSuggest(i)}
                             onClick={() => applySuggestion(s)}
-                            className={`group relative flex w-full items-center gap-3 px-3 py-2.5 text-left transition sm:gap-3.5 sm:px-4 sm:py-3 ${
-                              active
-                                ? "bg-gradient-to-r from-[#00E575]/14 via-[#3B82F6]/08 to-transparent"
-                                : "hover:bg-white/[0.035]"
+                            className={`flex w-full items-center gap-3 px-3 py-2.5 text-left transition sm:gap-3.5 sm:px-3.5 sm:py-2.5 ${
+                              active ? "bg-white/[0.06]" : "hover:bg-white/[0.03]"
                             }`}
                           >
-                            {active ? (
-                              <span
-                                aria-hidden
-                                className="absolute left-0 top-1/2 h-7 w-[3px] -translate-y-1/2 rounded-r-full bg-gradient-to-b from-[#00E575] to-[#3B82F6] shadow-[0_0_12px_rgba(0,229,117,0.6)]"
-                              />
-                            ) : null}
-
                             <SuggestThumb s={s} />
-
                             <span className="min-w-0 flex-1">
-                              <span className="block truncate text-[14px] font-medium tracking-tight text-white/95 sm:text-[15px]">
+                              <span className="block truncate text-[14px] font-medium text-white/95">
                                 <HighlightText text={s.label} query={suggestQ} />
                               </span>
                               {s.sub ? (
-                                <span className="mt-0.5 block truncate text-[11px] text-white/38 sm:text-[12px]">
-                                  <HighlightText text={s.sub} query={suggestQ} />
+                                <span className="mt-0.5 block truncate text-[11px] text-white/35">
+                                  {s.sub}
                                 </span>
                               ) : null}
                             </span>
-
                             <span
-                              className={`shrink-0 rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.14em] sm:text-[10px] ${
+                              className={`shrink-0 rounded-md px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider ${
                                 active
                                   ? "bg-[#00E575]/15 text-[#00E575]"
-                                  : "bg-white/[0.04] text-white/28"
+                                  : "text-white/25"
                               }`}
                             >
                               {kindLabel(s.kind)}
@@ -1790,65 +1604,53 @@ function BrowseInner() {
                     })}
                   </ul>
                 )}
-
-                {suggestions.length > 0 ? (
-                  <div className="flex items-center justify-between border-t border-white/[0.04] px-4 py-2.5">
-                    <span className="text-[10px] tracking-wide text-white/25">
-                      ↑↓ navigate · enter select
-                    </span>
-                    <span className="flex items-center gap-1.5 text-[10px] text-white/25">
-                      <span className="h-1 w-1 rounded-full bg-[#00E575]/70 shadow-[0_0_6px_#00E575]" />
-                      Plazore live
-                    </span>
-                  </div>
-                ) : null}
               </div>
             ) : null}
           </div>
 
           {showFilterBar ? (
-            <div className="flex flex-wrap gap-2 sm:items-stretch">
-              <button
-                type="button"
-                onClick={() => setSortOpen(true)}
-                className={`h-11 shrink-0 rounded-xl px-3.5 text-[11px] font-semibold tracking-wide transition sm:h-14 sm:px-4 sm:text-xs ${
-                  sortActive || structure !== "products_first"
-                    ? "bg-[#00E575]/12 text-[#00E575] shadow-[0_0_20px_rgba(0,229,117,0.15)]"
-                    : "bg-white/[0.04] text-white/70 hover:bg-white/[0.07]"
-                }`}
-              >
-                Sort
-              </button>
-              <button
-                type="button"
-                onClick={openPrice}
-                className={`h-11 shrink-0 rounded-xl px-3.5 text-[11px] font-semibold tracking-wide transition sm:h-14 sm:px-4 sm:text-xs ${
-                  priceActive
-                    ? "bg-[#00E575]/12 text-[#00E575] shadow-[0_0_20px_rgba(0,229,117,0.15)]"
-                    : "bg-white/[0.04] text-white/70 hover:bg-white/[0.07]"
-                }`}
-              >
-                Price
-              </button>
-              <button
-                type="button"
-                onClick={() => setLocOpen(true)}
-                className={`h-11 shrink-0 rounded-xl px-3.5 text-[11px] font-semibold tracking-wide transition sm:h-14 sm:px-4 sm:text-xs ${
-                  locActive
-                    ? "bg-[#3B82F6]/15 text-[#60A5FA] shadow-[0_0_20px_rgba(59,130,246,0.18)]"
-                    : "bg-white/[0.04] text-white/70 hover:bg-white/[0.07]"
-                }`}
-              >
-                Location
-              </button>
+            <div className="flex flex-wrap gap-2">
+              {(
+                [
+                  {
+                    label: "Sort",
+                    on: sortActive || structure !== "products_first",
+                    open: () => setSortOpen(true),
+                    onCls: "bg-[#00E575]/12 text-[#00E575]",
+                  },
+                  {
+                    label: "Price",
+                    on: priceActive,
+                    open: openPrice,
+                    onCls: "bg-[#00E575]/12 text-[#00E575]",
+                  },
+                  {
+                    label: "Location",
+                    on: locActive,
+                    open: () => setLocOpen(true),
+                    onCls: "bg-[#3B82F6]/15 text-[#60A5FA]",
+                  },
+                ] as const
+              ).map((b) => (
+                <button
+                  key={b.label}
+                  type="button"
+                  onClick={b.open}
+                  className={`h-11 rounded-xl px-3.5 text-[11px] font-semibold transition sm:h-12 sm:text-xs ${
+                    b.on ? b.onCls : "bg-white/[0.04] text-white/65 hover:bg-white/[0.07]"
+                  }`}
+                >
+                  {b.label}
+                </button>
+              ))}
               {specIndex.length > 0 ? (
                 <button
                   type="button"
                   onClick={() => setSpecOpen(true)}
-                  className={`inline-flex h-11 shrink-0 items-center gap-1.5 rounded-xl px-3.5 text-[11px] font-semibold tracking-wide transition sm:h-14 sm:px-4 sm:text-xs ${
+                  className={`inline-flex h-11 items-center gap-1.5 rounded-xl px-3.5 text-[11px] font-semibold transition sm:h-12 sm:text-xs ${
                     specActive
-                      ? "bg-[#22D3EE]/12 text-[#67E8F9] shadow-[0_0_20px_rgba(34,211,238,0.15)]"
-                      : "bg-white/[0.04] text-white/70 hover:bg-white/[0.07]"
+                      ? "bg-cyan-500/15 text-cyan-300"
+                      : "bg-white/[0.04] text-white/65 hover:bg-white/[0.07]"
                   }`}
                 >
                   <SlidersHorizontal className="h-3.5 w-3.5" strokeWidth={2} />
@@ -1859,34 +1661,34 @@ function BrowseInner() {
           ) : null}
         </div>
 
-        {/* chips + explore + results + sheets — keep the rest of your previous structure */}
+        {/* chips */}
         {(locActive || priceActive || specActive) && isSearching ? (
           <div className="mt-3 flex flex-wrap gap-2">
             {loc.region ? (
               <button
                 type="button"
                 onClick={() => setLoc((p) => ({ ...p, region: null }))}
-                className="rounded-full bg-[#3B82F6]/12 px-2.5 py-1 text-[11px] text-[#93C5FD]"
+                className={`${chip} bg-[#3B82F6]/12 text-[#93C5FD]`}
               >
-                Region: {loc.region} ×
+                {loc.region} ×
               </button>
             ) : null}
             {loc.state ? (
               <button
                 type="button"
                 onClick={() => setLoc((p) => ({ ...p, state: null }))}
-                className="rounded-full bg-[#3B82F6]/12 px-2.5 py-1 text-[11px] text-[#93C5FD]"
+                className={`${chip} bg-[#3B82F6]/12 text-[#93C5FD]`}
               >
-                State: {loc.state} ×
+                {loc.state} ×
               </button>
             ) : null}
             {loc.city ? (
               <button
                 type="button"
                 onClick={() => setLoc((p) => ({ ...p, city: null }))}
-                className="rounded-full bg-[#3B82F6]/12 px-2.5 py-1 text-[11px] text-[#93C5FD]"
+                className={`${chip} bg-[#3B82F6]/12 text-[#93C5FD]`}
               >
-                City: {loc.city} ×
+                {loc.city} ×
               </button>
             ) : null}
             {minPrice || maxPrice ? (
@@ -1896,16 +1698,16 @@ function BrowseInner() {
                   setMinPrice("");
                   setMaxPrice("");
                 }}
-                className="rounded-full bg-[#00E575]/10 px-2.5 py-1 text-[11px] text-[#34D399]"
+                className={`${chip} bg-[#00E575]/10 text-[#34D399]`}
               >
-                Price {minPrice || "0"}–{maxPrice || "∞"} ×
+                {minPrice || "0"}–{maxPrice || "∞"} ×
               </button>
             ) : null}
             {inStockOnly ? (
               <button
                 type="button"
                 onClick={() => setInStockOnly(false)}
-                className="rounded-full bg-[#00E575]/10 px-2.5 py-1 text-[11px] text-[#34D399]"
+                className={`${chip} bg-[#00E575]/10 text-[#34D399]`}
               >
                 In stock ×
               </button>
@@ -1916,7 +1718,7 @@ function BrowseInner() {
                   key={`${k}-${v}`}
                   type="button"
                   onClick={() => toggleSpecValue(k, v)}
-                  className="rounded-full bg-[#22D3EE]/10 px-2.5 py-1 text-[11px] text-[#67E8F9]"
+                  className={`${chip} bg-cyan-500/10 text-cyan-300`}
                 >
                   {k}: {v} ×
                 </button>
@@ -1925,34 +1727,25 @@ function BrowseInner() {
           </div>
         ) : null}
 
+        {/* body */}
         {!isSearching ? (
-          <div className="mt-8 w-full sm:mt-10">
-            <p className="text-[11px] font-bold tracking-[0.12em] text-muted">
-              EXPLORE
-            </p>
-            <div className="-mx-3 mt-3.5 overflow-x-auto px-3 pb-2 scrollbar-none sm:-mx-0 sm:mt-4 sm:px-0">
-              <div className="flex w-max gap-3 pr-3 sm:gap-3.5">
+          <div className="mt-8 sm:mt-10">
+            <p className="text-[11px] font-bold tracking-[0.12em] text-muted">EXPLORE</p>
+            <div className="-mx-3 mt-3.5 overflow-x-auto px-3 pb-2 scrollbar-none sm:mx-0 sm:px-0">
+              <div className="flex w-max gap-3">
                 {FLOORS.map((f) => (
                   <button
                     key={f.id}
                     type="button"
                     onClick={() => selectFloor(f.id)}
-                    className="relative h-[8.75rem] w-[6.25rem] shrink-0 overflow-hidden rounded-xl border border-line bg-surface text-left sm:h-[10.5rem] sm:w-[7.25rem]"
+                    className="relative h-36 w-24 shrink-0 overflow-hidden rounded-xl bg-surface text-left sm:h-40 sm:w-28"
                   >
                     {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={f.images[0]}
-                      alt=""
-                      className="absolute inset-0 h-full w-full object-cover"
-                    />
-                    <div className="absolute inset-0 bg-gradient-to-t from-bg via-bg/40 to-transparent" />
-                    <div className="absolute inset-x-2 bottom-2 sm:inset-x-2.5 sm:bottom-2.5">
-                      <p className="text-[12px] font-semibold leading-tight sm:text-[13px]">
-                        {f.short}
-                      </p>
-                      <p className="mt-0.5 truncate text-[9px] text-white/55 sm:text-[10px]">
-                        {f.hint}
-                      </p>
+                    <img src={f.images[0]} alt="" className="absolute inset-0 h-full w-full object-cover" />
+                    <div className="absolute inset-0 bg-gradient-to-t from-bg via-bg/35 to-transparent" />
+                    <div className="absolute inset-x-2 bottom-2">
+                      <p className="text-[12px] font-semibold leading-tight">{f.short}</p>
+                      <p className="mt-0.5 truncate text-[9px] text-white/50">{f.hint}</p>
                     </div>
                   </button>
                 ))}
@@ -1960,14 +1753,14 @@ function BrowseInner() {
             </div>
 
             {recent.length > 0 ? (
-              <div className="mt-10 sm:mt-12">
-                <div className="flex items-center justify-between gap-3">
+              <div className="mt-10">
+                <div className="flex items-center justify-between">
                   <p className="text-[11px] font-bold tracking-[0.12em] text-muted">
-                    RECENT SEARCHES
+                    RECENT
                   </p>
                   <button
                     type="button"
-                    className="text-[13px] text-ai-green sm:text-sm"
+                    className="text-[13px] text-[#00E575]"
                     onClick={() => {
                       setRecent([]);
                       localStorage.removeItem(RECENT_KEY);
@@ -1976,7 +1769,7 @@ function BrowseInner() {
                     Clear
                   </button>
                 </div>
-                <div className="mt-3.5 flex flex-wrap gap-2 sm:mt-4">
+                <div className="mt-3 flex flex-wrap gap-2">
                   {recent.map((r) => (
                     <button
                       key={r}
@@ -1986,7 +1779,7 @@ function BrowseInner() {
                         setDebounced(r);
                         pushRecent(r);
                       }}
-                      className="rounded-full bg-white/[0.04] px-3 py-2 text-[13px] transition hover:bg-white/[0.07] sm:px-3.5 sm:text-sm"
+                      className="rounded-full bg-white/[0.04] px-3.5 py-2 text-[13px] transition hover:bg-white/[0.07]"
                     >
                       {r}
                     </button>
@@ -1995,28 +1788,24 @@ function BrowseInner() {
               </div>
             ) : null}
 
-            <div className="mt-12 w-full sm:mt-14">
-              <p className="text-[11px] font-bold tracking-[0.12em] text-muted">
-                MOVING NOW
-              </p>
-              <p className="mt-1 text-[12px] text-secondary sm:text-xs">
-                Highest viewed products on Plazore
-              </p>
+            <div className="mt-12">
+              <p className="text-[11px] font-bold tracking-[0.12em] text-muted">MOVING NOW</p>
+              <p className="mt-1 text-[12px] text-secondary">Highest viewed on Plazore</p>
               {loading ? (
-                <OrbLoader compact label="Loading the mall…" />
+                <OrbLoader compact label="Loading…" />
               ) : movingNow.length === 0 ? (
                 <p className="mt-10 text-center text-muted">Nothing moving yet.</p>
               ) : (
                 <>
-                  <div className={`mt-6 w-full sm:mt-7 ${PRODUCT_GRID}`}>
+                  <div className={`mt-6 ${PRODUCT_GRID}`}>
                     {movingNow.map((p) => (
                       <ProductCell key={p._id} product={p} />
                     ))}
                   </div>
-                  <div className="mt-12 flex justify-center sm:mt-14">
+                  <div className="mt-12 flex justify-center">
                     <Link
                       href="/shop?mode=trending"
-                      className="border border-white/20 px-6 py-3 text-[11px] font-semibold tracking-[0.18em] uppercase text-white transition hover:border-white hover:bg-white/5 sm:px-8"
+                      className="rounded-xl border border-white/15 px-6 py-3 text-[11px] font-semibold tracking-[0.16em] uppercase text-white/80 transition hover:border-white/40"
                     >
                       Show more
                     </Link>
@@ -2025,47 +1814,35 @@ function BrowseInner() {
               )}
             </div>
           </div>
-        ) : categoryLoading ||
-          (searchLoading && live.products.length === 0) ? (
+        ) : categoryLoading || (searchLoading && live.products.length === 0) ? (
           <OrbLoader label="Looking through the mall…" />
         ) : (
-          <div className="mt-8 w-full sm:mt-10">
-            <div className="mb-7 flex items-start justify-between gap-3 sm:mb-9 sm:gap-4">
+          <div className="mt-8 sm:mt-10">
+            <div className="mb-7 flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <p className="truncate text-base font-bold sm:text-lg md:text-xl">
-                  {activeLabel}
-                </p>
-                <p className="mt-1 text-[11px] text-muted sm:text-xs">
+                <p className="truncate text-base font-bold sm:text-lg">{activeLabel}</p>
+                <p className="mt-1 text-[11px] text-muted">
                   {[
                     live.totalProducts
                       ? `${Math.min(visibleCount, live.totalProducts)} of ${live.totalProducts} products`
                       : null,
-                    live.stores.length
-                      ? `${live.stores.length} storefronts`
-                      : null,
+                    live.stores.length ? `${live.stores.length} stores` : null,
                     live.brands.length ? `${live.brands.length} brands` : null,
-                    live.categories.length
-                      ? `${live.categories.length} categories`
-                      : null,
                   ]
                     .filter(Boolean)
                     .join(" · ")}
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={clearAll}
-                className="shrink-0 text-[13px] text-ai-green sm:text-sm"
-              >
+              <button type="button" onClick={clearAll} className="text-[13px] text-[#00E575]">
                 Clear
               </button>
             </div>
             {structuredResults()}
             {!hasResults && !searchLoading ? (
-              <div className="pt-16 text-center sm:pt-20">
+              <div className="pt-16 text-center">
                 <p className="font-bold">Nothing found</p>
                 <p className="mt-2 text-sm text-secondary">
-                  Try another search, sort, price, location, or spec.
+                  Try another search, price, location, or spec.
                 </p>
               </div>
             ) : null}
@@ -2073,59 +1850,52 @@ function BrowseInner() {
         )}
       </div>
 
-      {/* Sort / Price / Location / Specs sheets — same as your last version */}
+      {/* sheets — simplified surfaces */}
       {sortOpen ? (
-        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/65 md:items-center">
-          <button
-            type="button"
-            className="absolute inset-0"
-            onClick={() => setSortOpen(false)}
-            aria-label="Close sort"
-          />
-          <div className="relative max-h-[85vh] w-full max-w-md overflow-y-auto rounded-t-2xl border-t border-line bg-surface p-5 sm:p-6 md:rounded-2xl md:border">
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 md:items-center">
+          <button type="button" className="absolute inset-0" onClick={() => setSortOpen(false)} />
+          <div className="relative max-h-[85vh] w-full max-w-md overflow-y-auto rounded-t-2xl bg-[#12151c] p-5 md:rounded-2xl md:ring-1 md:ring-white/10">
             <p className="text-lg font-bold">Sort & layout</p>
-            <p className="mt-5 text-sm font-semibold text-secondary">Sort by</p>
+            <p className="mt-4 text-sm font-semibold text-white/50">Sort by</p>
             <div className="mt-2 space-y-1">
               {SORT_OPTIONS.map((o) => (
                 <button
                   key={o.key}
                   type="button"
                   onClick={() => setSortKey(o.key)}
-                  className={`flex w-full items-center justify-between rounded-xl border px-3 py-2.5 text-left text-sm ${
+                  className={`flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left text-sm ${
                     sortKey === o.key
-                      ? "border-ai-green/40 bg-ai-green/10 font-semibold text-ai-green"
-                      : "border-line bg-surface-2"
+                      ? "bg-[#00E575]/12 font-semibold text-[#00E575]"
+                      : "bg-white/[0.03] text-white/80"
                   }`}
                 >
                   {o.label}
-                  {sortKey === o.key ? <span>✓</span> : null}
+                  {sortKey === o.key ? "✓" : null}
                 </button>
               ))}
             </div>
-            <p className="mt-6 text-sm font-semibold text-secondary">
-              Result structure
-            </p>
+            <p className="mt-5 text-sm font-semibold text-white/50">Structure</p>
             <div className="mt-2 space-y-1">
               {STRUCTURE_OPTIONS.map((o) => (
                 <button
                   key={o.key}
                   type="button"
                   onClick={() => setStructure(o.key)}
-                  className={`flex w-full items-center justify-between rounded-xl border px-3 py-2.5 text-left text-sm ${
+                  className={`flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left text-sm ${
                     structure === o.key
-                      ? "border-ai-green/40 bg-ai-green/10 font-semibold text-ai-green"
-                      : "border-line bg-surface-2"
+                      ? "bg-[#00E575]/12 font-semibold text-[#00E575]"
+                      : "bg-white/[0.03] text-white/80"
                   }`}
                 >
                   {o.label}
-                  {structure === o.key ? <span>✓</span> : null}
+                  {structure === o.key ? "✓" : null}
                 </button>
               ))}
             </div>
             <button
               type="button"
               onClick={() => setSortOpen(false)}
-              className="mt-8 h-12 w-full rounded-xl bg-text font-bold text-bg"
+              className="mt-6 h-12 w-full rounded-xl bg-white font-bold text-black"
             >
               Done
             </button>
@@ -2134,36 +1904,27 @@ function BrowseInner() {
       ) : null}
 
       {priceOpen ? (
-        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/65 md:items-center">
-          <button
-            type="button"
-            className="absolute inset-0"
-            onClick={() => setPriceOpen(false)}
-            aria-label="Close price"
-          />
-          <div className="relative w-full max-w-md rounded-t-2xl border-t border-line bg-surface p-5 sm:p-6 md:rounded-2xl md:border">
-            <p className="text-lg font-bold">Price filter</p>
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 md:items-center">
+          <button type="button" className="absolute inset-0" onClick={() => setPriceOpen(false)} />
+          <div className="relative w-full max-w-md rounded-t-2xl bg-[#12151c] p-5 md:rounded-2xl md:ring-1 md:ring-white/10">
+            <p className="text-lg font-bold">Price</p>
             <div className="mt-5 flex gap-2">
               <input
                 value={draftMin}
-                onChange={(e) =>
-                  setDraftMin(e.target.value.replace(/[^\d.]/g, ""))
-                }
+                onChange={(e) => setDraftMin(e.target.value.replace(/[^\d.]/g, ""))}
                 placeholder="Min"
                 inputMode="decimal"
-                className="h-11 flex-1 rounded-xl border border-line bg-surface-2 px-3 text-sm outline-none"
+                className="h-11 flex-1 rounded-xl bg-white/[0.04] px-3 text-sm outline-none ring-1 ring-white/10"
               />
               <input
                 value={draftMax}
-                onChange={(e) =>
-                  setDraftMax(e.target.value.replace(/[^\d.]/g, ""))
-                }
+                onChange={(e) => setDraftMax(e.target.value.replace(/[^\d.]/g, ""))}
                 placeholder="Max"
                 inputMode="decimal"
-                className="h-11 flex-1 rounded-xl border border-line bg-surface-2 px-3 text-sm outline-none"
+                className="h-11 flex-1 rounded-xl bg-white/[0.04] px-3 text-sm outline-none ring-1 ring-white/10"
               />
             </div>
-            <label className="mt-6 flex items-center gap-3 text-sm">
+            <label className="mt-5 flex items-center gap-3 text-sm">
               <input
                 type="checkbox"
                 checked={draftStock}
@@ -2171,18 +1932,18 @@ function BrowseInner() {
               />
               In stock only
             </label>
-            <div className="mt-8 flex gap-3">
+            <div className="mt-6 flex gap-3">
               <button
                 type="button"
                 onClick={resetPrice}
-                className="h-12 flex-1 rounded-xl border border-line bg-surface-2 font-semibold text-secondary"
+                className="h-12 flex-1 rounded-xl bg-white/[0.04] font-semibold text-white/60"
               >
                 Reset
               </button>
               <button
                 type="button"
                 onClick={applyPrice}
-                className="h-12 flex-1 rounded-xl bg-text font-bold text-bg"
+                className="h-12 flex-1 rounded-xl bg-white font-bold text-black"
               >
                 Apply
               </button>
@@ -2192,16 +1953,11 @@ function BrowseInner() {
       ) : null}
 
       {locOpen ? (
-        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/65 md:items-center">
-          <button
-            type="button"
-            className="absolute inset-0"
-            onClick={() => setLocOpen(false)}
-            aria-label="Close location"
-          />
-          <div className="relative max-h-[85vh] w-full max-w-md overflow-y-auto rounded-t-2xl border-t border-line bg-surface p-5 sm:p-6 md:rounded-2xl md:border">
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 md:items-center">
+          <button type="button" className="absolute inset-0" onClick={() => setLocOpen(false)} />
+          <div className="relative max-h-[85vh] w-full max-w-md overflow-y-auto rounded-t-2xl bg-[#12151c] p-5 md:rounded-2xl md:ring-1 md:ring-white/10">
             <p className="text-lg font-bold">Location</p>
-            <p className="mt-1 text-xs text-muted">From Plazore inventory</p>
+            <p className="mt-1 text-xs text-white/40">From inventory</p>
             {(["regions", "states", "cities"] as const).map((bucket) => {
               const list =
                 bucket === "regions"
@@ -2210,17 +1966,11 @@ function BrowseInner() {
                     ? locationIndex.states
                     : locationIndex.cities.slice(0, 48);
               const field =
-                bucket === "regions"
-                  ? "region"
-                  : bucket === "states"
-                    ? "state"
-                    : "city";
+                bucket === "regions" ? "region" : bucket === "states" ? "state" : "city";
               if (!list.length) return null;
               return (
                 <div key={bucket}>
-                  <p className="mt-5 text-sm font-semibold capitalize text-secondary">
-                    {field}
-                  </p>
+                  <p className="mt-5 text-sm font-semibold capitalize text-white/50">{field}</p>
                   <div className="mt-2 flex flex-wrap gap-2">
                     {list.map((r) => {
                       const on = (loc as any)[field] === r.name;
@@ -2236,8 +1986,8 @@ function BrowseInner() {
                           }
                           className={`rounded-full px-3 py-1.5 text-xs font-semibold ${
                             on
-                              ? "bg-[#3B82F6]/15 text-[#60A5FA]"
-                              : "bg-white/[0.04] text-white/70"
+                              ? "bg-[#3B82F6]/2 text-[#60A5FA]"
+                              : "bg-white/[0.04] text-white/65"
                           }`}
                         >
                           {r.name} · {r.count}
@@ -2248,20 +1998,18 @@ function BrowseInner() {
                 </div>
               );
             })}
-            <div className="mt-8 flex gap-3">
+            <div className="mt-6 flex gap-3">
               <button
                 type="button"
-                onClick={() =>
-                  setLoc({ region: null, state: null, city: null })
-                }
-                className="h-12 flex-1 rounded-xl border border-line bg-surface-2 font-semibold text-secondary"
+                onClick={() => setLoc({ region: null, state: null, city: null })}
+                className="h-12 flex-1 rounded-xl bg-white/[0.04] font-semibold text-white/60"
               >
                 Reset
               </button>
               <button
                 type="button"
                 onClick={() => setLocOpen(false)}
-                className="h-12 flex-1 rounded-xl bg-text font-bold text-bg"
+                className="h-12 flex-1 rounded-xl bg-white font-bold text-black"
               >
                 Apply
               </button>
@@ -2271,28 +2019,17 @@ function BrowseInner() {
       ) : null}
 
       {specOpen ? (
-        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/65 md:items-center">
-          <button
-            type="button"
-            className="absolute inset-0"
-            onClick={() => setSpecOpen(false)}
-            aria-label="Close specs"
-          />
-          <div className="relative max-h-[85vh] w-full max-w-md overflow-y-auto rounded-t-2xl border-t border-line bg-surface p-5 sm:p-6 md:rounded-2xl md:border">
-            <p className="text-lg font-bold">Specifications</p>
-            <p className="mt-1 text-xs text-muted">
-              Multi-select · from current inventory
-            </p>
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 md:items-center">
+          <button type="button" className="absolute inset-0" onClick={() => setSpecOpen(false)} />
+          <div className="relative max-h-[85vh] w-full max-w-md overflow-y-auto rounded-t-2xl bg-[#12151c] p-5 md:rounded-2xl md:ring-1 md:ring-white/10">
+            <p className="text-lg font-bold">Specs</p>
+            <p className="mt-1 text-xs text-white/40">Multi-select from inventory</p>
             {specIndex.length === 0 ? (
-              <p className="mt-6 text-sm text-muted">
-                No specs on these products yet.
-              </p>
+              <p className="mt-6 text-sm text-white/40">No specs yet.</p>
             ) : (
               specIndex.map((group) => (
                 <div key={group.key} className="mt-5">
-                  <p className="text-sm font-semibold text-secondary">
-                    {group.key}
-                  </p>
+                  <p className="text-sm font-semibold text-white/50">{group.key}</p>
                   <div className="mt-2 flex flex-wrap gap-2">
                     {group.values.map((v) => {
                       const on = (specs[group.key] || []).some(
@@ -2305,8 +2042,8 @@ function BrowseInner() {
                           onClick={() => toggleSpecValue(group.key, v.name)}
                           className={`rounded-full px-3 py-1.5 text-xs font-semibold ${
                             on
-                              ? "bg-[#22D3EE]/15 text-[#67E8F9]"
-                              : "bg-white/[0.04] text-white/70"
+                              ? "bg-cyan-500/20 text-cyan-300"
+                              : "bg-white/[0.04] text-white/65"
                           }`}
                         >
                           {v.name} · {v.count}
@@ -2317,18 +2054,18 @@ function BrowseInner() {
                 </div>
               ))
             )}
-            <div className="mt-8 flex gap-3">
+            <div className="mt-6 flex gap-3">
               <button
                 type="button"
                 onClick={() => setSpecs({})}
-                className="h-12 flex-1 rounded-xl border border-line bg-surface-2 font-semibold text-secondary"
+                className="h-12 flex-1 rounded-xl bg-white/[0.04] font-semibold text-white/60"
               >
                 Reset
               </button>
               <button
                 type="button"
                 onClick={() => setSpecOpen(false)}
-                className="h-12 flex-1 rounded-xl bg-text font-bold text-bg"
+                className="h-12 flex-1 rounded-xl bg-white font-bold text-black"
               >
                 Apply
               </button>
@@ -2338,10 +2075,7 @@ function BrowseInner() {
       ) : null}
 
       {appFeature ? (
-        <AppFeaturePrompt
-          feature={appFeature}
-          onClose={() => setAppFeature(null)}
-        />
+        <AppFeaturePrompt feature={appFeature} onClose={() => setAppFeature(null)} />
       ) : null}
     </div>
   );
@@ -2352,7 +2086,7 @@ export default function BrowsePage() {
     <ShowroomFlyCartProvider>
       <Suspense
         fallback={
-          <div className="flex min-h-screen items-center justify-center bg-bg text-muted">
+          <div className="flex min-h-screen items-center justify-center bg-bg">
             <OrbLoader compact />
           </div>
         }
