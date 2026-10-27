@@ -20,7 +20,7 @@ export async function apiGet<T>(path: string, token?: string): Promise<T> {
 export async function apiPost<T>(
   path: string,
   body: unknown,
-  token?: string
+  token?: string,
 ): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     method: "POST",
@@ -58,7 +58,7 @@ export type SearchSuggestItem = {
   sub?: string;
   value: string;
   meta?: string;
-  image?: string; // ← product / store / brand image URL
+  image?: string;
 };
 
 export type SearchSuggestResponse = {
@@ -78,17 +78,14 @@ export async function fetchSearchSuggest(
   q: string,
   opts?: { region?: string },
 ): Promise<SearchSuggestResponse["data"]> {
-  const empty = {
-    items: [] as SearchSuggestItem[],
+  const empty: SearchSuggestResponse["data"] = {
+    items: [],
     products: [],
     stores: [],
-    brands: [] as string[],
-    categories: [] as string[],
-    specs: [] as { key: string; value: string }[],
-    locations: [] as {
-      kind: "city" | "state" | "region";
-      name: string;
-    }[],
+    brands: [],
+    categories: [],
+    specs: [],
+    locations: [],
   };
   const query = (q || "").trim();
   if (!query) return empty;
@@ -103,6 +100,11 @@ export async function fetchSearchSuggest(
   } catch {
     return empty;
   }
+}
+
+/** Used by lounge/page.tsx — product list search, not typed suggest */
+export async function searchSuggest(q: string) {
+  return fetchMallProducts({ q, limit: 48, sort: "relevance" });
 }
 
 export async function fetchProduct(id: string) {
@@ -218,7 +220,7 @@ export async function fetchShowroom(opts?: {
 
   try {
     const json = await apiGet<ShowroomResponse>(
-      `/products/showroom${qs ? `?${qs}` : ""}`
+      `/products/showroom${qs ? `?${qs}` : ""}`,
     );
 
     const rooms: ShowroomRooms = {
@@ -269,7 +271,7 @@ export async function fetchPublicAnnouncements(opts?: {
     if (opts?.audience) q.set("audience", opts.audience);
     const path = q.toString() ? `/announcements?${q}` : "/announcements";
     const json = await apiGet<{ success: boolean; data: PublicAnnouncement[] }>(
-      path
+      path,
     );
     return Array.isArray(json.data) ? json.data : [];
   } catch {
@@ -279,11 +281,11 @@ export async function fetchPublicAnnouncements(opts?: {
 
 /** Optional detail route — returns null if not implemented on server */
 export async function fetchAnnouncementById(
-  id: string
+  id: string,
 ): Promise<PublicAnnouncement | null> {
   try {
     const json = await apiGet<{ success: boolean; data: PublicAnnouncement }>(
-      `/announcements/${id}`
+      `/announcements/${id}`,
     );
     return json.data || null;
   } catch {

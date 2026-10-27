@@ -48,8 +48,8 @@ const RECENT_KEY = "plazore_recent_searches";
 const MAX_RECENT = 8;
 const MOVING_NOW_MAX = 14;
 const PAGE_SIZE = 20;
-const SUGGEST_MS = 90;
-const SEARCH_MS = 140;
+const SUGGEST_MS = 80;
+const SEARCH_MS = 120;
 
 type SellerInfo = {
   _id: string;
@@ -248,11 +248,15 @@ function sortProducts(list: Product[], sort: SortKey): Product[] {
       return arr.sort((a, b) => productPrice(a) - productPrice(b));
     case "name_az":
       return arr.sort((a, b) =>
-        (a.name || "").localeCompare(b.name || "", undefined, { sensitivity: "base" }),
+        (a.name || "").localeCompare(b.name || "", undefined, {
+          sensitivity: "base",
+        }),
       );
     case "name_za":
       return arr.sort((a, b) =>
-        (b.name || "").localeCompare(a.name || "", undefined, { sensitivity: "base" }),
+        (b.name || "").localeCompare(a.name || "", undefined, {
+          sensitivity: "base",
+        }),
       );
     case "views":
     case "relevance":
@@ -349,7 +353,11 @@ function MenuLines() {
   );
 }
 
-const ProductCell = memo(function ProductCell({ product }: { product: Product }) {
+const ProductCell = memo(function ProductCell({
+  product,
+}: {
+  product: Product;
+}) {
   return (
     <div className="plazore-product-cell min-w-0 w-full [&>*]:!block [&>*]:!h-full [&>*]:!w-full [&>*]:!max-w-none [&_a]:!block [&_a]:!w-full [&_img]:!w-full">
       <ProductCard product={product} />
@@ -357,22 +365,36 @@ const ProductCell = memo(function ProductCell({ product }: { product: Product })
   );
 });
 
-function OrbLoader({ label, compact = false }: { label?: string; compact?: boolean }) {
+function OrbLoader({
+  label,
+  compact = false,
+}: {
+  label?: string;
+  compact?: boolean;
+}) {
   return (
     <div
       className={`flex flex-col items-center justify-center ${
-        compact ? "py-16" : "min-h-[45vh] py-20 sm:min-h-[55vh]"
+        compact
+          ? "py-16"
+          : "min-h-[45vh] py-20 sm:min-h-[55vh]"
       }`}
     >
       <div
         className={`relative flex items-center justify-center ${
-          compact ? "h-16 w-16 sm:h-20 sm:w-20" : "h-[90px] w-[90px] sm:h-[110px] sm:w-[110px]"
+          compact
+            ? "h-16 w-16 sm:h-20 sm:w-20"
+            : "h-[90px] w-[90px] sm:h-[110px] sm:w-[110px]"
         }`}
       >
         <div className="absolute inset-0 animate-spin rounded-full border-2 border-transparent border-t-[#00E575] border-r-[#3B82F6]" />
         <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#00E575]/10 sm:h-12 sm:w-12">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/logo.png" alt="" className="h-5 w-5 object-contain sm:h-6 sm:w-6" />
+          <img
+            src="/logo.png"
+            alt=""
+            className="h-5 w-5 object-contain sm:h-6 sm:w-6"
+          />
         </div>
       </div>
       {label ? <p className="mt-5 text-[13px] text-muted">{label}</p> : null}
@@ -450,7 +472,6 @@ function kindLabel(kind: SuggestionKind) {
   }
 }
 
-/** Product / store / category image first */
 const SuggestThumb = memo(function SuggestThumb({ s }: { s: Suggestion }) {
   const [broken, setBroken] = useState(false);
   const img = !broken && s.image ? s.image : null;
@@ -539,14 +560,19 @@ function BrowseInner() {
   const [locOpen, setLocOpen] = useState(false);
   const [specOpen, setSpecOpen] = useState(false);
   const [sortKey, setSortKey] = useState<SortKey>("relevance");
-  const [structure, setStructure] = useState<StructureOrder>("products_first");
+  const [structure, setStructure] =
+    useState<StructureOrder>("products_first");
   const [minPrice, setMinPrice] = useState("");
   const [maxPrice, setMaxPrice] = useState("");
   const [inStockOnly, setInStockOnly] = useState(false);
   const [draftMin, setDraftMin] = useState("");
   const [draftMax, setDraftMax] = useState("");
   const [draftStock, setDraftStock] = useState(false);
-  const [loc, setLoc] = useState<LocFilter>({ region: null, state: null, city: null });
+  const [loc, setLoc] = useState<LocFilter>({
+    region: null,
+    state: null,
+    city: null,
+  });
   const [specs, setSpecs] = useState<SpecFilter>({});
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [bagCount, setBagCount] = useState(0);
@@ -579,7 +605,11 @@ function BrowseInner() {
       setSuggestQ(q);
     }
     if (cat) setActiveCategory(cat);
-    setLoc({ region: region || null, state: state || null, city: city || null });
+    setLoc({
+      region: region || null,
+      state: state || null,
+      city: city || null,
+    });
     setMinPrice(min);
     setMaxPrice(max);
     setInStockOnly(stock);
@@ -609,7 +639,9 @@ function BrowseInner() {
     });
     const qs = params.toString();
     const next = qs ? `${pathname}?${qs}` : pathname;
-    const current = `${pathname}${typeof window !== "undefined" ? window.location.search : ""}`;
+    const current = `${pathname}${
+      typeof window !== "undefined" ? window.location.search : ""
+    }`;
     if (next !== current) router.replace(next, { scroll: false });
   }, [
     debounced,
@@ -651,12 +683,18 @@ function BrowseInner() {
     const onStorage = () => refreshBag();
     window.addEventListener("storage", onStorage);
     window.addEventListener("plazore-cart", onStorage as EventListener);
-    window.addEventListener("plazore-cart-change", onStorage as EventListener);
+    window.addEventListener(
+      "plazore-cart-change",
+      onStorage as EventListener,
+    );
     const t = setInterval(refreshBag, 2000);
     return () => {
       window.removeEventListener("storage", onStorage);
       window.removeEventListener("plazore-cart", onStorage as EventListener);
-      window.removeEventListener("plazore-cart-change", onStorage as EventListener);
+      window.removeEventListener(
+        "plazore-cart-change",
+        onStorage as EventListener,
+      );
       clearInterval(t);
     };
   }, [refreshBag]);
@@ -684,7 +722,7 @@ function BrowseInner() {
     };
   }, []);
 
-  /* dual debounce — fast suggest, slightly slower search */
+  /* dual debounce */
   useEffect(() => {
     const t = setTimeout(() => setSuggestQ(query.trim()), SUGGEST_MS);
     return () => clearTimeout(t);
@@ -699,9 +737,18 @@ function BrowseInner() {
 
   useEffect(() => {
     setVisibleCount(PAGE_SIZE);
-  }, [debounced, activeCategory, sortKey, minPrice, maxPrice, inStockOnly, loc, specs]);
+  }, [
+    debounced,
+    activeCategory,
+    sortKey,
+    minPrice,
+    maxPrice,
+    inStockOnly,
+    loc,
+    specs,
+  ]);
 
-  /* suggestions — seq guard = no race, always image-aware */
+  /* suggestions */
   useEffect(() => {
     if (!suggestQ) {
       setApiSuggestions(
@@ -786,8 +833,8 @@ function BrowseInner() {
         .forEach((b, i) => {
           const sample = allProducts.find(
             (p) =>
-              String((p as any).brand || "").toLowerCase() === b.toLowerCase() &&
-              p.images?.[0],
+              String((p as any).brand || "").toLowerCase() ===
+                b.toLowerCase() && p.images?.[0],
           );
           push({
             id: `b-${i}-${b}`,
@@ -814,29 +861,42 @@ function BrowseInner() {
           }),
         );
 
-      return out;
+      return out.sort((a, b) => (b.score || 0) - (a.score || 0)).slice(0, 12);
     };
+
+    // show client immediately
+    setApiSuggestions(buildClient());
 
     fetchSearchSuggest(suggestQ, { region: marketplaceRegion })
       .then((data) => {
         if (seq !== suggestSeq.current) return;
 
-        const items: Suggestion[] = (data.items || []).map((it) => {
+        const mapped: Suggestion[] = (data.items || []).map((it) => {
           let image = it.image;
-          if (it.kind === "category" && !image) {
+          if (!image && it.kind === "product" && it.meta) {
+            const p =
+              (data.products || []).find(
+                (x: any) => String(x._id) === String(it.meta),
+              ) ||
+              allProducts.find((x) => String(x._id) === String(it.meta));
+            image = p?.images?.[0];
+          }
+          if (!image && it.kind === "store") {
+            const s = (data.stores || []).find(
+              (x) => String(x._id) === String(it.meta || it.id),
+            );
+            image = s?.storeLogo;
+          }
+          if (!image && it.kind === "category") {
             image = floorImageForCategory(it.label || it.value);
           }
-          if (it.kind === "product" && !image && it.meta) {
-            const hit = (data.products || []).find(
-              (p: any) => String(p._id) === String(it.meta),
+          if (!image && it.kind === "brand") {
+            const sample = allProducts.find(
+              (p) =>
+                String((p as any).brand || "").toLowerCase() ===
+                  (it.label || it.value).toLowerCase() && p.images?.[0],
             );
-            image = hit?.images?.[0];
-          }
-          if (it.kind === "store" && !image && it.meta) {
-            const hit = (data.stores || []).find(
-              (s: any) => String(s._id) === String(it.meta),
-            );
-            image = hit?.storeLogo;
+            image = sample?.images?.[0];
           }
           return {
             id: it.id,
@@ -846,271 +906,94 @@ function BrowseInner() {
             value: it.value,
             meta: it.meta,
             image,
-            score:
-              matchScore(it.label, suggestQ) +
-              (it.kind === "product" ? 12 : 0) +
-              (it.kind === "store" ? 8 : 0) +
-              (image ? 5 : 0),
+            score: matchScore(it.label, suggestQ) + 15,
           };
         });
 
+        // merge API + client, prefer image rows
         const client = buildClient();
-        const seen = new Set(items.map((i) => `${i.kind}:${i.value.toLowerCase()}`));
-        for (const c of client) {
-          const k = `${c.kind}:${c.value.toLowerCase()}`;
-          if (seen.has(k)) {
-            const existing = items.find(
-              (i) => `${i.kind}:${i.value.toLowerCase()}` === k,
-            );
-            if (existing && !existing.image && c.image) existing.image = c.image;
-            continue;
-          }
+        const seen = new Set<string>();
+        const merged: Suggestion[] = [];
+        const push = (s: Suggestion) => {
+          const k = `${s.kind}:${s.value.toLowerCase()}`;
+          if (seen.has(k)) return;
           seen.add(k);
-          items.push(c);
-        }
+          merged.push(s);
+        };
+        [...mapped, ...client]
+          .sort((a, b) => {
+            const img = (x: Suggestion) => (x.image ? 1 : 0);
+            const d = img(b) - img(a);
+            if (d !== 0) return d;
+            return (b.score || 0) - (a.score || 0);
+          })
+          .forEach(push);
 
-        items.sort((a, b) => (b.score || 0) - (a.score || 0));
-        setApiSuggestions(items.slice(0, 12));
-        setSuggestLoading(false);
+        setApiSuggestions(merged.slice(0, 14));
       })
       .catch(() => {
         if (seq !== suggestSeq.current) return;
-        setApiSuggestions(
-          buildClient()
-            .sort((a, b) => (b.score || 0) - (a.score || 0))
-            .slice(0, 12),
-        );
-        setSuggestLoading(false);
+        setApiSuggestions(buildClient());
+      })
+      .finally(() => {
+        if (seq === suggestSeq.current) setSuggestLoading(false);
       });
-  }, [suggestQ, marketplaceRegion, recent, allProducts]);
+  }, [suggestQ, allProducts, recent, marketplaceRegion]);
 
-  /* product search */
+  /* server search */
   useEffect(() => {
-    if (debounced.length < 1 && !activeCategory) {
+    if (!debounced && !activeCategory) {
       setServerProducts([]);
       setSearchLoading(false);
+      setCategoryLoading(false);
       return;
     }
-    let cancelled = false;
-    setSearchLoading(true);
-    const hasQuery = debounced.length > 0;
-    fetchMallProducts({
-      q: activeCategory ? undefined : debounced || undefined,
-      category: resolveCategoryParam(activeCategory),
-      limit: 60,
-      minPrice: minPrice || undefined,
-      maxPrice: maxPrice || undefined,
-      inStock: inStockOnly || undefined,
-      sort: toApiSort(sortKey, hasQuery),
-      region: loc.region || undefined,
-    }).then((products) => {
-      if (cancelled) return;
-      let list = products;
-      if (hasQuery) {
-        list = [...products].sort((a, b) => {
-          const sa =
-            matchScore(a.name || "", debounced) * 2 +
-            matchScore(String((a as any).brand || ""), debounced);
-          const sb =
-            matchScore(b.name || "", debounced) * 2 +
-            matchScore(String((b as any).brand || ""), debounced);
-          return sb - sa || viewScore(b) - viewScore(a);
+    let alive = true;
+    const run = async () => {
+      if (activeCategory && !debounced) setCategoryLoading(true);
+      else setSearchLoading(true);
+      try {
+        const list = await fetchMallProducts({
+          q: debounced || undefined,
+          category: resolveCategoryParam(activeCategory),
+          sort: toApiSort(sortKey, !!debounced),
+          minPrice: minPrice || undefined,
+          maxPrice: maxPrice || undefined,
+          inStock: inStockOnly || undefined,
+          region: marketplaceRegion,
+          limit: 60,
         });
+        if (!alive) return;
+        setServerProducts(list);
+      } finally {
+        if (alive) {
+          setSearchLoading(false);
+          setCategoryLoading(false);
+        }
       }
-      setServerProducts(list);
-      setSearchLoading(false);
-    });
+    };
+    run();
     return () => {
-      cancelled = true;
+      alive = false;
     };
-  }, [debounced, activeCategory, minPrice, maxPrice, inStockOnly, sortKey, loc.region]);
-
-  useEffect(() => {
-    const onDown = (e: MouseEvent) => {
-      if (!searchWrapRef.current?.contains(e.target as Node)) setSuggestOpen(false);
-    };
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
-  }, []);
-
-  const locationIndex = useMemo(() => {
-    const regions = new Map<string, number>();
-    const states = new Map<string, number>();
-    const cities = new Map<string, number>();
-    allProducts.forEach((p) => {
-      const { region, state, city } = locParts(p);
-      if (region) regions.set(region, (regions.get(region) || 0) + 1);
-      if (state) states.set(state, (states.get(state) || 0) + 1);
-      if (city) cities.set(city, (cities.get(city) || 0) + 1);
-    });
-    const sortMap = (m: Map<string, number>) =>
-      Array.from(m.entries())
-        .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-        .map(([name, count]) => ({ name, count }));
-    return {
-      regions: sortMap(regions),
-      states: sortMap(states),
-      cities: sortMap(cities),
-    };
-  }, [allProducts]);
-
-  const specIndex = useMemo(() => {
-    const pool = serverProducts.length > 0 ? serverProducts : allProducts;
-    const map = new Map<string, Map<string, number>>();
-    pool.forEach((p) => {
-      Object.entries(getSpecs(p)).forEach(([k, v]) => {
-        if (!map.has(k)) map.set(k, new Map());
-        const values = map.get(k)!;
-        values.set(v, (values.get(v) || 0) + 1);
-      });
-    });
-    return Array.from(map.entries())
-      .map(([key, values]) => ({
-        key,
-        values: Array.from(values.entries())
-          .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-          .slice(0, 24)
-          .map(([name, count]) => ({ name, count })),
-      }))
-      .filter((g) => g.values.length > 0)
-      .sort((a, b) => b.values.length - a.values.length || a.key.localeCompare(b.key))
-      .slice(0, 12);
-  }, [serverProducts, allProducts]);
-
-  const suggestions = apiSuggestions;
-  useEffect(() => {
-    setActiveSuggest(0);
-  }, [suggestions]);
-
-  const movingNow = useMemo(
-    () => sortProducts(allProducts, "views").slice(0, MOVING_NOW_MAX),
-    [allProducts],
-  );
-
-  const applyLoc = useCallback(
-    (list: Product[]) =>
-      list.filter((p) => {
-        const parts = locParts(p);
-        if (loc.region && parts.region.toLowerCase() !== loc.region.toLowerCase())
-          return false;
-        if (loc.state && parts.state.toLowerCase() !== loc.state.toLowerCase())
-          return false;
-        if (loc.city && parts.city.toLowerCase() !== loc.city.toLowerCase())
-          return false;
-        return true;
-      }),
-    [loc],
-  );
-
-  const applySpecs = useCallback(
-    (list: Product[]) => {
-      const active = Object.entries(specs).filter(([, vals]) => vals?.length);
-      if (!active.length) return list;
-      return list.filter((p) => {
-        const s = getSpecs(p);
-        return active.every(([k, vals]) =>
-          vals.some((v) => String(s[k] || "").toLowerCase() === v.toLowerCase()),
-        );
-      });
-    },
-    [specs],
-  );
-
-  const applyPriceStock = useCallback(
-    (list: Product[]) => {
-      let products = list;
-      const min = Number(minPrice);
-      const max = Number(maxPrice);
-      if (Number.isFinite(min) && min > 0)
-        products = products.filter((p) => productPrice(p) >= min);
-      if (Number.isFinite(max) && max > 0)
-        products = products.filter((p) => productPrice(p) <= max);
-      if (inStockOnly)
-        products = products.filter((p) => {
-          if (Number((p as any).stock ?? 0) > 0) return true;
-          const variants = (p as any).variants;
-          return (
-            Array.isArray(variants) &&
-            variants.some(
-              (v: any) => v && v.available !== false && Number(v.stock) > 0,
-            )
-          );
-        });
-      return products;
-    },
-    [minPrice, maxPrice, inStockOnly],
-  );
-
-  const filteredProducts = useMemo(() => {
-    const q = debounced.toLowerCase();
-    if (!q && !activeCategory) return [] as Product[];
-    let products = serverProducts.length > 0 ? serverProducts : allProducts;
-    if (activeCategory) products = products.filter((p) => matchesFloor(p, activeCategory));
-    else if (q && serverProducts.length === 0)
-      products = products.filter((p) => matchesSearch(p, q));
-    products = applyPriceStock(applySpecs(applyLoc(products)));
-    let effective: SortKey = sortKey;
-    if (sortKey === "relevance") effective = q ? "views" : "newest";
-    return sortProducts(products, effective);
   }, [
     debounced,
     activeCategory,
-    serverProducts,
-    allProducts,
-    applyLoc,
-    applySpecs,
-    applyPriceStock,
     sortKey,
+    minPrice,
+    maxPrice,
+    inStockOnly,
+    marketplaceRegion,
   ]);
 
-  const live = useMemo(() => {
-    const q = debounced.toLowerCase();
-    const products = filteredProducts.slice(0, visibleCount);
-    const storesMap = new Map<string, SellerInfo>();
-    const brandSet = new Set<string>();
-    if (q) {
-      allProducts.forEach((p) => {
-        const s = getSeller(p);
-        if (s) {
-          const name = (s.storeName || s.name || "").toLowerCase();
-          if (name && textMatch(name, q)) storesMap.set(s._id, s);
-        }
-        const brand = String((p as any).brand || "").toLowerCase();
-        if (brand && textMatch(brand, q)) brandSet.add((p as any).brand);
-      });
-    }
-    return {
-      products,
-      totalProducts: filteredProducts.length,
-      stores: Array.from(storesMap.values()).slice(0, 12),
-      brands: Array.from(brandSet).slice(0, 12),
-      categories: CATEGORY_LIST.filter((c) => q && textMatch(c.toLowerCase(), q)).slice(
-        0,
-        12,
-      ),
-    };
-  }, [debounced, filteredProducts, visibleCount, allProducts]);
-
-  const isSearching = debounced.length > 0 || !!activeCategory;
-  const hasResults =
-    live.products.length > 0 ||
-    live.stores.length > 0 ||
-    live.brands.length > 0 ||
-    live.categories.length > 0;
-
-  const activeLabel = useMemo(() => {
-    if (!activeCategory) return debounced;
-    return FLOORS.find((f) => f.id === activeCategory)?.short || activeCategory;
-  }, [activeCategory, debounced]);
-
-  const pushRecent = useCallback((term: string) => {
-    const clean = term.trim();
-    if (!clean || clean.length < 2) return;
+  const pushRecent = useCallback((q: string) => {
+    const t = q.trim();
+    if (!t) return;
     setRecent((prev) => {
-      const next = [
-        clean,
-        ...prev.filter((r) => r.toLowerCase() !== clean.toLowerCase()),
-      ].slice(0, MAX_RECENT);
+      const next = [t, ...prev.filter((x) => x.toLowerCase() !== t.toLowerCase())].slice(
+        0,
+        MAX_RECENT,
+      );
       try {
         localStorage.setItem(RECENT_KEY, JSON.stringify(next));
       } catch {
@@ -1120,115 +1003,84 @@ function BrowseInner() {
     });
   }, []);
 
-  const clearAll = () => {
-    setQuery("");
-    setDebounced("");
-    setSuggestQ("");
-    setActiveCategory(null);
-    setServerProducts([]);
-    setCategoryLoading(false);
-    setMinPrice("");
-    setMaxPrice("");
-    setInStockOnly(false);
-    setDraftMin("");
-    setDraftMax("");
-    setDraftStock(false);
-    setLoc({ region: null, state: null, city: null });
-    setSpecs({});
-    setSortKey("relevance");
-    setVisibleCount(PAGE_SIZE);
-    setSuggestOpen(false);
-  };
-
-  const selectFloor = (id: string) => {
-    setQuery("");
-    setDebounced("");
-    setSuggestQ("");
-    setSuggestOpen(false);
-    setCategoryLoading(true);
-    setActiveCategory(id);
-    setTimeout(() => setCategoryLoading(false), 280);
-  };
-
-  const toggleSpecValue = (key: string, value: string) => {
-    setSpecs((prev) => {
-      const cur = prev[key] || [];
-      const has = cur.some((v) => v.toLowerCase() === value.toLowerCase());
-      const next = has
-        ? cur.filter((v) => v.toLowerCase() !== value.toLowerCase())
-        : [...cur, value];
-      const out = { ...prev };
-      if (next.length) out[key] = next;
-      else delete out[key];
-      return out;
-    });
-  };
-
-  const applySuggestion = (s: Suggestion) => {
-    if (s.kind === "category") {
-      selectFloor(s.value);
-      pushRecent(s.value);
-      return;
-    }
-    if (s.kind === "store" && s.meta) {
-      window.location.href = `/store/${s.meta}`;
-      return;
-    }
-    if (s.kind === "product" && s.meta) {
-      window.location.href = `/product/${s.meta}`;
-      return;
-    }
-    if (s.kind === "location") {
-      const kind = s.meta as "city" | "state" | "region" | undefined;
-      if (kind === "city") setLoc((p) => ({ ...p, city: s.value }));
-      else if (kind === "state") setLoc((p) => ({ ...p, state: s.value }));
-      else if (kind === "region") setLoc((p) => ({ ...p, region: s.value }));
-      else {
-        const cityHit = locationIndex.cities.find(
-          (c) => c.name.toLowerCase() === s.value.toLowerCase(),
-        );
-        const stateHit = locationIndex.states.find(
-          (c) => c.name.toLowerCase() === s.value.toLowerCase(),
-        );
-        const regionHit = locationIndex.regions.find(
-          (c) => c.name.toLowerCase() === s.value.toLowerCase(),
-        );
-        if (cityHit) setLoc((p) => ({ ...p, city: cityHit.name }));
-        else if (stateHit) setLoc((p) => ({ ...p, state: stateHit.name }));
-        else if (regionHit) setLoc((p) => ({ ...p, region: regionHit.name }));
+  const applySuggestion = useCallback(
+    (s: Suggestion) => {
+      setSuggestOpen(false);
+      if (s.kind === "category") {
+        setActiveCategory(s.value);
+        setQuery("");
+        setDebounced("");
+        setSuggestQ("");
+        return;
       }
+      if (s.kind === "location") {
+        const kind = (s.meta as "city" | "state" | "region") || "city";
+        setLoc((prev) => ({
+          ...prev,
+          [kind]: s.value,
+        }));
+        setQuery(s.value);
+        setDebounced(s.value);
+        pushRecent(s.value);
+        return;
+      }
+      if (s.kind === "spec" && s.meta) {
+        try {
+          const { key, value } = JSON.parse(s.meta);
+          setSpecs((prev) => {
+            const cur = prev[key] || [];
+            if (cur.some((x) => x.toLowerCase() === value.toLowerCase()))
+              return prev;
+            return { ...prev, [key]: [...cur, value] };
+          });
+        } catch {
+          /* */
+        }
+        setQuery(s.label);
+        setDebounced(s.label);
+        pushRecent(s.label);
+        return;
+      }
+      if (s.kind === "product" && s.meta) {
+        pushRecent(s.label);
+        router.push(`/product/${s.meta}`);
+        return;
+      }
+      if (s.kind === "store" && s.meta) {
+        pushRecent(s.label);
+        router.push(`/store/${s.meta}`);
+        return;
+      }
+      setActiveCategory(null);
       setQuery(s.value);
       setDebounced(s.value);
       pushRecent(s.value);
-      setSuggestOpen(false);
-      return;
-    }
-    if (s.kind === "spec") {
-      try {
-        const parsed = s.meta ? JSON.parse(s.meta) : null;
-        if (parsed?.key && parsed?.value) toggleSpecValue(parsed.key, parsed.value);
-        else {
-          const [key, ...rest] = s.value.split(":");
-          const val = rest.join(":").trim();
-          if (key && val) toggleSpecValue(key.trim(), val);
-        }
-      } catch {
-        const [key, ...rest] = s.value.split(":");
-        const val = rest.join(":").trim();
-        if (key && val) toggleSpecValue(key.trim(), val);
-      }
-      setQuery(s.label);
-      setDebounced(s.label);
-      pushRecent(s.label);
-      setSuggestOpen(false);
-      return;
-    }
-    setQuery(s.value);
-    setDebounced(s.value);
-    pushRecent(s.value);
-    setSuggestOpen(false);
+    },
+    [pushRecent, router],
+  );
+
+  const clearAll = useCallback(() => {
+    setQuery("");
+    setDebounced("");
+    setSuggestQ("");
     setActiveCategory(null);
-  };
+    setLoc({ region: null, state: null, city: null });
+    setMinPrice("");
+    setMaxPrice("");
+    setInStockOnly(false);
+    setSpecs({});
+    setSortKey("relevance");
+    setStructure("products_first");
+    setSuggestOpen(false);
+  }, []);
+
+  const selectFloor = useCallback((id: string) => {
+    setActiveCategory(id);
+    setQuery("");
+    setDebounced("");
+    setSuggestQ("");
+    setSuggestOpen(false);
+  }, []);
 
   const openPrice = () => {
     setDraftMin(minPrice);
@@ -1238,9 +1090,9 @@ function BrowseInner() {
   };
 
   const applyPrice = () => {
-    setMinPrice(draftMin.trim());
-    setMaxPrice(draftMax.trim());
-    setInStockOnly(!!draftStock);
+    setMinPrice(draftMin);
+    setMaxPrice(draftMax);
+    setInStockOnly(draftStock);
     setPriceOpen(false);
   };
 
@@ -1248,241 +1100,378 @@ function BrowseInner() {
     setDraftMin("");
     setDraftMax("");
     setDraftStock(false);
-    setMinPrice("");
-    setMaxPrice("");
-    setInStockOnly(false);
-    setPriceOpen(false);
   };
 
-  const locActive = !!(loc.region || loc.state || loc.city);
-  const priceActive = !!(minPrice || maxPrice) || inStockOnly;
-  const sortActive = sortKey !== "relevance";
-  const specActive = Object.values(specs).some((v) => v?.length);
-  const showFilterBar = isSearching;
+  const toggleSpecValue = useCallback((key: string, value: string) => {
+    setSpecs((prev) => {
+      const cur = prev[key] || [];
+      const has = cur.some((x) => x.toLowerCase() === value.toLowerCase());
+      const next = has
+        ? cur.filter((x) => x.toLowerCase() !== value.toLowerCase())
+        : [...cur, value];
+      const out = { ...prev };
+      if (next.length) out[key] = next;
+      else delete out[key];
+      return out;
+    });
+  }, []);
+
+  /* click outside suggest */
+  useEffect(() => {
+    const onDown = (e: MouseEvent) => {
+      if (!searchWrapRef.current?.contains(e.target as Node)) {
+        setSuggestOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, []);
+
+  const suggestions = apiSuggestions;
   const showSuggestPanel =
-    suggestOpen && (suggestions.length > 0 || query.trim().length > 0 || suggestLoading);
+    suggestOpen && (suggestLoading || suggestions.length > 0 || !!suggestQ);
 
-  /* blocks */
-  const renderProductsBlock = (products: Product[]) =>
-    products.length > 0 ? (
-      <div className="w-full">
-        <p className="mb-5 text-[11px] font-bold tracking-[0.12em] text-muted">PRODUCTS</p>
-        <div className={PRODUCT_GRID}>
-          {products.map((p) => (
-            <ProductCell key={p._id} product={p} />
-          ))}
-        </div>
-        {live.totalProducts > visibleCount ? (
-          <div className="mt-12 flex justify-center">
-            <button
-              type="button"
-              onClick={() => setVisibleCount((c) => c + PAGE_SIZE)}
-              className="rounded-xl border border-white/15 px-6 py-3 text-[11px] font-semibold tracking-[0.16em] uppercase text-white/80 transition hover:border-white/40 hover:text-white"
-            >
-              Show more
-            </button>
-          </div>
-        ) : null}
-      </div>
-    ) : null;
+  const isSearching = !!(
+    debounced ||
+    activeCategory ||
+    loc.region ||
+    loc.state ||
+    loc.city ||
+    minPrice ||
+    maxPrice ||
+    inStockOnly ||
+    Object.keys(specs).length
+  );
 
-  const renderStoresBlock = () =>
-    live.stores.length > 0 ? (
-      <div className="mt-12 first:mt-0">
-        <p className="mb-4 text-[11px] font-bold tracking-[0.12em] text-muted">STOREFRONTS</p>
-        <div className="-mx-3 flex gap-3 overflow-x-auto px-3 pb-1 scrollbar-none sm:mx-0 sm:px-0">
-          {live.stores.map((s) => (
-            <Link
-              key={s._id}
-              href={`/store/${s._id}`}
-              className="w-24 shrink-0 rounded-xl bg-white/[0.03] p-3 text-center transition hover:bg-white/[0.06] sm:w-28"
-            >
-              <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center overflow-hidden rounded-xl bg-white/5 sm:h-14 sm:w-14">
-                {s.storeLogo ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={s.storeLogo} alt="" className="h-full w-full object-cover" />
-                ) : (
-                  <Store className="h-5 w-5 text-white/30" />
-                )}
-              </div>
-              <p className="truncate text-[11px] font-semibold sm:text-xs">
-                {s.storeName || s.name || "Store"}
-              </p>
-            </Link>
-          ))}
-        </div>
-      </div>
-    ) : null;
+  const applyLoc = useCallback(
+    (list: Product[]) => {
+      if (!loc.region && !loc.state && !loc.city) return list;
+      return list.filter((p) => {
+        const parts = locParts(p);
+        if (
+          loc.region &&
+          parts.region.toLowerCase() !== loc.region.toLowerCase()
+        )
+          return false;
+        if (
+          loc.state &&
+          parts.state.toLowerCase() !== loc.state.toLowerCase()
+        )
+          return false;
+        if (loc.city && parts.city.toLowerCase() !== loc.city.toLowerCase())
+          return false;
+        return true;
+      });
+    },
+    [loc],
+  );
 
-  const renderCategoriesBlock = () =>
-    live.categories.length > 0 ? (
-      <div className="mt-12 first:mt-0">
-        <p className="mb-4 text-[11px] font-bold tracking-[0.12em] text-muted">CATEGORIES</p>
-        <div className="flex flex-wrap gap-2">
-          {live.categories.map((c) => (
-            <button
-              key={c}
-              type="button"
-              onClick={() => selectFloor(c)}
-              className="rounded-full bg-white/[0.04] px-3.5 py-2 text-[13px] font-semibold transition hover:bg-white/[0.08]"
-            >
-              {c}
-            </button>
-          ))}
-        </div>
-      </div>
-    ) : null;
+  const applySpecs = useCallback(
+    (list: Product[]) => {
+      const entries = Object.entries(specs).filter(([, v]) => v?.length);
+      if (!entries.length) return list;
+      return list.filter((p) => {
+        const ps = getSpecs(p);
+        return entries.every(([key, vals]) => {
+          const got = String(ps[key] || "").toLowerCase();
+          return vals.some((v) => got === v.toLowerCase());
+        });
+      });
+    },
+    [specs],
+  );
 
-  const renderBrandsBlock = () =>
-    live.brands.length > 0 ? (
-      <div className="mt-12 first:mt-0">
-        <p className="mb-4 text-[11px] font-bold tracking-[0.12em] text-muted">BRANDS</p>
-        <div className="flex flex-wrap gap-2">
-          {live.brands.map((b) => (
-            <button
-              key={b}
-              type="button"
-              onClick={() => {
-                setQuery(b);
-                setDebounced(b);
-                pushRecent(b);
-              }}
-              className="rounded-full bg-[#00E575]/10 px-3.5 py-2 text-[13px] font-semibold text-[#00E575] transition hover:bg-[#00E575]/15"
-            >
-              {b}
-            </button>
-          ))}
-        </div>
-      </div>
-    ) : null;
+  const applyPriceStock = useCallback(
+    (list: Product[]) => {
+      const min = minPrice ? parseFloat(minPrice) : NaN;
+      const max = maxPrice ? parseFloat(maxPrice) : NaN;
+      return list.filter((p) => {
+        const price = productPrice(p);
+        if (Number.isFinite(min) && price < min) return false;
+        if (Number.isFinite(max) && price > max) return false;
+        if (inStockOnly) {
+          const stock = Number((p as any).stock ?? (p as any).quantity ?? 1);
+          if (Number.isFinite(stock) && stock <= 0) return false;
+        }
+        return true;
+      });
+    },
+    [minPrice, maxPrice, inStockOnly],
+  );
+
+  const basePool = useMemo(() => {
+    if (debounced || activeCategory) return serverProducts;
+    return allProducts;
+  }, [debounced, activeCategory, serverProducts, allProducts]);
+
+  const filtered = useMemo(() => {
+    let list = basePool;
+    if (activeCategory && !debounced) {
+      list = list.filter((p) => matchesFloor(p, activeCategory));
+    }
+    if (debounced) {
+      list = list.filter((p) => matchesSearch(p, debounced));
+    }
+    list = applyLoc(list);
+    list = applySpecs(list);
+    list = applyPriceStock(list);
+    return sortProducts(list, sortKey);
+  }, [
+    basePool,
+    activeCategory,
+    debounced,
+    applyLoc,
+    applySpecs,
+    applyPriceStock,
+    sortKey,
+  ]);
+
+  const live = useMemo(() => {
+    const products = filtered.slice(0, visibleCount);
+    const storeMap = new Map<string, { id: string; name: string; logo?: string; count: number }>();
+    const brandSet = new Set<string>();
+    const catSet = new Set<string>();
+
+    filtered.forEach((p) => {
+      const s = getSeller(p);
+      if (s) {
+        const name = s.storeName || s.name || "Store";
+        const cur = storeMap.get(s._id);
+        if (cur) cur.count += 1;
+        else
+          storeMap.set(s._id, {
+            id: s._id,
+            name,
+            logo: s.storeLogo,
+            count: 1,
+          });
+      }
+      const b = String((p as any).brand || "").trim();
+      if (b) brandSet.add(b);
+      const c = categoryOf(p);
+      if (c) catSet.add(c);
+    });
+
+    return {
+      products,
+      totalProducts: filtered.length,
+      stores: Array.from(storeMap.values()).slice(0, 12),
+      brands: Array.from(brandSet).slice(0, 16),
+      categories: Array.from(catSet).slice(0, 12),
+    };
+  }, [filtered, visibleCount]);
+
+  const movingNow = useMemo(
+    () =>
+      sortProducts(allProducts, "views").slice(0, MOVING_NOW_MAX),
+    [allProducts],
+  );
+
+  const locationIndex = useMemo(() => {
+    const regions = new Map<string, number>();
+    const states = new Map<string, number>();
+    const cities = new Map<string, number>();
+    const pool = filtered.length ? filtered : allProducts;
+    pool.forEach((p) => {
+      const parts = locParts(p);
+      if (parts.region)
+        regions.set(parts.region, (regions.get(parts.region) || 0) + 1);
+      if (parts.state)
+        states.set(parts.state, (states.get(parts.state) || 0) + 1);
+      if (parts.city)
+        cities.set(parts.city, (cities.get(parts.city) || 0) + 1);
+    });
+    const toArr = (m: Map<string, number>) =>
+      Array.from(m.entries())
+        .map(([name, count]) => ({ name, count }))
+        .sort((a, b) => b.count - a.count);
+    return {
+      regions: toArr(regions),
+      states: toArr(states),
+      cities: toArr(cities),
+    };
+  }, [filtered, allProducts]);
+
+  const specIndex = useMemo(() => {
+    const groups = new Map<string, Map<string, number>>();
+    const pool = filtered.length ? filtered : allProducts;
+    pool.forEach((p) => {
+      Object.entries(getSpecs(p)).forEach(([k, v]) => {
+        if (!groups.has(k)) groups.set(k, new Map());
+        const m = groups.get(k)!;
+        m.set(v, (m.get(v) || 0) + 1);
+      });
+    });
+    return Array.from(groups.entries())
+      .map(([key, vals]) => ({
+        key,
+        values: Array.from(vals.entries())
+          .map(([name, count]) => ({ name, count }))
+          .sort((a, b) => b.count - a.count)
+          .slice(0, 24),
+      }))
+      .filter((g) => g.values.length > 0)
+      .slice(0, 12);
+  }, [filtered, allProducts]);
+
+  const locActive = !!(loc.region || loc.state || loc.city);
+  const priceActive = !!(minPrice || maxPrice || inStockOnly);
+  const specActive = Object.keys(specs).length > 0;
+  const sortActive = sortKey !== "relevance";
+  const showFilterBar = isSearching;
+  const hasResults =
+    live.totalProducts > 0 || live.stores.length > 0 || live.categories.length > 0;
+
+  const activeLabel = activeCategory
+    ? FLOORS.find((f) => f.id === activeCategory)?.short || activeCategory
+    : debounced
+      ? `“${debounced}”`
+      : "Results";
+
+  const chip =
+    "inline-flex items-center rounded-full px-3 py-1.5 text-[11px] font-semibold";
 
   const structuredResults = () => {
-    const products = renderProductsBlock(live.products);
-    const stores = renderStoresBlock();
-    const cats = renderCategoriesBlock();
-    const brands = renderBrandsBlock();
+    const productBlock =
+      live.products.length > 0 ? (
+        <div key="products">
+          <p className="mb-4 text-[11px] font-bold tracking-[0.12em] text-muted">
+            PRODUCTS
+          </p>
+          <div className={PRODUCT_GRID}>
+            {live.products.map((p) => (
+              <ProductCell key={p._id} product={p} />
+            ))}
+          </div>
+          {live.totalProducts > visibleCount ? (
+            <div className="mt-10 flex justify-center">
+              <button
+                type="button"
+                onClick={() => setVisibleCount((n) => n + PAGE_SIZE)}
+                className="rounded-xl border border-white/15 px-6 py-3 text-[11px] font-semibold tracking-[0.16em] uppercase text-white/80 transition hover:border-white/40"
+              >
+                Show more
+              </button>
+            </div>
+          ) : null}
+        </div>
+      ) : null;
+
+    const storeBlock =
+      live.stores.length > 0 ? (
+        <div key="stores" className="mt-10">
+          <p className="mb-4 text-[11px] font-bold tracking-[0.12em] text-muted">
+            STORES
+          </p>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
+            {live.stores.map((s) => (
+              <Link
+                key={s.id}
+                href={`/store/${s.id}`}
+                className="flex items-center gap-3 rounded-xl bg-white/[0.03] p-3 ring-1 ring-white/5 transition hover:bg-white/[0.06]"
+              >
+                {s.logo ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={s.logo}
+                    alt=""
+                    className="h-10 w-10 rounded-lg object-cover"
+                  />
+                ) : (
+                  <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#3B82F6]/15 text-[#60A5FA]">
+                    <Store className="h-4 w-4" />
+                  </span>
+                )}
+                <span className="min-w-0">
+                  <span className="block truncate text-sm font-semibold">
+                    {s.name}
+                  </span>
+                  <span className="text-[11px] text-white/40">
+                    {s.count} items
+                  </span>
+                </span>
+              </Link>
+            ))}
+          </div>
+        </div>
+      ) : null;
+
+    const categoryBlock =
+      live.categories.length > 0 ? (
+        <div key="categories" className="mt-10">
+          <p className="mb-4 text-[11px] font-bold tracking-[0.12em] text-muted">
+            CATEGORIES
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {live.categories.map((c) => (
+              <button
+                key={c}
+                type="button"
+                onClick={() => selectFloor(c)}
+                className="rounded-full bg-white/[0.04] px-3.5 py-2 text-[13px] transition hover:bg-white/[0.07]"
+              >
+                {c}
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null;
+
     if (structure === "stores_first")
       return (
         <>
-          {stores}
-          {products}
-          {cats}
-          {brands}
+          {storeBlock}
+          {productBlock}
+          {categoryBlock}
         </>
       );
     if (structure === "categories_first")
       return (
         <>
-          {cats}
-          {products}
-          {stores}
-          {brands}
+          {categoryBlock}
+          {productBlock}
+          {storeBlock}
         </>
       );
     return (
       <>
-        {products}
-        {stores}
-        {cats}
-        {brands}
+        {productBlock}
+        {storeBlock}
+        {categoryBlock}
       </>
     );
   };
 
-  const chip =
-    "rounded-full px-2.5 py-1 text-[11px] font-medium transition active:scale-[0.97]";
-
   return (
-    <div className="min-h-screen w-full overflow-x-hidden bg-bg text-text">
-      <style jsx global>{`
-        .plazore-product-cell,
-        .plazore-product-cell > *,
-        .plazore-product-cell a {
-          width: 100% !important;
-          max-width: 100% !important;
-          min-width: 0 !important;
-        }
-        .plazore-product-cell img {
-          width: 100%;
-        }
-        @keyframes ps-in {
-          from {
-            opacity: 0;
-            transform: translateY(-6px);
-          }
-          to {
-            opacity: 1;
-            transform: translateY(0);
-          }
-        }
-        .plazore-suggest-panel {
-          animation: ps-in 0.18s ease-out;
-        }
-      `}</style>
-
-      {/* header */}
-      <header className="sticky top-0 z-40 border-b border-white/[0.04] bg-bg/90 backdrop-blur-md">
-        <div className="mx-auto flex h-12 max-w-7xl items-center gap-2 px-3 sm:h-14 sm:gap-3 sm:px-6 lg:px-8">
-          <div className="flex shrink-0 items-center gap-1.5">
-            <Link
-              href="/lounge"
-              className="flex h-9 w-9 items-center justify-center md:hidden"
-              aria-label="Lounge"
-            >
-              <MenuLines />
-            </Link>
-            <Link href="/" className="flex items-center">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src="/logo-4.png"
-                alt="Plazore"
-                className="hidden h-8 w-auto object-contain sm:block lg:h-9"
-                draggable={false}
-              />
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src="/logo.png" alt="Plazore" className="h-6 w-6 object-contain sm:hidden" />
-            </Link>
-          </div>
-
-          <nav className="ml-4 hidden flex-1 items-center gap-5 md:flex lg:ml-10 lg:gap-8">
-            <Link
-              href="/"
-              className="text-xs tracking-[0.16em] uppercase text-secondary transition hover:text-text"
-            >
-              Mall
-            </Link>
-            <Link href="/browse" className="text-xs tracking-[0.16em] uppercase text-text">
-              Browse
-            </Link>
-            <Link
-              href="/lounge"
-              className="relative inline-flex items-center overflow-hidden rounded-lg border border-white/10 px-4 py-2 text-[11px] font-extrabold tracking-[0.2em] uppercase text-white"
-              style={{
-                background:
-                  "linear-gradient(135deg, #00E575 0%, #0ECF7A 40%, #3B82F6 100%)",
-              }}
-            >
-              Lounge
-            </Link>
-            <button
-              type="button"
-              onClick={() => setAppFeature("wishlist")}
-              className="text-xs tracking-[0.16em] uppercase text-secondary transition hover:text-text"
-            >
-              Wishlist
-            </button>
-          </nav>
-
+    <div className="min-h-screen bg-bg text-text">
+      {/* top bar */}
+      <header className="sticky top-0 z-40 border-b border-white/5 bg-bg/90 backdrop-blur-md">
+        <div className="mx-auto flex h-14 max-w-6xl items-center gap-3 px-3 sm:h-16 sm:px-4">
+          <Link
+            href="/lounge"
+            className="flex h-10 w-10 items-center justify-center rounded-xl text-white/70 transition hover:bg-white/5 hover:text-white"
+            aria-label="Menu"
+          >
+            <MenuLines />
+          </Link>
+          <Link href="/" className="flex shrink-0 items-center">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/logo-4.png"
+              alt="Plazore"
+              className="h-7 w-auto object-contain sm:h-8"
+            />
+          </Link>
+          <div className="flex-1" />
           <Link
             ref={bagRef}
             href="/cart"
-            className="relative ml-auto flex h-9 w-9 items-center justify-center sm:h-10 sm:w-10"
-            aria-label={`Bag${bagCount ? `, ${bagCount}` : ""}`}
-            data-plazore-cart-icon
+            className="relative flex h-10 w-10 items-center justify-center rounded-xl text-white/70 transition hover:bg-white/5 hover:text-white"
+            aria-label="Bag"
           >
-            <ShoppingBag className="h-5 w-5" strokeWidth={1.75} />
+            <ShoppingBag className="h-[18px] w-[18px]" strokeWidth={1.75} />
             {bagCount > 0 ? (
-              <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-[#00E575] px-1 text-[9px] font-bold text-[#041412]">
+              <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-[#00E575] px-1 text-[10px] font-bold text-black">
                 {bagCount > 99 ? "99+" : bagCount}
               </span>
             ) : null}
@@ -1490,16 +1479,12 @@ function BrowseInner() {
         </div>
       </header>
 
-      <div className="mx-auto w-full max-w-7xl px-3 pb-24 pt-5 sm:px-6 sm:pb-28 sm:pt-8 lg:px-8">
-        <h1 className="font-display text-2xl tracking-tight sm:text-3xl md:text-4xl">
-          Browse
-        </h1>
-
+      <div className="mx-auto max-w-6xl px-3 pb-16 pt-4 sm:px-4 sm:pt-6">
         {/* search */}
-        <div className="mt-5 flex flex-col gap-2.5 sm:mt-6 sm:flex-row sm:items-start sm:gap-3">
-          <div ref={searchWrapRef} className="relative min-w-0 flex-1">
-            <div className="relative flex h-12 items-center gap-2.5 rounded-2xl bg-[#0A0E14] px-3.5 ring-1 ring-[#00E575]/20 sm:h-13 sm:px-4">
-              <Search className="h-4 w-4 shrink-0 text-[#00E575]/80" strokeWidth={2} />
+        <div className="space-y-3">
+          <div ref={searchWrapRef} className="relative">
+            <div className="flex h-12 items-center gap-2.5 rounded-2xl bg-white/[0.04] px-3.5 ring-1 ring-white/10 transition focus-within:ring-[#00E575]/40 sm:h-13 sm:px-4">
+              <Search className="h-4 w-4 shrink-0 text-white/35" strokeWidth={2} />
               <input
                 value={query}
                 onChange={(e) => {
@@ -1519,7 +1504,9 @@ function BrowseInner() {
                   }
                   if (e.key === "ArrowDown") {
                     e.preventDefault();
-                    setActiveSuggest((i) => Math.min(i + 1, suggestions.length - 1));
+                    setActiveSuggest((i) =>
+                      Math.min(i + 1, suggestions.length - 1),
+                    );
                   } else if (e.key === "ArrowUp") {
                     e.preventDefault();
                     setActiveSuggest((i) => Math.max(i - 1, 0));
@@ -1541,7 +1528,11 @@ function BrowseInner() {
               {suggestLoading ? (
                 <span className="h-3.5 w-3.5 shrink-0 animate-spin rounded-full border border-transparent border-t-[#00E575] border-r-[#3B82F6]" />
               ) : null}
-              {(query || activeCategory || locActive || priceActive || specActive) && (
+              {(query ||
+                activeCategory ||
+                locActive ||
+                priceActive ||
+                specActive) && (
                 <button
                   type="button"
                   onClick={clearAll}
@@ -1553,11 +1544,9 @@ function BrowseInner() {
               )}
             </div>
 
-            {/* suggest panel — clean */}
             {showSuggestPanel ? (
-              <div className="plazore-suggest-panel absolute left-0 right-0 top-[calc(100%+6px)] z-50 overflow-hidden rounded-2xl bg-[#0A0E14]/98 ring-1 ring-white/10 shadow-2xl shadow-black/50 backdrop-blur-xl">
-                <div className="h-px w-full bg-gradient-to-r from-transparent via-[#00E575]/50 to-transparent" />
-
+              <div className="absolute left-0 right-0 top-[calc(100%+6px)] z-50 overflow-hidden rounded-2xl bg-[#0A0E14] ring-1 ring-white/10 shadow-xl">
+                <div className="h-px w-full bg-gradient-to-r from-transparent via-[#00E575]/40 to-transparent" />
                 {suggestLoading && suggestions.length === 0 ? (
                   <SuggestSpinner />
                 ) : suggestions.length === 0 ? (
@@ -1574,14 +1563,19 @@ function BrowseInner() {
                             type="button"
                             onMouseEnter={() => setActiveSuggest(i)}
                             onClick={() => applySuggestion(s)}
-                            className={`flex w-full items-center gap-3 px-3 py-2.5 text-left transition sm:gap-3.5 sm:px-3.5 sm:py-2.5 ${
-                              active ? "bg-white/[0.06]" : "hover:bg-white/[0.03]"
+                            className={`flex w-full items-center gap-3 px-3 py-2.5 text-left transition sm:gap-3.5 sm:px-3.5 ${
+                              active
+                                ? "bg-white/[0.06]"
+                                : "hover:bg-white/[0.03]"
                             }`}
                           >
                             <SuggestThumb s={s} />
                             <span className="min-w-0 flex-1">
                               <span className="block truncate text-[14px] font-medium text-white/95">
-                                <HighlightText text={s.label} query={suggestQ} />
+                                <HighlightText
+                                  text={s.label}
+                                  query={suggestQ}
+                                />
                               </span>
                               {s.sub ? (
                                 <span className="mt-0.5 block truncate text-[11px] text-white/35">
@@ -1637,7 +1631,9 @@ function BrowseInner() {
                   type="button"
                   onClick={b.open}
                   className={`h-11 rounded-xl px-3.5 text-[11px] font-semibold transition sm:h-12 sm:text-xs ${
-                    b.on ? b.onCls : "bg-white/[0.04] text-white/65 hover:bg-white/[0.07]"
+                    b.on
+                      ? b.onCls
+                      : "bg-white/[0.04] text-white/65 hover:bg-white/[0.07]"
                   }`}
                 >
                   {b.label}
@@ -1730,7 +1726,9 @@ function BrowseInner() {
         {/* body */}
         {!isSearching ? (
           <div className="mt-8 sm:mt-10">
-            <p className="text-[11px] font-bold tracking-[0.12em] text-muted">EXPLORE</p>
+            <p className="text-[11px] font-bold tracking-[0.12em] text-muted">
+              EXPLORE
+            </p>
             <div className="-mx-3 mt-3.5 overflow-x-auto px-3 pb-2 scrollbar-none sm:mx-0 sm:px-0">
               <div className="flex w-max gap-3">
                 {FLOORS.map((f) => (
@@ -1741,11 +1739,19 @@ function BrowseInner() {
                     className="relative h-36 w-24 shrink-0 overflow-hidden rounded-xl bg-surface text-left sm:h-40 sm:w-28"
                   >
                     {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={f.images[0]} alt="" className="absolute inset-0 h-full w-full object-cover" />
+                    <img
+                      src={f.images[0]}
+                      alt=""
+                      className="absolute inset-0 h-full w-full object-cover"
+                    />
                     <div className="absolute inset-0 bg-gradient-to-t from-bg via-bg/35 to-transparent" />
                     <div className="absolute inset-x-2 bottom-2">
-                      <p className="text-[12px] font-semibold leading-tight">{f.short}</p>
-                      <p className="mt-0.5 truncate text-[9px] text-white/50">{f.hint}</p>
+                      <p className="text-[12px] font-semibold leading-tight">
+                        {f.short}
+                      </p>
+                      <p className="mt-0.5 truncate text-[9px] text-white/50">
+                        {f.hint}
+                      </p>
                     </div>
                   </button>
                 ))}
@@ -1789,8 +1795,12 @@ function BrowseInner() {
             ) : null}
 
             <div className="mt-12">
-              <p className="text-[11px] font-bold tracking-[0.12em] text-muted">MOVING NOW</p>
-              <p className="mt-1 text-[12px] text-secondary">Highest viewed on Plazore</p>
+              <p className="text-[11px] font-bold tracking-[0.12em] text-muted">
+                MOVING NOW
+              </p>
+              <p className="mt-1 text-[12px] text-secondary">
+                Highest viewed on Plazore
+              </p>
               {loading ? (
                 <OrbLoader compact label="Loading…" />
               ) : movingNow.length === 0 ? (
@@ -1820,7 +1830,9 @@ function BrowseInner() {
           <div className="mt-8 sm:mt-10">
             <div className="mb-7 flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <p className="truncate text-base font-bold sm:text-lg">{activeLabel}</p>
+                <p className="truncate text-base font-bold sm:text-lg">
+                  {activeLabel}
+                </p>
                 <p className="mt-1 text-[11px] text-muted">
                   {[
                     live.totalProducts
@@ -1833,7 +1845,11 @@ function BrowseInner() {
                     .join(" · ")}
                 </p>
               </div>
-              <button type="button" onClick={clearAll} className="text-[13px] text-[#00E575]">
+              <button
+                type="button"
+                onClick={clearAll}
+                className="text-[13px] text-[#00E575]"
+              >
                 Clear
               </button>
             </div>
@@ -1850,10 +1866,14 @@ function BrowseInner() {
         )}
       </div>
 
-      {/* sheets — simplified surfaces */}
+      {/* sheets */}
       {sortOpen ? (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 md:items-center">
-          <button type="button" className="absolute inset-0" onClick={() => setSortOpen(false)} />
+          <button
+            type="button"
+            className="absolute inset-0"
+            onClick={() => setSortOpen(false)}
+          />
           <div className="relative max-h-[85vh] w-full max-w-md overflow-y-auto rounded-t-2xl bg-[#12151c] p-5 md:rounded-2xl md:ring-1 md:ring-white/10">
             <p className="text-lg font-bold">Sort & layout</p>
             <p className="mt-4 text-sm font-semibold text-white/50">Sort by</p>
@@ -1905,20 +1925,28 @@ function BrowseInner() {
 
       {priceOpen ? (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 md:items-center">
-          <button type="button" className="absolute inset-0" onClick={() => setPriceOpen(false)} />
+          <button
+            type="button"
+            className="absolute inset-0"
+            onClick={() => setPriceOpen(false)}
+          />
           <div className="relative w-full max-w-md rounded-t-2xl bg-[#12151c] p-5 md:rounded-2xl md:ring-1 md:ring-white/10">
             <p className="text-lg font-bold">Price</p>
             <div className="mt-5 flex gap-2">
               <input
                 value={draftMin}
-                onChange={(e) => setDraftMin(e.target.value.replace(/[^\d.]/g, ""))}
+                onChange={(e) =>
+                  setDraftMin(e.target.value.replace(/[^\d.]/g, ""))
+                }
                 placeholder="Min"
                 inputMode="decimal"
                 className="h-11 flex-1 rounded-xl bg-white/[0.04] px-3 text-sm outline-none ring-1 ring-white/10"
               />
               <input
                 value={draftMax}
-                onChange={(e) => setDraftMax(e.target.value.replace(/[^\d.]/g, ""))}
+                onChange={(e) =>
+                  setDraftMax(e.target.value.replace(/[^\d.]/g, ""))
+                }
                 placeholder="Max"
                 inputMode="decimal"
                 className="h-11 flex-1 rounded-xl bg-white/[0.04] px-3 text-sm outline-none ring-1 ring-white/10"
@@ -1954,7 +1982,11 @@ function BrowseInner() {
 
       {locOpen ? (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 md:items-center">
-          <button type="button" className="absolute inset-0" onClick={() => setLocOpen(false)} />
+          <button
+            type="button"
+            className="absolute inset-0"
+            onClick={() => setLocOpen(false)}
+          />
           <div className="relative max-h-[85vh] w-full max-w-md overflow-y-auto rounded-t-2xl bg-[#12151c] p-5 md:rounded-2xl md:ring-1 md:ring-white/10">
             <p className="text-lg font-bold">Location</p>
             <p className="mt-1 text-xs text-white/40">From inventory</p>
@@ -1966,11 +1998,17 @@ function BrowseInner() {
                     ? locationIndex.states
                     : locationIndex.cities.slice(0, 48);
               const field =
-                bucket === "regions" ? "region" : bucket === "states" ? "state" : "city";
+                bucket === "regions"
+                  ? "region"
+                  : bucket === "states"
+                    ? "state"
+                    : "city";
               if (!list.length) return null;
               return (
                 <div key={bucket}>
-                  <p className="mt-5 text-sm font-semibold capitalize text-white/50">{field}</p>
+                  <p className="mt-5 text-sm font-semibold capitalize text-white/50">
+                    {field}
+                  </p>
                   <div className="mt-2 flex flex-wrap gap-2">
                     {list.map((r) => {
                       const on = (loc as any)[field] === r.name;
@@ -2001,7 +2039,9 @@ function BrowseInner() {
             <div className="mt-6 flex gap-3">
               <button
                 type="button"
-                onClick={() => setLoc({ region: null, state: null, city: null })}
+                onClick={() =>
+                  setLoc({ region: null, state: null, city: null })
+                }
                 className="h-12 flex-1 rounded-xl bg-white/[0.04] font-semibold text-white/60"
               >
                 Reset
@@ -2020,16 +2060,24 @@ function BrowseInner() {
 
       {specOpen ? (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 md:items-center">
-          <button type="button" className="absolute inset-0" onClick={() => setSpecOpen(false)} />
+          <button
+            type="button"
+            className="absolute inset-0"
+            onClick={() => setSpecOpen(false)}
+          />
           <div className="relative max-h-[85vh] w-full max-w-md overflow-y-auto rounded-t-2xl bg-[#12151c] p-5 md:rounded-2xl md:ring-1 md:ring-white/10">
             <p className="text-lg font-bold">Specs</p>
-            <p className="mt-1 text-xs text-white/40">Multi-select from inventory</p>
+            <p className="mt-1 text-xs text-white/40">
+              Multi-select from inventory
+            </p>
             {specIndex.length === 0 ? (
               <p className="mt-6 text-sm text-white/40">No specs yet.</p>
             ) : (
               specIndex.map((group) => (
                 <div key={group.key} className="mt-5">
-                  <p className="text-sm font-semibold text-white/50">{group.key}</p>
+                  <p className="text-sm font-semibold text-white/50">
+                    {group.key}
+                  </p>
                   <div className="mt-2 flex flex-wrap gap-2">
                     {group.values.map((v) => {
                       const on = (specs[group.key] || []).some(
@@ -2075,7 +2123,10 @@ function BrowseInner() {
       ) : null}
 
       {appFeature ? (
-        <AppFeaturePrompt feature={appFeature} onClose={() => setAppFeature(null)} />
+        <AppFeaturePrompt
+          feature={appFeature}
+          onClose={() => setAppFeature(null)}
+        />
       ) : null}
     </div>
   );
