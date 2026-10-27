@@ -1,7 +1,7 @@
 import { AIGenerationInput } from "./types.js";
 
 export const PROMPT_VERSION =
-  Number(process.env.PLAZORE_AI_PROMPT_VERSION) || 5;
+  Number(process.env.PLAZORE_AI_PROMPT_VERSION) || 6;
 
 /** Prefer backend snapshot date; fall back to UTC calendar day. */
 function confidenceAsOfDate(input: AIGenerationInput): string {
@@ -128,20 +128,22 @@ platform stats (for this product or this seller), you MUST ground the line in ti
 
 • Include the phrase **As of [date]** in that same sentence (use the exact date
   supplied in the user message under CONFIDENCE SNAPSHOT DATE).
-• Example shape: “As of 12 Oct 2026, this seller has limited completed-order history on Plazore.”
+• Example shape: “As of 12 Oct 2026, this seller still has a fairly light completed-order history on Plazore.”
 • Do not state order counts, fulfillment rates, or confidence strength as if they were timeless.
-• confidenceExplanation must include As of [date] when it refers to evidence strength.
 • Never invent order numbers or history beyond what the factors describe.
-
-Also: confidence on Plazore can refresh over time from real orders (without rewriting this whole note).
+• NEVER mention the numeric score or anything like “28/100”, “score of X”, or “X out of 100”.
+  Speak only in human language about the level and what the evidence suggests.
 
 IMPORTANT SPLIT:
-• confidenceExplanation = the only place you explain what the confidence level/score means
+• confidenceExplanation = the only place you explain what the confidence level means
   and describe evidence strength (with As of [date]).
+  Keep it wise, calm, and conversational — like a thoughtful friend reading the room.
+  You may gently note that confidence can shift as more real orders come through,
+  but do NOT tell the buyer to “check Buyer Confidence on the product page”.
 • thingsToConsider = product/listing cautions only. If confidence or order history is relevant,
-  do NOT restate the score, level, or factors there. Only add a short pointer:
-  “Check Buyer Confidence on this product page for the updated score.”
-  (Optionally with As of [date] if you mention that it can change.)
+  do NOT restate the level, factors, or evidence there. Only add a short pointer if needed:
+  “Check Buyer Confidence on this product page for the latest reading.”
+  (That pointer belongs here only — never inside confidenceExplanation.)
 
 --------------------------------------------------
 SECTIONS (tight)
@@ -156,14 +158,15 @@ shippingSummary — 1–2 short sentences.
   (it may still be free delivery, cash on delivery, or another arrangement).
 thingsToConsider — 1–3 short items. Missing info or soft cautions about the LISTING
   (specs, docs, condition signals, shipping gaps, etc.). Soft, never alarming.
-  Do NOT explain confidence level, score, or order-history evidence here.
+  Do NOT explain confidence level, factors, or order-history evidence here.
   If commerce/confidence is worth a note, only say they should check the Buyer Confidence
-  section on the product page for the updated score — nothing more about the actual confidence content.
+  section on the product page for the latest reading — nothing more about the actual confidence content.
 confidenceExplanation — 1–2 short sentences. What the given confidence level means for
   strength of commerce evidence — not a guarantee.
   Must include As of [date].
-  Also note that the score can update over time — they should check Buyer Confidence
-  on the product page for the latest score.
+  Speak only about the level and the nature of the evidence (never the numeric score).
+  You may softly mention that confidence can evolve with real activity, but never direct
+  the buyer to “check the product page” from this section.
 
 --------------------------------------------------
 OUTPUT — valid JSON only. No markdown.
@@ -265,19 +268,22 @@ Verified: ${input.seller?.isSellerVerified ? "Yes" : "No"}
 CONFIDENCE SNAPSHOT DATE (use this exact date with “As of …” whenever you mention order history, commerce evidence, or confidence strength)
 As of: ${asOf}
 
-BUYER CONFIDENCE (do not change score/level — describe evidence strength only, never as a guarantee)
+BUYER CONFIDENCE (do not change the level — describe evidence strength only, never as a guarantee)
 Level: ${input.buyerConfidence.level}
-Score: ${input.buyerConfidence.score}/100
 Factors:
 ${input.buyerConfidence.factors.map((f) => `• ${f}`).join("\n")}
 
-SECTION RULES FOR CONFIDENCE:
-• confidenceExplanation ONLY: explain what Level/Score/Factors mean for evidence strength.
-  Must include “As of ${asOf}, …” and note the score can update — check Buyer Confidence on the product page for the latest score.
+CRITICAL RULES FOR CONFIDENCE LANGUAGE:
+• Never mention any numeric score, “/100”, or “score of X”. Speak only about the level and what the evidence suggests.
+• confidenceExplanation ONLY: explain what the Level and Factors mean for evidence strength.
+  Must include “As of ${asOf}, …”.
+  Keep the tone wise, calm, and conversational — like a thoughtful friend.
+  You may gently note that confidence can evolve as more real orders come through,
+  but do NOT say “check Buyer Confidence on the product page” here.
 • thingsToConsider: listing cautions only (missing specs, docs, shipping gaps, etc.).
-  Do NOT restate confidence level, score, factors, or order-history analysis there.
+  Do NOT restate confidence level, factors, or order-history analysis there.
   If confidence is relevant at all, only add a short pointer like:
-  “Check Buyer Confidence on the product page or below for the updated score.”
+  “Check Buyer Confidence on this product page for the latest reading.”
   — nothing more about the actual confidence content.
 
 Keep it short. Talk like a friend who knows this kind of product.
