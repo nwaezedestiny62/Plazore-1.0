@@ -343,12 +343,15 @@ const STRUCTURE_OPTIONS: { key: StructureOrder; label: string }[] = [
 const PRODUCT_GRID =
   "grid w-full grid-cols-2 gap-x-3 gap-y-8 sm:gap-x-5 sm:gap-y-10 md:grid-cols-3 md:gap-x-6 md:gap-y-11 lg:grid-cols-4 lg:gap-y-12 xl:grid-cols-5 xl:gap-x-7";
 
-function MenuLines() {
+/** Exact Mall.tsx CustomBarIcon */
+function CustomBarIcon({ className = "" }: { className?: string }) {
   return (
-    <span className="inline-flex flex-col justify-center gap-[5px]" aria-hidden>
-      <span className="block h-[1.5px] w-[18px] rounded-full bg-current" />
-      <span className="block h-[1.5px] w-[18px] rounded-full bg-current" />
-      <span className="block h-[1.5px] w-[18px] rounded-full bg-current" />
+    <span
+      className={`flex w-[22px] flex-col items-start gap-[5.5px] ${className}`}
+    >
+      <span className="block h-[2.6px] w-[22px] bg-current" />
+      <span className="block h-[2.6px] w-[15px] bg-current" />
+      <span className="block h-[2.6px] w-[22px] bg-current" />
     </span>
   );
 }
@@ -375,9 +378,7 @@ function OrbLoader({
   return (
     <div
       className={`flex flex-col items-center justify-center ${
-        compact
-          ? "py-16"
-          : "min-h-[45vh] py-20 sm:min-h-[55vh]"
+        compact ? "py-16" : "min-h-[45vh] py-20 sm:min-h-[55vh]"
       }`}
     >
       <div
@@ -478,7 +479,7 @@ const SuggestThumb = memo(function SuggestThumb({ s }: { s: Suggestion }) {
 
   if (img) {
     return (
-      <span className="relative h-12 w-12 shrink-0 overflow-hidden rounded-xl bg-white/5 sm:h-[52px] sm:w-[52px]">
+      <span className="relative h-12 w-12 shrink-0 overflow-hidden rounded-xl bg-white/[0.04] sm:h-[52px] sm:w-[52px]">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={img}
@@ -583,7 +584,6 @@ function BrowseInner() {
   const [suggestLoading, setSuggestLoading] = useState(false);
   const hydrated = useRef(false);
 
-  /* hydrate URL once */
   useEffect(() => {
     if (hydrated.current) return;
     hydrated.current = true;
@@ -621,7 +621,6 @@ function BrowseInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* URL sync */
   useEffect(() => {
     if (skipUrlWrite.current) return;
     const params = new URLSearchParams();
@@ -656,7 +655,6 @@ function BrowseInner() {
     router,
   ]);
 
-  /* bag target */
   useEffect(() => {
     const el = bagRef.current;
     if (!el || !flyCart?.registerBagTarget) return;
@@ -699,7 +697,6 @@ function BrowseInner() {
     };
   }, [refreshBag]);
 
-  /* initial products */
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -722,7 +719,6 @@ function BrowseInner() {
     };
   }, []);
 
-  /* dual debounce */
   useEffect(() => {
     const t = setTimeout(() => setSuggestQ(query.trim()), SUGGEST_MS);
     return () => clearTimeout(t);
@@ -748,7 +744,6 @@ function BrowseInner() {
     specs,
   ]);
 
-  /* suggestions */
   useEffect(() => {
     if (!suggestQ) {
       setApiSuggestions(
@@ -864,7 +859,6 @@ function BrowseInner() {
       return out.sort((a, b) => (b.score || 0) - (a.score || 0)).slice(0, 12);
     };
 
-    // show client immediately
     setApiSuggestions(buildClient());
 
     fetchSearchSuggest(suggestQ, { region: marketplaceRegion })
@@ -910,7 +904,6 @@ function BrowseInner() {
           };
         });
 
-        // merge API + client, prefer image rows
         const client = buildClient();
         const seen = new Set<string>();
         const merged: Suggestion[] = [];
@@ -940,7 +933,6 @@ function BrowseInner() {
       });
   }, [suggestQ, allProducts, recent, marketplaceRegion]);
 
-  /* server search */
   useEffect(() => {
     if (!debounced && !activeCategory) {
       setServerProducts([]);
@@ -990,10 +982,10 @@ function BrowseInner() {
     const t = q.trim();
     if (!t) return;
     setRecent((prev) => {
-      const next = [t, ...prev.filter((x) => x.toLowerCase() !== t.toLowerCase())].slice(
-        0,
-        MAX_RECENT,
-      );
+      const next = [
+        t,
+        ...prev.filter((x) => x.toLowerCase() !== t.toLowerCase()),
+      ].slice(0, MAX_RECENT);
       try {
         localStorage.setItem(RECENT_KEY, JSON.stringify(next));
       } catch {
@@ -1015,10 +1007,7 @@ function BrowseInner() {
       }
       if (s.kind === "location") {
         const kind = (s.meta as "city" | "state" | "region") || "city";
-        setLoc((prev) => ({
-          ...prev,
-          [kind]: s.value,
-        }));
+        setLoc((prev) => ({ ...prev, [kind]: s.value }));
         setQuery(s.value);
         setDebounced(s.value);
         pushRecent(s.value);
@@ -1116,7 +1105,6 @@ function BrowseInner() {
     });
   }, []);
 
-  /* click outside suggest */
   useEffect(() => {
     const onDown = (e: MouseEvent) => {
       if (!searchWrapRef.current?.contains(e.target as Node)) {
@@ -1228,7 +1216,10 @@ function BrowseInner() {
 
   const live = useMemo(() => {
     const products = filtered.slice(0, visibleCount);
-    const storeMap = new Map<string, { id: string; name: string; logo?: string; count: number }>();
+    const storeMap = new Map<
+      string,
+      { id: string; name: string; logo?: string; count: number }
+    >();
     const brandSet = new Set<string>();
     const catSet = new Set<string>();
 
@@ -1262,8 +1253,7 @@ function BrowseInner() {
   }, [filtered, visibleCount]);
 
   const movingNow = useMemo(
-    () =>
-      sortProducts(allProducts, "views").slice(0, MOVING_NOW_MAX),
+    () => sortProducts(allProducts, "views").slice(0, MOVING_NOW_MAX),
     [allProducts],
   );
 
@@ -1320,7 +1310,9 @@ function BrowseInner() {
   const sortActive = sortKey !== "relevance";
   const showFilterBar = isSearching;
   const hasResults =
-    live.totalProducts > 0 || live.stores.length > 0 || live.categories.length > 0;
+    live.totalProducts > 0 ||
+    live.stores.length > 0 ||
+    live.categories.length > 0;
 
   const activeLabel = activeCategory
     ? FLOORS.find((f) => f.id === activeCategory)?.short || activeCategory
@@ -1329,7 +1321,7 @@ function BrowseInner() {
       : "Results";
 
   const chip =
-    "inline-flex items-center rounded-full px-3 py-1.5 text-[11px] font-semibold";
+    "inline-flex items-center rounded-full bg-white/[0.06] px-3 py-1.5 text-[11px] font-semibold text-white/70 transition hover:bg-white/[0.1]";
 
   const structuredResults = () => {
     const productBlock =
@@ -1348,7 +1340,7 @@ function BrowseInner() {
               <button
                 type="button"
                 onClick={() => setVisibleCount((n) => n + PAGE_SIZE)}
-                className="rounded-xl border border-white/15 px-6 py-3 text-[11px] font-semibold tracking-[0.16em] uppercase text-white/80 transition hover:border-white/40"
+                className="rounded-xl bg-white/[0.06] px-6 py-3 text-[11px] font-semibold tracking-[0.16em] uppercase text-white/80 transition hover:bg-white/[0.1]"
               >
                 Show more
               </button>
@@ -1368,7 +1360,7 @@ function BrowseInner() {
               <Link
                 key={s.id}
                 href={`/store/${s.id}`}
-                className="flex items-center gap-3 rounded-xl bg-white/[0.03] p-3 ring-1 ring-white/5 transition hover:bg-white/[0.06]"
+                className="flex items-center gap-3 rounded-xl bg-white/[0.04] p-3 transition hover:bg-white/[0.07]"
               >
                 {s.logo ? (
                   // eslint-disable-next-line @next/next/no-img-element
@@ -1408,7 +1400,7 @@ function BrowseInner() {
                 key={c}
                 type="button"
                 onClick={() => selectFloor(c)}
-                className="rounded-full bg-white/[0.04] px-3.5 py-2 text-[13px] transition hover:bg-white/[0.07]"
+                className="rounded-full bg-white/[0.05] px-3.5 py-2 text-[13px] transition hover:bg-white/[0.09]"
               >
                 {c}
               </button>
@@ -1444,15 +1436,15 @@ function BrowseInner() {
 
   return (
     <div className="min-h-screen bg-bg text-text">
-      {/* top bar */}
-      <header className="sticky top-0 z-40 border-b border-white/5 bg-bg/90 backdrop-blur-md">
+      {/* header — no border */}
+      <header className="sticky top-0 z-40 bg-bg/90 backdrop-blur-md">
         <div className="mx-auto flex h-14 max-w-6xl items-center gap-3 px-3 sm:h-16 sm:px-4">
           <Link
             href="/lounge"
-            className="flex h-10 w-10 items-center justify-center rounded-xl text-white/70 transition hover:bg-white/5 hover:text-white"
+            className="flex h-10 w-10 items-center justify-center text-white/75 transition hover:text-white"
             aria-label="Menu"
           >
-            <MenuLines />
+            <CustomBarIcon />
           </Link>
           <Link href="/" className="flex shrink-0 items-center">
             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -1460,13 +1452,14 @@ function BrowseInner() {
               src="/logo-4.png"
               alt="Plazore"
               className="h-7 w-auto object-contain sm:h-8"
+              draggable={false}
             />
           </Link>
           <div className="flex-1" />
           <Link
             ref={bagRef}
             href="/cart"
-            className="relative flex h-10 w-10 items-center justify-center rounded-xl text-white/70 transition hover:bg-white/5 hover:text-white"
+            className="relative flex h-10 w-10 items-center justify-center text-white/75 transition hover:text-white"
             aria-label="Bag"
           >
             <ShoppingBag className="h-[18px] w-[18px]" strokeWidth={1.75} />
@@ -1480,11 +1473,14 @@ function BrowseInner() {
       </header>
 
       <div className="mx-auto max-w-6xl px-3 pb-16 pt-4 sm:px-4 sm:pt-6">
-        {/* search */}
         <div className="space-y-3">
+          {/* search — no border / no ring */}
           <div ref={searchWrapRef} className="relative">
-            <div className="flex h-12 items-center gap-2.5 rounded-2xl bg-white/[0.04] px-3.5 ring-1 ring-white/10 transition focus-within:ring-[#00E575]/40 sm:h-13 sm:px-4">
-              <Search className="h-4 w-4 shrink-0 text-white/35" strokeWidth={2} />
+            <div className="flex h-12 items-center gap-2.5 rounded-2xl bg-white/[0.05] px-3.5 transition focus-within:bg-white/[0.07] sm:h-[52px] sm:px-4">
+              <Search
+                className="h-4 w-4 shrink-0 text-white/35"
+                strokeWidth={2}
+              />
               <input
                 value={query}
                 onChange={(e) => {
@@ -1544,9 +1540,10 @@ function BrowseInner() {
               )}
             </div>
 
+            {/* suggest — no border, clean surface */}
             {showSuggestPanel ? (
-              <div className="absolute left-0 right-0 top-[calc(100%+6px)] z-50 overflow-hidden rounded-2xl bg-[#0A0E14] ring-1 ring-white/10 shadow-xl">
-                <div className="h-px w-full bg-gradient-to-r from-transparent via-[#00E575]/40 to-transparent" />
+              <div className="absolute left-0 right-0 top-[calc(100%+6px)] z-50 overflow-hidden rounded-2xl bg-[#0C1017] shadow-[0_16px_48px_rgba(0,0,0,0.55)]">
+                <div className="h-px w-full bg-gradient-to-r from-transparent via-[#00E575]/35 to-transparent" />
                 {suggestLoading && suggestions.length === 0 ? (
                   <SuggestSpinner />
                 ) : suggestions.length === 0 ? (
@@ -1633,7 +1630,7 @@ function BrowseInner() {
                   className={`h-11 rounded-xl px-3.5 text-[11px] font-semibold transition sm:h-12 sm:text-xs ${
                     b.on
                       ? b.onCls
-                      : "bg-white/[0.04] text-white/65 hover:bg-white/[0.07]"
+                      : "bg-white/[0.05] text-white/65 hover:bg-white/[0.08]"
                   }`}
                 >
                   {b.label}
@@ -1646,7 +1643,7 @@ function BrowseInner() {
                   className={`inline-flex h-11 items-center gap-1.5 rounded-xl px-3.5 text-[11px] font-semibold transition sm:h-12 sm:text-xs ${
                     specActive
                       ? "bg-cyan-500/15 text-cyan-300"
-                      : "bg-white/[0.04] text-white/65 hover:bg-white/[0.07]"
+                      : "bg-white/[0.05] text-white/65 hover:bg-white/[0.08]"
                   }`}
                 >
                   <SlidersHorizontal className="h-3.5 w-3.5" strokeWidth={2} />
@@ -1657,14 +1654,13 @@ function BrowseInner() {
           ) : null}
         </div>
 
-        {/* chips */}
         {(locActive || priceActive || specActive) && isSearching ? (
           <div className="mt-3 flex flex-wrap gap-2">
             {loc.region ? (
               <button
                 type="button"
                 onClick={() => setLoc((p) => ({ ...p, region: null }))}
-                className={`${chip} bg-[#3B82F6]/12 text-[#93C5FD]`}
+                className={chip}
               >
                 {loc.region} ×
               </button>
@@ -1673,7 +1669,7 @@ function BrowseInner() {
               <button
                 type="button"
                 onClick={() => setLoc((p) => ({ ...p, state: null }))}
-                className={`${chip} bg-[#3B82F6]/12 text-[#93C5FD]`}
+                className={chip}
               >
                 {loc.state} ×
               </button>
@@ -1682,7 +1678,7 @@ function BrowseInner() {
               <button
                 type="button"
                 onClick={() => setLoc((p) => ({ ...p, city: null }))}
-                className={`${chip} bg-[#3B82F6]/12 text-[#93C5FD]`}
+                className={chip}
               >
                 {loc.city} ×
               </button>
@@ -1694,7 +1690,7 @@ function BrowseInner() {
                   setMinPrice("");
                   setMaxPrice("");
                 }}
-                className={`${chip} bg-[#00E575]/10 text-[#34D399]`}
+                className={chip}
               >
                 {minPrice || "0"}–{maxPrice || "∞"} ×
               </button>
@@ -1703,7 +1699,7 @@ function BrowseInner() {
               <button
                 type="button"
                 onClick={() => setInStockOnly(false)}
-                className={`${chip} bg-[#00E575]/10 text-[#34D399]`}
+                className={chip}
               >
                 In stock ×
               </button>
@@ -1714,7 +1710,7 @@ function BrowseInner() {
                   key={`${k}-${v}`}
                   type="button"
                   onClick={() => toggleSpecValue(k, v)}
-                  className={`${chip} bg-cyan-500/10 text-cyan-300`}
+                  className={chip}
                 >
                   {k}: {v} ×
                 </button>
@@ -1723,7 +1719,6 @@ function BrowseInner() {
           </div>
         ) : null}
 
-        {/* body */}
         {!isSearching ? (
           <div className="mt-8 sm:mt-10">
             <p className="text-[11px] font-bold tracking-[0.12em] text-muted">
@@ -1785,7 +1780,7 @@ function BrowseInner() {
                         setDebounced(r);
                         pushRecent(r);
                       }}
-                      className="rounded-full bg-white/[0.04] px-3.5 py-2 text-[13px] transition hover:bg-white/[0.07]"
+                      className="rounded-full bg-white/[0.05] px-3.5 py-2 text-[13px] transition hover:bg-white/[0.09]"
                     >
                       {r}
                     </button>
@@ -1812,7 +1807,7 @@ function BrowseInner() {
                   <div className="mt-12 flex justify-center">
                     <Link
                       href="/shop?mode=trending"
-                      className="rounded-xl border border-white/15 px-6 py-3 text-[11px] font-semibold tracking-[0.16em] uppercase text-white/80 transition hover:border-white/40"
+                      className="rounded-xl bg-white/[0.06] px-6 py-3 text-[11px] font-semibold tracking-[0.16em] uppercase text-white/80 transition hover:bg-white/[0.1]"
                     >
                       Show more
                     </Link>
@@ -1863,7 +1858,7 @@ function BrowseInner() {
         )}
       </div>
 
-      {/* sheets */}
+      {/* sheets — no ring borders */}
       {sortOpen ? (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 md:items-center">
           <button
@@ -1871,7 +1866,7 @@ function BrowseInner() {
             className="absolute inset-0"
             onClick={() => setSortOpen(false)}
           />
-          <div className="relative max-h-[85vh] w-full max-w-md overflow-y-auto rounded-t-2xl bg-[#12151c] p-5 md:rounded-2xl md:ring-1 md:ring-white/10">
+          <div className="relative max-h-[85vh] w-full max-w-md overflow-y-auto rounded-t-2xl bg-[#12151c] p-5 md:rounded-2xl">
             <p className="text-lg font-bold">Sort & layout</p>
             <p className="mt-4 text-sm font-semibold text-white/50">Sort by</p>
             <div className="mt-2 space-y-1">
@@ -1880,10 +1875,10 @@ function BrowseInner() {
                   key={o.key}
                   type="button"
                   onClick={() => setSortKey(o.key)}
-                  className={`flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left text-sm ${
+                  className={`flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left text-sm transition ${
                     sortKey === o.key
                       ? "bg-[#00E575]/12 font-semibold text-[#00E575]"
-                      : "bg-white/[0.03] text-white/80"
+                      : "bg-white/[0.03] text-white/80 hover:bg-white/[0.05]"
                   }`}
                 >
                   {o.label}
@@ -1898,10 +1893,10 @@ function BrowseInner() {
                   key={o.key}
                   type="button"
                   onClick={() => setStructure(o.key)}
-                  className={`flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left text-sm ${
+                  className={`flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left text-sm transition ${
                     structure === o.key
                       ? "bg-[#00E575]/12 font-semibold text-[#00E575]"
-                      : "bg-white/[0.03] text-white/80"
+                      : "bg-white/[0.03] text-white/80 hover:bg-white/[0.05]"
                   }`}
                 >
                   {o.label}
@@ -1927,7 +1922,7 @@ function BrowseInner() {
             className="absolute inset-0"
             onClick={() => setPriceOpen(false)}
           />
-          <div className="relative w-full max-w-md rounded-t-2xl bg-[#12151c] p-5 md:rounded-2xl md:ring-1 md:ring-white/10">
+          <div className="relative w-full max-w-md rounded-t-2xl bg-[#12151c] p-5 md:rounded-2xl">
             <p className="text-lg font-bold">Price</p>
             <div className="mt-5 flex gap-2">
               <input
@@ -1937,7 +1932,7 @@ function BrowseInner() {
                 }
                 placeholder="Min"
                 inputMode="decimal"
-                className="h-11 flex-1 rounded-xl bg-white/[0.04] px-3 text-sm outline-none ring-1 ring-white/10"
+                className="h-11 flex-1 rounded-xl bg-white/[0.05] px-3 text-sm outline-none"
               />
               <input
                 value={draftMax}
@@ -1946,7 +1941,7 @@ function BrowseInner() {
                 }
                 placeholder="Max"
                 inputMode="decimal"
-                className="h-11 flex-1 rounded-xl bg-white/[0.04] px-3 text-sm outline-none ring-1 ring-white/10"
+                className="h-11 flex-1 rounded-xl bg-white/[0.05] px-3 text-sm outline-none"
               />
             </div>
             <label className="mt-5 flex items-center gap-3 text-sm">
@@ -1961,7 +1956,7 @@ function BrowseInner() {
               <button
                 type="button"
                 onClick={resetPrice}
-                className="h-12 flex-1 rounded-xl bg-white/[0.04] font-semibold text-white/60"
+                className="h-12 flex-1 rounded-xl bg-white/[0.05] font-semibold text-white/60"
               >
                 Reset
               </button>
@@ -1984,7 +1979,7 @@ function BrowseInner() {
             className="absolute inset-0"
             onClick={() => setLocOpen(false)}
           />
-          <div className="relative max-h-[85vh] w-full max-w-md overflow-y-auto rounded-t-2xl bg-[#12151c] p-5 md:rounded-2xl md:ring-1 md:ring-white/10">
+          <div className="relative max-h-[85vh] w-full max-w-md overflow-y-auto rounded-t-2xl bg-[#12151c] p-5 md:rounded-2xl">
             <p className="text-lg font-bold">Location</p>
             <p className="mt-1 text-xs text-white/40">From inventory</p>
             {(["regions", "states", "cities"] as const).map((bucket) => {
@@ -2019,10 +2014,10 @@ function BrowseInner() {
                               [field]: on ? null : r.name,
                             }))
                           }
-                          className={`rounded-full px-3 py-1.5 text-xs font-semibold ${
+                          className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${
                             on
                               ? "bg-[#3B82F6]/2 text-[#60A5FA]"
-                              : "bg-white/[0.04] text-white/65"
+                              : "bg-white/[0.05] text-white/65 hover:bg-white/[0.08]"
                           }`}
                         >
                           {r.name} · {r.count}
@@ -2039,7 +2034,7 @@ function BrowseInner() {
                 onClick={() =>
                   setLoc({ region: null, state: null, city: null })
                 }
-                className="h-12 flex-1 rounded-xl bg-white/[0.04] font-semibold text-white/60"
+                className="h-12 flex-1 rounded-xl bg-white/[0.05] font-semibold text-white/60"
               >
                 Reset
               </button>
@@ -2062,7 +2057,7 @@ function BrowseInner() {
             className="absolute inset-0"
             onClick={() => setSpecOpen(false)}
           />
-          <div className="relative max-h-[85vh] w-full max-w-md overflow-y-auto rounded-t-2xl bg-[#12151c] p-5 md:rounded-2xl md:ring-1 md:ring-white/10">
+          <div className="relative max-h-[85vh] w-full max-w-md overflow-y-auto rounded-t-2xl bg-[#12151c] p-5 md:rounded-2xl">
             <p className="text-lg font-bold">Specs</p>
             <p className="mt-1 text-xs text-white/40">
               Multi-select from inventory
@@ -2085,10 +2080,10 @@ function BrowseInner() {
                           key={v.name}
                           type="button"
                           onClick={() => toggleSpecValue(group.key, v.name)}
-                          className={`rounded-full px-3 py-1.5 text-xs font-semibold ${
+                          className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${
                             on
                               ? "bg-cyan-500/20 text-cyan-300"
-                              : "bg-white/[0.04] text-white/65"
+                              : "bg-white/[0.05] text-white/65 hover:bg-white/[0.08]"
                           }`}
                         >
                           {v.name} · {v.count}
@@ -2103,7 +2098,7 @@ function BrowseInner() {
               <button
                 type="button"
                 onClick={() => setSpecs({})}
-                className="h-12 flex-1 rounded-xl bg-white/[0.04] font-semibold text-white/60"
+                className="h-12 flex-1 rounded-xl bg-white/[0.05] font-semibold text-white/60"
               >
                 Reset
               </button>
