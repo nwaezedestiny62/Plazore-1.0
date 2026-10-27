@@ -10,7 +10,18 @@ import {
   useState,
   Suspense,
 } from "react";
-import { ShoppingBag, SlidersHorizontal, MapPin, Tag } from "lucide-react";
+import {
+  ShoppingBag,
+  SlidersHorizontal,
+  MapPin,
+  Tag,
+  Store,
+  Package,
+  Sparkles,
+  Clock,
+  Layers,
+  Building2,
+} from "lucide-react";
 import { AppFeaturePrompt, type AppFeature } from "@/components/app/AppFeaturePrompt";
 import { ProductCard } from "@/components/mall/ProductCard";
 import {
@@ -33,8 +44,8 @@ const RECENT_KEY = "plazore_recent_searches";
 const MAX_RECENT = 8;
 const MOVING_NOW_MAX = 14;
 const PAGE_SIZE = 20;
-const SUGGEST_DEBOUNCE_MS = 140;
-const SEARCH_DEBOUNCE_MS = 180;
+const SUGGEST_DEBOUNCE_MS = 110;
+const SEARCH_DEBOUNCE_MS = 160;
 
 type SellerInfo = {
   _id: string;
@@ -61,7 +72,6 @@ type LocFilter = {
   city: string | null;
 };
 
-/** Multi-select: key → list of selected values */
 type SpecFilter = Record<string, string[]>;
 
 type SuggestionKind = SearchSuggestItem["kind"] | "recent";
@@ -74,6 +84,7 @@ type Suggestion = {
   value: string;
   meta?: string;
   image?: string;
+  score?: number;
 };
 
 function categoryOf(p: Product) {
@@ -197,6 +208,20 @@ function textMatch(hay: string, q: string) {
   return tokens.every((t) => h.includes(t));
 }
 
+/** Smarter relevance score for ranking suggestions */
+function matchScore(label: string, q: string): number {
+  const h = (label || "").toLowerCase().trim();
+  const ql = q.toLowerCase().trim();
+  if (!ql || !h) return 0;
+  if (h === ql) return 100;
+  if (h.startsWith(ql)) return 80;
+  if (h.includes(ql)) return 60;
+  const tokens = ql.split(/\s+/).filter((t) => t.length > 1);
+  if (!tokens.length) return 0;
+  const hits = tokens.filter((t) => h.includes(t)).length;
+  return (hits / tokens.length) * 40;
+}
+
 function matchesSearch(p: Product, q: string) {
   if (!q) return true;
   const ql = q.toLowerCase().trim();
@@ -282,7 +307,14 @@ function resolveCategoryParam(active: string | null): string | undefined {
   return active;
 }
 
-/** Highlight matched tokens in suggestion label */
+function floorImageForCategory(name: string): string | undefined {
+  const n = name.toLowerCase();
+  const floor =
+    FLOORS.find((f) => f.id === n || f.short.toLowerCase() === n) ||
+    FLOORS.find((f) => f.match.some((m) => m.toLowerCase() === n));
+  return floor?.images?.[0];
+}
+
 function HighlightText({ text, query }: { text: string; query: string }) {
   const q = query.trim();
   if (!q || !text) return <>{text}</>;
@@ -295,19 +327,22 @@ function HighlightText({ text, query }: { text: string; query: string }) {
   const parts = text.split(re);
   return (
     <>
-      {parts.map((part, i) =>
-        re.test(part) ? (
+      {parts.map((part, i) => {
+        const isHit = tokens.some(
+          (t) => part.toLowerCase() === t.replace(/\\/g, "").toLowerCase(),
+        );
+        return isHit ? (
           <span
             key={i}
             className="font-semibold text-[#00E575]"
-            style={{ textShadow: "0 0 12px rgba(0,229,117,0.35)" }}
+            style={{ textShadow: "0 0 14px rgba(0,229,117,0.45)" }}
           >
             {part}
           </span>
         ) : (
           <span key={i}>{part}</span>
-        ),
-      )}
+        );
+      })}
     </>
   );
 }
@@ -350,7 +385,13 @@ function ProductCell({ product }: { product: Product }) {
   );
 }
 
-function OrbLoader({ label, compact = false }: { label?: string; compact?: boolean }) {
+function OrbLoader({
+  label,
+  compact = false,
+}: {
+  label?: string;
+  compact?: boolean;
+}) {
   return (
     <div
       className={`flex flex-col items-center justify-center ${
@@ -374,35 +415,76 @@ function OrbLoader({ label, compact = false }: { label?: string; compact?: boole
           <img
             src="/logo.png"
             alt=""
-            className={`object-contain ${compact ? "h-5 w-5 sm:h-6 sm:w-6" : "h-7 w-7 sm:h-8 sm:w-8"}`}
+            className={`object-contain ${
+              compact ? "h-5 w-5 sm:h-6 sm:w-6" : "h-7 w-7 sm:h-8 sm:w-8"
+            }`}
           />
         </div>
       </div>
       {label ? (
-        <p className="mt-5 text-center text-[13px] text-muted sm:text-sm">{label}</p>
+        <p className="mt-5 text-center text-[13px] text-muted sm:text-sm">
+          {label}
+        </p>
       ) : null}
     </div>
   );
 }
 
+/** Tiny neon spinner for suggest panel */
+function SuggestSpinner() {
+  return (
+    <div className="flex items-center justify-center gap-3 px-4 py-6">
+      <span className="relative flex h-5 w-5">
+        <span className="absolute inset-0 animate-spin rounded-full border-[1.5px] border-transparent border-t-[#00E575] border-r-[#3B82F6]" />
+        <span className="absolute inset-[3px] rounded-full bg-[#00E575]/15 shadow-[0_0_12px_rgba(0,229,117,0.4)]" />
+      </span>
+      <span className="h-1 w-1 animate-pulse rounded-full bg-[#00E575]/70" />
+      <span className="h-1 w-1 animate-pulse rounded-full bg-[#3B82F6]/70 [animation-delay:120ms]" />
+      <span className="h-1 w-1 animate-pulse rounded-full bg-[#00E575]/50 [animation-delay:240ms]" />
+    </div>
+  );
+}
+
+function kindIcon(kind: SuggestionKind) {
+  const cls = "h-4 w-4";
+  switch (kind) {
+    case "product":
+      return <Package className={cls} strokeWidth={1.75} />;
+    case "store":
+      return <Store className={cls} strokeWidth={1.75} />;
+    case "brand":
+      return <Sparkles className={cls} strokeWidth={1.75} />;
+    case "category":
+      return <Layers className={cls} strokeWidth={1.75} />;
+    case "spec":
+      return <Tag className={cls} strokeWidth={1.75} />;
+    case "location":
+      return <MapPin className={cls} strokeWidth={1.75} />;
+    case "recent":
+      return <Clock className={cls} strokeWidth={1.75} />;
+    default:
+      return <Building2 className={cls} strokeWidth={1.75} />;
+  }
+}
+
 function kindAccent(kind: SuggestionKind) {
   switch (kind) {
     case "product":
-      return "from-[#00E575]/25 to-[#3B82F6]/15 text-[#00E575]";
+      return "from-[#00E575]/30 to-[#3B82F6]/15 text-[#00E575] ring-[#00E575]/25";
     case "store":
-      return "from-[#3B82F6]/25 to-[#00E575]/10 text-[#60A5FA]";
+      return "from-[#3B82F6]/30 to-[#00E575]/10 text-[#60A5FA] ring-[#3B82F6]/25";
     case "brand":
-      return "from-[#00E575]/20 to-transparent text-[#34D399]";
+      return "from-[#00E575]/20 to-transparent text-[#34D399] ring-[#00E575]/20";
     case "category":
-      return "from-[#3B82F6]/20 to-transparent text-[#93C5FD]";
+      return "from-[#3B82F6]/20 to-transparent text-[#93C5FD] ring-[#3B82F6]/20";
     case "spec":
-      return "from-[#22D3EE]/20 to-[#00E575]/10 text-[#67E8F9]";
+      return "from-[#22D3EE]/25 to-[#00E575]/10 text-[#67E8F9] ring-[#22D3EE]/25";
     case "location":
-      return "from-[#A78BFA]/20 to-[#3B82F6]/10 text-[#C4B5FD]";
+      return "from-[#A78BFA]/25 to-[#3B82F6]/10 text-[#C4B5FD] ring-[#A78BFA]/25";
     case "recent":
-      return "from-white/10 to-transparent text-white/50";
+      return "from-white/10 to-transparent text-white/45 ring-white/10";
     default:
-      return "from-white/10 to-transparent text-white/60";
+      return "from-white/10 to-transparent text-white/55 ring-white/10";
   }
 }
 
@@ -425,6 +507,42 @@ function kindLabel(kind: SuggestionKind) {
     default:
       return "";
   }
+}
+
+function SuggestThumb({
+  s,
+}: {
+  s: Suggestion;
+}) {
+  const [broken, setBroken] = useState(false);
+  const img = !broken ? s.image : undefined;
+
+  if (img) {
+    return (
+      <span className="relative h-11 w-11 shrink-0 overflow-hidden rounded-xl ring-1 ring-white/10 sm:h-12 sm:w-12">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={img}
+          alt=""
+          className="h-full w-full object-cover"
+          onError={() => setBroken(true)}
+          draggable={false}
+        />
+        <span
+          aria-hidden
+          className="pointer-events-none absolute inset-0 bg-gradient-to-tr from-black/25 to-transparent"
+        />
+      </span>
+    );
+  }
+
+  return (
+    <span
+      className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br ring-1 sm:h-12 sm:w-12 ${kindAccent(s.kind)}`}
+    >
+      {kindIcon(s.kind)}
+    </span>
+  );
 }
 
 function parseSpecsFromParams(sp: URLSearchParams): SpecFilter {
@@ -490,7 +608,6 @@ function BrowseInner() {
   const [suggestLoading, setSuggestLoading] = useState(false);
   const hydrated = useRef(false);
 
-  // ── Hydrate from URL once ───────────────────────────────────
   useEffect(() => {
     if (hydrated.current) return;
     hydrated.current = true;
@@ -522,14 +639,12 @@ function BrowseInner() {
     setInStockOnly(stock);
     if (SORT_OPTIONS.some((o) => o.key === sort)) setSortKey(sort);
     setSpecs(parsedSpecs);
-    // allow URL writes after first paint
     requestAnimationFrame(() => {
       skipUrlWrite.current = false;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ── Write filters → URL ─────────────────────────────────────
   useEffect(() => {
     if (skipUrlWrite.current) return;
     const params = new URLSearchParams();
@@ -547,7 +662,7 @@ function BrowseInner() {
     });
     const qs = params.toString();
     const next = qs ? `${pathname}?${qs}` : pathname;
-    const current = `${pathname}${window.location.search}`;
+    const current = `${pathname}${typeof window !== "undefined" ? window.location.search : ""}`;
     if (next !== current) {
       router.replace(next, { scroll: false });
     }
@@ -597,7 +712,10 @@ function BrowseInner() {
     return () => {
       window.removeEventListener("storage", onStorage);
       window.removeEventListener("plazore-cart", onStorage as EventListener);
-      window.removeEventListener("plazore-cart-change", onStorage as EventListener);
+      window.removeEventListener(
+        "plazore-cart-change",
+        onStorage as EventListener,
+      );
       clearInterval(t);
     };
   }, [refreshBag]);
@@ -638,53 +756,191 @@ function BrowseInner() {
     setVisibleCount(PAGE_SIZE);
   }, [debounced, activeCategory, sortKey, minPrice, maxPrice, inStockOnly, loc, specs]);
 
-  // ── API-backed suggestions ──────────────────────────────────
+  // Intelligent suggestions: API + client enrichment + ranking + images
   useEffect(() => {
     if (!suggestQ) {
       setApiSuggestions(
-        recent.slice(0, 5).map((r, i) => ({
+        recent.slice(0, 6).map((r, i) => ({
           id: `recent-${i}`,
           kind: "recent" as const,
           label: r,
           value: r,
+          score: 10,
         })),
       );
       setSuggestLoading(false);
       return;
     }
+
     let cancelled = false;
     setSuggestLoading(true);
-    fetchSearchSuggest(suggestQ, { region: marketplaceRegion }).then((data) => {
-      if (cancelled) return;
-      const items: Suggestion[] = (data.items || []).map((it) => ({
-        id: it.id,
-        kind: it.kind,
-        label: it.label,
-        sub: it.sub,
-        value: it.value,
-        meta: it.meta,
-        image: it.image,
-      }));
-      // Client fallback enrichment if API empty
-      if (!items.length && allProducts.length) {
-        const ql = suggestQ.toLowerCase();
-        allProducts
-          .filter((p) => textMatch((p.name || "").toLowerCase(), ql))
-          .slice(0, 5)
-          .forEach((p) =>
-            items.push({
-              id: `p-${p._id}`,
-              kind: "product",
-              label: p.name || "Product",
-              sub: (p as any).brand || categoryOf(p),
-              value: p.name || "",
-              meta: p._id,
-            }),
-          );
-      }
-      setApiSuggestions(items.slice(0, 14));
-      setSuggestLoading(false);
-    });
+
+    const buildClientFallback = (): Suggestion[] => {
+      const ql = suggestQ.toLowerCase();
+      const out: Suggestion[] = [];
+      const seen = new Set<string>();
+
+      const push = (s: Suggestion) => {
+        const k = `${s.kind}:${s.value.toLowerCase()}`;
+        if (seen.has(k)) return;
+        seen.add(k);
+        out.push(s);
+      };
+
+      // Products with images
+      allProducts
+        .map((p) => ({
+          p,
+          score:
+            matchScore(p.name || "", suggestQ) * 1.2 +
+            matchScore(String((p as any).brand || ""), suggestQ) * 0.4,
+        }))
+        .filter((x) => x.score > 8)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 6)
+        .forEach(({ p, score }) =>
+          push({
+            id: `p-${p._id}`,
+            kind: "product",
+            label: p.name || "Product",
+            sub: (p as any).brand || categoryOf(p) || undefined,
+            value: p.name || "",
+            meta: p._id,
+            image: p.images?.[0],
+            score,
+          }),
+        );
+
+      // Stores
+      const stores = new Map<string, SellerInfo>();
+      allProducts.forEach((p) => {
+        const s = getSeller(p);
+        if (!s) return;
+        const name = (s.storeName || s.name || "").trim();
+        if (name && textMatch(name.toLowerCase(), ql)) stores.set(s._id, s);
+      });
+      Array.from(stores.values())
+        .slice(0, 4)
+        .forEach((s) =>
+          push({
+            id: `s-${s._id}`,
+            kind: "store",
+            label: s.storeName || s.name || "Store",
+            sub: "Storefront",
+            value: s.storeName || s.name || "",
+            meta: s._id,
+            image: s.storeLogo,
+            score: matchScore(s.storeName || s.name || "", suggestQ) + 5,
+          }),
+        );
+
+      // Brands
+      const brands = new Set<string>();
+      allProducts.forEach((p) => {
+        const b = String((p as any).brand || "").trim();
+        if (b && textMatch(b.toLowerCase(), ql)) brands.add(b);
+      });
+      Array.from(brands)
+        .slice(0, 4)
+        .forEach((b, i) =>
+          push({
+            id: `b-${i}-${b}`,
+            kind: "brand",
+            label: b,
+            sub: "Brand",
+            value: b,
+            score: matchScore(b, suggestQ) + 3,
+          }),
+        );
+
+      // Categories + floor images
+      CATEGORY_LIST.filter((c) => textMatch(c.toLowerCase(), ql))
+        .slice(0, 4)
+        .forEach((c) =>
+          push({
+            id: `c-${c}`,
+            kind: "category",
+            label: c,
+            sub: "Category",
+            value: c,
+            image: floorImageForCategory(c),
+            score: matchScore(c, suggestQ) + 2,
+          }),
+        );
+
+      return out;
+    };
+
+    fetchSearchSuggest(suggestQ, { region: marketplaceRegion })
+      .then((data) => {
+        if (cancelled) return;
+
+        const items: Suggestion[] = (data.items || []).map((it) => {
+          let image = it.image;
+          // Enrich category with floor art
+          if (it.kind === "category" && !image) {
+            image = floorImageForCategory(it.label || it.value);
+          }
+          // Enrich product images from API product list if missing
+          if (it.kind === "product" && !image && it.meta) {
+            const hit = (data.products || []).find(
+              (p: any) => String(p._id) === String(it.meta),
+            );
+            image = hit?.images?.[0];
+          }
+          // Enrich store logos
+          if (it.kind === "store" && !image && it.meta) {
+            const hit = (data.stores || []).find(
+              (s: any) => String(s._id) === String(it.meta),
+            );
+            image = hit?.storeLogo;
+          }
+          return {
+            id: it.id,
+            kind: it.kind,
+            label: it.label,
+            sub: it.sub,
+            value: it.value,
+            meta: it.meta,
+            image,
+            score:
+              matchScore(it.label, suggestQ) +
+              (it.kind === "product" ? 12 : 0) +
+              (it.kind === "store" ? 8 : 0) +
+              (image ? 4 : 0),
+          };
+        });
+
+        // Merge client fallback for completeness
+        const client = buildClientFallback();
+        const seen = new Set(items.map((i) => `${i.kind}:${i.value.toLowerCase()}`));
+        for (const c of client) {
+          const k = `${c.kind}:${c.value.toLowerCase()}`;
+          if (seen.has(k)) {
+            // prefer image if API missed it
+            const existing = items.find(
+              (i) => `${i.kind}:${i.value.toLowerCase()}` === k,
+            );
+            if (existing && !existing.image && c.image) existing.image = c.image;
+            continue;
+          }
+          seen.add(k);
+          items.push(c);
+        }
+
+        items.sort((a, b) => (b.score || 0) - (a.score || 0));
+        setApiSuggestions(items.slice(0, 12));
+        setSuggestLoading(false);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        const client = buildClientFallback().sort(
+          (a, b) => (b.score || 0) - (a.score || 0),
+        );
+        setApiSuggestions(client.slice(0, 12));
+        setSuggestLoading(false);
+      });
+
     return () => {
       cancelled = true;
     };
@@ -711,7 +967,20 @@ function BrowseInner() {
       region: loc.region || undefined,
     }).then((products) => {
       if (!cancelled) {
-        setServerProducts(products);
+        // Client re-rank by text relevance when q present
+        let list = products;
+        if (hasQuery) {
+          list = [...products].sort((a, b) => {
+            const sa =
+              matchScore(a.name || "", debounced) * 2 +
+              matchScore(String((a as any).brand || ""), debounced);
+            const sb =
+              matchScore(b.name || "", debounced) * 2 +
+              matchScore(String((b as any).brand || ""), debounced);
+            return sb - sa || viewScore(b) - viewScore(a);
+          });
+        }
+        setServerProducts(list);
         setSearchLoading(false);
       }
     });
@@ -771,7 +1040,10 @@ function BrowseInner() {
           .map(([name, count]) => ({ name, count })),
       }))
       .filter((g) => g.values.length > 0)
-      .sort((a, b) => b.values.length - a.values.length || a.key.localeCompare(b.key))
+      .sort(
+        (a, b) =>
+          b.values.length - a.values.length || a.key.localeCompare(b.key),
+      )
       .slice(0, 12);
   }, [serverProducts, allProducts]);
 
@@ -790,7 +1062,10 @@ function BrowseInner() {
     (list: Product[]) =>
       list.filter((p) => {
         const parts = locParts(p);
-        if (loc.region && parts.region.toLowerCase() !== loc.region.toLowerCase())
+        if (
+          loc.region &&
+          parts.region.toLowerCase() !== loc.region.toLowerCase()
+        )
           return false;
         if (loc.state && parts.state.toLowerCase() !== loc.state.toLowerCase())
           return false;
@@ -801,7 +1076,6 @@ function BrowseInner() {
     [loc],
   );
 
-  /** Multi-select: product must match at least one selected value per active key */
   const applySpecs = useCallback(
     (list: Product[]) => {
       const active = Object.entries(specs).filter(([, vals]) => vals?.length);
@@ -833,7 +1107,8 @@ function BrowseInner() {
           const variants = (p as any).variants;
           if (Array.isArray(variants)) {
             return variants.some(
-              (v: any) => v && v.available !== false && Number(v.stock) > 0,
+              (v: any) =>
+                v && v.available !== false && Number(v.stock) > 0,
             );
           }
           return false;
@@ -1068,7 +1343,11 @@ function BrowseInner() {
   const specActive = Object.values(specs).some((v) => v?.length);
   const showFilterBar = isSearching;
   const showSuggestPanel =
-    suggestOpen && (suggestions.length > 0 || query.trim().length > 0 || suggestLoading);
+    suggestOpen &&
+    (suggestions.length > 0 || query.trim().length > 0 || suggestLoading);
+
+  // … rest of render (products blocks, sheets) same structure —
+  // KEY UI change is the suggest panel below
 
   const renderProductsBlock = (products: Product[]) =>
     products.length > 0 ? (
@@ -1111,7 +1390,11 @@ function BrowseInner() {
               <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center overflow-hidden bg-surface-2 sm:h-14 sm:w-14">
                 {s.storeLogo ? (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={s.storeLogo} alt="" className="h-full w-full object-cover" />
+                  <img
+                    src={s.storeLogo}
+                    alt=""
+                    className="h-full w-full object-cover"
+                  />
                 ) : (
                   <span className="text-muted">⌂</span>
                 )}
@@ -1220,18 +1503,34 @@ function BrowseInner() {
         @keyframes plazore-suggest-in {
           from {
             opacity: 0;
-            transform: translateY(-6px) scale(0.985);
+            transform: translateY(-8px) scale(0.98);
+            filter: blur(4px);
           }
           to {
             opacity: 1;
             transform: translateY(0) scale(1);
+            filter: blur(0);
           }
         }
         .plazore-suggest-panel {
-          animation: plazore-suggest-in 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+          animation: plazore-suggest-in 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        @keyframes plazore-row-in {
+          from {
+            opacity: 0;
+            transform: translateX(-6px);
+          }
+          to {
+            opacity: 1;
+            transform: translateX(0);
+          }
+        }
+        .plazore-suggest-row {
+          animation: plazore-row-in 0.32s cubic-bezier(0.16, 1, 0.3, 1) both;
         }
       `}</style>
 
+      {/* header unchanged structurally — logo-4 desktop */}
       <header className="sticky top-0 z-40 border-b border-white/5 bg-bg/90 backdrop-blur-md">
         <div className="mx-auto flex h-12 max-w-7xl items-center gap-2 px-3 sm:h-14 sm:gap-3 sm:px-6 lg:px-8">
           <div className="flex shrink-0 items-center gap-1.5">
@@ -1304,7 +1603,10 @@ function BrowseInner() {
             aria-label={`Bag${bagCount ? `, ${bagCount} items` : ""}`}
             data-plazore-cart-icon
           >
-            <ShoppingBag className="h-5 w-5 sm:h-[22px] sm:w-[22px]" strokeWidth={1.75} />
+            <ShoppingBag
+              className="h-5 w-5 sm:h-[22px] sm:w-[22px]"
+              strokeWidth={1.75}
+            />
             {bagCount > 0 ? (
               <span className="absolute -right-0.5 -top-0.5 flex h-[16px] min-w-[16px] items-center justify-center rounded-full bg-[#00E575] px-1 text-[9px] font-bold leading-none text-[#041412] sm:h-[18px] sm:min-w-[18px] sm:text-[10px]">
                 {bagCount > 99 ? "99+" : bagCount}
@@ -1319,24 +1621,26 @@ function BrowseInner() {
           Browse
         </h1>
 
+        {/* ── Search bar + futuristic suggest ── */}
         <div className="mt-5 flex flex-col gap-2.5 sm:mt-7 sm:flex-row sm:items-start sm:gap-3">
           <div ref={searchWrapRef} className="relative min-w-0 flex-1">
             <div
-              className="relative flex h-12 items-center gap-2.5 bg-[#0C1018]/90 px-3.5 sm:h-14 sm:gap-3 sm:px-5"
+              className="relative flex h-12 items-center gap-2.5 overflow-hidden rounded-2xl bg-[#070B12]/95 px-3.5 sm:h-14 sm:gap-3 sm:px-5"
               style={{
                 boxShadow:
-                  "0 0 0 1px rgba(0,229,117,0.12), 0 0 24px rgba(0,229,117,0.06), 0 0 40px rgba(59,130,246,0.05)",
+                  "0 0 0 1px rgba(0,229,117,0.18), 0 0 28px rgba(0,229,117,0.08), 0 0 48px rgba(59,130,246,0.06), inset 0 1px 0 rgba(255,255,255,0.06)",
               }}
             >
               <span
-                className="text-lg sm:text-xl"
-                style={{
-                  background: "linear-gradient(135deg, #00E575, #3B82F6)",
-                  WebkitBackgroundClip: "text",
-                  WebkitTextFillColor: "transparent",
-                }}
-              >
-                ⌕
+                aria-hidden
+                className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-[#00E575]/50 to-transparent"
+              />
+              <span className="relative flex h-7 w-7 shrink-0 items-center justify-center sm:h-8 sm:w-8">
+                <span className="absolute inset-0 rounded-full bg-[#00E575]/10 blur-[6px]" />
+                <Sparkles
+                  className="relative h-4 w-4 text-[#00E575] sm:h-[17px] sm:w-[17px]"
+                  strokeWidth={1.75}
+                />
               </span>
               <input
                 ref={inputRef}
@@ -1358,7 +1662,9 @@ function BrowseInner() {
                   }
                   if (e.key === "ArrowDown") {
                     e.preventDefault();
-                    setActiveSuggest((i) => Math.min(i + 1, suggestions.length - 1));
+                    setActiveSuggest((i) =>
+                      Math.min(i + 1, suggestions.length - 1),
+                    );
                   } else if (e.key === "ArrowUp") {
                     e.preventDefault();
                     setActiveSuggest((i) => Math.max(i - 1, 0));
@@ -1374,11 +1680,16 @@ function BrowseInner() {
                     setSuggestOpen(false);
                   }
                 }}
-                placeholder="Search products, stores, brands, specs, places…"
-                className="w-full bg-transparent text-[15px] text-text outline-none placeholder:text-white/30 sm:text-base"
+                placeholder="Search the mall — products, stores, brands, places…"
+                className="w-full bg-transparent text-[15px] text-white/95 outline-none placeholder:text-white/28 sm:text-base"
                 autoComplete="off"
                 spellCheck={false}
               />
+              {suggestLoading ? (
+                <span className="relative flex h-4 w-4 shrink-0">
+                  <span className="absolute inset-0 animate-spin rounded-full border-[1.5px] border-transparent border-t-[#00E575] border-r-[#3B82F6]" />
+                </span>
+              ) : null}
               {(query ||
                 activeCategory ||
                 locActive ||
@@ -1387,76 +1698,90 @@ function BrowseInner() {
                 <button
                   type="button"
                   onClick={clearAll}
-                  className="text-xl leading-none text-white/40 transition hover:text-white"
+                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-white/35 transition hover:bg-white/5 hover:text-white"
                 >
                   ×
                 </button>
               )}
             </div>
 
+            {/* FUTURISTIC SUGGEST PANEL */}
             {showSuggestPanel ? (
               <div
-                className="plazore-suggest-panel absolute left-0 right-0 top-[calc(100%+6px)] z-50 overflow-hidden"
+                className="plazore-suggest-panel absolute left-0 right-0 top-[calc(100%+8px)] z-50 overflow-hidden rounded-2xl"
                 style={{
                   background:
-                    "linear-gradient(165deg, rgba(8,14,22,0.97) 0%, rgba(6,12,20,0.98) 100%)",
+                    "linear-gradient(165deg, rgba(6,10,18,0.97) 0%, rgba(5,9,16,0.99) 100%)",
                   boxShadow:
-                    "0 0 0 1px rgba(0,229,117,0.14), 0 0 32px rgba(0,229,117,0.08), 0 0 64px rgba(59,130,246,0.07), 0 20px 50px rgba(0,0,0,0.45)",
-                  backdropFilter: "blur(20px)",
+                    "0 0 0 1px rgba(0,229,117,0.16), 0 0 40px rgba(0,229,117,0.1), 0 0 80px rgba(59,130,246,0.08), 0 24px 60px rgba(0,0,0,0.55)",
+                  backdropFilter: "blur(24px) saturate(1.4)",
                 }}
               >
                 <div
                   className="h-[2px] w-full"
                   style={{
                     background:
-                      "linear-gradient(90deg, transparent, #00E575 20%, #3B82F6 80%, transparent)",
-                    opacity: 0.7,
+                      "linear-gradient(90deg, transparent 0%, #00E575 25%, #3B82F6 75%, transparent 100%)",
+                    opacity: 0.85,
                   }}
                 />
+
                 {suggestLoading && suggestions.length === 0 ? (
-                  <p className="px-4 py-5 text-[13px] text-white/40">Searching…</p>
+                  <SuggestSpinner />
                 ) : suggestions.length === 0 ? (
-                  <p className="px-4 py-5 text-[13px] text-white/40">
-                    No matches yet — try a product, brand, or city.
-                  </p>
+                  <div className="flex flex-col items-center gap-2 px-4 py-8 text-center">
+                    <Sparkles className="h-5 w-5 text-white/20" strokeWidth={1.5} />
+                    <p className="text-[13px] text-white/40">
+                      Nothing close yet — try a brand, city, or product name
+                    </p>
+                  </div>
                 ) : (
-                  <ul className="max-h-[min(62vh,420px)] overflow-y-auto py-1.5">
+                  <ul className="max-h-[min(68vh,460px)] overflow-y-auto overscroll-contain py-2">
                     {suggestions.map((s, i) => {
                       const active = i === activeSuggest;
                       return (
-                        <li key={s.id}>
+                        <li
+                          key={s.id}
+                          className="plazore-suggest-row"
+                          style={{ animationDelay: `${Math.min(i, 8) * 28}ms` }}
+                        >
                           <button
                             type="button"
                             onMouseEnter={() => setActiveSuggest(i)}
                             onClick={() => applySuggestion(s)}
-                            className={`flex w-full items-center gap-3 px-3.5 py-2.5 text-left transition sm:px-4 sm:py-3 ${
+                            className={`group relative flex w-full items-center gap-3 px-3 py-2.5 text-left transition sm:gap-3.5 sm:px-4 sm:py-3 ${
                               active
-                                ? "bg-gradient-to-r from-[#00E575]/12 via-[#3B82F6]/08 to-transparent"
-                                : "hover:bg-white/[0.03]"
+                                ? "bg-gradient-to-r from-[#00E575]/14 via-[#3B82F6]/08 to-transparent"
+                                : "hover:bg-white/[0.035]"
                             }`}
                           >
-                            <span
-                              className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br text-[10px] font-bold ${kindAccent(s.kind)}`}
-                            >
-                              {s.kind === "location" ? (
-                                <MapPin className="h-3.5 w-3.5" strokeWidth={2} />
-                              ) : s.kind === "spec" ? (
-                                <Tag className="h-3.5 w-3.5" strokeWidth={2} />
-                              ) : (
-                                kindLabel(s.kind).slice(0, 1)
-                              )}
-                            </span>
+                            {active ? (
+                              <span
+                                aria-hidden
+                                className="absolute left-0 top-1/2 h-7 w-[3px] -translate-y-1/2 rounded-r-full bg-gradient-to-b from-[#00E575] to-[#3B82F6] shadow-[0_0_12px_rgba(0,229,117,0.6)]"
+                              />
+                            ) : null}
+
+                            <SuggestThumb s={s} />
+
                             <span className="min-w-0 flex-1">
-                              <span className="block truncate text-[14px] font-medium text-white/95 sm:text-[15px]">
+                              <span className="block truncate text-[14px] font-medium tracking-tight text-white/95 sm:text-[15px]">
                                 <HighlightText text={s.label} query={suggestQ} />
                               </span>
                               {s.sub ? (
-                                <span className="mt-0.5 block truncate text-[11px] text-white/40">
+                                <span className="mt-0.5 block truncate text-[11px] text-white/38 sm:text-[12px]">
                                   <HighlightText text={s.sub} query={suggestQ} />
                                 </span>
                               ) : null}
                             </span>
-                            <span className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/25">
+
+                            <span
+                              className={`shrink-0 rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.14em] sm:text-[10px] ${
+                                active
+                                  ? "bg-[#00E575]/15 text-[#00E575]"
+                                  : "bg-white/[0.04] text-white/28"
+                              }`}
+                            >
                               {kindLabel(s.kind)}
                             </span>
                           </button>
@@ -1465,6 +1790,18 @@ function BrowseInner() {
                     })}
                   </ul>
                 )}
+
+                {suggestions.length > 0 ? (
+                  <div className="flex items-center justify-between border-t border-white/[0.04] px-4 py-2.5">
+                    <span className="text-[10px] tracking-wide text-white/25">
+                      ↑↓ navigate · enter select
+                    </span>
+                    <span className="flex items-center gap-1.5 text-[10px] text-white/25">
+                      <span className="h-1 w-1 rounded-full bg-[#00E575]/70 shadow-[0_0_6px_#00E575]" />
+                      Plazore live
+                    </span>
+                  </div>
+                ) : null}
               </div>
             ) : null}
           </div>
@@ -1474,7 +1811,7 @@ function BrowseInner() {
               <button
                 type="button"
                 onClick={() => setSortOpen(true)}
-                className={`h-11 shrink-0 px-3.5 text-[11px] font-semibold tracking-wide transition sm:h-14 sm:px-4 sm:text-xs ${
+                className={`h-11 shrink-0 rounded-xl px-3.5 text-[11px] font-semibold tracking-wide transition sm:h-14 sm:px-4 sm:text-xs ${
                   sortActive || structure !== "products_first"
                     ? "bg-[#00E575]/12 text-[#00E575] shadow-[0_0_20px_rgba(0,229,117,0.15)]"
                     : "bg-white/[0.04] text-white/70 hover:bg-white/[0.07]"
@@ -1485,7 +1822,7 @@ function BrowseInner() {
               <button
                 type="button"
                 onClick={openPrice}
-                className={`h-11 shrink-0 px-3.5 text-[11px] font-semibold tracking-wide transition sm:h-14 sm:px-4 sm:text-xs ${
+                className={`h-11 shrink-0 rounded-xl px-3.5 text-[11px] font-semibold tracking-wide transition sm:h-14 sm:px-4 sm:text-xs ${
                   priceActive
                     ? "bg-[#00E575]/12 text-[#00E575] shadow-[0_0_20px_rgba(0,229,117,0.15)]"
                     : "bg-white/[0.04] text-white/70 hover:bg-white/[0.07]"
@@ -1496,7 +1833,7 @@ function BrowseInner() {
               <button
                 type="button"
                 onClick={() => setLocOpen(true)}
-                className={`h-11 shrink-0 px-3.5 text-[11px] font-semibold tracking-wide transition sm:h-14 sm:px-4 sm:text-xs ${
+                className={`h-11 shrink-0 rounded-xl px-3.5 text-[11px] font-semibold tracking-wide transition sm:h-14 sm:px-4 sm:text-xs ${
                   locActive
                     ? "bg-[#3B82F6]/15 text-[#60A5FA] shadow-[0_0_20px_rgba(59,130,246,0.18)]"
                     : "bg-white/[0.04] text-white/70 hover:bg-white/[0.07]"
@@ -1508,7 +1845,7 @@ function BrowseInner() {
                 <button
                   type="button"
                   onClick={() => setSpecOpen(true)}
-                  className={`inline-flex h-11 shrink-0 items-center gap-1.5 px-3.5 text-[11px] font-semibold tracking-wide transition sm:h-14 sm:px-4 sm:text-xs ${
+                  className={`inline-flex h-11 shrink-0 items-center gap-1.5 rounded-xl px-3.5 text-[11px] font-semibold tracking-wide transition sm:h-14 sm:px-4 sm:text-xs ${
                     specActive
                       ? "bg-[#22D3EE]/12 text-[#67E8F9] shadow-[0_0_20px_rgba(34,211,238,0.15)]"
                       : "bg-white/[0.04] text-white/70 hover:bg-white/[0.07]"
@@ -1522,14 +1859,14 @@ function BrowseInner() {
           ) : null}
         </div>
 
-        {/* Active chips — multi-select aware */}
+        {/* chips + explore + results + sheets — keep the rest of your previous structure */}
         {(locActive || priceActive || specActive) && isSearching ? (
           <div className="mt-3 flex flex-wrap gap-2">
             {loc.region ? (
               <button
                 type="button"
                 onClick={() => setLoc((p) => ({ ...p, region: null }))}
-                className="bg-[#3B82F6]/12 px-2.5 py-1 text-[11px] text-[#93C5FD]"
+                className="rounded-full bg-[#3B82F6]/12 px-2.5 py-1 text-[11px] text-[#93C5FD]"
               >
                 Region: {loc.region} ×
               </button>
@@ -1538,7 +1875,7 @@ function BrowseInner() {
               <button
                 type="button"
                 onClick={() => setLoc((p) => ({ ...p, state: null }))}
-                className="bg-[#3B82F6]/12 px-2.5 py-1 text-[11px] text-[#93C5FD]"
+                className="rounded-full bg-[#3B82F6]/12 px-2.5 py-1 text-[11px] text-[#93C5FD]"
               >
                 State: {loc.state} ×
               </button>
@@ -1547,7 +1884,7 @@ function BrowseInner() {
               <button
                 type="button"
                 onClick={() => setLoc((p) => ({ ...p, city: null }))}
-                className="bg-[#3B82F6]/12 px-2.5 py-1 text-[11px] text-[#93C5FD]"
+                className="rounded-full bg-[#3B82F6]/12 px-2.5 py-1 text-[11px] text-[#93C5FD]"
               >
                 City: {loc.city} ×
               </button>
@@ -1559,7 +1896,7 @@ function BrowseInner() {
                   setMinPrice("");
                   setMaxPrice("");
                 }}
-                className="bg-[#00E575]/10 px-2.5 py-1 text-[11px] text-[#34D399]"
+                className="rounded-full bg-[#00E575]/10 px-2.5 py-1 text-[11px] text-[#34D399]"
               >
                 Price {minPrice || "0"}–{maxPrice || "∞"} ×
               </button>
@@ -1568,7 +1905,7 @@ function BrowseInner() {
               <button
                 type="button"
                 onClick={() => setInStockOnly(false)}
-                className="bg-[#00E575]/10 px-2.5 py-1 text-[11px] text-[#34D399]"
+                className="rounded-full bg-[#00E575]/10 px-2.5 py-1 text-[11px] text-[#34D399]"
               >
                 In stock ×
               </button>
@@ -1579,7 +1916,7 @@ function BrowseInner() {
                   key={`${k}-${v}`}
                   type="button"
                   onClick={() => toggleSpecValue(k, v)}
-                  className="bg-[#22D3EE]/10 px-2.5 py-1 text-[11px] text-[#67E8F9]"
+                  className="rounded-full bg-[#22D3EE]/10 px-2.5 py-1 text-[11px] text-[#67E8F9]"
                 >
                   {k}: {v} ×
                 </button>
@@ -1600,7 +1937,7 @@ function BrowseInner() {
                     key={f.id}
                     type="button"
                     onClick={() => selectFloor(f.id)}
-                    className="relative h-[8.75rem] w-[6.25rem] shrink-0 overflow-hidden border border-line bg-surface text-left sm:h-[10.5rem] sm:w-[7.25rem]"
+                    className="relative h-[8.75rem] w-[6.25rem] shrink-0 overflow-hidden rounded-xl border border-line bg-surface text-left sm:h-[10.5rem] sm:w-[7.25rem]"
                   >
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
@@ -1649,7 +1986,7 @@ function BrowseInner() {
                         setDebounced(r);
                         pushRecent(r);
                       }}
-                      className="bg-white/[0.04] px-3 py-2 text-[13px] transition hover:bg-white/[0.07] sm:px-3.5 sm:text-sm"
+                      className="rounded-full bg-white/[0.04] px-3 py-2 text-[13px] transition hover:bg-white/[0.07] sm:px-3.5 sm:text-sm"
                     >
                       {r}
                     </button>
@@ -1703,7 +2040,9 @@ function BrowseInner() {
                     live.totalProducts
                       ? `${Math.min(visibleCount, live.totalProducts)} of ${live.totalProducts} products`
                       : null,
-                    live.stores.length ? `${live.stores.length} storefronts` : null,
+                    live.stores.length
+                      ? `${live.stores.length} storefronts`
+                      : null,
                     live.brands.length ? `${live.brands.length} brands` : null,
                     live.categories.length
                       ? `${live.categories.length} categories`
@@ -1734,7 +2073,7 @@ function BrowseInner() {
         )}
       </div>
 
-      {/* Sort / Price / Location sheets — same as before */}
+      {/* Sort / Price / Location / Specs sheets — same as your last version */}
       {sortOpen ? (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/65 md:items-center">
           <button
@@ -1743,7 +2082,7 @@ function BrowseInner() {
             onClick={() => setSortOpen(false)}
             aria-label="Close sort"
           />
-          <div className="relative max-h-[85vh] w-full max-w-md overflow-y-auto border-t border-line bg-surface p-5 sm:p-6 md:border">
+          <div className="relative max-h-[85vh] w-full max-w-md overflow-y-auto rounded-t-2xl border-t border-line bg-surface p-5 sm:p-6 md:rounded-2xl md:border">
             <p className="text-lg font-bold">Sort & layout</p>
             <p className="mt-5 text-sm font-semibold text-secondary">Sort by</p>
             <div className="mt-2 space-y-1">
@@ -1752,7 +2091,7 @@ function BrowseInner() {
                   key={o.key}
                   type="button"
                   onClick={() => setSortKey(o.key)}
-                  className={`flex w-full items-center justify-between border px-3 py-2.5 text-left text-sm ${
+                  className={`flex w-full items-center justify-between rounded-xl border px-3 py-2.5 text-left text-sm ${
                     sortKey === o.key
                       ? "border-ai-green/40 bg-ai-green/10 font-semibold text-ai-green"
                       : "border-line bg-surface-2"
@@ -1772,7 +2111,7 @@ function BrowseInner() {
                   key={o.key}
                   type="button"
                   onClick={() => setStructure(o.key)}
-                  className={`flex w-full items-center justify-between border px-3 py-2.5 text-left text-sm ${
+                  className={`flex w-full items-center justify-between rounded-xl border px-3 py-2.5 text-left text-sm ${
                     structure === o.key
                       ? "border-ai-green/40 bg-ai-green/10 font-semibold text-ai-green"
                       : "border-line bg-surface-2"
@@ -1786,7 +2125,7 @@ function BrowseInner() {
             <button
               type="button"
               onClick={() => setSortOpen(false)}
-              className="mt-8 h-12 w-full bg-text font-bold text-bg"
+              className="mt-8 h-12 w-full rounded-xl bg-text font-bold text-bg"
             >
               Done
             </button>
@@ -1802,22 +2141,26 @@ function BrowseInner() {
             onClick={() => setPriceOpen(false)}
             aria-label="Close price"
           />
-          <div className="relative w-full max-w-md border-t border-line bg-surface p-5 sm:p-6 md:border">
+          <div className="relative w-full max-w-md rounded-t-2xl border-t border-line bg-surface p-5 sm:p-6 md:rounded-2xl md:border">
             <p className="text-lg font-bold">Price filter</p>
             <div className="mt-5 flex gap-2">
               <input
                 value={draftMin}
-                onChange={(e) => setDraftMin(e.target.value.replace(/[^\d.]/g, ""))}
+                onChange={(e) =>
+                  setDraftMin(e.target.value.replace(/[^\d.]/g, ""))
+                }
                 placeholder="Min"
                 inputMode="decimal"
-                className="h-11 flex-1 border border-line bg-surface-2 px-3 text-sm outline-none"
+                className="h-11 flex-1 rounded-xl border border-line bg-surface-2 px-3 text-sm outline-none"
               />
               <input
                 value={draftMax}
-                onChange={(e) => setDraftMax(e.target.value.replace(/[^\d.]/g, ""))}
+                onChange={(e) =>
+                  setDraftMax(e.target.value.replace(/[^\d.]/g, ""))
+                }
                 placeholder="Max"
                 inputMode="decimal"
-                className="h-11 flex-1 border border-line bg-surface-2 px-3 text-sm outline-none"
+                className="h-11 flex-1 rounded-xl border border-line bg-surface-2 px-3 text-sm outline-none"
               />
             </div>
             <label className="mt-6 flex items-center gap-3 text-sm">
@@ -1832,14 +2175,14 @@ function BrowseInner() {
               <button
                 type="button"
                 onClick={resetPrice}
-                className="h-12 flex-1 border border-line bg-surface-2 font-semibold text-secondary"
+                className="h-12 flex-1 rounded-xl border border-line bg-surface-2 font-semibold text-secondary"
               >
                 Reset
               </button>
               <button
                 type="button"
                 onClick={applyPrice}
-                className="h-12 flex-1 bg-text font-bold text-bg"
+                className="h-12 flex-1 rounded-xl bg-text font-bold text-bg"
               >
                 Apply
               </button>
@@ -1856,7 +2199,7 @@ function BrowseInner() {
             onClick={() => setLocOpen(false)}
             aria-label="Close location"
           />
-          <div className="relative max-h-[85vh] w-full max-w-md overflow-y-auto border-t border-line bg-surface p-5 sm:p-6 md:border">
+          <div className="relative max-h-[85vh] w-full max-w-md overflow-y-auto rounded-t-2xl border-t border-line bg-surface p-5 sm:p-6 md:rounded-2xl md:border">
             <p className="text-lg font-bold">Location</p>
             <p className="mt-1 text-xs text-muted">From Plazore inventory</p>
             {(["regions", "states", "cities"] as const).map((bucket) => {
@@ -1867,7 +2210,11 @@ function BrowseInner() {
                     ? locationIndex.states
                     : locationIndex.cities.slice(0, 48);
               const field =
-                bucket === "regions" ? "region" : bucket === "states" ? "state" : "city";
+                bucket === "regions"
+                  ? "region"
+                  : bucket === "states"
+                    ? "state"
+                    : "city";
               if (!list.length) return null;
               return (
                 <div key={bucket}>
@@ -1887,7 +2234,7 @@ function BrowseInner() {
                               [field]: on ? null : r.name,
                             }))
                           }
-                          className={`px-3 py-1.5 text-xs font-semibold ${
+                          className={`rounded-full px-3 py-1.5 text-xs font-semibold ${
                             on
                               ? "bg-[#3B82F6]/15 text-[#60A5FA]"
                               : "bg-white/[0.04] text-white/70"
@@ -1904,15 +2251,17 @@ function BrowseInner() {
             <div className="mt-8 flex gap-3">
               <button
                 type="button"
-                onClick={() => setLoc({ region: null, state: null, city: null })}
-                className="h-12 flex-1 border border-line bg-surface-2 font-semibold text-secondary"
+                onClick={() =>
+                  setLoc({ region: null, state: null, city: null })
+                }
+                className="h-12 flex-1 rounded-xl border border-line bg-surface-2 font-semibold text-secondary"
               >
                 Reset
               </button>
               <button
                 type="button"
                 onClick={() => setLocOpen(false)}
-                className="h-12 flex-1 bg-text font-bold text-bg"
+                className="h-12 flex-1 rounded-xl bg-text font-bold text-bg"
               >
                 Apply
               </button>
@@ -1921,7 +2270,6 @@ function BrowseInner() {
         </div>
       ) : null}
 
-      {/* Specs — multi-select */}
       {specOpen ? (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/65 md:items-center">
           <button
@@ -1930,17 +2278,21 @@ function BrowseInner() {
             onClick={() => setSpecOpen(false)}
             aria-label="Close specs"
           />
-          <div className="relative max-h-[85vh] w-full max-w-md overflow-y-auto border-t border-line bg-surface p-5 sm:p-6 md:border">
+          <div className="relative max-h-[85vh] w-full max-w-md overflow-y-auto rounded-t-2xl border-t border-line bg-surface p-5 sm:p-6 md:rounded-2xl md:border">
             <p className="text-lg font-bold">Specifications</p>
             <p className="mt-1 text-xs text-muted">
-              Multi-select · from current inventory. Match any selected value per field.
+              Multi-select · from current inventory
             </p>
             {specIndex.length === 0 ? (
-              <p className="mt-6 text-sm text-muted">No specs on these products yet.</p>
+              <p className="mt-6 text-sm text-muted">
+                No specs on these products yet.
+              </p>
             ) : (
               specIndex.map((group) => (
                 <div key={group.key} className="mt-5">
-                  <p className="text-sm font-semibold text-secondary">{group.key}</p>
+                  <p className="text-sm font-semibold text-secondary">
+                    {group.key}
+                  </p>
                   <div className="mt-2 flex flex-wrap gap-2">
                     {group.values.map((v) => {
                       const on = (specs[group.key] || []).some(
@@ -1951,7 +2303,7 @@ function BrowseInner() {
                           key={v.name}
                           type="button"
                           onClick={() => toggleSpecValue(group.key, v.name)}
-                          className={`px-3 py-1.5 text-xs font-semibold ${
+                          className={`rounded-full px-3 py-1.5 text-xs font-semibold ${
                             on
                               ? "bg-[#22D3EE]/15 text-[#67E8F9]"
                               : "bg-white/[0.04] text-white/70"
@@ -1969,14 +2321,14 @@ function BrowseInner() {
               <button
                 type="button"
                 onClick={() => setSpecs({})}
-                className="h-12 flex-1 border border-line bg-surface-2 font-semibold text-secondary"
+                className="h-12 flex-1 rounded-xl border border-line bg-surface-2 font-semibold text-secondary"
               >
                 Reset
               </button>
               <button
                 type="button"
                 onClick={() => setSpecOpen(false)}
-                className="h-12 flex-1 bg-text font-bold text-bg"
+                className="h-12 flex-1 rounded-xl bg-text font-bold text-bg"
               >
                 Apply
               </button>
@@ -1986,7 +2338,10 @@ function BrowseInner() {
       ) : null}
 
       {appFeature ? (
-        <AppFeaturePrompt feature={appFeature} onClose={() => setAppFeature(null)} />
+        <AppFeaturePrompt
+          feature={appFeature}
+          onClose={() => setAppFeature(null)}
+        />
       ) : null}
     </div>
   );
@@ -1998,7 +2353,7 @@ export default function BrowsePage() {
       <Suspense
         fallback={
           <div className="flex min-h-screen items-center justify-center bg-bg text-muted">
-            Loading browse…
+            <OrbLoader compact />
           </div>
         }
       >
