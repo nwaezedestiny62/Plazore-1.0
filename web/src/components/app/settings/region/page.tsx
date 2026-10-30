@@ -55,7 +55,7 @@ export default function RegionSettingsPage() {
             </p>
             {!loading && (
               <p className="mt-2 text-[12px] font-semibold text-[#00E575]">
-                Current: {region} · {currencyCode}
+                Current: {region} | {currencyCode}
               </p>
             )}
           </div>
@@ -91,7 +91,7 @@ export default function RegionSettingsPage() {
                   <span className="min-w-0 flex-1">
                     <span className="block text-[15px] font-semibold">{r.name}</span>
                     <span className="mt-0.5 block text-[12px] text-[#737A86]">
-                      {r.currency.code} · {r.currency.symbol}
+                      {r.currency.code} | {r.currency.symbol}
                     </span>
                   </span>
                   {busy ? (

@@ -4,12 +4,11 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { HeroStage } from "@/components/mall/HeroStage";
+import { Bell, Search, ShoppingCart } from "lucide-react";
 import {
-  Bell,
-  Search,
-  ShoppingBag,
-} from "lucide-react";
-import { AppFeaturePrompt, type AppFeature } from "@/components/app/AppFeaturePrompt";
+  AppFeaturePrompt,
+  type AppFeature,
+} from "@/components/app/AppFeaturePrompt";
 import { useAuth, useUser } from "@clerk/nextjs";
 import { HERO_SLIDES, type HeroSlide } from "@/lib/heroCampaigns";
 import { fetchHeroBanners, prefetchHeroImages } from "@/lib/fetchHeroBanners";
@@ -23,11 +22,31 @@ import {
   saveShowroomSessionId,
 } from "@/lib/showroomEvents";
 import { ProductCard } from "./ProductCard";
-import { ShowroomFlyCartProvider, useShowroomFlyCart } from "./ShowroomFlyCart";
+import {
+  ShowroomFlyCartProvider,
+  useShowroomFlyCart,
+} from "./ShowroomFlyCart";
 
 const API =
   process.env.NEXT_PUBLIC_API_URL || "https://plazore-api.onrender.com/api";
 const PENDING_KEY = "plazore_pending_action";
+
+/** Global hard lock: same product cannot be added twice within this window */
+const ADD_COOLDOWN_MS = 900;
+const recentAdds = new Map<string, number>();
+
+function canAddOnce(productId: string): boolean {
+  const now = Date.now();
+  const last = recentAdds.get(productId) || 0;
+  if (now - last < ADD_COOLDOWN_MS) return false;
+  recentAdds.set(productId, now);
+  if (recentAdds.size > 40) {
+    for (const [k, t] of recentAdds) {
+      if (now - t > ADD_COOLDOWN_MS * 2) recentAdds.delete(k);
+    }
+  }
+  return true;
+}
 
 const ROOM_CAPACITY = {
   1: 50,
@@ -62,25 +81,8 @@ type SplitRooms = {
   titles: RoomTitles;
 };
 
-/** Horizontal product rail — no page scroll chaining */
 const RAIL_CLASS =
   "flex gap-2 overflow-x-auto overscroll-x-contain px-4 pb-2 sm:gap-3 sm:px-6 md:px-10 lg:px-16 [scrollbar-width:none] [-webkit-overflow-scrolling:touch] [&::-webkit-scrollbar]:hidden";
-
-function heroHeadlineSize(text: string): string {
-  const n = (text || "").trim().length;
-  if (n > 52) return "clamp(1.25rem, 2.8vw, 2.15rem)";
-  if (n > 40) return "clamp(1.4rem, 3.2vw, 2.55rem)";
-  if (n > 28) return "clamp(1.55rem, 3.8vw, 3.1rem)";
-  if (n > 18) return "clamp(1.7rem, 4.2vw, 3.65rem)";
-  return "clamp(1.85rem, 4.6vw, 4.25rem)";
-}
-
-function heroSubSize(text: string): string {
-  const n = (text || "").trim().length;
-  if (n > 90) return "text-[13px] sm:text-[14px]";
-  if (n > 60) return "text-[13px] sm:text-[15px]";
-  return "text-[14px] sm:text-[16px]";
-}
 
 function takeUnique(
   list: Product[] | undefined,
@@ -142,7 +144,6 @@ function isBagVisible(el: HTMLElement | null): boolean {
   );
 }
 
-/** Click-only smooth jump. Never applied to document scroll. */
 function smoothScrollToEl(el: HTMLElement | null) {
   if (!el || typeof window === "undefined") return;
   el.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -160,6 +161,102 @@ function CustomBarIcon({ className = "" }: { className?: string }) {
   );
 }
 
+function productHasVariants(product: Product): boolean {
+  const p = product as Product & {
+    hasVariants?: boolean;
+    variants?: unknown[];
+    options?: unknown[];
+  };
+  if (p.hasVariants === true) return true;
+  return (
+    (Array.isArray(p.variants) && p.variants.length > 0) ||
+    (Array.isArray(p.options) && p.options.length > 0)
+  );
+}
+
+function stashPendingAdd(productId: string) {
+  try {
+    sessionStorage.setItem(
+      PENDING_KEY,
+      JSON.stringify({
+        type: "add_to_cart",
+        productId,
+        at: Date.now(),
+      }),
+    );
+    sessionStorage.setItem(
+      "plazore_return_to",
+      typeof window !== "undefined" ? window.location.pathname : "/",
+    );
+  } catch {
+    /* ignore */
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Soft twinkling stars for Room 4 — CSS only, zero lag
+───────────────────────────────────────────────────────────── */
+function Starfield() {
+  const stars = useMemo(() => {
+    const out: {
+      left: string;
+      top: string;
+      size: number;
+      delay: number;
+      dur: number;
+    }[] = [];
+    for (let i = 0; i < 56; i++) {
+      const seed = (i * 97) % 1000;
+      out.push({
+        left: `${(seed * 0.137) % 100}%`,
+        top: `${(seed * 0.271) % 100}%`,
+        size: 1 + (seed % 3) * 0.55,
+        delay: (seed % 40) / 10,
+        dur: 2.6 + (seed % 28) / 10,
+      });
+    }
+    return out;
+  }, []);
+
+  return (
+    <div
+      className="pointer-events-none absolute inset-0 overflow-hidden"
+      aria-hidden
+    >
+      {stars.map((s, i) => (
+        <span
+          key={i}
+          className="absolute bg-white"
+          style={{
+            left: s.left,
+            top: s.top,
+            width: s.size,
+            height: s.size,
+            opacity: 0.3,
+            animation: `plazore-twinkle ${s.dur}s ease-in-out ${s.delay}s infinite`,
+          }}
+        />
+      ))}
+      <style jsx>{`
+        @keyframes plazore-twinkle {
+          0%,
+          100% {
+            opacity: 0.12;
+            transform: scale(0.85);
+          }
+          50% {
+            opacity: 0.7;
+            transform: scale(1.12);
+          }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Mall Chrome (header)
+───────────────────────────────────────────────────────────── */
 function MallChrome({
   progress,
   bagN,
@@ -172,7 +269,6 @@ function MallChrome({
   const fly = useShowroomFlyCart();
   const bagRefDesktop = useRef<HTMLAnchorElement>(null);
   const bagRefMobile = useRef<HTMLAnchorElement>(null);
-  const atTop = progress < 0.06;
   const solid = progress >= 0.06;
   const [prompt, setPrompt] = useState<AppFeature | null>(null);
   const { isSignedIn } = useAuth();
@@ -317,12 +413,13 @@ function MallChrome({
             href="/notifications"
             className="relative flex h-9 w-9 items-center justify-center text-white/80 transition hover:text-text lg:h-10 lg:w-10"
             aria-label={
-              notifN > 0
-                ? `Notifications, ${notifN} unread`
-                : "Notifications"
+              notifN > 0 ? `Notifications, ${notifN} unread` : "Notifications"
             }
           >
-            <Bell className="h-[17px] w-[17px] lg:h-[18px] lg:w-[18px]" strokeWidth={1.75} />
+            <Bell
+              className="h-[17px] w-[17px] lg:h-[18px] lg:w-[18px]"
+              strokeWidth={1.75}
+            />
             {notifN > 0 ? (
               <span className="absolute right-0.5 top-1 flex min-w-[15px] items-center justify-center rounded-full bg-[#00E575] px-1 text-center text-[9px] font-extrabold leading-none text-[#041412]">
                 {notifN > 99 ? "99+" : notifN}
@@ -334,10 +431,10 @@ function MallChrome({
             ref={bagRefDesktop}
             href="/cart"
             className="relative flex h-9 w-9 items-center justify-center text-white/80 transition hover:text-text lg:h-10 lg:w-10"
-            aria-label="Shopping bag"
+            aria-label="Shopping cart"
             data-plazore-cart-icon
           >
-            <ShoppingBag
+            <ShoppingCart
               className="h-[17px] w-[17px] lg:h-[18px] lg:w-[18px]"
               strokeWidth={1.75}
             />
@@ -411,9 +508,7 @@ function MallChrome({
             href="/notifications"
             className="relative flex h-9 w-9 items-center justify-center text-white/90 sm:h-10 sm:w-10"
             aria-label={
-              notifN > 0
-                ? `Notifications, ${notifN} unread`
-                : "Notifications"
+              notifN > 0 ? `Notifications, ${notifN} unread` : "Notifications"
             }
           >
             <Bell className="h-[17px] w-[17px]" strokeWidth={1.75} />
@@ -428,19 +523,19 @@ function MallChrome({
             ref={bagRefMobile}
             href="/cart"
             className="relative flex h-9 w-9 items-center justify-center text-white/90 sm:h-10 sm:w-10"
-            aria-label="Shopping bag"
+            aria-label="Shopping cart"
             data-plazore-cart-icon
           >
             <span
               aria-hidden
-              className="pointer-events-none absolute inset-1 rounded-full bg-[#00E575]/12 blur-[5px]"
+              className="pointer-events-none absolute inset-1 bg-[#00E575]/12 blur-[5px]"
             />
-            <ShoppingBag
+            <ShoppingCart
               className="relative h-[17px] w-[17px]"
               strokeWidth={1.75}
             />
             {bagN > 0 ? (
-              <span className="absolute -right-0.5 -top-0.5 flex min-w-[15px] items-center justify-center rounded-full bg-gradient-to-r from-[#00E575] to-[#3B82F6] px-1 text-[8px] font-extrabold text-[#041412] shadow-[0_0_10px_rgba(0,229,117,0.45)]">
+              <span className="absolute -right-0.5 -top-0.5 flex min-w-[15px] items-center justify-center bg-gradient-to-r from-[#00E575] to-[#3B82F6] px-1 text-[8px] font-extrabold text-[#041412] shadow-[0_0_10px_rgba(0,229,117,0.45)]">
                 {bagN > 9 ? "9+" : bagN}
               </span>
             ) : null}
@@ -476,6 +571,10 @@ function MallChrome({
   );
 }
 
+/* ─────────────────────────────────────────────────────────────
+   ROOM 3 — THE SIGNAL
+   Strict +1 add, fly, badge update. No border radius.
+───────────────────────────────────────────────────────────── */
 function RoomThreeStage({ products }: { products: Product[] }) {
   const router = useRouter();
   const { isSignedIn, isLoaded } = useAuth();
@@ -488,6 +587,39 @@ function RoomThreeStage({ products }: { products: Product[] }) {
   const busy = useRef(false);
   const autoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cartBtnRef = useRef<HTMLButtonElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [adding, setAdding] = useState(false);
+
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+
+    v.muted = true;
+    v.defaultMuted = true;
+    v.playsInline = true;
+    v.loop = true;
+    v.preload = "auto";
+
+    const tryPlay = () => {
+      const p = v.play();
+      if (p && typeof p.catch === "function") {
+        p.catch(() => {
+          setTimeout(() => v.play().catch(() => {}), 400);
+        });
+      }
+    };
+
+    tryPlay();
+
+    const onVis = () => {
+      if (document.visibilityState === "visible") tryPlay();
+    };
+    document.addEventListener("visibilitychange", onVis);
+
+    return () => {
+      document.removeEventListener("visibilitychange", onVis);
+    };
+  }, []);
 
   useEffect(() => {
     currentRef.current = current;
@@ -499,14 +631,6 @@ function RoomThreeStage({ products }: { products: Product[] }) {
       autoTimer.current = null;
     }
   }, []);
-
-  const scheduleAuto = useCallback(() => {
-    clearAuto();
-    if (products.length < 2) return;
-    autoTimer.current = setTimeout(() => {
-      goTo(currentRef.current + 1);
-    }, 5200);
-  }, [products.length, clearAuto]);
 
   const goTo = useCallback(
     (raw: number) => {
@@ -521,11 +645,23 @@ function RoomThreeStage({ products }: { products: Product[] }) {
       window.setTimeout(() => {
         busy.current = false;
         currentRef.current = target;
-        scheduleAuto();
-      }, 1800);
+        if (products.length >= 2) {
+          autoTimer.current = setTimeout(() => {
+            goTo(currentRef.current + 1);
+          }, 5400);
+        }
+      }, 900);
     },
-    [products.length, clearAuto, scheduleAuto],
+    [products.length, clearAuto],
   );
+
+  const scheduleAuto = useCallback(() => {
+    clearAuto();
+    if (products.length < 2) return;
+    autoTimer.current = setTimeout(() => {
+      goTo(currentRef.current + 1);
+    }, 5400);
+  }, [products.length, clearAuto, goTo]);
 
   useEffect(() => {
     if (products.length < 2) return;
@@ -533,40 +669,53 @@ function RoomThreeStage({ products }: { products: Product[] }) {
     return () => clearAuto();
   }, [products.length, scheduleAuto, clearAuto]);
 
-  const handleAddToCart = () => {
+  const handleAddToCart = (e: React.MouseEvent | React.PointerEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (!isLoaded || adding) return;
+
     const product = products[currentRef.current];
-    if (!product) return;
-    if (!isLoaded) return;
+    if (!product?._id) return;
+
+    const pid = String(product._id);
+    if (!canAddOnce(pid)) return;
+
+    setAdding(true);
+    window.setTimeout(() => setAdding(false), ADD_COOLDOWN_MS);
+
     if (!isSignedIn) {
-      try {
-        sessionStorage.setItem(
-          PENDING_KEY,
-          JSON.stringify({
-            type: "add_to_cart",
-            productId: product._id,
-            at: Date.now(),
-          }),
-        );
-        sessionStorage.setItem("plazore_return_to", window.location.pathname);
-      } catch {
-        /* ignore */
-      }
+      stashPendingAdd(pid);
       router.push(
-        `/sign-in?redirect_url=${encodeURIComponent(window.location.pathname)}`,
+        `/sign-in?redirect_url=${encodeURIComponent(
+          typeof window !== "undefined" ? window.location.pathname : "/",
+        )}`,
       );
       return;
     }
+
+    if (productHasVariants(product)) {
+      router.push(`/product/${pid}`);
+      return;
+    }
+
     const el = cartBtnRef.current;
-    if (el && fly) {
-      const r = el.getBoundingClientRect();
-      fly.flyAdd(product, {
-        x: r.left,
-        y: r.top,
-        width: r.width,
-        height: r.height,
-      });
-    } else if (fly) {
-      fly.flyAdd(product, { x: 0, y: 0, width: 34, height: 34 });
+    const origin =
+      el != null
+        ? (() => {
+            const r = el.getBoundingClientRect();
+            return {
+              x: r.left,
+              y: r.top,
+              width: r.width,
+              height: r.height,
+            };
+          })()
+        : { x: 0, y: 0, width: 40, height: 40 };
+
+    // ONLY flyAdd — never call addToCart here
+    if (fly) {
+      fly.flyAdd(product, origin);
     }
   };
 
@@ -574,90 +723,143 @@ function RoomThreeStage({ products }: { products: Product[] }) {
   const active = products[current] || products[0];
 
   return (
-    <div className="w-full">
-      <div className="relative mx-auto w-full max-w-[min(100%,420px)] sm:max-w-[520px] lg:max-w-[600px]">
-        <div className="relative aspect-[4/5] w-full overflow-hidden bg-[#111] sm:aspect-[5/6]">
-          {products.map((p, i) => (
-            <div
-              key={p._id}
-              className="absolute inset-0 transition-opacity duration-[1800ms] ease-in-out"
-              style={{
-                opacity: i === current ? 1 : 0,
-                pointerEvents: i === current ? "auto" : "none",
-              }}
-            >
-              <Link href={`/product/${p._id}`} className="block h-full w-full">
-                {p.images?.[0] ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={p.images[0]}
-                    alt={p.name}
-                    className="h-full w-full object-cover will-change-transform"
-                    style={{
-                      transform: i === current ? "scale(1.04)" : "scale(1)",
-                      transition:
-                        i === current
-                          ? "transform 5.2s linear"
-                          : "transform 0s",
-                    }}
-                  />
-                ) : (
-                  <div className="h-full w-full bg-surface-2" />
-                )}
+    <div className="relative w-full overflow-hidden">
+      <div className="pointer-events-none absolute inset-0 z-0">
+        <video
+          ref={videoRef}
+          className="h-full w-full object-cover"
+          src="/room3.mp4"
+          muted
+          loop
+          playsInline
+          autoPlay
+          preload="auto"
+          disablePictureInPicture
+          controlsList="nodownload nofullscreen noremoteplayback"
+          style={{
+            transform: "translateZ(0)",
+            willChange: "transform",
+            backfaceVisibility: "hidden",
+          }}
+        />
+        <div className="absolute inset-0 bg-gradient-to-b from-[#05060A]/55 via-[#05060A]/35 to-[#05060A]/75" />
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_30%,rgba(5,6,10,0.55)_100%)]" />
+      </div>
+
+      <div className="relative z-10 mx-auto flex w-full max-w-[1100px] flex-col items-center px-4 py-12 sm:px-6 sm:py-16 md:py-20 lg:px-10">
+        <div className="mb-8 text-center sm:mb-10">
+          <p className="text-[10px] font-semibold tracking-[0.32em] text-white/50 sm:text-[11px]">
+            THE SIGNAL
+          </p>
+          <p className="mt-2 font-display text-[1.65rem] font-bold tracking-tight text-white sm:text-[2rem] md:text-4xl lg:text-5xl">
+            Worth Your Attention
+          </p>
+        </div>
+
+        <div className="relative w-full max-w-[min(100%,380px)] sm:max-w-[460px] lg:max-w-[520px]">
+          {/* NO border radius */}
+          <div className="relative aspect-[4/5] w-full overflow-hidden border border-white/10 bg-black/40 shadow-[0_20px_60px_rgba(0,0,0,0.45)] sm:aspect-[5/6]">
+            {products.map((p, i) => (
+              <div
+                key={p._id}
+                className="absolute inset-0 transition-opacity duration-[900ms] ease-[cubic-bezier(0.22,1,0.36,1)]"
+                style={{
+                  opacity: i === current ? 1 : 0,
+                  pointerEvents: i === current ? "auto" : "none",
+                }}
+              >
+                <Link href={`/product/${p._id}`} className="block h-full w-full">
+                  {p.images?.[0] ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={p.images[0]}
+                      alt={p.name}
+                      className="h-full w-full object-cover"
+                      style={{
+                        transform: i === current ? "scale(1.045)" : "scale(1)",
+                        transition:
+                          i === current
+                            ? "transform 5.4s linear"
+                            : "transform 0s",
+                        willChange: "transform",
+                      }}
+                      draggable={false}
+                    />
+                  ) : (
+                    <div className="h-full w-full bg-[#1a1c22]" />
+                  )}
+                </Link>
+              </div>
+            ))}
+
+            <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[42%] bg-gradient-to-t from-black/80 via-black/40 to-transparent" />
+
+            <div className="absolute inset-x-0 bottom-0 z-10 px-4 pb-4 pt-8 sm:px-5 sm:pb-5">
+              <Link href={`/product/${active._id}`} className="block">
+                <p className="line-clamp-2 text-[15px] font-semibold leading-snug text-white drop-shadow-sm sm:text-[17px]">
+                  {active.name}
+                </p>
+                <p className="mt-1 flex flex-wrap items-center gap-x-2 text-[12px] text-white/70 sm:text-[13px]">
+                  <span className="capitalize">
+                    {(active.brand || "plazore").toLowerCase()}
+                  </span>
+                  <span className="text-white/30">·</span>
+                  <span className="font-semibold text-white">
+                    {formatProductPrice(
+                      Number(active.price),
+                      active.region,
+                      displayRegion,
+                    )}
+                  </span>
+                </p>
               </Link>
             </div>
-          ))}
 
-          <button
-            ref={cartBtnRef}
-            type="button"
-            onClick={handleAddToCart}
-            aria-label="Add to bag"
-            className="absolute bottom-3 right-3 z-20 flex h-[34px] w-[34px] items-center justify-center bg-white text-[#111] shadow-[0_1px_6px_rgba(0,0,0,0.18)] transition hover:scale-105 active:scale-95"
-          >
-            <ShoppingBag className="h-4 w-4" strokeWidth={2} />
-          </button>
-        </div>
-
-        <div className="mt-4 px-1 sm:mt-5">
-          <Link href={`/product/${active._id}`}>
-            <p className="text-[15px] font-medium leading-snug text-white sm:text-[17px]">
-              {active.name}
-            </p>
-            <p className="mt-1 text-[12px] text-white/55 sm:mt-1.5 sm:text-[13px]">
-              <span>{(active.brand || "plazore").toLowerCase()}</span>
-              <span className="text-white/35"> | </span>
-              <span className="font-medium text-white">
-                {formatProductPrice(
-                  Number(active.price),
-                  active.region,
-                  displayRegion,
-                )}
-              </span>
-            </p>
-          </Link>
-        </div>
-
-        {products.length > 1 ? (
-          <div className="mt-5 flex justify-center gap-2 sm:mt-7">
-            {products.map((_, i) => (
-              <button
-                key={i}
-                type="button"
-                onClick={() => goTo(i)}
-                className={`h-1.5 rounded-full transition-all ${
-                  i === current ? "w-[18px] bg-white/85" : "w-1.5 bg-white/22"
-                }`}
-                aria-label={`Product ${i + 1}`}
+            <button
+              ref={cartBtnRef}
+              type="button"
+              onClick={handleAddToCart}
+              disabled={adding}
+              aria-label="Add to cart"
+              className={`absolute bottom-3 right-3 z-20 flex h-10 w-10 items-center justify-center bg-white text-[#0a0c10] shadow-[0_4px_20px_rgba(0,0,0,0.35)] transition active:scale-95 sm:bottom-4 sm:right-4 sm:h-11 sm:w-11 ${
+                adding
+                  ? "pointer-events-none scale-95 opacity-70"
+                  : "hover:scale-105"
+              }`}
+            >
+              <ShoppingCart
+                className="h-[18px] w-[18px] sm:h-5 sm:w-5"
+                strokeWidth={2.1}
               />
-            ))}
+            </button>
           </div>
-        ) : null}
+
+          {products.length > 1 ? (
+            <div className="mt-5 flex justify-center gap-2 sm:mt-6">
+              {products.map((_, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={() => goTo(i)}
+                  className={`h-1.5 transition-all duration-300 ${
+                    i === current
+                      ? "w-[20px] bg-white/90"
+                      : "w-1.5 bg-white/25 hover:bg-white/40"
+                  }`}
+                  aria-label={`Product ${i + 1}`}
+                />
+              ))}
+            </div>
+          ) : null}
+        </div>
       </div>
     </div>
   );
 }
 
+/* ─────────────────────────────────────────────────────────────
+   Main Mall
+───────────────────────────────────────────────────────────── */
 function MallInner({
   products: initialProducts,
   rooms: initialRooms,
@@ -676,9 +878,7 @@ function MallInner({
     initialRooms || null,
   );
   const [loading, setLoading] = useState(initialLoading);
-
   const [heroSlides, setHeroSlides] = useState<HeroSlide[]>(HERO_SLIDES);
-  const [slide, setSlide] = useState(0);
 
   const [progress, setProgress] = useState(0);
   const [activeRoom, setActiveRoom] = useState(1);
@@ -690,11 +890,6 @@ function MallInner({
   const heroFetchedRef = useRef(false);
   const lastRoomRef = useRef(1);
 
-  /**
-   * CRITICAL: do NOT set html/body scroll-behavior: smooth.
-   * That makes the page keep easing after you stop — the “hook”.
-   * Smooth is only used in smoothScrollToEl on intentional clicks.
-   */
   useEffect(() => {
     const html = document.documentElement;
     const body = document.body;
@@ -731,7 +926,6 @@ function MallInner({
         });
         if (slides?.length) {
           setHeroSlides(slides);
-          setSlide(0);
           prefetchHeroImages(slides);
         }
       } catch {
@@ -903,18 +1097,6 @@ function MallInner({
   }, [isSignedIn, getToken]);
 
   useEffect(() => {
-    if (heroSlides.length < 2) return;
-    const id = setInterval(() => {
-      setSlide((s) => (s + 1) % heroSlides.length);
-    }, 12000);
-    return () => clearInterval(id);
-  }, [heroSlides.length]);
-
-  /**
-   * Observe only. Never scroll the page from here.
-   * activeRoom only updates when the room actually changes (fewer re-renders).
-   */
-  useEffect(() => {
     let ticking = false;
 
     const onScroll = () => {
@@ -963,7 +1145,7 @@ function MallInner({
 
       <HeroStage slides={heroSlides} onEnterShowroom={enterShowroom} />
 
-      {/* Desktop room dots — click only */}
+      {/* Desktop room dots */}
       <div
         className={`fixed right-3 top-1/2 z-40 hidden -translate-y-1/2 flex-col gap-2.5 md:flex lg:right-4 ${
           roomNavOn ? "opacity-100" : "pointer-events-none opacity-0"
@@ -974,7 +1156,7 @@ function MallInner({
             key={n}
             type="button"
             onClick={() => goRoom(n)}
-            className={`h-2 rounded-full transition-all ${
+            className={`h-2 transition-all ${
               activeRoom === n
                 ? "w-7 bg-[#00E575]"
                 : "w-2 bg-white/30 hover:bg-white/50"
@@ -984,7 +1166,7 @@ function MallInner({
         ))}
       </div>
 
-      {/* Mobile room pills — click only; safe-area aware */}
+      {/* Mobile room pills */}
       <div
         className={`fixed inset-x-0 z-40 flex justify-center px-4 md:hidden ${
           roomNavOn ? "opacity-100" : "pointer-events-none opacity-0"
@@ -993,13 +1175,13 @@ function MallInner({
           bottom: "max(1rem, env(safe-area-inset-bottom, 0px))",
         }}
       >
-        <div className="flex items-center gap-1 rounded-full border border-white/10 bg-[#11141A]/92 px-2 py-1.5 backdrop-blur-xl">
+        <div className="flex items-center gap-1 border border-white/10 bg-[#11141A]/92 px-2 py-1.5 backdrop-blur-xl">
           {Array.from({ length: roomCount }, (_, i) => i + 1).map((n) => (
             <button
               key={n}
               type="button"
               onClick={() => goRoom(n)}
-              className={`min-w-[32px] rounded-full px-2 py-1.5 text-[10px] font-bold tracking-wide sm:min-w-[36px] sm:px-2.5 ${
+              className={`min-w-[32px] px-2 py-1.5 text-[10px] font-bold tracking-wide sm:min-w-[36px] sm:px-2.5 ${
                 activeRoom === n ? "bg-white text-[#090B0F]" : "text-white/50"
               }`}
             >
@@ -1020,6 +1202,7 @@ function MallInner({
           </div>
         ) : (
           <>
+            {/* ──────────── ROOM 1 — THE HORIZON ──────────── */}
             {rooms.one.length > 0 ? (
               <section
                 ref={(el) => {
@@ -1082,6 +1265,7 @@ function MallInner({
               </section>
             ) : null}
 
+            {/* ──────────── ROOM 2 — THE CHAMBER ──────────── */}
             {rooms.two.length > 0 ? (
               <section
                 ref={(el) => {
@@ -1123,50 +1307,52 @@ function MallInner({
               </section>
             ) : null}
 
+            {/* ──────────── ROOM 3 — THE SIGNAL ──────────── */}
             {rooms.three.length > 0 ? (
               <section
                 ref={(el) => {
                   roomRefs.current[3] = el;
                 }}
-                className="bg-[#07080C] px-4 py-10 sm:px-6 sm:py-14 md:px-10 md:py-20 lg:px-16"
+                className="relative min-h-[85vh] overflow-hidden bg-[#05060A]"
               >
-                <p className="text-[10px] font-semibold tracking-[0.28em] text-white/40 sm:text-[11px]">
-                  {rooms.titles.three[0]}
-                </p>
-                <p className="mt-1.5 font-display text-[1.5rem] font-bold text-white sm:mt-2 sm:text-[1.75rem] md:text-4xl lg:text-5xl">
-                  {rooms.titles.three[1]}
-                </p>
-                <div className="mt-8 sm:mt-10">
-                  <RoomThreeStage products={rooms.three} />
-                </div>
+                <RoomThreeStage products={rooms.three} />
               </section>
             ) : null}
 
+            {/* ──────────── ROOM 4 — THE LOCALE (no border radius) ──────────── */}
             {rooms.four.length > 0 ? (
               <section
                 ref={(el) => {
                   roomRefs.current[4] = el;
                 }}
-                className="bg-[#F7F1E9] px-0 py-10 sm:py-14 md:py-20"
+                className="relative overflow-hidden bg-[#07090F] px-0 py-12 sm:py-16 md:py-20"
               >
-                <div className="px-4 sm:px-6 md:px-10 lg:px-16">
-                  <p className="text-[10px] font-semibold tracking-[0.28em] text-[#9C8B7A] sm:text-[11px]">
+                <Starfield />
+
+                {/* soft top edge line — sharp, no radius */}
+                <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-white/[0.06]" />
+
+                <div className="relative z-10 px-4 sm:px-6 md:px-10 lg:px-16">
+                  <p className="text-[10px] font-semibold tracking-[0.28em] text-white/40 sm:text-[11px]">
                     {rooms.titles.four[0]}
                   </p>
-                  <p className="mt-1.5 font-display text-[1.5rem] font-bold tracking-tight text-[#2C241B] sm:mt-2 sm:text-[1.75rem] md:text-4xl">
+                  <p className="mt-1.5 font-display text-[1.55rem] font-bold tracking-tight text-white sm:mt-2 sm:text-[1.85rem] md:text-4xl">
                     {rooms.titles.four[1]}
                   </p>
-                  <p className="mt-1.5 text-[13px] text-[#8C7B6B] sm:mt-2 sm:text-sm">
+                  <p className="mt-2 max-w-md text-[13px] leading-relaxed text-white/50 sm:text-sm">
                     A closer look at what&apos;s moving around you.
                   </p>
                 </div>
-                <div className={`mt-8 sm:mt-10 ${RAIL_CLASS} pb-4`}>
+
+                {/* Sharp-edge product rail — force no radius on cards in this room */}
+                <div
+                  className={`relative z-10 mt-8 sm:mt-10 ${RAIL_CLASS} pb-4 [&_.group]:!rounded-none [&_img]:!rounded-none [&_button]:!rounded-none`}
+                >
                   {rooms.four.map((p) => (
                     <ProductCard
                       key={`r4-${p._id}`}
                       product={p}
                       compact
-                      tone="light"
                       room={4}
                     />
                   ))}
@@ -1198,4 +1384,4 @@ export function Mall({
       <MallInner products={products} rooms={rooms} loading={loading} />
     </ShowroomFlyCartProvider>
   );
-}
+} 

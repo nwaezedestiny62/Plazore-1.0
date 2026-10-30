@@ -28,7 +28,7 @@ export const TV_QUOTE_SLIDES: QuoteSlide[] = [
       "https://images.unsplash.com/photo-1451187580459-43490279c0fa?auto=format&fit=crop&w=2000&q=80",
     kicker: "CONTROL",
     title: "The future of commerce is quiet, exact, and already here.",
-    body: "Plazore · Discovery-led systems",
+    body: "Plazore | Discovery-led systems",
   },
   {
     image:

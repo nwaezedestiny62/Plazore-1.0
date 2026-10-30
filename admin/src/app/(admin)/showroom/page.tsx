@@ -62,23 +62,23 @@ type Section = {
 
 const ROOM_META: Record<string, { title: string; body: string; accent: string }> = {
   "1": {
-    title: "Section 1 · Discovery",
-    body: "50 slots · two rows of 25 · primary unique set",
+    title: "Section 1 | Discovery",
+    body: "50 slots | two rows of 25 | primary unique set",
     accent: "#00E575",
   },
   "2": {
-    title: "Section 2 · Preference pairs",
-    body: "14 slots · side-by-side pairs · primary unique set",
+    title: "Section 2 | Preference pairs",
+    body: "14 slots | side-by-side pairs | primary unique set",
     accent: "#3B82F6",
   },
   "3": {
-    title: "Section 3 · Exploration",
-    body: "16 slots · may reuse 1–2 when inventory is thin",
+    title: "Section 3 | Exploration",
+    body: "16 slots | may reuse 1–2 when inventory is thin",
     accent: "#14B8A6",
   },
   "4": {
-    title: "Section 4 · Broader surface",
-    body: "33 slots · may reuse earlier rooms when inventory is thin",
+    title: "Section 4 | Broader surface",
+    body: "33 slots | may reuse earlier rooms when inventory is thin",
     accent: "#A78BFA",
   },
 };
@@ -363,7 +363,7 @@ function ProductModal({
           <p className="text-[13px] text-white/50">
             {[product.category, product.region, `stock ${product.stock ?? "—"}`]
               .filter(Boolean)
-              .join(" · ")}
+              .join(" | ")}
           </p>
           <p className="text-xl font-semibold tabular-nums">
             {Number(product.price || 0).toLocaleString()}
@@ -570,7 +570,7 @@ function ShowroomDirectory() {
               Ranker {algo?.status || "—"}
             </Badge>
             <span className="text-xs text-white/40">
-              Last refresh {fmt(ov?.lastRefresh)} · populated{" "}
+              Last refresh {fmt(ov?.lastRefresh)} | populated{" "}
               {totals?.populated ?? 0}/{totals?.capacity ?? 0} ({fillOverall}%)
             </span>
           </div>
@@ -654,7 +654,7 @@ function ShowroomDirectory() {
                     <span className="font-medium text-[#F5F7FA]">
                       {algo.name}
                     </span>{" "}
-                    · {algo.version} ·{" "}
+                    | {algo.version} |{" "}
                     {String(algo.type || "").replaceAll("_", " ")}
                   </p>
                   <p>Refresh interval: {algo.refreshIntervalLabel}</p>
@@ -682,7 +682,7 @@ function ShowroomDirectory() {
                         />
                         <span>
                           <span className="text-[#F5F7FA]">{s.name}</span>
-                          <span className="text-white/35"> · {s.weight}</span>
+                          <span className="text-white/35"> | {s.weight}</span>
                           {s.notes ? (
                             <span className="text-white/45"> — {s.notes}</span>
                           ) : null}
@@ -692,7 +692,7 @@ function ShowroomDirectory() {
                   </ul>
                   {Array.isArray(algo.eligibility) && algo.eligibility.length ? (
                     <p className="mt-3 text-[11px] text-white/35">
-                      Eligibility: {algo.eligibility.join(" · ")}
+                      Eligibility: {algo.eligibility.join(" | ")}
                     </p>
                   ) : null}
                 </div>
@@ -766,7 +766,7 @@ function ShowroomDirectory() {
                       {sec.categories
                         .slice(0, 6)
                         .map((c) => `${c.key} ${c.count}`)
-                        .join(" · ") || "—"}
+                        .join(" | ") || "—"}
                     </p>
                   </div>
                   <div>
@@ -777,7 +777,7 @@ function ShowroomDirectory() {
                       {sec.sellers
                         .slice(0, 4)
                         .map((c) => `${c.key} ${c.count}`)
-                        .join(" · ") || "—"}
+                        .join(" | ") || "—"}
                     </p>
                   </div>
                   <div>
@@ -787,7 +787,7 @@ function ShowroomDirectory() {
                     <p className="mt-1 text-[12px] leading-relaxed text-white/55">
                       {sec.regions
                         .map((c) => `${c.key} ${c.count}`)
-                        .join(" · ") || "—"}
+                        .join(" | ") || "—"}
                     </p>
                   </div>
                 </div>

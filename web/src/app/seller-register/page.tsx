@@ -524,7 +524,7 @@ export default function SellerRegisterPage() {
                     {selectedRegion?.name}
                   </span>
                   <span className="mt-0.5 block text-[12px] text-white/55">
-                    {isNigeria ? "Paystack payouts" : "Stripe Connect payouts"} ·{" "}
+                    {isNigeria ? "Paystack payouts" : "Stripe Connect payouts"} |{" "}
                     {selectedRegion?.currency?.symbol}
                   </span>
                 </span>

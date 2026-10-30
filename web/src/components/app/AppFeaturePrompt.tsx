@@ -359,7 +359,7 @@ export function AppFeaturePrompt({
           </div>
         </div>
 
-        {/* ═══ DESKTOP — text left · portrait video right ═══ */}
+        {/* ═══ DESKTOP — text left | portrait video right ═══ */}
         <div className="hidden sm:flex sm:flex-row sm:items-stretch">
           <div className="flex flex-1 flex-col justify-center px-9 py-11 pr-7">
             <TextBlock copy={copy} requestClose={requestClose} />

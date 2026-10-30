@@ -445,7 +445,7 @@ function PerformanceDirectory() {
           </Badge>
           <Badge tone="blue">
             <Activity className="mr-1 inline h-3 w-3" />
-            Live · {POLL_MS / 1000}s
+            Live | {POLL_MS / 1000}s
           </Badge>
           <Badge tone="neutral">Query env: {environment}</Badge>
           {lastLiveAt ? (
@@ -494,7 +494,7 @@ function PerformanceDirectory() {
                 const st = (c.s?.state as HealthState) || "no_data";
                 const meta =
                   c.s?.avgMs != null
-                    ? `avg ${fmtMs(c.s.avgMs)} · err ${fmtRate(c.s.errorRate)} · ${c.s.requests ?? 0} req`
+                    ? `avg ${fmtMs(c.s.avgMs)} | err ${fmtRate(c.s.errorRate)} | ${c.s.requests ?? 0} req`
                     : undefined;
                 return (
                   <ServiceCard
@@ -584,9 +584,9 @@ function PerformanceDirectory() {
                 />
               </div>
               <p className="mt-4 text-[11px] text-white/35">
-                1-minute buckets · latency warn{" "}
+                1-minute buckets | latency warn{" "}
                 {health?.thresholds?.latencyWarnMs ?? 800}ms / crit{" "}
-                {health?.thresholds?.latencyCritMs ?? 2000}ms · error warn{" "}
+                {health?.thresholds?.latencyCritMs ?? 2000}ms | error warn{" "}
                 {(
                   (health?.thresholds?.errorRateWarn ?? 0.02) * 100
                 ).toFixed(0)}
@@ -660,11 +660,11 @@ function PerformanceDirectory() {
                       </p>
                     ) : null}
                     <p className="mt-1 text-[11px] tabular-nums text-white/35">
-                      Occurrences {inc.occurrences} · First{" "}
+                      Occurrences {inc.occurrences} | First{" "}
                       {inc.firstDetected
                         ? new Date(inc.firstDetected).toLocaleString()
                         : "—"}{" "}
-                      · Last{" "}
+                      | Last{" "}
                       {inc.lastDetected
                         ? new Date(inc.lastDetected).toLocaleString()
                         : "—"}
@@ -839,7 +839,7 @@ function PerformanceDirectory() {
 WEB   →  API / BACKEND  →  DATABASE
 ADMIN →  API / BACKEND  →  DATABASE
 
-Auth (Clerk) · Storage · Jobs
+Auth (Clerk) | Storage | Jobs
 Payments — not instrumented`}</pre>
               </div>
             </Panel>

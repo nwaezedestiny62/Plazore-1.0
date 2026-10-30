@@ -521,7 +521,7 @@ export default function HelpPage() {
         <section>
           <p className="mb-4 text-[10px] font-bold tracking-[1.6px] text-[#6B7280]">
             {q
-              ? `RESULTS · ${filtered.reduce((n, c) => n + c.articles.length, 0)}`
+              ? `RESULTS | ${filtered.reduce((n, c) => n + c.articles.length, 0)}`
               : "TOPICS"}
           </p>
 

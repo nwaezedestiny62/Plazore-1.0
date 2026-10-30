@@ -1,6 +1,6 @@
 /**
  * Product Details — Plazore mobile
- * Report at bottom · 6-line description · Google/sign-in resume
+ * Report at bottom | 6-line description | Google/sign-in resume
  * Message seller opens /chat/:id?from=product&productId= so the thread
  * always shows this listing + store, and back returns here.
  */
@@ -765,7 +765,7 @@ export default function ProductDetails() {
         ? formatProduct(Number(product.price), product.region)
         : "";
     return price
-      ? `${name} · ${price}\nOn Plazore — THE NEW WAY TO SHOP AND EARN 🛒🛍️.\n${productUrl}`
+      ? `${name} | ${price}\nOn Plazore — THE NEW WAY TO SHOP AND EARN 🛒🛍️.\n${productUrl}`
       : `${name}\nOn Plazore — THE NEW WAY TO SHOP AND EARN 🛒🛍️.\n${productUrl}`;
   }, [product, productUrl, formatProduct]);
 
@@ -1426,7 +1426,7 @@ export default function ProductDetails() {
                   )}
                   {inStock ? (
                     <GradientText style={styles.availableText}>
-                      {`Available · ${displayStock}`}
+                      {`Available | ${displayStock}`}
                     </GradientText>
                   ) : (
                     <Text style={[styles.availableText, { color: ERROR }]}>
@@ -1519,9 +1519,9 @@ export default function ProductDetails() {
                       <View style={styles.optionReadyRow}>
                         <View style={styles.optionReadyDot} />
                         <Text style={styles.optionHintOk}>
-                          Ready · {displayStock} available
+                          Ready | {displayStock} available
                           {matchedVariant.price != null
-                            ? ` · ${formatProduct(
+                            ? ` | ${formatProduct(
                                 Number(matchedVariant.price),
                                 product.region,
                               )}`
@@ -1885,7 +1885,7 @@ export default function ProductDetails() {
                           Ask about {productName}
                         </Text>
                         <Text style={styles.commSub} numberOfLines={1}>
-                          Chat with {storeName} · stays on this listing
+                          Chat with {storeName} | stays on this listing
                         </Text>
                       </View>
                       <View style={styles.commArrow}>

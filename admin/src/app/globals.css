@@ -51,7 +51,7 @@ button:not(:disabled),
   to { transform: rotate(360deg); }
 }
 
-/* ── Clerk · Admin sign-in ── */
+/* ── Clerk | Admin sign-in ── */
 .cl-rootBox,
 .cl-card,
 .cl-cardBox,

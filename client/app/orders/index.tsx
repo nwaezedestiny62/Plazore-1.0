@@ -379,7 +379,7 @@ export default function BuyerOrders() {
 
               <View style={styles.cardBottom}>
                 <Text style={styles.meta}>
-                  {count} item{count !== 1 ? 's' : ''} · {totalLabel}
+                  {count} item{count !== 1 ? 's' : ''} | {totalLabel}
                 </Text>
                 <Text style={styles.date}>
                   {item.createdAt

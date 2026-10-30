@@ -75,7 +75,7 @@ function formatOptionLine(item: any): string {
     const parts = Object.entries(so)
       .filter(([, v]) => v != null && String(v).trim() !== '')
       .map(([k, v]) => `${k}: ${v}`)
-    if (parts.length) return parts.join(' · ')
+    if (parts.length) return parts.join(' | ')
   }
   if (item?.size) return `Size: ${item.size}`
   return ''
@@ -901,7 +901,7 @@ export default function SellerOrderDetails() {
                     </Text>
                   )}
                   <Text style={styles.meta}>
-                    Qty: {item.quantity} · {fmtItem(unit, item)} each
+                    Qty: {item.quantity} | {fmtItem(unit, item)} each
                   </Text>
                   <Text style={[styles.bodyStrong, { marginTop: 2, fontSize: 14 }]}>
                     {fmtItem(unit * (Number(item.quantity) || 1), item)}
@@ -959,7 +959,7 @@ export default function SellerOrderDetails() {
                 <Text style={styles.methodText}>
                   {impliedMethod === 'self'
                     ? 'Self delivery'
-                    : `Courier${courierName ? ` · ${courierName}` : ''}`}
+                    : `Courier${courierName ? ` | ${courierName}` : ''}`}
                 </Text>
               </View>
 

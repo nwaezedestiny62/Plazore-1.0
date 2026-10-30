@@ -368,7 +368,7 @@ function OrderChip({ o }: { o: any }) {
     <div className="rounded-xl border border-white/[0.07] bg-white/[0.03] px-3 py-2">
       <p className="font-mono text-[12px] font-semibold text-[#00E575]">{id}</p>
       <p className="mt-0.5 text-[11px] text-white/45">
-        {fmt(o.createdAt)} · {o.orderStatus || o.status || "—"} ·{" "}
+        {fmt(o.createdAt)} | {o.orderStatus || o.status || "—"} |{" "}
         {money(o.totalAmount ?? o.total)}
       </p>
     </div>
@@ -573,7 +573,7 @@ function ActivityModal({
               <ul className="mt-3 space-y-1.5">
                 {health.signals.map((s, i) => (
                   <li key={i} className="text-xs text-white/50">
-                    · {s}
+                    | {s}
                   </li>
                 ))}
               </ul>
@@ -665,8 +665,8 @@ function ActivityModal({
                       key={p._id}
                       className="rounded-xl border border-white/[0.07] bg-white/[0.03] px-3 py-2 text-xs"
                     >
-                      {p.brand} ···· {p.last4}
-                      {p.isDefault ? " · default" : ""}
+                      {p.brand} |||| {p.last4}
+                      {p.isDefault ? " | default" : ""}
                     </p>
                   ))}
                 </div>
@@ -686,8 +686,8 @@ function ActivityModal({
                       key={a._id}
                       className="rounded-xl border border-white/[0.07] bg-white/[0.03] px-3 py-2 text-xs"
                     >
-                      {a.type} · {a.city}, {a.state}
-                      {a.isDefault ? " · default" : ""}
+                      {a.type} | {a.city}, {a.state}
+                      {a.isDefault ? " | default" : ""}
                     </p>
                   ))}
                 </div>
@@ -1072,8 +1072,8 @@ function ModerationDirectory() {
                   <div className="min-w-0">
                     <p className="truncate font-medium">{u.name || "—"}</p>
                     <p className="truncate text-xs text-white/40">
-                      {u.email} · {u.role}
-                      {u.storeName ? ` · ${u.storeName}` : ""}
+                      {u.email} | {u.role}
+                      {u.storeName ? ` | ${u.storeName}` : ""}
                     </p>
                   </div>
                   <div className="flex flex-wrap gap-1.5">
@@ -1082,14 +1082,14 @@ function ModerationDirectory() {
                         u.moderation?.buyer?.status || "NORMAL",
                       )}
                     >
-                      Buyer · {u.moderation?.buyer?.status || "NORMAL"}
+                      Buyer | {u.moderation?.buyer?.status || "NORMAL"}
                     </Badge>
                     <Badge
                       tone={toneForStatus(
                         u.moderation?.seller?.status || "NORMAL",
                       )}
                     >
-                      Seller · {u.moderation?.seller?.status || "NORMAL"}
+                      Seller | {u.moderation?.seller?.status || "NORMAL"}
                     </Badge>
                   </div>
                 </button>
@@ -1119,7 +1119,7 @@ function ModerationDirectory() {
                 </p>
                 {profile.user.marketplaceRegion && (
                   <p className="mt-1 text-xs text-white/35">
-                    Region · {profile.user.marketplaceRegion}
+                    Region | {profile.user.marketplaceRegion}
                   </p>
                 )}
               </div>
@@ -1169,7 +1169,7 @@ function ModerationDirectory() {
                     </div>
                     {s.endsAt && s.status === "SUSPENDED" && (
                       <p className="mt-2 text-xs text-white/45">
-                        Internal · {fmt(s.endsAt)} · {remaining(s.endsAt)}
+                        Internal | {fmt(s.endsAt)} | {remaining(s.endsAt)}
                       </p>
                     )}
                   </button>
@@ -1216,7 +1216,7 @@ function ModerationDirectory() {
                     </Badge>
                     {side.status === "SUSPENDED" && side.endsAt && (
                       <p className="mt-2 text-xs text-white/45">
-                        Internal end · {remaining(side.endsAt)}
+                        Internal end | {remaining(side.endsAt)}
                       </p>
                     )}
                     {side.status === "BLOCKED" && (
@@ -1382,7 +1382,7 @@ function ModerationDirectory() {
                 >
                   <div className="min-w-0">
                     <p className="truncate text-sm font-medium">
-                      {c.user?.name || "User"} · {c.user?.email}
+                      {c.user?.name || "User"} | {c.user?.email}
                     </p>
                     <div className="mt-1.5 flex flex-wrap gap-2">
                       <Badge tone="neutral">{c.context}</Badge>

@@ -1134,7 +1134,7 @@ function AnnouncementsInner() {
 
       <header className="mb-6 border-b border-white/[0.08] pb-5">
         <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-[#00E575]">
-          Platform · Design studio
+          Platform | Design studio
         </p>
         <div className="mt-2 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
@@ -1396,7 +1396,7 @@ function AnnouncementsInner() {
                         {items.map(([key, meta]) => (
                           <option key={key} value={key}>
                             {meta.label}
-                            {meta.isGradient ? " · gradient" : ""}
+                            {meta.isGradient ? " | gradient" : ""}
                           </option>
                         ))}
                       </optgroup>
@@ -1576,8 +1576,8 @@ function AnnouncementsInner() {
                 Live preview
               </p>
               <span className="text-[10px] text-white/30">
-                {ACCENT_MAP[design.accent]?.label || design.accent} ·{" "}
-                {design.layout} · {design.theme}
+                {ACCENT_MAP[design.accent]?.label || design.accent} |{" "}
+                {design.layout} | {design.theme}
               </span>
             </div>
             <div className="bg-[#080A0E] p-4 sm:p-5">
@@ -1639,7 +1639,7 @@ function AnnouncementsInner() {
                       </p>
                       <p className="mt-2 text-[11px] text-white/35">
                         {a.status === "published"
-                          ? `Published ${fmt(a.publishedAt)} · delivered ${a.deliveredCount ?? 0}`
+                          ? `Published ${fmt(a.publishedAt)} | delivered ${a.deliveredCount ?? 0}`
                           : `Updated ${fmt(a.updatedAt)}`}
                       </p>
                     </div>

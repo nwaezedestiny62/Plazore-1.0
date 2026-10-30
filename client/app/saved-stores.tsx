@@ -498,7 +498,7 @@ export default function SavedStoresScreen() {
             <View style={styles.footer}>
               <View style={styles.footerLine} />
               <Text style={styles.footerText}>
-                Plazore · Your private collection
+                Plazore | Your private collection
               </Text>
             </View>
           </Animated.ScrollView>

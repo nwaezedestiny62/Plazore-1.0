@@ -871,7 +871,7 @@ function ReportsDirectory() {
                     </p>
                     <p className="mt-1 truncate text-xs text-white/40">
                       Reporter: {r.reporter?.name || "—"}
-                      {r.reporter?.email ? ` · ${r.reporter.email}` : ""}
+                      {r.reporter?.email ? ` | ${r.reporter.email}` : ""}
                     </p>
                     {r.description ? (
                       <p className="mt-2 line-clamp-2 text-sm text-white/50">

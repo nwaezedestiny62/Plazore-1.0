@@ -164,7 +164,7 @@ export default function SellerAIAssistant() {
               </LinearGradient>
             </View>
 
-            <Text style={styles.footer}>Plazore · Seller Intelligence</Text>
+            <Text style={styles.footer}>Plazore | Seller Intelligence</Text>
           </ScrollView>
         </Animated.View>
       </SafeAreaView>

@@ -184,7 +184,7 @@ export default function SellerSettingsPage() {
         </Section>
 
         <p className="mt-2 text-center text-[11px] tracking-wide text-[#737A86]">
-          Plazore · Seller Lounge
+          Plazore | Seller Lounge
         </p>
       </div>
     </div>

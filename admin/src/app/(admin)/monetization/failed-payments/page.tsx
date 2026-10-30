@@ -357,7 +357,7 @@ export default function FailedPaymentsPage() {
                 {row.problem?.detail}
               </p>
               <p className="mt-1 text-[11px] text-white/35">
-                Buyer: {row.buyer?.name || row.buyer?.email || "—"} · Seller:{" "}
+                Buyer: {row.buyer?.name || row.buyer?.email || "—"} | Seller:{" "}
                 {row.seller?.storeName || row.seller?.name || "—"}
               </p>
             </div>
@@ -367,7 +367,7 @@ export default function FailedPaymentsPage() {
                 row.feeBreakdown?.currency || row.currency || "NGN"
               )}
               <p className="text-[10px] font-normal text-white/40">
-                {row.paymentStatus} · {row.paymentLifecycle || "—"}
+                {row.paymentStatus} | {row.paymentLifecycle || "—"}
               </p>
             </div>
           </button>
@@ -438,7 +438,7 @@ export default function FailedPaymentsPage() {
               </div>
               <div className="rounded-xl border border-white/8 bg-white/[0.03] p-3 text-xs">
                 <p>
-                  Status: <strong>{selected.paymentStatus}</strong> · Lifecycle:{" "}
+                  Status: <strong>{selected.paymentStatus}</strong> | Lifecycle:{" "}
                   <strong>{selected.paymentLifecycle || "—"}</strong>
                 </p>
                 <p className="mt-1">

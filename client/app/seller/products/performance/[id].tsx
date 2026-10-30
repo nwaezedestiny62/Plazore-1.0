@@ -155,10 +155,10 @@ export default function ProductPerformanceScreen() {
         <View style={styles.card}>
           <Text style={styles.label}>Performance score</Text>
           <Text style={styles.score}>{score}</Text>
-          <Text style={styles.scoreHint}>Views ×1 · Cart ×5 · Purchases ×15</Text>
+          <Text style={styles.scoreHint}>Views ×1 | Cart ×5 | Purchases ×15</Text>
           {data.milestones?.p200 ? (
             <View style={styles.milestone}>
-              <Text style={styles.milestoneText}>Milestone · 200 pts</Text>
+              <Text style={styles.milestoneText}>Milestone | 200 pts</Text>
             </View>
           ) : null}
         </View>

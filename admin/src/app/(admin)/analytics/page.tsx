@@ -120,7 +120,7 @@ function VizChart({
         </div>
         <p className="text-[11px] text-white/35">
           Peak {peak.toLocaleString()}
-          {series[peakIdx]?.date ? ` · ${series[peakIdx].date}` : ""}
+          {series[peakIdx]?.date ? ` | ${series[peakIdx].date}` : ""}
         </p>
       </div>
 
@@ -158,7 +158,7 @@ function VizChart({
                 <div className="pointer-events-none absolute -top-8 left-1/2 z-10 hidden -translate-x-1/2 whitespace-nowrap rounded-md border border-white/10 bg-[#0E1116] px-2 py-1 text-[10px] text-white group-hover:block">
                   {v.toLocaleString()}
                   {series[i]?.date ? (
-                    <span className="text-white/40"> · {series[i].date}</span>
+                    <span className="text-white/40"> | {series[i].date}</span>
                   ) : null}
                 </div>
               </div>
@@ -313,7 +313,7 @@ export default function AnalyticsPage() {
             ))}
           </div>
           <p className="mt-2 text-[12px] text-white/35">
-            {rangeMeta?.hint} · API window {rangeLabel}
+            {rangeMeta?.hint} | API window {rangeLabel}
           </p>
         </div>
 
@@ -325,7 +325,7 @@ export default function AnalyticsPage() {
             </span>
           </Badge>
           <Badge tone="blue">
-            {rangeMeta?.label} · {rangeLabel}
+            {rangeMeta?.label} | {rangeLabel}
           </Badge>
           {fetchedAt ? (
             <span className="text-[11px] text-white/35">

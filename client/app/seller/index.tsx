@@ -579,7 +579,7 @@ export default function SellerDashboard() {
 
           <View style={styles.revenueMeta}>
             <Text style={styles.revenueMetaText}>
-              Fee · {feePct}% of product price
+              Fee | {feePct}% of product price
             </Text>
             <Pressable
               onPress={() => router.push('/seller/subscription' as any)}
@@ -730,7 +730,7 @@ export default function SellerDashboard() {
                 <Text style={styles.activitySub}>
                   {item.subtitle}
                   {item.at
-                    ? ` · ${new Date(item.at).toLocaleDateString()}`
+                    ? ` | ${new Date(item.at).toLocaleDateString()}`
                     : ''}
                 </Text>
               </View>
@@ -760,7 +760,7 @@ export default function SellerDashboard() {
           </TouchableOpacity>
         </View>
 
-        <Text style={styles.footerBrand}>Plazore · Seller Lounge</Text>
+        <Text style={styles.footerBrand}>Plazore | Seller Lounge</Text>
       </ScrollView>
     </SafeAreaView>
   )

@@ -50,7 +50,7 @@ export default function RoomTwo({
       <View style={styles.header}>
         <Text style={styles.kicker}>{title}</Text>
         <Text style={styles.title}>{subtitle}</Text>
-        <Text style={styles.hint}>Compare side by side · pick what fits you</Text>
+        <Text style={styles.hint}>Compare side by side | pick what fits you</Text>
         <View style={styles.line} />
       </View>
 

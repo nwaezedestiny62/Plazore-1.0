@@ -186,7 +186,7 @@ export default function PlazoreAIScreen() {
                 style={styles.headerLogo}
                 resizeMode="contain"
               />
-              {/* Space Grotesk 600 · white */}
+              {/* Space Grotesk 600 | white */}
               <Text style={styles.headerTitle}>Plazore AI</Text>
             </View>
             <GradientText style={styles.headerSub}>
@@ -463,7 +463,7 @@ const styles = StyleSheet.create({
     width: 22,
     height: 22,
   },
-  /* Space Grotesk 600 · white */
+  /* Space Grotesk 600 | white */
   headerTitle: {
     color: "#FFFFFF",
     fontFamily: FONT.space600,

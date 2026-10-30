@@ -6,8 +6,11 @@ import {
 
 const KEY = "plazore_web_cart";
 
+/** Same line cannot be written twice within this window */
+const ADD_LOCK_MS = 1000;
+const recentLineAdds = new Map<string, number>();
+
 export type CartItem = {
-  /** productId or productId::variantKey */
   id: string;
   product: Product;
   quantity: number;
@@ -25,7 +28,6 @@ export type AddToCartSelection = {
   variant?: ProductVariant | null;
 };
 
-/** Stable line id — same product + same variant = one line */
 function lineId(productId: string, variantKey?: string): string {
   const key = String(variantKey || "").trim();
   return key ? `${productId}::${key}` : productId;
@@ -36,7 +38,6 @@ function read(): CartItem[] {
   try {
     const raw = localStorage.getItem(KEY);
     const items: CartItem[] = raw ? JSON.parse(raw) : [];
-    // Migrate legacy lines that only had product _id as id
     return items.map((item) => {
       const vk = item.variantKey || "";
       const expected = lineId(item.product?._id || item.id, vk);
@@ -64,17 +65,14 @@ export function cartCount() {
 }
 
 /**
- * Add to cart.
- * - Simple product: no selection needed.
- * - Variant product: pass variant / selectedOptions / variantKey.
- * Same product + same variantKey → increases quantity (never creates a second line).
- * Different variant → separate line.
+ * Returns true if quantity was written, false if blocked by lock.
+ * ONE successful write per line id within ADD_LOCK_MS.
  */
 export function addToCart(
   product: Product,
   qty = 1,
   selection?: AddToCartSelection
-) {
+): boolean {
   const quantity = Math.max(1, Number(qty) || 1);
 
   if (productHasVariants(product)) {
@@ -110,13 +108,25 @@ export function addToCart(
     {};
 
   const unitPrice = getVariantUnitPrice(product, variant);
-  const id = lineId(product._id, variantKey);
+  const id = lineId(String(product._id), variantKey);
+
+  const now = Date.now();
+  const last = recentLineAdds.get(id) || 0;
+  if (now - last < ADD_LOCK_MS) {
+    return false;
+  }
+  recentLineAdds.set(id, now);
+
+  if (recentLineAdds.size > 80) {
+    for (const [k, t] of recentLineAdds) {
+      if (now - t > ADD_LOCK_MS * 3) recentLineAdds.delete(k);
+    }
+  }
 
   const items = read();
   const i = items.findIndex((x) => x.id === id);
 
   if (i >= 0) {
-    // Merge into existing line — never push a duplicate
     items[i].quantity += quantity;
     items[i].price = unitPrice;
     items[i].variantId = variantId || items[i].variantId;
@@ -136,6 +146,7 @@ export function addToCart(
   }
 
   write(items);
+  return true;
 }
 
 export function updateQuantity(id: string, qty: number) {
@@ -161,7 +172,6 @@ export function clearCart() {
   window.dispatchEvent(new Event("plazore-cart"));
 }
 
-/** Payload rows for POST /orders create (backend-compatible) */
 export function cartItemsForCheckout(items?: CartItem[]) {
   const list = items || read();
   return list.map((item) => ({

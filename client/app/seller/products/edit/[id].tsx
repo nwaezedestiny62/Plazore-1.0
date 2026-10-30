@@ -764,7 +764,7 @@ function ProductPagePreview({
         >
           {data.category || data.subCategory ? (
             <Text style={styles.pageEyebrow} numberOfLines={1}>
-              {[data.category, data.subCategory].filter(Boolean).join(' · ')}
+              {[data.category, data.subCategory].filter(Boolean).join(' | ')}
             </Text>
           ) : null}
 
@@ -794,7 +794,7 @@ function ProductPagePreview({
                 }}
                 numberOfLines={1}
               >
-                {inStock ? `Available · ${stockN}` : 'Unavailable'}
+                {inStock ? `Available | ${stockN}` : 'Unavailable'}
               </Text>
             </View>
           </View>
@@ -1660,7 +1660,7 @@ const toast = useCallback(
         <Text style={styles.pageLead}>
           Listed in {productRegionName} ({productCurrency})
           {regionMismatch
-            ? ` · editing in ${sellerRegionName} (${sellerCurrency})`
+            ? ` | editing in ${sellerRegionName} (${sellerCurrency})`
             : ''}
         </Text>
 
@@ -1668,7 +1668,7 @@ const toast = useCallback(
         <Section
           step="01"
           title="Photos"
-          subtitle={`First photo is the cover · up to ${maxImages}`}
+          subtitle={`First photo is the cover | up to ${maxImages}`}
         >
           <ScrollView horizontal showsHorizontalScrollIndicator={false}>
             {images.map((img, i) => (
@@ -1771,7 +1771,7 @@ const toast = useCallback(
 
           <Label onPress={() => priceRef.current?.focus()}>
             Price * ({sellerCurrency}
-            {regionMismatch ? ` · stores as ${productCurrency}` : ''})
+            {regionMismatch ? ` | stores as ${productCurrency}` : ''})
           </Label>
           <TextInput
             ref={priceRef}
@@ -1923,11 +1923,11 @@ const toast = useCallback(
               {variantDrafts.length > 0 && (
                 <>
                   <Label>
-                    Variants · {variantDrafts.length} · total stock{' '}
+                    Variants | {variantDrafts.length} | total stock{' '}
                     {totalVariantStock}
                   </Label>
                   {variantDrafts.map((vd) => {
-                    const label = Object.values(vd.options).join(' · ')
+                    const label = Object.values(vd.options).join(' | ')
                     return (
                       <View key={vd.variantId} style={styles.docBox}>
                         <View
@@ -2158,7 +2158,7 @@ const toast = useCallback(
                         textTransform: 'capitalize',
                       }}
                     >
-                      {doc.documentType.replace(/_/g, ' ')} · saved
+                      {doc.documentType.replace(/_/g, ' ')} | saved
                     </Text>
                   </View>
                   <TouchableOpacity
@@ -2533,7 +2533,7 @@ const toast = useCallback(
             marginBottom: 22,
           }}
         >
-          Preview the page · swipe through your images
+          Preview the page | swipe through your images
         </Text>
 
         <Section step={needsDocs ? '07' : '06'} title="Save changes">

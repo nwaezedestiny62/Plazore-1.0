@@ -631,7 +631,7 @@ function TeamInner() {
         <div className="flex flex-col gap-5 p-5 sm:flex-row sm:items-end sm:justify-between sm:p-6">
           <div className="min-w-0">
             <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-[#00E575]">
-              Plazore Admin · Team
+              Plazore Admin | Team
             </p>
             <h1 className="mt-2 text-2xl font-semibold tracking-tight text-[#F5F7FA] sm:text-3xl">
               Administrators
@@ -770,7 +770,7 @@ function TeamInner() {
                           Added {fmt(a.activatedAt)}
                         </span>
                         <span className="text-[11px] text-[#737A86]">
-                          · Last active {fmt(a.lastActiveAt)}
+                          | Last active {fmt(a.lastActiveAt)}
                         </span>
                       </div>
                     </div>
@@ -842,11 +842,11 @@ function TeamInner() {
                           Invited {fmt(inv.invitedAt)}
                         </span>
                         <span className="text-[11px] text-[#737A86]">
-                          · Expires {fmt(inv.expiresAt)}
+                          | Expires {fmt(inv.expiresAt)}
                         </span>
                         {inv.invitedByName ? (
                           <span className="text-[11px] text-[#737A86]">
-                            · By {inv.invitedByName}
+                            | By {inv.invitedByName}
                           </span>
                         ) : null}
                       </div>

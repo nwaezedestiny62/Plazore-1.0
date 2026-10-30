@@ -475,7 +475,7 @@ export default function AboutPlazore() {
               </Text>
               <SectionMedia
                 uri={IMG.autopilot}
-                caption="Observe · understand · improve"
+                caption="Observe | understand | improve"
                 width={winW}
               />
               <Body>
@@ -509,7 +509,7 @@ export default function AboutPlazore() {
               <SectionTitle>For People Who Shop</SectionTitle>
               <SectionMedia
                 uri={IMG.buyers}
-                caption="Discover · understand · buy"
+                caption="Discover | understand | buy"
                 width={winW}
               />
               <Body>
@@ -549,7 +549,7 @@ export default function AboutPlazore() {
               <SectionTitle>For People Who Sell</SectionTitle>
               <SectionMedia
                 uri={IMG.sellers}
-                caption="Build · reach · grow"
+                caption="Build | reach | grow"
                 width={winW}
               />
               <Body>
@@ -727,7 +727,7 @@ export default function AboutPlazore() {
               <SectionTitle>Commerce With Structure.</SectionTitle>
               <SectionMedia
                 uri={IMG.trust}
-                caption="Payment · order · fulfilment"
+                caption="Payment | order | fulfilment"
                 width={winW}
               />
               <Body>

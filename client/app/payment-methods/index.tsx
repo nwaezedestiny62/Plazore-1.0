@@ -306,7 +306,7 @@ export default function PaymentMethods() {
 
                   <Text style={styles.cardMeta} numberOfLines={1}>
                     Expires {item.expMonth}/{item.expYear}
-                    {item.name ? ` · ${item.name}` : ''}
+                    {item.name ? ` | ${item.name}` : ''}
                   </Text>
 
                   {item.bank ? (
@@ -334,7 +334,7 @@ export default function PaymentMethods() {
         ListFooterComponent={
           cards.length > 0 ? (
             <Text style={styles.footerNote}>
-              Managed securely · Paystack & Stripe tokenisation · Plazore never
+              Managed securely | Paystack & Stripe tokenisation | Plazore never
               stores full card numbers
             </Text>
           ) : null

@@ -10,7 +10,7 @@ export type LocationCountry = {
 
 /**
  * Fulfillment geo data — aligned with marketplace regions in regions.ts
- * NG · GH · BJ · CM · KE · ZA · EG · US · CA · GB · DE · FR · AU
+ * NG | GH | BJ | CM | KE | ZA | EG | US | CA | GB | DE | FR | AU
  */
 export const FULFILLMENT_COUNTRIES: LocationCountry[] = [
   // ── Nigeria ──────────────────────────────────────────

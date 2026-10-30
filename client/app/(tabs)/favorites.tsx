@@ -1,6 +1,6 @@
 /**
  * Wishlist / Saved Products — Plazore dark
- * Stacked cards · 2 per row · no cart · top overlay sort
+ * Stacked cards | 2 per row | no cart | top overlay sort
  * Custom bar left of title → opens Navigation Hub
  */
 
@@ -54,8 +54,8 @@ const SORT_OPTIONS: { key: SortKey; label: string; hint: string }[] = [
   { key: 'oldest', label: 'Oldest first', hint: 'First saved' },
   { key: 'name_az', label: 'Name A → Z', hint: 'Alphabetical' },
   { key: 'name_za', label: 'Name Z → A', hint: 'Reverse alpha' },
-  { key: 'price_low', label: 'Price · Low to high', hint: 'Lowest price first' },
-  { key: 'price_high', label: 'Price · High to low', hint: 'Highest price first' },
+  { key: 'price_low', label: 'Price | Low to high', hint: 'Lowest price first' },
+  { key: 'price_high', label: 'Price | High to low', hint: 'Highest price first' },
 ]
 
 type OverlayAction = {
@@ -317,7 +317,7 @@ function SavedStackCard({ product }: { product: Product }) {
             <Text style={styles.brand} numberOfLines={1}>
               {brand.toLowerCase()}
             </Text>
-            <Text style={styles.dot}>·</Text>
+            <Text style={styles.dot}>|</Text>
             <Text style={styles.price} numberOfLines={1}>
               {price}
             </Text>

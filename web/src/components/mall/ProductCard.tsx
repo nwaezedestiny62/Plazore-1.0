@@ -19,7 +19,6 @@ import {
 } from "@/lib/regions";
 import type { Product, ProductVariant } from "@/lib/types";
 import { trackShowroomEvent } from "@/lib/showroomEvents";
-import { addToCart } from "@/lib/cart";
 
 const PENDING_KEY = "plazore_pending_action";
 const GOOGLE_G =
@@ -314,8 +313,14 @@ export function ProductCard({
     }, 240);
   }, []);
 
-  const doAdd = useCallback(
+   const doAdd = useCallback(
     (variant?: ProductVariant | null) => {
+      if (addLockRef.current) return;
+      addLockRef.current = true;
+      window.setTimeout(() => {
+        addLockRef.current = false;
+      }, 1000);
+
       void trackShowroomEvent({
         productId: String(product._id),
         type: "cart",
@@ -324,41 +329,39 @@ export function ProductCard({
         region: product.region || displayRegion || "NG",
       });
 
+      const selection = variant
+        ? {
+            variantId: variant.variantId,
+            variantKey: variant.key,
+            selectedOptions: mapToRecord(variant.options),
+            variant,
+          }
+        : undefined;
+
       const payload = variant
         ? {
             ...product,
             price: Number(variant.price ?? product.price) || product.price,
-            selectedVariant: variant,
-            variantId: variant.variantId,
-            variantKey: variant.key,
-            selectedOptions: mapToRecord(variant.options),
           }
         : product;
 
-      try {
-        addToCart(product, 1, {
-          variantId: variant?.variantId,
-          variantKey: variant?.key,
-          selectedOptions: variant ? mapToRecord(variant.options) : undefined,
-          variant: variant || undefined,
-        });
-      } catch {
-        /* picker path should already enforce selection */
-      }
-
       const el = btnRef.current;
-      if (el && fly) {
-        const r = el.getBoundingClientRect();
-        fly.flyAdd(payload as Product, {
-          x: r.left,
-          y: r.top,
-          width: r.width,
-          height: r.height,
-        });
-        return;
-      }
+      const origin =
+        el != null
+          ? (() => {
+              const r = el.getBoundingClientRect();
+              return {
+                x: r.left,
+                y: r.top,
+                width: r.width,
+                height: r.height,
+              };
+            })()
+          : { x: 0, y: 0, width: 36, height: 36 };
+
+      // ONLY write path — do NOT call addToCart here
       if (fly) {
-        fly.flyAdd(payload as Product, { x: 0, y: 0, width: 36, height: 36 });
+        fly.flyAdd(payload as Product, origin, selection);
       }
     },
     [product, room, position, displayRegion, fly]
@@ -368,12 +371,12 @@ export function ProductCard({
     e.preventDefault();
     e.stopPropagation();
     if (!isLoaded) return;
-
     if (addLockRef.current) return;
+
     addLockRef.current = true;
     window.setTimeout(() => {
       addLockRef.current = false;
-    }, 400);
+    }, 900);
 
     if (!isSignedIn) {
       stashReturn(product._id);
@@ -391,12 +394,12 @@ export function ProductCard({
     e.preventDefault();
     e.stopPropagation();
     if (!selectionComplete || !selectedVariant || !inStock) return;
-
     if (addLockRef.current) return;
+
     addLockRef.current = true;
     window.setTimeout(() => {
       addLockRef.current = false;
-    }, 400);
+    }, 900);
 
     doAdd(selectedVariant);
     closePicker();
@@ -669,23 +672,23 @@ export function ProductCard({
           ) : null}
 
           <button
-            ref={btnRef}
-            type="button"
-            onClick={onCart}
-            onPointerDown={(e) => {
-              e.stopPropagation();
-              setPressed(true);
-            }}
-            onPointerUp={() => setPressed(false)}
-            onPointerLeave={() => setPressed(false)}
-            aria-label={hasVariants ? "Choose options" : "Add to bag"}
-            className="absolute bottom-2 right-2 z-30 flex h-8 w-8 items-center justify-center bg-white text-[#111] shadow-[0_2px_10px_rgba(0,0,0,0.18)] transition-[transform,box-shadow,opacity] duration-200 ease-out hover:shadow-[0_4px_14px_rgba(0,0,0,0.22)] focus:outline-none focus-visible:ring-1 focus-visible:ring-white/40 active:opacity-90 sm:bottom-2.5 sm:right-2.5 sm:h-9 sm:w-9"
-            style={{
-              transform: pressed ? "scale(0.96)" : "scale(1)",
-              opacity: pickerOpen ? 0 : 1,
-              pointerEvents: pickerOpen ? "none" : "auto",
-            }}
-          >
+  ref={btnRef}
+  type="button"
+  onClick={onCart}
+  onPointerDown={(e) => {
+    e.stopPropagation();
+    setPressed(true);
+  }}
+  onPointerUp={() => setPressed(false)}
+  onPointerLeave={() => setPressed(false)}
+  aria-label={hasVariants ? "Choose options" : "Add to bag"}
+  className="absolute bottom-2 right-2 z-30 flex h-8 w-8 items-center justify-center bg-white text-[#111] shadow-[0_2px_10px_rgba(0,0,0,0.18)] transition-[transform,box-shadow,opacity] duration-200 ease-out hover:shadow-[0_4px_14px_rgba(0,0,0,0.22)] focus:outline-none focus-visible:ring-1 focus-visible:ring-white/40 active:opacity-90 sm:bottom-2.5 sm:right-2.5 sm:h-9 sm:w-9"
+  style={{
+    transform: pressed ? "scale(0.96)" : "scale(1)",
+    opacity: pickerOpen ? 0 : 1,
+    pointerEvents: pickerOpen ? "none" : "auto",
+  }}
+>
             <ShoppingCart
               className="h-[14px] w-[14px] sm:h-[15px] sm:w-[15px]"
               strokeWidth={2.1}

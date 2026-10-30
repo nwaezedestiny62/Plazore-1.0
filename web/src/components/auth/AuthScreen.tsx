@@ -242,7 +242,7 @@ function LegalSheet({
             ))}
           </div>
           <p className="mt-8 text-center text-[11px] text-white/30">
-            Last updated · Plazore platform summary
+            Last updated | Plazore platform summary
           </p>
         </div>
 
@@ -1027,7 +1027,7 @@ export function AuthScreen({ initialMode = "login" }: { initialMode?: Mode }) {
             </form>
           )}
 
-          {/* Footer: real tappable Privacy · Terms · About */}
+          {/* Footer: real tappable Privacy | Terms | About */}
           <p className="mt-14 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-center text-[11px] tracking-wide text-white/30">
             <button
               type="button"
@@ -1036,7 +1036,7 @@ export function AuthScreen({ initialMode = "login" }: { initialMode?: Mode }) {
             >
               Privacy
             </button>
-            <span aria-hidden>·</span>
+            <span aria-hidden>|</span>
             <button
               type="button"
               onClick={() => setLegal("terms")}
@@ -1044,7 +1044,7 @@ export function AuthScreen({ initialMode = "login" }: { initialMode?: Mode }) {
             >
               Terms
             </button>
-            <span aria-hidden>·</span>
+            <span aria-hidden>|</span>
             <button
               type="button"
               onClick={() => setLegal("about")}

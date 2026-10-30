@@ -929,7 +929,7 @@ export default function Checkout() {
     setProgressLabel(
       routeGroups.length > 1
         ? `Preparing ${routeGroups.length} payments…`
-        : `Preparing secure payment · ${providerLabel}`,
+        : `Preparing secure payment | ${providerLabel}`,
     )
     setOrderPhase('processing')
     setPaidCount(0)
@@ -1052,7 +1052,7 @@ export default function Checkout() {
 
         setProgressLabel(
           ready.length > 1
-            ? `Paying ${i + 1} of ${ready.length} · ${label}`
+            ? `Paying ${i + 1} of ${ready.length} | ${label}`
             : `Opening ${providerLabel}…`,
         )
 
@@ -1271,13 +1271,13 @@ export default function Checkout() {
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
-        <Text style={styles.stepHint}>REVIEW · DELIVER · PAY</Text>
+        <Text style={styles.stepHint}>REVIEW | DELIVER | PAY</Text>
 
         {routeGroups.length > 1 && (
           <View style={styles.multiHint}>
             <Ionicons name="information-circle-outline" size={16} color={BLUE} />
             <Text style={styles.multiHintText}>
-              {routeGroups.length} sellers · each is paid separately.
+              {routeGroups.length} sellers | each is paid separately.
               Successful payments stay protected.
             </Text>
           </View>
@@ -1295,7 +1295,7 @@ export default function Checkout() {
             <Text style={styles.badge}>
               {itemCount} item{itemCount !== 1 ? 's' : ''}
               {routeGroups.length > 1
-                ? ` · ${routeGroups.length} sellers`
+                ? ` | ${routeGroups.length} sellers`
                 : ''}
             </Text>
           </View>
@@ -1330,7 +1330,7 @@ export default function Checkout() {
                   typeof item.selectedOptions === 'object'
                     ? Object.entries(item.selectedOptions)
                         .map(([k, v]) => `${k}: ${v}`)
-                        .join(' · ')
+                        .join(' | ')
                     : ''
                 return (
                   <View
@@ -1352,8 +1352,8 @@ export default function Checkout() {
                         {product?.name || 'Product'}
                       </Text>
                       <Text style={styles.itemMeta}>
-                        Qty {qty} · {fmtProduct(unit, region)} each
-                        {optionLine ? ` · ${optionLine}` : ''}
+                        Qty {qty} | {fmtProduct(unit, region)} each
+                        {optionLine ? ` | ${optionLine}` : ''}
                       </Text>
                     </View>
                     <Text style={styles.itemTotal} numberOfLines={1}>
@@ -1364,7 +1364,7 @@ export default function Checkout() {
               })}
               <View style={styles.routeSubtotal}>
                 <Text style={styles.routeSubtotalText}>
-                  Route · delivery {fmt(group.deliveryFeeDisplay)}
+                  Route | delivery {fmt(group.deliveryFeeDisplay)}
                 </Text>
                 <Text style={styles.routeSubtotalVal}>
                   {fmt(
@@ -1489,7 +1489,7 @@ export default function Checkout() {
               <View style={styles.selectContent}>
                 <Text style={styles.selectTitle}>Paystack</Text>
                 <Text style={styles.selectSub}>
-                  Cards, bank transfer & local methods · Best for Nigeria &
+                  Cards, bank transfer & local methods | Best for Nigeria &
                   Africa
                 </Text>
               </View>
@@ -1515,7 +1515,7 @@ export default function Checkout() {
               <View style={styles.selectContent}>
                 <Text style={styles.selectTitle}>Stripe</Text>
                 <Text style={styles.selectSub}>
-                  Cards & wallets · Best for US, EU & international
+                  Cards & wallets | Best for US, EU & international
                 </Text>
               </View>
             </TouchableOpacity>
@@ -1532,7 +1532,7 @@ export default function Checkout() {
               <View style={{ flex: 1 }}>
                 <Text style={styles.cardTitle}>Payment method</Text>
                 <Text style={styles.cardSub}>
-                  Saved cards · {providerLabel} hosts entry
+                  Saved cards | {providerLabel} hosts entry
                 </Text>
               </View>
             </View>
@@ -1754,7 +1754,7 @@ export default function Checkout() {
           </View>
         </View>
 
-        <Text style={styles.footerBrand}>Plazore · Digital Mall</Text>
+        <Text style={styles.footerBrand}>Plazore | Digital Mall</Text>
       </ScrollView>
 
       <View style={styles.bottomBar}>

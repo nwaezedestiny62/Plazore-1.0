@@ -7,9 +7,9 @@ type Props = { params: Promise<{ id: string }> };
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { id } = await params;
   const product = await fetchProduct(id);
-  if (!product) return { title: "Piece not found · Plazore" };
+  if (!product) return { title: "Piece not found | Plazore" };
   return {
-    title: `${product.name} · Plazore`,
+    title: `${product.name} | Plazore`,
     description: product.description?.slice(0, 160) || "On Plazore",
     openGraph: {
       title: product.name,

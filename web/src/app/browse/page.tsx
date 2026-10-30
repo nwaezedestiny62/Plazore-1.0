@@ -340,8 +340,17 @@ const STRUCTURE_OPTIONS: { key: StructureOrder; label: string }[] = [
   { key: "categories_first", label: "Categories → Products → Stores" },
 ];
 
+/**
+ * PRODUCT GRID — significant vertical spacing, especially on phones
+ * Mobile (2-col): gap-y-11 / gap-y-12  → clear separation between rows
+ * sm+: progressive increase so cards never feel stacked
+ */
 const PRODUCT_GRID =
-  "grid w-full grid-cols-2 gap-x-3 gap-y-8 sm:gap-x-5 sm:gap-y-10 md:grid-cols-3 md:gap-x-6 md:gap-y-11 lg:grid-cols-4 lg:gap-y-12 xl:grid-cols-5 xl:gap-x-7";
+  "grid w-full grid-cols-2 gap-x-6 gap-y-8 " +        // mobile: wider space between columns
+  "sm:gap-x-7 sm:gap-y-9 " +
+  "md:grid-cols-3 md:gap-x-7 md:gap-y-10 " +
+  "lg:grid-cols-4 lg:gap-x-8 lg:gap-y-11 " +
+  "xl:grid-cols-5 xl:gap-x-9 xl:gap-y-12";
 
 /** Exact Mall.tsx CustomBarIcon */
 function CustomBarIcon({ className = "" }: { className?: string }) {
@@ -1327,7 +1336,7 @@ function BrowseInner() {
     const productBlock =
       live.products.length > 0 ? (
         <div key="products">
-          <p className="mb-4 text-[11px] font-bold tracking-[0.12em] text-muted">
+          <p className="mb-5 text-[11px] font-bold tracking-[0.12em] text-muted sm:mb-6">
             PRODUCTS
           </p>
           <div className={PRODUCT_GRID}>
@@ -1336,7 +1345,7 @@ function BrowseInner() {
             ))}
           </div>
           {live.totalProducts > visibleCount ? (
-            <div className="mt-10 flex justify-center">
+            <div className="mt-12 flex justify-center sm:mt-14">
               <button
                 type="button"
                 onClick={() => setVisibleCount((n) => n + PAGE_SIZE)}
@@ -1351,11 +1360,11 @@ function BrowseInner() {
 
     const storeBlock =
       live.stores.length > 0 ? (
-        <div key="stores" className="mt-10">
-          <p className="mb-4 text-[11px] font-bold tracking-[0.12em] text-muted">
+        <div key="stores" className="mt-12 sm:mt-14">
+          <p className="mb-5 text-[11px] font-bold tracking-[0.12em] text-muted sm:mb-6">
             STORES
           </p>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 md:grid-cols-4">
             {live.stores.map((s) => (
               <Link
                 key={s.id}
@@ -1390,8 +1399,8 @@ function BrowseInner() {
 
     const categoryBlock =
       live.categories.length > 0 ? (
-        <div key="categories" className="mt-10">
-          <p className="mb-4 text-[11px] font-bold tracking-[0.12em] text-muted">
+        <div key="categories" className="mt-12 sm:mt-14">
+          <p className="mb-5 text-[11px] font-bold tracking-[0.12em] text-muted sm:mb-6">
             CATEGORIES
           </p>
           <div className="flex flex-wrap gap-2">
@@ -1804,7 +1813,7 @@ function BrowseInner() {
                       <ProductCell key={p._id} product={p} />
                     ))}
                   </div>
-                  <div className="mt-12 flex justify-center">
+                  <div className="mt-12 flex justify-center sm:mt-14">
                     <Link
                       href="/shop?mode=trending"
                       className="rounded-xl bg-white/[0.06] px-6 py-3 text-[11px] font-semibold tracking-[0.16em] uppercase text-white/80 transition hover:bg-white/[0.1]"
@@ -1820,7 +1829,7 @@ function BrowseInner() {
           <OrbLoader label="Looking through the mall…" />
         ) : (
           <div className="mt-8 sm:mt-10">
-            <div className="mb-7 flex items-start justify-between gap-3">
+            <div className="mb-7 flex items-start justify-between gap-3 sm:mb-8">
               <div className="min-w-0">
                 <p className="truncate text-base font-bold sm:text-lg">
                   {activeLabel}
@@ -1834,7 +1843,7 @@ function BrowseInner() {
                     live.brands.length ? `${live.brands.length} brands` : null,
                   ]
                     .filter(Boolean)
-                    .join(" · ")}
+                    .join(" | ")}
                 </p>
               </div>
               <button
@@ -2020,7 +2029,7 @@ function BrowseInner() {
                               : "bg-white/[0.05] text-white/65 hover:bg-white/[0.08]"
                           }`}
                         >
-                          {r.name} · {r.count}
+                          {r.name} | {r.count}
                         </button>
                       );
                     })}
@@ -2086,7 +2095,7 @@ function BrowseInner() {
                               : "bg-white/[0.05] text-white/65 hover:bg-white/[0.08]"
                           }`}
                         >
-                          {v.name} · {v.count}
+                          {v.name} | {v.count}
                         </button>
                       );
                     })}

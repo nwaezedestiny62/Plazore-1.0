@@ -473,7 +473,7 @@ function ShowroomProductCard({
             >
               {brand}
             </Text>
-            <Text style={[styles.divider, { color: textMuted }]}> · </Text>
+            <Text style={[styles.divider, { color: textMuted }]}> | </Text>
             <Text style={[styles.price, { color: textSecondary }]}>
               {basePriceLabel}
             </Text>

@@ -204,7 +204,7 @@ function briefOf(ev: LatestEvent) {
     ev.region || "",
   ]
     .filter(Boolean)
-    .join(" · ");
+    .join(" | ");
 }
 
 export default function LatestCommercePage() {
@@ -570,8 +570,8 @@ export default function LatestCommercePage() {
                   </span>
                   <span className="mt-1 block text-[11px] text-white/35">
                     {timeAgo(ev.at)}
-                    {ev.order?.number ? ` · ${ev.order.number}` : ""}
-                    {ev.region ? ` · ${ev.region}` : ""}
+                    {ev.order?.number ? ` | ${ev.order.number}` : ""}
+                    {ev.region ? ` | ${ev.region}` : ""}
                   </span>
                 </span>
                 {ev.money ? (
@@ -661,13 +661,13 @@ function Detail({
       </div>
 
       <div className="mt-4">
-        <Row label="When" value={`${exactWhen(ev.at)} · ${timeAgo(ev.at)}`} />
-        <Row label="Who" value={ev.actor ? `${ev.actor.name}${ev.actor.email ? ` · ${ev.actor.email}` : ""}` : undefined} />
+        <Row label="When" value={`${exactWhen(ev.at)} | ${timeAgo(ev.at)}`} />
+        <Row label="Who" value={ev.actor ? `${ev.actor.name}${ev.actor.email ? ` | ${ev.actor.email}` : ""}` : undefined} />
         <Row
           label="With"
           value={
             ev.other
-              ? `${ev.other.storeName || ev.other.name}${ev.other.email ? ` · ${ev.other.email}` : ""}`
+              ? `${ev.other.storeName || ev.other.name}${ev.other.email ? ` | ${ev.other.email}` : ""}`
               : undefined
           }
         />

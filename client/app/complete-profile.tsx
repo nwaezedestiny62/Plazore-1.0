@@ -467,7 +467,7 @@ export default function CompleteProfileScreen() {
                     {regionCfg?.currency ? (
                       <Text style={styles.fieldSub}>
                         {dialMeta?.dial}
-                        {' · '}
+                        {' | '}
                         {regionCfg.currency.symbol} {regionCfg.currency.code}
                       </Text>
                     ) : null}
@@ -512,7 +512,7 @@ export default function CompleteProfileScreen() {
                 </View>
                 <Text style={styles.hint}>
                   {country && dialMeta
-                    ? `Local number only · we add ${dialMeta.dial}`
+                    ? `Local number only | we add ${dialMeta.dial}`
                     : 'Pick a country to unlock phone entry'}
                 </Text>
 
@@ -646,7 +646,7 @@ export default function CompleteProfileScreen() {
                       <Text style={styles.countryMeta}>
                         {d}
                         {r.currency?.code
-                          ? ` · ${r.currency.symbol} ${r.currency.code}`
+                          ? ` | ${r.currency.symbol} ${r.currency.code}`
                           : ''}
                       </Text>
                     </View>

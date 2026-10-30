@@ -268,7 +268,7 @@ function PerformanceBars({ data }: { data: SeriesPoint[] }) {
           </>
         ) : (
           <span className="text-[#6B8299]">
-            Tap a day · score = views×1 + cart×5 + purchases×15
+            Tap a day | score = views×1 + cart×5 + purchases×15
           </span>
         )}
       </div>
@@ -651,7 +651,7 @@ export default function SellerDashboardPage() {
 
               <div className="mt-3 flex items-center justify-between gap-2 text-[11px] sm:mt-3.5 sm:text-xs">
                 <span className="text-[#737A86]">
-                  Fee · {feePct}% of product price
+                  Fee | {feePct}% of product price
                 </span>
                 <Link
                   href="/seller/subscription"
@@ -853,7 +853,7 @@ export default function SellerDashboardPage() {
                         <span className="mt-0.5 block truncate text-[11px] text-[#737A86] sm:text-xs">
                           {item.subtitle}
                           {item.at
-                            ? ` · ${new Date(item.at).toLocaleDateString()}`
+                            ? ` | ${new Date(item.at).toLocaleDateString()}`
                             : ""}
                         </span>
                       </span>
@@ -890,7 +890,7 @@ export default function SellerDashboardPage() {
         </div>
 
         <p className="mt-6 text-center text-[10px] tracking-wide text-[#737A86] sm:mt-8 sm:text-[11px]">
-          Plazore · Seller Lounge
+          Plazore | Seller Lounge
         </p>
       </div>
     </div>

@@ -344,7 +344,7 @@ export default function SellerProductsPage() {
         <div className="min-w-0">
           <h1 className="text-xl font-extrabold tracking-tight">My Products</h1>
           <p className="mt-0.5 text-xs text-[#737A86]">
-            {products.length} product{products.length !== 1 ? "s" : ""} · {SORT_LABEL[sort]}
+            {products.length} product{products.length !== 1 ? "s" : ""} | {SORT_LABEL[sort]}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">

@@ -49,7 +49,7 @@ function formatOptionLine(item: any): string {
     const parts = Object.entries(so)
       .filter(([, v]) => v != null && String(v).trim() !== '')
       .map(([k, v]) => `${k}: ${v}`)
-    if (parts.length) return parts.join(' · ')
+    if (parts.length) return parts.join(' | ')
   }
   if (item?.size) return `Size: ${item.size}`
   return ''
@@ -262,7 +262,7 @@ export default function BuyerOrderDetails() {
           contextType: 'order',
           category: 'delivery',
           orderId: String(order._id),
-          subject: `Delivery issue · ${order.orderNumber || ''}`,
+          subject: `Delivery issue | ${order.orderNumber || ''}`,
         },
       })
     } catch (e: any) {
@@ -578,7 +578,7 @@ export default function BuyerOrderDetails() {
                     </Text>
                   )}
                   <Text style={styles.itemMeta}>
-                    Qty {item.quantity} · {fmtItem(unit, item)} each
+                    Qty {item.quantity} | {fmtItem(unit, item)} each
                   </Text>
                   <Text style={styles.itemLineTotal}>
                     {fmtItem(lineTotal, item)}

@@ -2,7 +2,7 @@
 
 /**
  * Plazore privacy consent — sharp editorial bottom sheet
- * Essential always on · optional analytics / marketing when enabled in config
+ * Essential always on | optional analytics / marketing when enabled in config
  * Geometry: zero radius. Motion: clip-path + staggered reveal (not generic scale).
  */
 

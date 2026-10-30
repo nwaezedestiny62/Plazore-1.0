@@ -397,7 +397,7 @@ export default function OrdersPage() {
                         className="text-[13px] font-semibold"
                         suppressHydrationWarning
                       >
-                        {count} item{count !== 1 ? "s" : ""} ·{" "}
+                        {count} item{count !== 1 ? "s" : ""} |{" "}
                         {fmtFrom(Number(item.totalAmount) || 0, src)}
                       </p>
                       <p className="text-[11px] text-[#6B7280]">

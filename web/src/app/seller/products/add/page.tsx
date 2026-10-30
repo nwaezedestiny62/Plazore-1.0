@@ -727,7 +727,7 @@ export default function AddProductPage() {
           </Link>
           <div className="min-w-0">
             <p className="text-[10px] font-bold uppercase tracking-[2px] text-[#737A86] sm:text-[11px]">
-              Seller Lounge · {regionConfig.flag} {regionConfig.name} (
+              Seller Lounge | {regionConfig.flag} {regionConfig.name} (
               {regionConfig.currency.code})
             </p>
             <h1 className="truncate text-xl font-extrabold tracking-tight sm:text-2xl md:text-[26px]">
@@ -741,7 +741,7 @@ export default function AddProductPage() {
             <Section
               step="01"
               title="Images"
-              subtitle={`Up to ${maxImages} photos · First photo = Cover`}
+              subtitle={`Up to ${maxImages} photos | First photo = Cover`}
             >
               <div className="flex flex-wrap gap-2">
                 {imageUrls.map((url, i) => (
@@ -835,7 +835,7 @@ export default function AddProductPage() {
                     inputMode="decimal"
                   />
                   <p className="mb-3 -mt-2 text-[11px] text-[#737A86]">
-                    Base price · variants can override
+                    Base price | variants can override
                   </p>
                 </div>
                 {!hasVariants && (
@@ -989,7 +989,7 @@ export default function AddProductPage() {
                 <div className="space-y-4">
                   <p className="text-[12px] leading-relaxed text-[#737A86]">
                     Specs above stay factual. Options are what the buyer
-                    chooses. Max 5 groups · 30 values each · 200 variants.
+                    chooses. Max 5 groups | 30 values each | 200 variants.
                   </p>
 
                   {optionDrafts.map((opt, idx) => (
@@ -1065,13 +1065,13 @@ export default function AddProductPage() {
                   {variantDrafts.length > 0 && (
                     <div className="mt-2 overflow-x-auto">
                       <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.8px] text-[#737A86]">
-                        Variants · {variantDrafts.length}
+                        Variants | {variantDrafts.length}
                       </p>
                       <div className="min-w-[280px] space-y-2">
                         {variantDrafts.map((v) => {
                           const label = Object.entries(v.options)
                             .map(([k, val]) => `${k}: ${val}`)
-                            .join(" · ");
+                            .join(" | ");
                           return (
                             <div
                               key={v.key}
@@ -1481,7 +1481,7 @@ export default function AddProductPage() {
 
             <div className="mb-4 border border-line bg-[#0A121C] p-3.5">
               <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.8px] text-[#737A86]">
-                Showroom card · cover = first photo
+                Showroom card | cover = first photo
               </p>
               <div className="w-[150px]">
                 <div className="relative aspect-[1/1.35] overflow-hidden bg-[#F1F1F1]">
@@ -1533,7 +1533,7 @@ export default function AddProductPage() {
                     {optionDrafts.filter((o) => o.name.trim()).length !== 1
                       ? "s"
                       : ""}{" "}
-                    · {variantDrafts.length} variants
+                    | {variantDrafts.length} variants
                   </p>
                 )}
               </div>
@@ -1559,7 +1559,7 @@ export default function AddProductPage() {
                 <div className="p-3.5">
                   {(category || subCategory) && (
                     <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-[1.2px] text-[#737A86]">
-                      {[category, subCategory].filter(Boolean).join(" · ")}
+                      {[category, subCategory].filter(Boolean).join(" | ")}
                     </p>
                   )}
                   <p className="text-lg font-bold leading-6 text-text">
@@ -1578,10 +1578,10 @@ export default function AddProductPage() {
                     >
                       {hasVariants
                         ? stockN > 0
-                          ? `In stock · ${stockN}`
+                          ? `In stock | ${stockN}`
                           : "Select options"
                         : stockN > 0
-                          ? `Available · ${stockN}`
+                          ? `Available | ${stockN}`
                           : "Unavailable"}
                     </span>
                   </div>

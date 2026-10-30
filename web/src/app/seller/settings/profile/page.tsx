@@ -224,7 +224,7 @@ export default function SellerIdentityPage() {
         </button>
         <div className="min-w-0 flex-1 text-center">
           <h1 className="text-[18px] font-bold tracking-tight">Seller identity</h1>
-          <p className="text-[11px] text-white/40">Private · not your public storefront</p>
+          <p className="text-[11px] text-white/40">Private | not your public storefront</p>
         </div>
         <div className="w-10" />
       </header>
@@ -367,7 +367,7 @@ export default function SellerIdentityPage() {
                   <span className="min-w-0 flex-1">
                     <span className="block text-[15px] font-medium">{r.name}</span>
                     <span className="text-xs text-white/55">
-                      {r.currency?.symbol} · {r.currency?.code}
+                      {r.currency?.symbol} | {r.currency?.code}
                     </span>
                   </span>
                   {selected && (

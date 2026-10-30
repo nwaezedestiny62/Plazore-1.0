@@ -680,7 +680,7 @@ function ProductPagePreview({
         >
           {data.category || data.subCategory ? (
             <Text style={styles.pageEyebrow} numberOfLines={1}>
-              {[data.category, data.subCategory].filter(Boolean).join(' · ')}
+              {[data.category, data.subCategory].filter(Boolean).join(' | ')}
             </Text>
           ) : null}
 
@@ -710,7 +710,7 @@ function ProductPagePreview({
                 }}
                 numberOfLines={1}
               >
-                {inStock ? `Available · ${stockN}` : 'Unavailable'}
+                {inStock ? `Available | ${stockN}` : 'Unavailable'}
               </Text>
             </View>
           </View>
@@ -1482,13 +1482,13 @@ const toast = useCallback(
         <Text style={styles.pageKicker}>Seller lounge</Text>
         <Text style={styles.pageTitle}>Add product</Text>
         <Text style={styles.pageLead}>
-          Listed in {region || 'NG'} marketplace · price locked to this region
+          Listed in {region || 'NG'} marketplace | price locked to this region
         </Text>
 
         <Section
           step="01"
           title="Photos"
-          subtitle={`First photo is the cover · up to ${maxImages}`}
+          subtitle={`First photo is the cover | up to ${maxImages}`}
         >
           <ScrollView horizontal showsHorizontalScrollIndicator={false}>
             {images.map((uri, i) => (
@@ -1735,11 +1735,11 @@ const toast = useCallback(
               {variantDrafts.length > 0 && (
                 <>
                   <Label>
-                    Variants · {variantDrafts.length} · total stock{' '}
+                    Variants | {variantDrafts.length} | total stock{' '}
                     {totalVariantStock}
                   </Label>
                   {variantDrafts.map((vd) => {
-                    const label = Object.values(vd.options).join(' · ')
+                    const label = Object.values(vd.options).join(' | ')
                     return (
                       <View key={vd.variantId} style={styles.docBox}>
                         <View
@@ -2305,7 +2305,7 @@ const toast = useCallback(
             marginBottom: 22,
           }}
         >
-          Preview the page · swipe through your images
+          Preview the page | swipe through your images
         </Text>
 
         <Section step={needsDocs ? '07' : '06'} title="Publish">

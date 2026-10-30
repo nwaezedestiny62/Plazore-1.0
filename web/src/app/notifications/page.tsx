@@ -590,7 +590,7 @@ export default function NotificationsPage() {
 
                       {isContactThread(item.type) ? (
                         <span className="mt-1 block text-[10px] font-semibold text-[#00E575]">
-                          Plazore · Contact
+                          Plazore | Contact
                         </span>
                       ) : null}
 

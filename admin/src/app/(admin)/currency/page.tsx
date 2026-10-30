@@ -393,8 +393,8 @@ function RateEditorModal({
                     >
                       <div className="flex justify-between gap-2">
                         <span className="text-[#F5F7FA]">
-                          v{h.version} · ₦{h.rateToNgn}
-                          {h.isActive ? " · active" : ""}
+                          v{h.version} | ₦{h.rateToNgn}
+                          {h.isActive ? " | active" : ""}
                         </span>
                         <span className="text-white/35">
                           {fmt(h.effectiveFrom)}
@@ -403,9 +403,9 @@ function RateEditorModal({
                       <p className="mt-0.5 text-white/40">
                         {h.changedByName || "—"}
                         {h.percentChange != null
-                          ? ` · ${h.percentChange.toFixed(2)}%`
+                          ? ` | ${h.percentChange.toFixed(2)}%`
                           : ""}
-                        {h.reason ? ` · ${h.reason}` : ""}
+                        {h.reason ? ` | ${h.reason}` : ""}
                       </p>
                     </div>
                   ))
@@ -591,7 +591,7 @@ function CurrencyDirectory() {
             <Database className="mr-1 inline h-3 w-3" />
             {envLabel}
           </Badge>
-          <Badge tone="green">Base · NGN</Badge>
+          <Badge tone="green">Base | NGN</Badge>
         </div>
       </header>
 
@@ -610,7 +610,7 @@ function CurrencyDirectory() {
         <div className="flex flex-wrap items-center gap-3">
           <Badge tone="green">Base: NGN — Nigerian Naira</Badge>
           <span className="text-xs text-white/40">
-            1 unit of each currency = X NGN · Cross-rates derived automatically
+            1 unit of each currency = X NGN | Cross-rates derived automatically
           </span>
         </div>
         <p className="mt-3 flex items-start gap-2 text-xs text-white/50">
@@ -665,7 +665,7 @@ function CurrencyDirectory() {
                     {r.isActive ? "Active" : "Inactive"}
                   </Badge>
                   <p className="mt-1 text-[10px] text-white/30">
-                    v{r.version} · {fmt(r.lastUpdated)}
+                    v{r.version} | {fmt(r.lastUpdated)}
                   </p>
                 </div>
               </button>

@@ -330,7 +330,7 @@ export default function ContactScreen() {
             const o = res.data?.data || res.data;
             if (!cancelled && o?.orderNumber) {
               setOrderLabel(
-                subjectParam || `Delivery issue · ${o.orderNumber}`,
+                subjectParam || `Delivery issue | ${o.orderNumber}`,
               );
               if (o.seller?.storeName) setStoreName(o.seller.storeName);
             }
@@ -550,10 +550,10 @@ export default function ContactScreen() {
             </Text>
             <Text style={styles.headerSub} numberOfLines={1}>
               {isOrderContext
-                ? "Order linked · payout held until resolved"
+                ? "Order linked | payout held until resolved"
                 : isReport
-                  ? "Structured · calm · private"
-                  : "Calm support · no sales pressure"}
+                  ? "Structured | calm | private"
+                  : "Calm support | no sales pressure"}
             </Text>
           </View>
         </View>

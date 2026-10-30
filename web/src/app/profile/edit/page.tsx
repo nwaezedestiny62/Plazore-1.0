@@ -360,7 +360,7 @@ export default function EditProfilePage() {
                   <span className="min-w-0 flex-1">
                     <span className="block text-[15px] font-medium">{r.name}</span>
                     <span className="mt-px block text-xs text-white/55">
-                      {r.currency.symbol} · {r.currency.code}
+                      {r.currency.symbol} | {r.currency.code}
                     </span>
                   </span>
                   {selected ? <Check className="h-[22px] w-[22px] text-[#00E575]" /> : null}

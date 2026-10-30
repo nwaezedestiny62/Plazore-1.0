@@ -378,7 +378,7 @@ export default function EditProfileScreen() {
                   <View style={styles.regionItemInfo}>
                     <Text style={styles.regionItemName}>{r.name}</Text>
                     <Text style={styles.regionItemCurrency}>
-                      {r.currency.symbol} · {r.currency.code}
+                      {r.currency.symbol} | {r.currency.code}
                     </Text>
                   </View>
                   {selected && (

@@ -204,7 +204,7 @@ export async function notifySellerShipRequired(opts: {
   orderNumber: string;
   productName?: string;
 }) {
-  const name = opts.productName ? ` · ${opts.productName}` : "";
+  const name = opts.productName ? ` | ${opts.productName}` : "";
   return sendNotification({
     userId: opts.sellerId,
     type: "ship_required",

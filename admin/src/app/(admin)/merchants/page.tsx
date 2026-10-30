@@ -477,7 +477,7 @@ function Gate({ children }: { children: ReactNode }) {
           <Lock className="mt-5 h-5 w-5 text-[#00E575]" />
           <h1 className="mt-3 text-2xl font-semibold">Merchants</h1>
           <p className="mt-1.5 text-[13px] text-white/45">
-            Storefront monitoring · integrity scan · verify & suspend
+            Storefront monitoring | integrity scan | verify & suspend
           </p>
           <form onSubmit={submit} className="mt-6 space-y-3">
             <input
@@ -562,11 +562,11 @@ function ActivityFloat({
                 />
               </div>
               <p className="mt-2.5 text-[10px] leading-snug text-white/40">
-                {summary.total} merchants · {summary.new7d} new ·{" "}
-                {summary.verified} verified · {summary.suspended} suspended
+                {summary.total} merchants | {summary.new7d} new |{" "}
+                {summary.verified} verified | {summary.suspended} suspended
               </p>
               <p className="mt-1 text-[10px] text-white/30">
-                This page: {summary.pageCritical} critical · {summary.pageWarn}{" "}
+                This page: {summary.pageCritical} critical | {summary.pageWarn}{" "}
                 warn
               </p>
             </div>
@@ -692,7 +692,7 @@ function BusinessLocationCard({
     ["Landmark", address?.landmark],
     [
       "Delivery",
-      [deliveryMethod, courierCompany].filter(Boolean).join(" · ") || undefined,
+      [deliveryMethod, courierCompany].filter(Boolean).join(" | ") || undefined,
     ],
   ];
 
@@ -707,8 +707,8 @@ function BusinessLocationCard({
         <p className="text-[13px] font-bold">Business location</p>
         {locCountry ? (
           <span className="text-[11px] text-white/40">
-            Pricing country · {locCountry}
-            {locCurrency ? ` · ${locCurrency}` : ""}
+            Pricing country | {locCountry}
+            {locCurrency ? ` | ${locCurrency}` : ""}
           </span>
         ) : null}
         <div className="ml-auto flex flex-wrap items-center gap-2">
@@ -956,7 +956,7 @@ function DetailModal({
             </p>
             <p className="truncate text-[12px] text-white/45">
               {u?.email || "—"}
-              {u?.phone ? ` · ${u.phone}` : ""}
+              {u?.phone ? ` | ${u.phone}` : ""}
             </p>
             <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
               {u?.isSellerSuspended ? (
@@ -1004,7 +1004,7 @@ function DetailModal({
                         Verified seller
                       </p>
                       <p className="mt-0.5 text-[11px] text-white/40">
-                        Badge on storefront · builds buyer trust
+                        Badge on storefront | builds buyer trust
                       </p>
                     </div>
                     <Toggle
@@ -1127,7 +1127,7 @@ function DetailModal({
                     <p className="mt-0.5 text-[15px] font-bold">{planLabel}</p>
                     <p className="text-[11px] text-white/40">
                       {detail.subscription.status || "—"}
-                      {detail.subscription.isPromotional ? " · Promo" : ""}
+                      {detail.subscription.isPromotional ? " | Promo" : ""}
                     </p>
                   </div>
                   <div className="rounded-xl border border-white/[0.06] bg-[#0A0D12]/50 px-3 py-2.5">
@@ -1228,7 +1228,7 @@ function DetailModal({
                   {u.moderation.restrictions ? (
                     <p className="mt-1 text-[11px] text-white/40">
                       {u.moderation.restrictions.preventNewListings
-                        ? "No new listings · "
+                        ? "No new listings | "
                         : ""}
                       {u.moderation.restrictions.preventPublishing
                         ? "Publishing blocked"
@@ -1349,8 +1349,8 @@ function DetailModal({
                               {p.name}
                             </p>
                             <p className="text-[11px] text-white/40">
-                              {p.isActive ? "Active" : "Inactive"} · stock{" "}
-                              {p.stock ?? "—"} · {reg} · {cur}
+                              {p.isActive ? "Active" : "Inactive"} | stock{" "}
+                              {p.stock ?? "—"} | {reg} | {cur}
                             </p>
                           </div>
                           <p className="shrink-0 text-[13px] font-semibold tabular-nums text-[#00E575]">
@@ -1390,12 +1390,12 @@ function DetailModal({
                               {o.orderNumber}
                             </p>
                             <p className="text-[11px] text-white/40">
-                              {o.buyer?.name || o.buyer?.email || "Buyer"} ·{" "}
+                              {o.buyer?.name || o.buyer?.email || "Buyer"} |{" "}
                               {relTime(o.createdAt)}
-                              {o.isSellerOwnedPurchase ? " · self-purchase" : ""}
-                              {reg !== "—" ? ` · ${reg}` : ""}
+                              {o.isSellerOwnedPurchase ? " | self-purchase" : ""}
+                              {reg !== "—" ? ` | ${reg}` : ""}
                               {typeof feeRate === "number"
-                                ? ` · fee ${(feeRate * 100).toFixed(1)}%`
+                                ? ` | fee ${(feeRate * 100).toFixed(1)}%`
                                 : ""}
                             </p>
                             <p className="mt-0.5 text-[12px] font-semibold tabular-nums text-[#00E575]">
@@ -1436,7 +1436,7 @@ function DetailModal({
                           {c.product?.name ? (
                             <span className="font-normal text-white/40">
                               {" "}
-                              · {c.product.name}
+                              | {c.product.name}
                             </span>
                           ) : null}
                         </p>
@@ -1444,7 +1444,7 @@ function DetailModal({
                           {c.lastMessage?.text || "—"}
                         </p>
                         <p className="mt-1 text-[10px] text-white/30">
-                          {relTime(c.updatedAt || c.lastMessage?.createdAt)} ·
+                          {relTime(c.updatedAt || c.lastMessage?.createdAt)} |
                           unread {c.unreadBySeller ?? 0}
                         </p>
                       </li>
@@ -1766,15 +1766,15 @@ export default function MerchantsPage() {
                         ) : null}
                       </div>
                       <p className="mt-0.5 truncate text-[12px] text-white/45">
-                        {m.email || "—"} · {reg}
-                        {cur ? ` · ${cur}` : ""} · {m.productStats?.active ?? 0}{" "}
-                        live · {m.orderStats?.total ?? 0} orders
+                        {m.email || "—"} | {reg}
+                        {cur ? ` | ${cur}` : ""} | {m.productStats?.active ?? 0}{" "}
+                        live | {m.orderStats?.total ?? 0} orders
                       </p>
                       {m.integrity?.flags?.[0] ? (
                         <p className="mt-1 truncate text-[11px] text-white/35">
                           {m.integrity.flags[0].label}
                           {m.integrity.flags.length > 1
-                            ? ` · +${m.integrity.flags.length - 1} more`
+                            ? ` | +${m.integrity.flags.length - 1} more`
                             : ""}
                         </p>
                       ) : null}

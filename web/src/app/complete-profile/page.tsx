@@ -462,7 +462,7 @@ export default function CompleteProfilePage() {
                 <span className="mt-0.5 block text-[11px] text-white/50">
                   {dialMeta?.dial}
                   {selectedRegion.currency?.code
-                    ? ` · ${selectedRegion.currency.symbol} ${selectedRegion.currency.code}`
+                    ? ` | ${selectedRegion.currency.symbol} ${selectedRegion.currency.code}`
                     : ""}
                 </span>
               ) : null}
@@ -511,7 +511,7 @@ export default function CompleteProfilePage() {
                       <span className="text-[11px] text-white/45">
                         {d}
                         {r.currency?.code
-                          ? ` · ${r.currency.symbol} ${r.currency.code}`
+                          ? ` | ${r.currency.symbol} ${r.currency.code}`
                           : ""}
                       </span>
                     </span>

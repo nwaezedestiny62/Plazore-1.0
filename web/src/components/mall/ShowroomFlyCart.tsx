@@ -9,7 +9,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { addToCart } from "@/lib/cart";
+import { addToCart, type AddToCartSelection } from "@/lib/cart";
 import type { Product } from "@/lib/types";
 
 type Origin = { x: number; y: number; width: number; height: number };
@@ -22,7 +22,12 @@ type FlyJob = {
 };
 
 type Ctx = {
-  flyAdd: (product: Product, origin: Origin) => void;
+  /** ONLY place that writes to cart from the showroom. Returns true if +1 written. */
+  flyAdd: (
+    product: Product,
+    origin: Origin,
+    selection?: AddToCartSelection
+  ) => boolean;
   registerBagTarget: (el: HTMLElement | null) => void;
   bagPulse: number;
 };
@@ -47,24 +52,40 @@ export function ShowroomFlyCartProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const flyAdd = useCallback((product: Product, origin: Origin) => {
-  const target =
-    targetRef.current ||
-    (typeof window !== "undefined"
-      ? { x: window.innerWidth - 48, y: 40 }
-      : { x: 0, y: 0 });
+  const flyAdd = useCallback(
+    (
+      product: Product,
+      origin: Origin,
+      selection?: AddToCartSelection
+    ): boolean => {
+      let added = false;
+      try {
+        added = addToCart(product, 1, selection) === true;
+      } catch {
+        return false;
+      }
+      if (!added) return false;
 
-  const id = `${product._id}-${Date.now()}`;
-  setJobs((prev) => [
-    ...prev,
-    {
-      id,
-      image: product.images?.[0],
-      origin,
-      target,
+      const target =
+        targetRef.current ||
+        (typeof window !== "undefined"
+          ? { x: window.innerWidth - 48, y: 40 }
+          : { x: 0, y: 0 });
+
+      const id = `${product._id}-${Date.now()}`;
+      setJobs((prev) => [
+        ...prev,
+        {
+          id,
+          image: product.images?.[0],
+          origin,
+          target,
+        },
+      ]);
+      return true;
     },
-  ]);
-}, []);
+    []
+  );
 
   const onDone = useCallback((id: string) => {
     setJobs((prev) => prev.filter((j) => j.id !== id));

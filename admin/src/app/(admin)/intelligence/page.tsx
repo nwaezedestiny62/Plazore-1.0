@@ -414,7 +414,7 @@ function IntelligenceModal({
                   {src.name}
                 </h2>
                 <p className="mt-0.5 truncate text-[11px] text-white/40">
-                  {[src.brand, src.category].filter(Boolean).join(" · ")}
+                  {[src.brand, src.category].filter(Boolean).join(" | ")}
                 </p>
               </>
             ) : (
@@ -528,11 +528,11 @@ function IntelligenceModal({
                   </div>
                   <div className="space-y-0.5 border-t border-white/[0.06] pt-3 text-[10px] text-white/30">
                     <p>
-                      Generated {fmt(gen.generatedAt)} · Updated{" "}
+                      Generated {fmt(gen.generatedAt)} | Updated{" "}
                       {fmt(gen.updatedAt)}
                     </p>
                     <p>
-                      Model {gen.modelVersion || "—"} · prompt v
+                      Model {gen.modelVersion || "—"} | prompt v
                       {gen.promptVersion ?? "—"}
                     </p>
                   </div>
@@ -616,7 +616,7 @@ function IntelligenceModal({
                 </div>
               </div>
               <p className="text-[12px] text-white/50">
-                {Number(src.price || 0).toLocaleString()} · stock {src.stock} ·{" "}
+                {Number(src.price || 0).toLocaleString()} | stock {src.stock} |{" "}
                 {src.isActive ? "active" : "inactive"}
               </p>
               {specs.length ? (
@@ -636,7 +636,7 @@ function IntelligenceModal({
                 Seller {src.seller?.storeName || src.seller?.name || "—"}
               </p>
               <p className="text-[11px] text-white/30">
-                Listed {fmt(src.createdAt)} · Updated {fmt(src.updatedAt)}
+                Listed {fmt(src.createdAt)} | Updated {fmt(src.updatedAt)}
               </p>
             </div>
           )}
@@ -1050,7 +1050,7 @@ function IntelligenceDirectory() {
             Previous
           </Button>
           <span className="text-xs text-white/40">
-            Page {page} of {pages} · {total.toLocaleString()}
+            Page {page} of {pages} | {total.toLocaleString()}
           </span>
           <Button
             tone="ghost"

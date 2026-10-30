@@ -203,7 +203,7 @@ export default function OrderDetailPage() {
         contextType: "order",
         category: "delivery",
         orderId: String(order._id),
-        subject: `Delivery issue · ${order.orderNumber || ""}`,
+        subject: `Delivery issue | ${order.orderNumber || ""}`,
       });
       router.push(`/contact?${q.toString()}`);
     } catch (e: any) {
@@ -482,7 +482,7 @@ export default function OrderDetailPage() {
                     {item.name}
                   </p>
                   <p className="mt-0.5 text-xs text-secondary">
-                    Qty {item.quantity} · {fmtItem(Number(item.price) || 0, item)}
+                    Qty {item.quantity} | {fmtItem(Number(item.price) || 0, item)}
                   </p>
                 </div>
               </div>

@@ -206,8 +206,8 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
   { key: "relevance", label: "Recommended" },
   { key: "newest", label: "Newest" },
   { key: "trending", label: "Most viewed" },
-  { key: "price_asc", label: "Price · Low to high" },
-  { key: "price_desc", label: "Price · High to low" },
+  { key: "price_asc", label: "Price | Low to high" },
+  { key: "price_desc", label: "Price | High to low" },
   { key: "name", label: "Name A–Z" },
 ];
 
@@ -638,7 +638,7 @@ export default function Shop() {
           ? "Stores"
           : mode === "category" && selectedCategory
             ? selectedSub
-              ? `${selectedCategory} · ${selectedSub}`
+              ? `${selectedCategory} | ${selectedSub}`
               : selectedCategory
             : "Categories";
 

@@ -787,7 +787,7 @@ function LiveStorefrontPreview({
               }}
             />
             <Text style={{ color: MUTED, fontSize: 9, letterSpacing: 1 }}>
-              Plazore · Digital Mall
+              Plazore | Digital Mall
             </Text>
           </View>
         </ScrollView>
@@ -1156,7 +1156,7 @@ export default function MyStore() {
             marginTop: 8,
           }}
         >
-          Previewing your storefront · Scroll inside the phone to explore
+          Previewing your storefront | Scroll inside the phone to explore
         </Text>
 
         <TouchableOpacity

@@ -770,7 +770,7 @@ function CinematicVariantPicker({
     options
       .map((o) => selected[o.name])
       .filter(Boolean)
-      .join(" · ") || "Choose your exact piece";
+      .join(" | ") || "Choose your exact piece";
 
   const valuePossible = (name: string, val: string) => {
     const trial = { ...selected, [name]: val };
@@ -1304,14 +1304,14 @@ export function ProductView({ product }: { product: Product }) {
     ? inStock
       ? availableStock <= 5
         ? `Only ${availableStock} left`
-        : `In stock · ${availableStock}`
+        : `In stock | ${availableStock}`
       : "Out of stock"
     : !selectionComplete
       ? "Select options"
       : inStock
         ? availableStock <= 5
           ? `Only ${availableStock} left`
-          : `In stock · ${availableStock}`
+          : `In stock | ${availableStock}`
         : "Out of stock";
 
   const wishlistCount = Number(

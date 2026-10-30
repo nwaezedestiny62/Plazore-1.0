@@ -351,7 +351,7 @@ export default function SellerOrdersPage() {
           </h1>
           <p className="mt-0.5 text-xs text-[#737A86]">
             {sorted.length} shown
-            {hideCompleted ? " · completed hidden" : ""} · {SORT_LABEL[sort]}
+            {hideCompleted ? " | completed hidden" : ""} | {SORT_LABEL[sort]}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -436,7 +436,7 @@ export default function SellerOrdersPage() {
                           {item.orderNumber || "Order"}
                         </td>
                         <td className="px-4 py-3.5 text-[#A7ADB8]">
-                          {item.buyer?.name || item.user?.name || "Buyer"} ·{" "}
+                          {item.buyer?.name || item.user?.name || "Buyer"} |{" "}
                           {item.items?.length || 0} item
                           {(item.items?.length || 0) !== 1 ? "s" : ""}
                         </td>
@@ -501,7 +501,7 @@ export default function SellerOrdersPage() {
                         </span>
                       </div>
                       <p className="mt-2 text-[13px] text-[#A7ADB8]">
-                        {item.buyer?.name || item.user?.name || "Buyer"} ·{" "}
+                        {item.buyer?.name || item.user?.name || "Buyer"} |{" "}
                         {item.items?.length || 0} item
                         {(item.items?.length || 0) !== 1 ? "s" : ""}
                       </p>

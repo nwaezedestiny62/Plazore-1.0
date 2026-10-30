@@ -266,7 +266,7 @@ function BannerPreview({
       </div>
       <div className="absolute right-2 top-2">
         <Badge tone={controlType === "system" ? "blue" : "green"}>
-          {controlType === "system" ? "System" : "Admin"} · #{position}
+          {controlType === "system" ? "System" : "Admin"} | #{position}
         </Badge>
       </div>
     </div>
@@ -384,7 +384,7 @@ function BannerModal({
               <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[#00E575]">
                 {isAdmin ? "Admin slot" : "System slot"}
               </span>
-              <span className="text-[10px] text-white/30">·</span>
+              <span className="text-[10px] text-white/30">|</span>
               <span className="text-[10px] font-medium text-white/40">
                 Position {slot.position}
               </span>
@@ -402,13 +402,13 @@ function BannerModal({
                 </span>
                 {slot.updatedAt ? (
                   <span className="text-[11px] text-white/25">
-                    · Updated {fmt(slot.updatedAt)}
+                    | Updated {fmt(slot.updatedAt)}
                   </span>
                 ) : null}
               </div>
             ) : (
               <p className="text-[12px] text-white/40">
-                Adaptive · locked · not editable
+                Adaptive | locked | not editable
               </p>
             )}
           </div>
@@ -456,7 +456,7 @@ function BannerModal({
                         Upload banner image
                       </p>
                       <p className="text-[11px] text-white/25">
-                        JPG · PNG · WEBP · max 8MB
+                        JPG | PNG | WEBP | max 8MB
                       </p>
                     </div>
                   )}
@@ -624,7 +624,7 @@ function BannerModal({
                         >
                           <div className="min-w-0">
                             <p className="truncate font-medium text-[#F5F7FA]">
-                              v{h.version} · {h.creative?.headline || h.status}
+                              v{h.version} | {h.creative?.headline || h.status}
                             </p>
                             {h.note ? (
                               <p className="mt-0.5 truncate text-[11px] text-white/30">
@@ -1028,8 +1028,8 @@ function ContentInner() {
             Hero Banners
           </h1>
           <p className="mt-1.5 max-w-xl text-sm leading-relaxed text-[#A7ADB8]">
-            Edit slots <span className="text-[#F5F7FA]">2 · 3 · 5</span>. Slots{" "}
-            <span className="text-[#F5F7FA]">1 · 4</span> are system adaptive.
+            Edit slots <span className="text-[#F5F7FA]">2 | 3 | 5</span>. Slots{" "}
+            <span className="text-[#F5F7FA]">1 | 4</span> are system adaptive.
             Images go through Cloudinary — same stack as products.
           </p>
         </div>
@@ -1100,7 +1100,7 @@ function ContentInner() {
                 ? slot.published || slot.draft || {}
                 : {
                     headline: "System personalized",
-                    subheadline: "Adaptive · 6h cycle · not editable",
+                    subheadline: "Adaptive | 6h cycle | not editable",
                     imageUrl:
                       recentPersonal.find((p) => p.position === slot.position)
                         ?.imageUrl || "",
@@ -1133,8 +1133,8 @@ function ContentInner() {
                       </p>
                       <p className="mt-0.5 text-[11px] text-white/40">
                         {slot.controlType === "system"
-                          ? "Locked · adaptive"
-                          : `v${slot.publishedVersion || 0} · ${
+                          ? "Locked | adaptive"
+                          : `v${slot.publishedVersion || 0} | ${
                               slot.isActive === false ? "Off" : "On"
                             }`}
                       </p>

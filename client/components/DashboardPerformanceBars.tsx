@@ -178,7 +178,7 @@ export function DashboardPerformanceBars({
           </View>
         ) : (
           <Text style={styles.tipHint}>
-            Tap a day · score = views×1 + cart×5 + purchases×15
+            Tap a day | score = views×1 + cart×5 + purchases×15
           </Text>
         )}
       </View>

@@ -86,7 +86,7 @@ function formatSelectedOptions(raw: unknown): string {
   const rec = toOptionRecord(raw);
   return Object.entries(rec)
     .map(([k, v]) => `${titleCaseKey(k)}: ${v}`)
-    .join(" · ");
+    .join(" | ");
 }
 
 function optionsFromVariantKey(key?: string): string {
@@ -100,7 +100,7 @@ function optionsFromVariantKey(key?: string): string {
       return v ? `${titleCaseKey(k.trim())}: ${v.trim()}` : k.trim();
     })
     .filter(Boolean)
-    .join(" · ");
+    .join(" | ");
 }
 
 function itemOptionsLine(item: any): string {
@@ -767,7 +767,7 @@ export default function SellerOrderDetailsPage() {
                     className="mt-1.5 text-xs text-[#737A86]"
                     suppressHydrationWarning
                   >
-                    Qty {qty} · {fmtFrom(unit, srcRegion)} each
+                    Qty {qty} | {fmtFrom(unit, srcRegion)} each
                   </p>
                   <p
                     className="mt-0.5 text-[13px] font-semibold text-[#F5F7FA]"
@@ -826,7 +826,7 @@ export default function SellerOrderDetailsPage() {
                 <span className="font-semibold">
                   {impliedMethod === "self"
                     ? "Self delivery"
-                    : `Courier${courierName ? ` · ${courierName}` : ""}`}
+                    : `Courier${courierName ? ` | ${courierName}` : ""}`}
                 </span>
               </div>
 

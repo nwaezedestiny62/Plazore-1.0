@@ -351,7 +351,7 @@ export default function Cart() {
                       <TextInput
                         value={note}
                         onChangeText={(t) => updateItemNote(item.id, t)}
-                        placeholder="e.g. Pack carefully · Gift wrap · Leave at door"
+                        placeholder="e.g. Pack carefully | Gift wrap | Leave at door"
                         placeholderTextColor={MUTED}
                         multiline
                         maxLength={120}

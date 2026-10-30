@@ -312,7 +312,7 @@ export function Storefront({
               </div>
               <p className="mt-1.5 text-xs tracking-wide text-[#737A86]">
                 {isOwner ? "Your storefront" : "Explore this store"}
-                {" · "}
+                {" | "}
                 <span className="text-white/40">Prices in {currencyCode}</span>
               </p>
               {locationLabel ? (
@@ -543,7 +543,7 @@ export function Storefront({
                     Contact Store through Plazore
                   </span>
                   <span className="mt-0.5 block text-xs text-[#737A86]">
-                    Routed through Plazore · not direct seller chat
+                    Routed through Plazore | not direct seller chat
                   </span>
                 </span>
                 <ChevronLeft className="h-4 w-4 shrink-0 rotate-180 text-[#737A86]" />
@@ -573,7 +573,7 @@ export function Storefront({
         <footer className="mb-2 mt-10 flex flex-col items-center">
           <span className="mb-3.5 h-[3px] w-9 rounded-sm bg-[#252A33]" />
           <p className="text-[11px] tracking-widest text-[#737A86]">
-            Plazore · Digital Mall
+            Plazore | Digital Mall
           </p>
         </footer>
       </div>

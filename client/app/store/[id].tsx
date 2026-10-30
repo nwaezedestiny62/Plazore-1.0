@@ -782,7 +782,7 @@ export default function PublicStorefront() {
                     </View>
                   ) : null}
                 </View>
-                <Text style={styles.openLabel}>Open · Plazore storefront</Text>
+                <Text style={styles.openLabel}>Open | Plazore storefront</Text>
                 {locationLabel ? (
                   <View style={styles.locationRow}>
                     <Ionicons name="location-outline" size={13} color={MUTED} />
@@ -879,7 +879,7 @@ export default function PublicStorefront() {
               <View style={[styles.actionRow, { justifyContent: "flex-start" }]}>
                 <View style={styles.countPill}>
                   <Text style={styles.countText}>
-                    {products.length} product{products.length === 1 ? "" : "s"} · Your store
+                    {products.length} product{products.length === 1 ? "" : "s"} | Your store
                   </Text>
                 </View>
               </View>
@@ -1077,7 +1077,7 @@ export default function PublicStorefront() {
                   Contact Store through Plazore
                 </Text>
                 <Text style={styles.supportSubCalm} numberOfLines={1}>
-                  Routed through Plazore · not direct seller chat
+                  Routed through Plazore | not direct seller chat
                 </Text>
               </View>
               <Ionicons name="chevron-forward" size={16} color={MUTED} />
@@ -1103,7 +1103,7 @@ export default function PublicStorefront() {
 
         <View style={styles.footer}>
           <View style={styles.footerLine} />
-          <Text style={styles.footerText}>Plazore · Digital Mall</Text>
+          <Text style={styles.footerText}>Plazore | Digital Mall</Text>
         </View>
       </ScrollView>
 

@@ -256,7 +256,7 @@ export default function SellerSubscriptionScreen() {
       >
         <Text style={styles.eyebrow}>GROWTH</Text>
         <Text style={styles.sub}>
-          Pricing follows your business location ({country} · {currency}) — not
+          Pricing follows your business location ({country} | {currency}) — not
           browse region. Nigeria uses local NGN prices; other countries use the
           international tier converted to {currency}. Fees on product only.
         </Text>
@@ -278,7 +278,7 @@ export default function SellerSubscriptionScreen() {
             {plans.find((p) => p.id === active?.planId)?.name ||
               active?.planId ||
               "Free Seller"}
-            {active?.isPromotional ? " · Promo" : ""}
+            {active?.isPromotional ? " | Promo" : ""}
           </Text>
           <Text style={styles.heroFee}>
             {feePct(active?.transactionFeeRate)} fee
@@ -297,7 +297,7 @@ export default function SellerSubscriptionScreen() {
             <Ionicons name="gift-outline" size={20} color={AMBER} />
             <View style={{ flex: 1 }}>
               <Text style={styles.promoTitle}>
-                Dominant Niche · promotional
+                Dominant Niche | promotional
               </Text>
               <Text style={styles.promoBody}>
                 {promo.claimed
@@ -339,21 +339,21 @@ export default function SellerSubscriptionScreen() {
               <Text style={styles.planPrice}>{price}</Text>
               <Text style={styles.planMeta}>
                 {plan.price.amount > 0
-                  ? `per month · ${country}`
+                  ? `per month | ${country}`
                   : "No monthly charge"}
               </Text>
               <View style={styles.divider} />
               <Text style={styles.feat}>
-                · Up to {plan.benefits.maxImagesPerProduct} images / product
+                | Up to {plan.benefits.maxImagesPerProduct} images / product
               </Text>
               <Text style={styles.feat}>
-                · {plan.benefits.showroomVisibility} visibility
+                | {plan.benefits.showroomVisibility} visibility
               </Text>
               {plan.benefits.priorityDiscovery ? (
-                <Text style={styles.feat}>· Priority discovery</Text>
+                <Text style={styles.feat}>| Priority discovery</Text>
               ) : null}
               {plan.benefits.bannerEligible ? (
-                <Text style={styles.feat}>· Banner eligible</Text>
+                <Text style={styles.feat}>| Banner eligible</Text>
               ) : null}
               <View style={styles.feeRow}>
                 <Text style={styles.feeLabel}>Transaction fee</Text>
@@ -374,7 +374,7 @@ export default function SellerSubscriptionScreen() {
                       <Text style={styles.ctaText}>
                         {plan.id === "free"
                           ? "Switch to Free"
-                          : `Subscribe · ${price}`}
+                          : `Subscribe | ${price}`}
                       </Text>
                     )}
                   </LinearGradient>

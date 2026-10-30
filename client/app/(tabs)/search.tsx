@@ -929,7 +929,7 @@ export default function BrowseScreen() {
                   : null,
               ]
                 .filter(Boolean)
-                .join(' · ')}
+                .join(' | ')}
             </Text>
           </View>
           <Pressable onPress={clearAll} hitSlop={10}>

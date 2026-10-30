@@ -164,8 +164,8 @@ async function checkAuth(): Promise<{
     state: "operational",
     note:
       pingOk === true
-        ? `Clerk reachable · ${withClerk} linked users · ${recentSeen} active 24h`
-        : `Clerk keys present · ${withClerk} linked users · ${recentSeen} active 24h`,
+        ? `Clerk reachable | ${withClerk} linked users | ${recentSeen} active 24h`
+        : `Clerk keys present | ${withClerk} linked users | ${recentSeen} active 24h`,
     detail: { withClerk, recentSeen24h: recentSeen, pingOk },
   };
 }
@@ -265,7 +265,7 @@ async function checkStorage(): Promise<{
 
   return {
     state: "operational",
-    note: parts.join(" · "),
+    note: parts.join(" | "),
     detail,
   };
 }
@@ -295,28 +295,28 @@ async function checkJobs(): Promise<{
     if (failRate >= 0.25 && failed >= 5) {
       return {
         state: "critical",
-        note: `AI jobs failing heavily · pending ${pending} · failed ${failed} · ready ${ready}`,
+        note: `AI jobs failing heavily | pending ${pending} | failed ${failed} | ready ${ready}`,
         detail: { pending, failed, ready, failRate },
       };
     }
     if (pending >= 50) {
       return {
         state: "warning",
-        note: `AI job backlog growing · pending ${pending} · failed ${failed}`,
+        note: `AI job backlog growing | pending ${pending} | failed ${failed}`,
         detail: { pending, failed, ready },
       };
     }
     if (failed > 0) {
       return {
         state: "degraded",
-        note: `Some AI jobs failed · pending ${pending} · failed ${failed} · ready ${ready}`,
+        note: `Some AI jobs failed | pending ${pending} | failed ${failed} | ready ${ready}`,
         detail: { pending, failed, ready },
       };
     }
 
     return {
       state: "operational",
-      note: `AI jobs healthy · pending ${pending} · ready ${ready}`,
+      note: `AI jobs healthy | pending ${pending} | ready ${ready}`,
       detail: { pending, failed, ready },
     };
   } catch (e: any) {
@@ -368,7 +368,7 @@ async function checkDatabase(): Promise<{
 
     return {
       state,
-      note: `MongoDB ping ${pingMs}ms · ${collections} collections`,
+      note: `MongoDB ping ${pingMs}ms | ${collections} collections`,
       detail: { connectionReadyState: readyState, pingMs, collections },
     };
   } catch (e: any) {
@@ -400,7 +400,7 @@ export async function getPlatformHealth(environment: Env) {
   // API: if no aggregate yet but this handler ran + DB up → operational
   let apiState = stateFromMetrics(all.avgMs, all.errorRate, all.hasData);
   let apiNote = all.hasData
-    ? `avg ${Math.round(all.avgMs || 0)}ms · err ${((all.errorRate || 0) * 100).toFixed(2)}% · ${all.requests} req / 15m`
+    ? `avg ${Math.round(all.avgMs || 0)}ms | err ${((all.errorRate || 0) * 100).toFixed(2)}% | ${all.requests} req / 15m`
     : "API responding (no request aggregates in window yet — traffic will fill this)";
   if (!all.hasData && database.state !== "critical") {
     apiState = "operational";
@@ -415,7 +415,7 @@ export async function getPlatformHealth(environment: Env) {
     if (traffic.hasData) {
       return {
         state: stateFromMetrics(traffic.avgMs, traffic.errorRate, true),
-        note: `${label} traffic · ${traffic.requests} req / 15m · ${activeUsers} users seen 24h`,
+        note: `${label} traffic | ${traffic.requests} req / 15m | ${activeUsers} users seen 24h`,
         requests: traffic.requests,
         avgMs: traffic.avgMs,
         errorRate: traffic.errorRate,
@@ -424,7 +424,7 @@ export async function getPlatformHealth(environment: Env) {
     if (activeUsers > 0) {
       return {
         state: "operational",
-        note: `No surface-tagged API traffic yet · ${activeUsers} ${label} users active 24h (lastSeenPlatform)`,
+        note: `No surface-tagged API traffic yet | ${activeUsers} ${label} users active 24h (lastSeenPlatform)`,
         requests: 0,
         avgMs: null,
         errorRate: null,
@@ -432,7 +432,7 @@ export async function getPlatformHealth(environment: Env) {
     }
     return {
       state: "operational",
-      note: `No ${label} traffic in window · waiting for clients / presence`,
+      note: `No ${label} traffic in window | waiting for clients / presence`,
       requests: 0,
       avgMs: null,
       errorRate: null,

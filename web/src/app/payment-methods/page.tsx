@@ -267,7 +267,7 @@ export default function PaymentMethodsPage() {
                         </div>
                         <p className="truncate text-[13px] leading-[18px] text-[#A7ADB8]">
                           Expires {item.expMonth}/{item.expYear}
-                          {item.name ? ` · ${item.name}` : ""}
+                          {item.name ? ` | ${item.name}` : ""}
                         </p>
                         {item.bank ? (
                           <p className="mt-0.5 truncate text-[11px] text-[#737A86]">
@@ -297,7 +297,7 @@ export default function PaymentMethodsPage() {
               })}
             </ul>
             <p className="mt-6 text-center text-[11px] leading-4 text-[#737A86]">
-              Managed securely · Paystack &amp; Stripe tokenisation · Plazore
+              Managed securely | Paystack &amp; Stripe tokenisation | Plazore
               never stores full card numbers
             </p>
           </>

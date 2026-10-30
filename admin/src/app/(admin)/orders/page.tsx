@@ -764,10 +764,10 @@ function OrderFlow({ order }: { order: OrderRow }) {
         <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-200">
           Cancelled
           {order.cancellation?.cancelledAt
-            ? ` · ${fmtDate(order.cancellation.cancelledAt)}`
+            ? ` | ${fmtDate(order.cancellation.cancelledAt)}`
             : ""}
           {order.cancellation?.cancelledBy
-            ? ` · by ${order.cancellation.cancelledBy}`
+            ? ` | by ${order.cancellation.cancelledBy}`
             : ""}
         </div>
       )}
@@ -775,7 +775,7 @@ function OrderFlow({ order }: { order: OrderRow }) {
         <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
           Dispute open — payout blocked
           {order.payout?.blockedReason
-            ? ` · ${order.payout.blockedReason}`
+            ? ` | ${order.payout.blockedReason}`
             : ""}
         </div>
       )}
@@ -990,8 +990,8 @@ function OrderModal({
                   <span className="font-semibold text-white/80">
                     {listingRegion}
                   </span>
-                  {listingRegion !== "—" ? ` · ${regionLabel(listingRegion)}` : ""}
-                  {" · paid as "}
+                  {listingRegion !== "—" ? ` | ${regionLabel(listingRegion)}` : ""}
+                  {" | paid as "}
                   <span className="font-semibold text-white/80">{currency}</span>
                 </p>
                 <p className="mt-1 text-[11px] text-white/35">
@@ -1091,7 +1091,7 @@ function OrderModal({
                                 : "Item")}
                           </p>
                           <p className="mt-0.5 text-[11px] text-white/40">
-                            Qty {qty} · listed unit{" "}
+                            Qty {qty} | listed unit{" "}
                             <span className="tabular-nums text-white/70">
                               {fmtMoney(unit, cur)}
                             </span>
@@ -1105,7 +1105,7 @@ function OrderModal({
                                   live,
                                   currencyForRegion(liveReg) || cur
                                 )}
-                                {liveReg ? ` · ${liveReg}` : ""}
+                                {liveReg ? ` | ${liveReg}` : ""}
                               </p>
                             )}
                           <div className="mt-1 flex flex-wrap gap-1.5">
@@ -1218,7 +1218,7 @@ function OrderModal({
                   <p className="text-xs opacity-90">
                     By {selected.cancellation.cancelledBy || "—"}
                     {selected.cancellation.reasonLabel
-                      ? ` · ${selected.cancellation.reasonLabel}`
+                      ? ` | ${selected.cancellation.reasonLabel}`
                       : ""}
                   </p>
                   {selected.cancellation.refundStatus &&
@@ -1584,7 +1584,7 @@ function OrdersDirectory() {
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-xs text-white/35">
               {total.toLocaleString()} order{total === 1 ? "" : "s"}
-              {stale ? " · cached" : ""}
+              {stale ? " | cached" : ""}
             </span>
             <Button
               tone="ghost"
@@ -1877,7 +1877,7 @@ function OrdersDirectory() {
                       </span>
                       <p className="mt-1 text-[10px] text-white/35">
                         {cur}
-                        {reg !== "—" ? ` · ${regionLabel(reg)}` : ""}
+                        {reg !== "—" ? ` | ${regionLabel(reg)}` : ""}
                       </p>
                     </td>
                     <td className="px-4 py-3">

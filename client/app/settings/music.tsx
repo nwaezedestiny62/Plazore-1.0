@@ -1,6 +1,6 @@
 /**
  * Ambient Soundtrack — Plazore Settings
- * ON/OFF freezes position · volume independent · no border radius
+ * ON/OFF freezes position | volume independent | no border radius
  */
 
 import { useSoundtrack } from '@/context/SoundtrackContext'
@@ -80,7 +80,7 @@ export default function MusicSettingsScreen() {
 
           {/* Volume */}
           <Text style={styles.volLabel}>
-            Volume · {Math.round(volume * 100)}%
+            Volume | {Math.round(volume * 100)}%
           </Text>
           <Slider
             style={styles.slider}

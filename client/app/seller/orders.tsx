@@ -431,8 +431,8 @@ export default function SellerOrders() {
           <Text style={styles.title}>Incoming Orders</Text>
           <Text style={styles.subtitle}>
             {sorted.length} shown
-            {hideCompleted ? ' · completed hidden' : ''}
-            {' · '}
+            {hideCompleted ? ' | completed hidden' : ''}
+            {' | '}
             {SORT_LABEL[sort]}
           </Text>
         </View>
@@ -504,7 +504,7 @@ export default function SellerOrders() {
               </View>
               <Text style={styles.buyerLine} numberOfLines={1}>
                 {item.buyer?.name || item.user?.name || 'Buyer'}
-                {' · '}
+                {' | '}
                 {item.items?.length || 0} item
                 {(item.items?.length || 0) !== 1 ? 's' : ''}
               </Text>

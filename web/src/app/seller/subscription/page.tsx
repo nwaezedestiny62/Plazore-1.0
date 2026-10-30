@@ -233,7 +233,7 @@ export default function SellerSubscriptionPage() {
         </h1>
         <p className="mb-5 mt-2.5 text-sm leading-[21px] text-[#A7ADB8]">
           Pricing follows your <strong className="text-white/80">business location</strong>{" "}
-          ({country} · {currency}) — not browse region. Nigeria uses local NGN prices;
+          ({country} | {currency}) — not browse region. Nigeria uses local NGN prices;
           other countries use the international tier converted to {currency}. Fees apply
           to product price only, never delivery.
         </p>
@@ -278,9 +278,9 @@ export default function SellerSubscriptionPage() {
               </p>
             </div>
             <div className="border border-white/[0.07] bg-[#171B22] px-2.5 py-1.5 text-xs font-semibold text-[#A7ADB8]">
-              {country} · {currency}
+              {country} | {currency}
               {active?.maxImagesPerProduct
-                ? ` · ${active.maxImagesPerProduct} imgs`
+                ? ` | ${active.maxImagesPerProduct} imgs`
                 : ""}
             </div>
           </div>
@@ -338,7 +338,7 @@ export default function SellerSubscriptionPage() {
         )}
 
         <p className="mb-3 text-[11px] font-bold uppercase tracking-[1.4px] text-[#737A86]">
-          Plans · {currency}
+          Plans | {currency}
         </p>
 
         <div className="space-y-3">
@@ -380,7 +380,7 @@ export default function SellerSubscriptionPage() {
                     <p className="mt-1.5 text-xl font-extrabold">{priceLabel}</p>
                     <p className="mt-0.5 text-[11px] text-[#737A86]">
                       {plan.price.amount > 0
-                        ? `per month · ${country}`
+                        ? `per month | ${country}`
                         : "No monthly charge"}
                     </p>
                   </div>
@@ -419,7 +419,7 @@ export default function SellerSubscriptionPage() {
                     ) : null}
                     {plan.id === "free"
                       ? "Switch to Free Seller"
-                      : `Subscribe · ${priceLabel}/mo`}
+                      : `Subscribe | ${priceLabel}/mo`}
                   </button>
                 )}
               </article>

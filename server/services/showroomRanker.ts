@@ -1,30 +1,29 @@
 /**
- * Plazore Showroom Ranker (V2.1)
- * FULLNESS FIRST · ADAPTABILITY SECOND
+ * Plazore Showroom Ranker (V3.0)
+ * DISCIPLINED · LOCATION-AWARE · PLAN-EFFECTIVE · ACTIVITY-INTELLIGENT
  *
  * Capacities (unchanged):
- *   Room 1 = 50 unique   (THE HORIZON / Expanded View)     rotate ~2h
- *   Room 2 = 14 unique   (THE CHAMBER / Natural Selection) rotate ~3h
+ *   Room 1 = 50 unique   (THE HORIZON)     rotate every 1 hour
+ *   Room 2 = 14 unique   (THE CHAMBER)     rotate every 30 minutes
  *   Room 1 + Room 2 = 64 unique (no overlap)
- *   Room 3 = 16          (THE SIGNAL / The Watch)          rotate ~20m · user activity
- *   Room 4 = 30          (THE LOCALE)                      always live · regional top
+ *   Room 3 = 16          (THE SIGNAL)      rotate every 18 minutes · TikTok-style FYP
+ *   Room 4 = 30          (THE LOCALE)      always live · regional first + nearest
  *   Full mall = 110 slots
  *
- * Eligible =
- *   isActive === true
- *   AND has sellable stock (top-level stock > 0  OR  any available variant with stock > 0)
+ * Priority order for ranking signals:
+ *   1. Seller plan (Dominant Niche / Business Plus / Global Reach)
+ *   2. Local region products (second priority)
+ *   3. Commerce + user activity signals
+ *   4. Freshness + quality
+ *
+ * Guest (unsigned) behaviour:
+ *   - Uses detected region
+ *   - Strong preference for local products
+ *   - Paid plans are highly effective
+ *   - Rooms are never random
  *
  * Adaptive ON  only when eligibleCount >= 110
- * Adaptive OFF when eligibleCount < 110
- *   → show every real eligible product
- *   → never pad / never duplicate just to look full
- *   → no seller / category caps that hide inventory
- *
- * Plan visibility boost applies to Rooms 1, 2, 4 ONLY (not Room 3).
- * Room 3 is pure user-activity signal.
- *
- * Rooms 3 & 4 may reuse Room 1/2 products ONLY when adaptive is ON
- * and a real ranking signal justifies another appearance.
+ * Adaptive OFF when eligibleCount < 110 → inventory-first, no padding
  */
 
 import crypto from "crypto";
@@ -37,6 +36,7 @@ import {
   getPlanBenefits,
   type PlanId,
 } from "../config/plans.js";
+import { getNearestRegions } from "../config/regions.js";
 import { notifyShowroomRefresh } from "../utils/sendNotification.js";
 
 export const ROOM_CAPACITY = {
@@ -51,31 +51,19 @@ export const FULL_SHOWROOM_SLOTS =
 
 export const ADAPTIVE_THRESHOLD = FULL_SHOWROOM_SLOTS;
 
-/** Per-room cache / rotation windows */
+/** Updated rotation windows */
 export const ROOM_TTL_MS = {
-  1: 1000 * 60 * 60 * 2, // 2 hours — Expanded View
-  2: 1000 * 60 * 60 * 3, // 3 hours — Natural Selection
-  3: 1000 * 60 * 20, // 20 minutes — The Watch (user activity)
-  4: 0, // always live — The Locale
+  1: 1000 * 60 * 60 * 1,  // 1 hour  — THE HORIZON
+  2: 1000 * 60 * 30,      // 30 min  — THE CHAMBER
+  3: 1000 * 60 * 18,      // 18 min  — THE SIGNAL (FYP)
+  4: 0,                   // always live — THE LOCALE
 } as const;
 
-/** Session document TTL (longest room + buffer) */
 export const SESSION_TTL_MS = 1000 * 60 * 60 * 6;
 
 const SELLER_PUBLIC_FIELDS =
   "name storeName storeLogo storeDescription isSellerVerified marketplaceRegion shippingDefaults";
 
-/**
- * Robust eligibility:
- * - isActive must be true
- * - has sellable stock either at product level OR on any available variant
- *
- * This is the primary fix for products that use variants (top-level stock can be 0
- * while variants still have inventory).
- *
- * Use buildEligibleQuery() when you need to AND extra fields (region, _id $nin, etc).
- * Never spread this object directly with other top-level keys that collide with $or.
- */
 export function buildEligibleQuery(extra: Record<string, any> = {}): any {
   const stockOr = {
     $or: [
@@ -102,10 +90,8 @@ export function buildEligibleQuery(extra: Record<string, any> = {}): any {
   return parts.length === 1 ? parts[0] : { $and: parts };
 }
 
-/** Legacy export kept for any external imports that still expect ELIGIBLE_FILTER */
 export const ELIGIBLE_FILTER = buildEligibleQuery();
 
-/** In-memory check (used after hydrate / for safety) */
 export function isProductEligible(p: any): boolean {
   if (!p || p.isActive === false) return false;
   const topStock = Number(p.stock) || 0;
@@ -155,15 +141,11 @@ function productId(p: any): string {
 }
 
 function categoryKey(p: any): string {
-  return String(p?.category || "")
-    .trim()
-    .toLowerCase();
+  return String(p?.category || "").trim().toLowerCase();
 }
 
 function subCategoryKey(p: any): string {
-  return String(p?.subCategory || "")
-    .trim()
-    .toLowerCase();
+  return String(p?.subCategory || "").trim().toLowerCase();
 }
 
 async function buildInterestProfile(
@@ -185,7 +167,7 @@ async function buildInterestProfile(
 
   const events = await ShowroomEvent.find(query)
     .sort({ createdAt: -1 })
-    .limit(200)
+    .limit(220)
     .populate("product", "category subCategory seller price")
     .lean();
 
@@ -202,29 +184,14 @@ async function buildInterestProfile(
     const eventType = String(raw?.type || "");
     let weight = 0;
     switch (eventType) {
-      case "purchase":
-        weight = 14;
-        break;
-      case "cart":
-        weight = 8;
-        break;
-      case "wishlist":
-        weight = 6;
-        break;
-      case "open":
-        weight = 4;
-        break;
-      case "impression":
-        weight = 0.5;
-        break;
-      case "skip":
-        weight = -2.5;
-        break;
-      case "search":
-        weight = 3;
-        break;
-      default:
-        weight = 0;
+      case "purchase": weight = 16; break;
+      case "cart":     weight = 9;  break;
+      case "wishlist": weight = 6.5; break;
+      case "open":     weight = 4.2; break;
+      case "impression": weight = 0.45; break;
+      case "skip":     weight = -2.8; break;
+      case "search":   weight = 3.2; break;
+      default: weight = 0;
     }
 
     const w = weight * decay;
@@ -241,12 +208,9 @@ async function buildInterestProfile(
 
     profile.productIds.set(pid, (profile.productIds.get(pid) || 0) + w);
     if (cat) profile.categories.set(cat, (profile.categories.get(cat) || 0) + w);
-    if (sub)
-      profile.subCategories.set(sub, (profile.subCategories.get(sub) || 0) + w);
-    if (seller)
-      profile.sellers.set(seller, (profile.sellers.get(seller) || 0) + w);
-    if (band)
-      profile.priceBands.set(band, (profile.priceBands.get(band) || 0) + w);
+    if (sub) profile.subCategories.set(sub, (profile.subCategories.get(sub) || 0) + w);
+    if (seller) profile.sellers.set(seller, (profile.sellers.get(seller) || 0) + w);
+    if (band) profile.priceBands.set(band, (profile.priceBands.get(band) || 0) + w);
   }
 
   return profile;
@@ -302,6 +266,7 @@ function scoreProductBase(opts: {
   planVisibility?: string;
   interestMultiplier?: number;
   regionalCommerceBoost?: boolean;
+  isGuest?: boolean;
 }): ScoredProduct {
   const {
     product,
@@ -315,42 +280,46 @@ function scoreProductBase(opts: {
     planVisibility = "standard",
     interestMultiplier = 1,
     regionalCommerceBoost = false,
+    isGuest = false,
   } = opts;
 
   const reasons: string[] = [];
   let score = 0;
 
+  // ── 1. LOCAL REGION (second priority after plan) ──────────────────────
   const pRegion = String(product.region || "").toUpperCase();
   const uRegion = String(region || "NG").toUpperCase();
-  let regional = 0.35;
+  let regional = 0.22;
   if (pRegion === uRegion) {
-    regional = 1;
+    regional = isGuest ? 1.55 : 1.35; // stronger for guests
     reasons.push("local_region");
   } else if (pRegion && uRegion && pRegion.slice(0, 2) === uRegion.slice(0, 2)) {
-    regional = 0.65;
+    regional = 0.78;
     reasons.push("nearby_region");
   }
-  score += regional * (regionalCommerceBoost ? 1.85 : 1.25);
+  score += regional * (regionalCommerceBoost ? 2.15 : 1.6);
 
+  // ── 2. COMMERCE SIGNALS ───────────────────────────────────────────────
   const views = perf?.views || 0;
   const carts = perf?.cartAdds || 0;
   const purchases = perf?.purchases || 0;
   const wishlist = product.wishlistCount || 0;
 
-  const conversion =
-    views > 0 ? (purchases * 3 + carts) / Math.max(views, 1) : 0;
+  const conversion = views > 0 ? (purchases * 3 + carts) / Math.max(views, 1) : 0;
   const commerceRaw =
-    purchases * 15 + carts * 5 + views * 0.4 + wishlist * 2 + conversion * 40;
+    purchases * 16 + carts * 5.5 + views * 0.42 + wishlist * 2.1 + conversion * 42;
   const commerce = Math.log10(1 + commerceRaw) / 3;
-  const commerceWeight = regionalCommerceBoost ? 1.55 : 1.1;
+  const commerceWeight = regionalCommerceBoost ? 1.65 : 1.15;
   score += clamp(commerce) * commerceWeight;
   if (purchases > 0 || carts > 2) reasons.push("commerce_signal");
 
+  // ── 3. FRESHNESS ──────────────────────────────────────────────────────
   const age = daysSince(product.createdAt);
   const freshness = clamp(1 - age / 21);
-  score += freshness * 0.95;
+  score += freshness * 0.92;
   if (age <= 7) reasons.push("fresh");
 
+  // ── 4. USER INTEREST / ACTIVITY ───────────────────────────────────────
   let interestScore = 0;
   const cat = String(product.category || "").trim();
   const sub = String(product.subCategory || "").trim();
@@ -359,82 +328,93 @@ function scoreProductBase(opts: {
   const pid = productId(product);
 
   if (pid && interest.productIds.has(pid)) {
-    interestScore += clamp(interest.productIds.get(pid)! / 18) * 0.7;
+    interestScore += clamp(interest.productIds.get(pid)! / 16) * 0.75;
     reasons.push("user_engaged_product");
   }
   if (cat && interest.categories.has(cat)) {
-    interestScore += clamp(interest.categories.get(cat)! / 20) * 0.5;
+    interestScore += clamp(interest.categories.get(cat)! / 18) * 0.52;
   }
   if (sub && interest.subCategories.has(sub)) {
-    interestScore += clamp(interest.subCategories.get(sub)! / 12) * 0.3;
+    interestScore += clamp(interest.subCategories.get(sub)! / 11) * 0.34;
   }
   if (sellerId && interest.sellers.has(sellerId)) {
-    interestScore += clamp(interest.sellers.get(sellerId)! / 15) * 0.25;
+    interestScore += clamp(interest.sellers.get(sellerId)! / 14) * 0.26;
   }
   if (band && interest.priceBands.has(band)) {
-    interestScore += clamp(interest.priceBands.get(band)! / 15) * 0.15;
+    interestScore += clamp(interest.priceBands.get(band)! / 14) * 0.16;
   }
-  score += clamp(interestScore) * 1.2 * interestMultiplier;
+  score += clamp(interestScore) * 1.25 * interestMultiplier;
   if (interestScore > 0.12) reasons.push("matches_interest");
 
+  // ── 5. EXPLORATION / UNDER-EXPOSED ────────────────────────────────────
   let exploration = 0;
   if (age <= 14 && (views < 30 || purchases === 0)) {
-    exploration += 0.55;
+    exploration += 0.52;
     reasons.push("exploration_new");
   }
   if (views < 8 && carts === 0) {
-    exploration += 0.28;
+    exploration += 0.26;
     reasons.push("underexposed");
   }
-  score += exploration * 0.95;
+  score += exploration * 0.9;
 
-  let quality = 0.3;
-  if (product.isActive !== false) quality += 0.2;
-  if (isProductEligible(product)) quality += 0.25;
-  if (product.images?.length > 0) quality += 0.15;
-  if (product.isFeatured) quality += 0.2;
-  score += quality * 0.5;
+  // ── 6. QUALITY ────────────────────────────────────────────────────────
+  let quality = 0.28;
+  if (product.isActive !== false) quality += 0.18;
+  if (isProductEligible(product)) quality += 0.22;
+  if (product.images?.length > 0) quality += 0.16;
+  if (product.isFeatured) quality += 0.18;
+  score += quality * 0.48;
 
+  // ── 7. SEARCH ─────────────────────────────────────────────────────────
   if (searchQuery && searchQuery.trim()) {
     const q = searchQuery.toLowerCase().trim();
     const name = String(product.name || "").toLowerCase();
     const desc = String(product.description || "").toLowerCase();
     const brand = String(product.brand || "").toLowerCase();
     let searchHit = 0;
-    if (name.includes(q)) searchHit += 1.2;
-    if (brand.includes(q)) searchHit += 0.7;
-    if (cat.toLowerCase().includes(q)) searchHit += 0.5;
-    if (sub.toLowerCase().includes(q)) searchHit += 0.4;
-    if (desc.includes(q)) searchHit += 0.25;
-    score += searchHit * 1.8;
+    if (name.includes(q)) searchHit += 1.25;
+    if (brand.includes(q)) searchHit += 0.72;
+    if (cat.toLowerCase().includes(q)) searchHit += 0.48;
+    if (sub.toLowerCase().includes(q)) searchHit += 0.38;
+    if (desc.includes(q)) searchHit += 0.22;
+    score += searchHit * 1.85;
     if (searchHit > 0) reasons.push("search_match");
   }
 
+  // ── 8. PLAN BOOST (strongest signal when enabled) ─────────────────────
   if (applyPlanBoost) {
     const planPri = Number(planDiscoveryPriority) || 10;
-    const planBoost = clamp(planPri / 100) * 1.45;
+    // Stronger weighting so Dominant / Business Plus / Global Reach dominate
+    const planBoost = clamp(planPri / 100) * 2.25;
     score += planBoost;
+
     if (planPri >= 100) reasons.push("plan_global_reach");
     else if (planPri >= 70) reasons.push("plan_business_plus");
     else if (planPri >= 40) reasons.push("plan_dominant");
 
-    if (planVisibility === "maximum" || planVisibility === "high") {
-      score += 0.22;
-      reasons.push("plan_visibility_" + planVisibility);
+    if (planVisibility === "maximum") {
+      score += 0.48;
+      reasons.push("plan_visibility_maximum");
+    } else if (planVisibility === "high") {
+      score += 0.30;
+      reasons.push("plan_visibility_high");
     } else if (planVisibility === "increased") {
-      score += 0.1;
+      score += 0.15;
       reasons.push("plan_visibility_increased");
     }
   }
 
+  // ── 9. EXPOSURE PENALTY ───────────────────────────────────────────────
   const positiveSignal = purchases * 3 + carts * 2 + wishlist;
   const rawPenalty = Math.max(0, exposureCount - positiveSignal * 0.5);
-  const exposurePenalty = Math.min(1.4, rawPenalty * 0.22);
-  score -= exposurePenalty * 1.25;
+  const exposurePenalty = Math.min(1.5, rawPenalty * 0.23);
+  score -= exposurePenalty * 1.3;
   if (exposurePenalty > 0.3) reasons.push("exposure_penalty");
 
+  // Tiny deterministic jitter so ranking is stable but not identical every time
   const idHash = [...pid].reduce((a, c) => a + c.charCodeAt(0), 0);
-  score += ((idHash % 17) / 17) * 0.08;
+  score += ((idHash % 17) / 17) * 0.07;
 
   return { product, score, reasons };
 }
@@ -455,7 +435,6 @@ function takeUnique(
     selected.push(item);
     used.add(id);
   }
-
   return selected;
 }
 
@@ -502,10 +481,13 @@ function selectWithDiversity(
 
   tryPick(false);
   if (selected.length < capacity) tryPick(true);
-
   return selected;
 }
 
+/**
+ * Room 2 – Intelligent comparison pairs.
+ * Priority: same subcategory → same category → fill.
+ */
 function selectComparisonPairs(
   scored: ScoredProduct[],
   capacity: number,
@@ -536,23 +518,18 @@ function selectComparisonPairs(
   const pushPair = (a: ScoredProduct, b: ScoredProduct | null) => {
     const idA = productId(a.product);
     if (used.has(idA) || selected.length >= capacity) return;
-    selected.push({
-      ...a,
-      reasons: [...a.reasons, "comparison_pair"],
-    });
+    selected.push({ ...a, reasons: [...a.reasons, "comparison_pair"] });
     used.add(idA);
     if (b && selected.length < capacity) {
       const idB = productId(b.product);
       if (!used.has(idB)) {
-        selected.push({
-          ...b,
-          reasons: [...b.reasons, "comparison_pair"],
-        });
+        selected.push({ ...b, reasons: [...b.reasons, "comparison_pair"] });
         used.add(idB);
       }
     }
   };
 
+  // Pass 1: strict same-subcategory pairs only
   for (const [, list] of catOrder) {
     if (selected.length >= capacity) break;
     const remaining = list.filter((s) => !used.has(productId(s.product)));
@@ -561,20 +538,34 @@ function selectComparisonPairs(
       if (used.has(productId(remaining[i].product))) continue;
       const a = remaining[i];
       const subA = subCategoryKey(a.product);
+      if (!subA) continue; // require subcategory for intelligent comparison
+
       let partner: ScoredProduct | null = null;
       for (let j = i + 1; j < remaining.length; j++) {
         const cand = remaining[j];
         if (used.has(productId(cand.product))) continue;
-        if (subA && subCategoryKey(cand.product) === subA) {
+        if (subCategoryKey(cand.product) === subA) {
           partner = cand;
           break;
         }
-        if (!partner) partner = cand;
       }
-      pushPair(a, partner);
+      if (partner) pushPair(a, partner);
     }
   }
 
+  // Pass 2: same-category fallback only if still short
+  if (selected.length < capacity) {
+    for (const [, list] of catOrder) {
+      if (selected.length >= capacity) break;
+      const remaining = list.filter((s) => !used.has(productId(s.product)));
+      for (let i = 0; i < remaining.length - 1; i += 2) {
+        if (selected.length >= capacity) break;
+        pushPair(remaining[i], remaining[i + 1] || null);
+      }
+    }
+  }
+
+  // Final fill
   if (selected.length < capacity) {
     for (const s of scored) {
       if (selected.length >= capacity) break;
@@ -645,10 +636,7 @@ function selectAdaptiveWithControlledReuse(
 }
 
 /**
- * INVENTORY FIRST (eligibleCount < 110)
- * Put every unique eligible product on the floor.
- * Room 1 fills first (up to 50), leftover unique → 2 → 3 → 4.
- * No caps. No hiding. Fullness over adaptiveness.
+ * Inventory-first mode (< 110 eligible)
  */
 function distributeInventoryFirst(scored: ScoredProduct[]): {
   room1: ScoredProduct[];
@@ -657,9 +645,7 @@ function distributeInventoryFirst(scored: ScoredProduct[]): {
   room4: ScoredProduct[];
 } {
   const n = scored.length;
-  if (n === 0) {
-    return { room1: [], room2: [], room3: [], room4: [] };
-  }
+  if (n === 0) return { room1: [], room2: [], room3: [], room4: [] };
 
   const used = new Set<string>();
 
@@ -674,18 +660,10 @@ function distributeInventoryFirst(scored: ScoredProduct[]): {
   );
   room2.forEach((s) => used.add(productId(s.product)));
 
-  const room3 = takeUnique(
-    scored,
-    Math.min(ROOM_CAPACITY[3], n - used.size),
-    used
-  );
+  const room3 = takeUnique(scored, Math.min(ROOM_CAPACITY[3], n - used.size), used);
   room3.forEach((s) => used.add(productId(s.product)));
 
-  const room4 = takeUnique(
-    scored,
-    Math.min(ROOM_CAPACITY[4], n - used.size),
-    used
-  );
+  const room4 = takeUnique(scored, Math.min(ROOM_CAPACITY[4], n - used.size), used);
 
   return { room1, room2, room3, room4 };
 }
@@ -703,12 +681,14 @@ function distributeAdaptive(opts: {
 } {
   const { scoredRoom1, scoredRoom2, scoredRoom3, scoredRoom4 } = opts;
 
+  // Room 1 – selective, plan-heavy, diversity controlled
   const room1 = selectWithDiversity(scoredRoom1, ROOM_CAPACITY[1], {
-    maxPerCategory: 14,
-    maxPerSeller: 7,
+    maxPerCategory: 11,
+    maxPerSeller: 5,
   });
   const used1 = new Set(room1.map((s) => productId(s.product)));
 
+  // Room 2 – intelligent same-subcategory pairs
   const room2 = selectComparisonPairs(
     scoredRoom2.filter((s) => !used1.has(productId(s.product))),
     ROOM_CAPACITY[2],
@@ -719,6 +699,7 @@ function distributeAdaptive(opts: {
     ...room2.map((s) => productId(s.product)),
   ]);
 
+  // Room 3 – FYP style, controlled reuse
   const room3 = selectAdaptiveWithControlledReuse(
     scoredRoom3,
     ROOM_CAPACITY[3],
@@ -726,10 +707,11 @@ function distributeAdaptive(opts: {
     {
       maxPerCategory: 6,
       maxPerSeller: 3,
-      reuseMinScoreRatio: 0.68,
+      reuseMinScoreRatio: 0.66,
     }
   );
 
+  // Room 4 – regional first
   const room4 = selectAdaptiveWithControlledReuse(
     scoredRoom4,
     ROOM_CAPACITY[4],
@@ -737,7 +719,7 @@ function distributeAdaptive(opts: {
     {
       maxPerCategory: 10,
       maxPerSeller: 5,
-      reuseMinScoreRatio: 0.7,
+      reuseMinScoreRatio: 0.70,
     }
   );
 
@@ -775,11 +757,6 @@ function cachedUniqueIds(session: any): string[] {
   return [...new Set(allIds.map(String).filter(Boolean))];
 }
 
-/**
- * Decide which rooms need a rebuild based on per-room TTL.
- * Room 4 is always rebuilt (live).
- * Also force rebuild when a room is empty or under-filled relative to inventory.
- */
 function roomsNeedingRefresh(
   session: any | null,
   forceRefresh: boolean,
@@ -787,10 +764,7 @@ function roomsNeedingRefresh(
 ): Set<number> {
   const need = new Set<number>();
   if (forceRefresh || !session) {
-    need.add(1);
-    need.add(2);
-    need.add(3);
-    need.add(4);
+    need.add(1); need.add(2); need.add(3); need.add(4);
     return need;
   }
 
@@ -816,25 +790,18 @@ function roomsNeedingRefresh(
     }
   }
 
-  // Empty room → rebuild
   for (const r of [1, 2, 3, 4] as const) {
     const ids = sess?.productIdsByRoom?.[r] || [];
     if (!ids.length) need.add(r);
   }
 
-  // Inventory-first underfill protection:
-  // If we still have fewer unique products than eligible inventory (and under 110),
-  // force a full rebuild so new listings enter immediately.
   const cachedUnique = cachedUniqueIds(session).length;
   if (
     eligibleCount > 0 &&
     eligibleCount < ADAPTIVE_THRESHOLD &&
     cachedUnique < eligibleCount
   ) {
-    need.add(1);
-    need.add(2);
-    need.add(3);
-    need.add(4);
+    need.add(1); need.add(2); need.add(3); need.add(4);
   }
 
   return need;
@@ -848,15 +815,14 @@ export async function generateShowroom(opts: {
   forceRefresh?: boolean;
 }) {
   const region = (opts.region || "NG").trim().toUpperCase() || "NG";
-  const sessionId =
-    opts.sessionId || crypto.randomBytes(16).toString("hex");
+  const sessionId = opts.sessionId || crypto.randomBytes(16).toString("hex");
   const userId = opts.userId || null;
+  const isGuest = !userId;
   const searchQuery = opts.searchQuery?.trim() || "";
 
   let session = await ShowroomSession.findOne({ sessionId });
   const now = new Date();
 
-  // Live eligible count using the robust filter
   const eligibleCountLive = await Product.countDocuments(buildEligibleQuery());
 
   const needRefresh = roomsNeedingRefresh(
@@ -865,7 +831,7 @@ export async function generateShowroom(opts: {
     eligibleCountLive
   );
 
-  // Full cache hit only if no room needs refresh and inventory didn't grow
+  // Full cache hit
   if (
     session &&
     !opts.forceRefresh &&
@@ -883,11 +849,8 @@ export async function generateShowroom(opts: {
         .populate("seller", SELLER_PUBLIC_FIELDS)
         .lean();
 
-      // Safety: drop anything that somehow became ineligible
       const eligibleProducts = (products as any[]).filter(isProductEligible);
-      const map = new Map(
-        eligibleProducts.map((p: any) => [String(p._id), p])
-      );
+      const map = new Map(eligibleProducts.map((p: any) => [String(p._id), p]));
       const hydrate = (ids: string[]) =>
         (ids || []).map((id) => map.get(String(id))).filter(Boolean);
 
@@ -907,39 +870,49 @@ export async function generateShowroom(opts: {
           eligibleCount: eligibleCountLive,
           adaptiveThreshold: ADAPTIVE_THRESHOLD,
           roomTtlMs: { ...ROOM_TTL_MS },
+          isGuest,
         },
       };
     }
-    // Fall through to rebuild if inventory grew or under-filled
-    needRefresh.add(1);
-    needRefresh.add(2);
-    needRefresh.add(3);
-    needRefresh.add(4);
+    needRefresh.add(1); needRefresh.add(2); needRefresh.add(3); needRefresh.add(4);
   }
 
-  // Load candidates with robust filter (never spread $or with sibling keys)
+  // Load candidates – prioritise local region first
   const localProducts = await Product.find(buildEligibleQuery({ region }))
     .populate("seller", SELLER_PUBLIC_FIELDS)
     .sort({ isFeatured: -1, createdAt: -1 })
-    .limit(800)
+    .limit(900)
     .lean();
 
   let candidates = [...localProducts];
 
-  const excludeIds = localProducts.map((p: any) => p._id);
-  const extra = await Product.find(
-    buildEligibleQuery(
-      excludeIds.length ? { _id: { $nin: excludeIds } } : {}
+  // Nearest regions next (for Room 4 fill quality)
+  const nearest = getNearestRegions(region);
+  if (nearest.length) {
+    const nearProducts = await Product.find(
+      buildEligibleQuery({
+        region: { $in: nearest },
+        _id: { $nin: localProducts.map((p: any) => p._id) },
+      })
     )
+      .populate("seller", SELLER_PUBLIC_FIELDS)
+      .sort({ isFeatured: -1, createdAt: -1 })
+      .limit(400)
+      .lean();
+    candidates = [...candidates, ...nearProducts];
+  }
+
+  // Rest of world
+  const excludeIds = candidates.map((p: any) => p._id);
+  const extra = await Product.find(
+    buildEligibleQuery(excludeIds.length ? { _id: { $nin: excludeIds } } : {})
   )
     .populate("seller", SELLER_PUBLIC_FIELDS)
     .sort({ isFeatured: -1, createdAt: -1 })
-    .limit(1200)
+    .limit(1000)
     .lean();
 
   candidates = [...candidates, ...extra];
-
-  // Final in-memory safety net
   candidates = candidates.filter(isProductEligible);
   const eligibleCount = candidates.length;
 
@@ -954,6 +927,7 @@ export async function generateShowroom(opts: {
         eligibleCount: 0,
         adaptiveThreshold: ADAPTIVE_THRESHOLD,
         roomTtlMs: { ...ROOM_TTL_MS },
+        isGuest,
       },
     };
   }
@@ -975,7 +949,6 @@ export async function generateShowroom(opts: {
   }
 
   const adaptiveOn = eligibleCount >= ADAPTIVE_THRESHOLD;
-
   const sellerIds = candidates.map((p: any) =>
     String(p.seller?._id || p.seller || "")
   );
@@ -1005,14 +978,32 @@ export async function generateShowroom(opts: {
           planVisibility: boost.visibility,
           interestMultiplier,
           regionalCommerceBoost,
+          isGuest,
         });
       })
       .sort((a, b) => b.score - a.score);
 
-  const scoredRoom1 = scoreFor(true, 1.0, false);
-  const scoredRoom2 = scoredRoom1;
-  const scoredRoom3 = scoreFor(false, 2.15, false);
-  const scoredRoom4 = scoreFor(true, 0.85, true);
+  // Room scoring profiles
+  const scoredRoom1 = scoreFor(true, isGuest ? 0.9 : 1.05, false);
+  const scoredRoom2 = scoredRoom1; // same base pool, different selection
+  const scoredRoom3 = scoreFor(false, isGuest ? 1.8 : 2.6, false); // strong activity weight
+  const scoredRoom4 = scoreFor(true, 0.8, true); // regional commerce heavy
+
+  // Cold-start boost for Room 3 when user has almost no activity
+  if (interest.productIds.size < 3 && interest.categories.size < 2) {
+    scoredRoom3.forEach((s) => {
+      if (
+        s.reasons.includes("commerce_signal") ||
+        s.reasons.includes("local_region") ||
+        s.reasons.includes("plan_business_plus") ||
+        s.reasons.includes("plan_global_reach") ||
+        s.reasons.includes("fresh")
+      ) {
+        s.score *= 1.28;
+      }
+    });
+    scoredRoom3.sort((a, b) => b.score - a.score);
+  }
 
   let room1: ScoredProduct[];
   let room2: ScoredProduct[];
@@ -1020,7 +1011,6 @@ export async function generateShowroom(opts: {
   let room4: ScoredProduct[];
 
   if (!adaptiveOn) {
-    // FULLNESS FIRST — every eligible product goes in
     const dist = distributeInventoryFirst(scoredRoom1);
     room1 = dist.room1;
     room2 = dist.room2;
@@ -1039,7 +1029,7 @@ export async function generateShowroom(opts: {
     room4 = dist.room4;
   }
 
-  // Partial refresh: keep cached rooms that are still fresh
+  // Partial refresh
   if (session && needRefresh.size < 4 && !searchQuery && !opts.forceRefresh) {
     const uniqueIds = cachedUniqueIds(session);
     if (uniqueIds.length) {
@@ -1073,7 +1063,7 @@ export async function generateShowroom(opts: {
     }
   }
 
-  // Enforce uniqueness between room 1 and 2
+  // Enforce uniqueness Room 1 ↔ Room 2
   const ids1 = new Set(room1.map((s) => productId(s.product)));
   const final2 = room2.filter((s) => !ids1.has(productId(s.product)));
 
@@ -1171,6 +1161,7 @@ export async function generateShowroom(opts: {
         4: room4.length,
       },
       mode: adaptiveOn ? "adaptive" : "inventory_first",
+      isGuest,
     },
   };
 }
@@ -1216,8 +1207,9 @@ export async function rankProductsForSearch(opts: {
         applyPlanBoost: true,
         planDiscoveryPriority: boost.priority,
         planVisibility: boost.visibility,
-        interestMultiplier: 1.2,
+        interestMultiplier: 1.25,
         regionalCommerceBoost: false,
+        isGuest: !opts.userId,
       });
     })
     .sort((a, b) => b.score - a.score);

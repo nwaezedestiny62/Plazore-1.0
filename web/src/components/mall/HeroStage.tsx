@@ -5,13 +5,13 @@ import { ChevronDown } from "lucide-react";
 import type { HeroSlide } from "@/lib/heroCampaigns";
 import { HERO_SLIDES } from "@/lib/heroCampaigns";
 
-const HOLD_MS = 12_000;
-const IMG_FADE_MS = 3200;
-const TEXT_OUT_MS = 720;
-const TEXT_IN_MS = 1150;
-const TEXT_GAP_MS = 60;
+const HOLD_MS = 11500;
+const IMG_FADE_MS = 4200;
+const TEXT_OUT_MS = 850;
+const TEXT_IN_MS = 1400;
+const TEXT_GAP_MS = 80;
 
-const EASE_IMG = "cubic-bezier(0.33, 0, 0.2, 1)";
+const EASE_IMG = "cubic-bezier(0.4, 0, 0.2, 1)";
 const EASE_TEXT = "cubic-bezier(0.22, 1, 0.36, 1)";
 const FALLBACK_IMG = "/hero/welcome.png";
 
@@ -60,11 +60,13 @@ function SafeHeroImg({
         animate
           ? {
               transform: active
-                ? "scale(1.07) translateZ(0)"
+                ? "scale(1.08) translateZ(0)"
                 : "scale(1) translateZ(0)",
               transition: active
                 ? `transform ${HOLD_MS}ms cubic-bezier(0.25, 0.1, 0.25, 1)`
                 : "none",
+              willChange: "transform",
+              backfaceVisibility: "hidden",
             }
           : undefined
       }
@@ -97,13 +99,14 @@ function CopyBlock({
     if (!animate) return undefined;
     return {
       opacity: visible ? 1 : 0,
-      transform: visible ? "translate3d(0,0,0)" : "translate3d(0,12px,0)",
+      transform: visible ? "translate3d(0,0,0)" : "translate3d(0,18px,0)",
       transition:
         phase === "hidden"
           ? "none"
           : visible
             ? `opacity ${TEXT_IN_MS}ms ${EASE_TEXT} ${delayIn}ms, transform ${TEXT_IN_MS}ms ${EASE_TEXT} ${delayIn}ms`
             : `opacity ${TEXT_OUT_MS}ms ${EASE_TEXT}, transform ${TEXT_OUT_MS}ms ${EASE_TEXT}`,
+      willChange: "opacity, transform",
     };
   };
 
@@ -129,14 +132,14 @@ function CopyBlock({
         className="mt-3 font-display font-medium leading-[1.12] tracking-tight text-white"
         style={{
           fontSize: headlineFs,
-          ...lineStyle(entering ? 100 : 0),
+          ...lineStyle(entering ? 120 : 0),
         }}
       >
         <span className="line-clamp-3">{slide.headline}</span>
       </h1>
       <p
         className={`mt-3 max-w-lg leading-relaxed text-white/65 line-clamp-3 ${subClass}`}
-        style={lineStyle(entering ? 180 : 0)}
+        style={lineStyle(entering ? 220 : 0)}
       >
         {slide.subheadline}
       </p>
@@ -144,7 +147,7 @@ function CopyBlock({
         type="button"
         onClick={onCta}
         className="mt-7 w-fit border border-white/35 px-6 py-2.5 text-[11px] font-semibold tracking-[0.2em] uppercase text-white transition duration-500 hover:border-white hover:bg-white/5"
-        style={lineStyle(entering ? 260 : 0)}
+        style={lineStyle(entering ? 320 : 0)}
       >
         {slide.ctaLabel}
       </button>
@@ -160,9 +163,7 @@ type Props = {
 export function HeroStage({ slides: rawSlides, onEnterShowroom }: Props) {
   const slides = rawSlides?.length > 0 ? rawSlides : HERO_SLIDES;
 
-  /** false on server + first client paint → identical HTML → no hydration mismatch */
   const [ready, setReady] = useState(false);
-
   const [index, setIndex] = useState(0);
   const [front, setFront] = useState<"A" | "B">("A");
   const [slideA, setSlideA] = useState(0);
@@ -232,10 +233,10 @@ export function HeroStage({ slides: rawSlides, onEnterShowroom }: Props) {
           if (fromFront === "A") setPhaseB("idle");
           else setPhaseA("idle");
           busy.current = false;
-        }, TEXT_IN_MS + 50);
+        }, TEXT_IN_MS + 60);
       }, TEXT_OUT_MS + TEXT_GAP_MS);
     },
-    [front, ready, slides.length]
+    [front, ready, slides.length],
   );
 
   const goToRef = useRef(goTo);
@@ -259,7 +260,6 @@ export function HeroStage({ slides: rawSlides, onEnterShowroom }: Props) {
 
   return (
     <section className="relative h-dvh min-h-[560px] overflow-hidden bg-[#090B0F]">
-      {/* Images: only first slide until ready (SSR match) */}
       {(ready ? slides : [first]).map((s, i) => {
         const active = ready ? i === index : i === 0;
         return (
@@ -273,6 +273,7 @@ export function HeroStage({ slides: rawSlides, onEnterShowroom }: Props) {
                     transition: `opacity ${IMG_FADE_MS}ms ${EASE_IMG}`,
                     pointerEvents: active ? "auto" : "none",
                     zIndex: active ? 1 : 0,
+                    willChange: "opacity",
                   }
                 : { opacity: 1, zIndex: 1 }
             }

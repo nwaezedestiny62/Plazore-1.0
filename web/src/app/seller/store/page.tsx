@@ -363,7 +363,7 @@ function LivePreview({
 
           <div className="pb-4 text-center">
             <div className="mx-auto mb-2 h-0.5 w-7 rounded-sm bg-line" />
-            <p className="text-[9px] tracking-widest text-[#737A86]">Plazore · Digital Mall</p>
+            <p className="text-[9px] tracking-widest text-[#737A86]">Plazore | Digital Mall</p>
           </div>
         </div>
         <div className="mx-auto mt-1.5 h-0.5 w-20 rounded-sm bg-white/20" />
@@ -731,7 +731,7 @@ export default function SellerStorePage() {
               }}
             />
             <p className="mt-3 text-center text-[11px] text-[#737A86]">
-              Preview · scroll inside the phone to explore
+              Preview | scroll inside the phone to explore
             </p>
           </div>
         </div>

@@ -456,11 +456,11 @@ function RevenueFloat({
                 {fmtMoney(fee, "NGN")}
               </p>
               <p className="mt-2 text-[10px] text-white/35">
-                GMV {fmtMoney(gmv, "NGN")} · default {overview.feePercent}% ·
+                GMV {fmtMoney(gmv, "NGN")} | default {overview.feePercent}% |
                 actual = per-seller plan
               </p>
               <p className="mt-1 text-[10px] text-white/30">
-                Eligible payouts {overview.counts.payoutEligible} · failed{" "}
+                Eligible payouts {overview.counts.payoutEligible} | failed{" "}
                 {overview.counts.payoutFailed}
               </p>
             </div>
@@ -570,7 +570,7 @@ function OrderMoneyModal({
         <div className="h-[2px] shrink-0 bg-gradient-to-r from-[#00E575] via-[#14B8A6] to-[#3B82F6]" />
         <div className="flex h-12 shrink-0 items-center justify-between px-4 sm:px-5">
           <p className="text-[10px] font-semibold tracking-[0.2em] text-[#00E575]">
-            MONEY · ORDER
+            MONEY | ORDER
           </p>
           <button
             type="button"
@@ -598,7 +598,7 @@ function OrderMoneyModal({
                 </p>
                 <div className="mt-2 flex flex-wrap gap-1.5">
                   <Badge tone={payTone(order.paymentStatus)}>
-                    pay · {order.paymentStatus || "—"}
+                    pay | {order.paymentStatus || "—"}
                   </Badge>
                   <Badge tone="neutral">{order.orderStatus || "—"}</Badge>
                   {order.paymentLifecycle ? (
@@ -606,7 +606,7 @@ function OrderMoneyModal({
                   ) : null}
                   {order.payout?.status ? (
                     <Badge tone={payTone(order.payout.status)}>
-                      payout · {order.payout.status}
+                      payout | {order.payout.status}
                     </Badge>
                   ) : null}
                 </div>
@@ -649,11 +649,11 @@ function OrderMoneyModal({
                 <div className="space-y-2 text-[13px]">
                   <p className="flex items-center gap-2 text-white/70">
                     <User className="h-3.5 w-3.5 text-[#00E575]" />
-                    {order.buyer?.name || "—"} · {order.buyer?.email || "—"}
+                    {order.buyer?.name || "—"} | {order.buyer?.email || "—"}
                   </p>
                   <p className="flex items-center gap-2 text-white/70">
                     <Store className="h-3.5 w-3.5 text-[#00E575]" />
-                    {order.seller?.storeName || order.seller?.name || "—"} ·{" "}
+                    {order.seller?.storeName || order.seller?.name || "—"} |{" "}
                     {order.seller?.email || "—"}
                   </p>
                 </div>
@@ -667,7 +667,7 @@ function OrderMoneyModal({
 
               {order.payout?.reference ? (
                 <p className="font-mono text-[11px] text-white/40">
-                  Payout ref · {order.payout.reference}
+                  Payout ref | {order.payout.reference}
                 </p>
               ) : null}
 
@@ -1214,7 +1214,7 @@ function PaymentsBody() {
                       : fmtMoney(overview.gmv, "NGN")}
                   </p>
                   <p className="mt-1 text-[11px] text-white/35">
-                    Non-cancelled order totals · not FX-converted
+                    Non-cancelled order totals | not FX-converted
                   </p>
                 </div>
                 <div className="rounded-2xl border border-white/[0.08] bg-white/[0.03] p-4">
@@ -1230,7 +1230,7 @@ function PaymentsBody() {
                       : fmtMoney(overview.feeRevenue, "NGN")}
                   </p>
                   <p className="mt-1 text-[11px] text-white/35">
-                    Default {overview.feePercent}% · per seller plan on product
+                    Default {overview.feePercent}% | per seller plan on product
                     subtotal only
                   </p>
                 </div>
@@ -1247,7 +1247,7 @@ function PaymentsBody() {
                       : fmtMoney(0, "NGN")}
                   </p>
                   <p className="mt-1 text-[11px] text-white/35">
-                    Paid Paystack/Stripe plans · promo/free excluded
+                    Paid Paystack/Stripe plans | promo/free excluded
                   </p>
                 </div>
                 <div className="rounded-2xl border border-white/[0.08] bg-white/[0.03] p-4">
@@ -1258,13 +1258,13 @@ function PaymentsBody() {
                     </p>
                   </div>
                   <p className="mt-2 text-[13px] leading-relaxed text-white/70">
-                    Paid {overview.counts.paidOrders} · pending{" "}
-                    {overview.counts.pendingPayment} · refunded{" "}
+                    Paid {overview.counts.paidOrders} | pending{" "}
+                    {overview.counts.pendingPayment} | refunded{" "}
                     {overview.counts.refunded}
                   </p>
                   <p className="mt-1 text-[11px] text-white/35">
-                    Payouts eligible {overview.counts.payoutEligible} · done{" "}
-                    {overview.counts.payoutCompleted} · failed{" "}
+                    Payouts eligible {overview.counts.payoutEligible} | done{" "}
+                    {overview.counts.payoutCompleted} | failed{" "}
                     {overview.counts.payoutFailed}
                   </p>
                 </div>
@@ -1290,11 +1290,11 @@ function PaymentsBody() {
                       />
                     </div>
                     <p className="mt-2 text-[12px] text-white/45">
-                      Nigeria &amp; Africa · charges, refunds, NUBAN transfers
+                      Nigeria &amp; Africa | charges, refunds, NUBAN transfers
                     </p>
                     {overview.providers.paystack.publicKey && (
                       <p className="mt-3 truncate font-mono text-[10px] text-white/30">
-                        pk ·{" "}
+                        pk |{" "}
                         {String(overview.providers.paystack.publicKey).slice(
                           0,
                           20,
@@ -1316,12 +1316,12 @@ function PaymentsBody() {
                       />
                     </div>
                     <p className="mt-2 text-[12px] text-white/45">
-                      International cards · PaymentIntents, refunds, Connect
+                      International cards | PaymentIntents, refunds, Connect
                       transfers
                     </p>
                     {overview.providers.stripe.publicKey && (
                       <p className="mt-3 truncate font-mono text-[10px] text-white/30">
-                        pk ·{" "}
+                        pk |{" "}
                         {String(overview.providers.stripe.publicKey).slice(
                           0,
                           20,
@@ -1333,7 +1333,7 @@ function PaymentsBody() {
                 </div>
                 {overview.available.length > 0 && (
                   <p className="mt-3 text-[11px] text-white/35">
-                    Available rails: {overview.available.join(" · ")}
+                    Available rails: {overview.available.join(" | ")}
                   </p>
                 )}
               </section>
@@ -1363,23 +1363,23 @@ function PaymentsBody() {
                 <h2 className="text-sm font-semibold">How money moves</h2>
                 <ul className="mt-3 space-y-2 text-[12.5px] leading-relaxed text-white/50">
                   <li>
-                    · Buyer pays full gross (products + shipping) via Paystack
+                    | Buyer pays full gross (products + shipping) via Paystack
                     or Stripe.
                   </li>
                   <li>
-                    · Platform fee = plan rate × product subtotal only (shipping
+                    | Platform fee = plan rate × product subtotal only (shipping
                     excluded).
                   </li>
                   <li>
-                    · Seller payout becomes eligible after delivery confirm /
+                    | Seller payout becomes eligible after delivery confirm /
                     auto-confirm or admin settle-seller.
                   </li>
                   <li>
-                    · Nightly payout job transfers eligible balances; failed
+                    | Nightly payout job transfers eligible balances; failed
                     rows retry.
                   </li>
                   <li>
-                    · Admin refund-buyer reverses charge and blocks seller
+                    | Admin refund-buyer reverses charge and blocks seller
                     payout.
                   </li>
                 </ul>
@@ -1576,7 +1576,7 @@ function PaymentsBody() {
           )}
           {page >= pages && orders.length > 0 && (
             <p className="py-3 text-center text-[11px] text-white/30">
-              End · {orders.length.toLocaleString()} shown
+              End | {orders.length.toLocaleString()} shown
               {total ? ` / ${total.toLocaleString()}` : ""}
             </p>
           )}

@@ -95,7 +95,7 @@ function formatBuckets(buckets?: MoneyBucket[]) {
   if (!buckets?.length) return "—";
   return buckets
     .map((b) => fmtMoney(b.amount, b.currency))
-    .join(" · ");
+    .join(" | ");
 }
 
 function shortDate(d?: string) {
@@ -261,7 +261,7 @@ export default function RevenueBoardPage() {
             <div className="flex items-center gap-2 text-white/45">
               <Banknote className="h-4 w-4 text-[#3B82F6]" />
               <span className="text-[10px] font-semibold uppercase tracking-wider">
-                Revenue · transaction fees
+                Revenue | transaction fees
               </span>
             </div>
             <p className="mt-2 text-lg font-bold leading-snug">
@@ -272,7 +272,7 @@ export default function RevenueBoardPage() {
             <div className="flex items-center gap-2 text-white/45">
               <Store className="h-4 w-4 text-[#14B8A6]" />
               <span className="text-[10px] font-semibold uppercase tracking-wider">
-                Revenue · seller subscriptions
+                Revenue | seller subscriptions
               </span>
             </div>
             <p className="mt-2 text-lg font-bold leading-snug">
@@ -419,12 +419,12 @@ export default function RevenueBoardPage() {
                   </p>
                   <p className="truncate text-[11px] text-white/40">
                     {s.email}
-                    {s.region ? ` · ${s.region}` : ""}
-                    {s.suspended ? " · suspended" : ""}
-                    {!s.bankReady ? " · bank incomplete" : ""}
+                    {s.region ? ` | ${s.region}` : ""}
+                    {s.suspended ? " | suspended" : ""}
+                    {!s.bankReady ? " | bank incomplete" : ""}
                   </p>
                   <p className="text-[10px] text-white/30 sm:hidden">
-                    {s.orders} orders · sub {fmtMoney(s.subscriptionRevenue, s.currency)}
+                    {s.orders} orders | sub {fmtMoney(s.subscriptionRevenue, s.currency)}
                   </p>
                 </div>
               </div>
@@ -457,7 +457,7 @@ export default function RevenueBoardPage() {
       </div>
 
       <p className="text-center text-[11px] text-white/35">
-        {totalSellers} sellers · page {page} / {pages}
+        {totalSellers} sellers | page {page} / {pages}
       </p>
       {pages > 1 ? (
         <div className="flex items-center justify-center gap-3">

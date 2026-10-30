@@ -252,7 +252,7 @@ export default function CartPage() {
                         onChange={(e) =>
                           updateItemNote(item.id, e.target.value)
                         }
-                        placeholder="e.g. Pack carefully · Gift wrap · Leave at door"
+                        placeholder="e.g. Pack carefully | Gift wrap | Leave at door"
                         className="min-h-14 w-full border border-white/8 bg-[#14181F] px-3 py-2.5 text-[13px] leading-[18px] text-text outline-none placeholder:text-white/38"
                       />
                       <p className="mt-1 text-right text-[10px] font-semibold text-white/38">

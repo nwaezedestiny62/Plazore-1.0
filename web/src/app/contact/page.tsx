@@ -217,7 +217,7 @@ function ContactPageInner() {
               const o = json?.data || json;
               if (alive && o?.orderNumber) {
                 setOrderLabel(
-                  subjectParam || `Delivery issue · ${o.orderNumber}`
+                  subjectParam || `Delivery issue | ${o.orderNumber}`
                 );
                 if (o.seller?.storeName) setStoreName(o.seller.storeName);
               }
@@ -426,10 +426,10 @@ function ContactPageInner() {
               </p>
               <p className="truncate text-[11px] text-[#737A86]">
                 {isOrderContext
-                  ? "Order linked · payout held until resolved"
+                  ? "Order linked | payout held until resolved"
                   : isReport
-                    ? "Structured · calm · private"
-                    : "Calm support · no sales pressure"}
+                    ? "Structured | calm | private"
+                    : "Calm support | no sales pressure"}
               </p>
             </div>
           </div>

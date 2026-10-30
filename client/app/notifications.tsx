@@ -785,13 +785,13 @@ export default function Notifications() {
                   )}
 
                   {isContactThread(type) && (
-                    <Text style={styles.contactMeta}>Plazore · Contact</Text>
+                    <Text style={styles.contactMeta}>Plazore | Contact</Text>
                   )}
 
                   {isChat && (
                     <Text style={styles.chatMeta} numberOfLines={1}>
                       Chat
-                      {productName ? ` · ${productName}` : ''}
+                      {productName ? ` | ${productName}` : ''}
                     </Text>
                   )}
 

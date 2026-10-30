@@ -204,7 +204,7 @@ export default function SellerMarketplaceRegionPage() {
                     {r.name}
                   </span>
                   <span className="mt-0.5 block text-xs text-[#737A86]">
-                    {r.currency?.symbol} · {r.currency?.code}
+                    {r.currency?.symbol} | {r.currency?.code}
                   </span>
                 </span>
                 {selected && (

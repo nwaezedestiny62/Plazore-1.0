@@ -799,16 +799,16 @@ function ContactModal({
                         </p>
                         <p className="mt-1 text-[11px] text-white/40">
                           Listed {listingReg}
-                          {country ? ` · ${country}` : ""} · paid as {cur}
+                          {country ? ` | ${country}` : ""} | paid as {cur}
                           {order.feeBreakdown?.platformFee != null && (
                             <>
-                              {" · Fee 8% "}
+                              {" | Fee 8% "}
                               {fmtMoney(order.feeBreakdown.platformFee, cur)}
                             </>
                           )}
                           {order.feeBreakdown?.sellerPayoutAmount != null && (
                             <>
-                              {" · Seller "}
+                              {" | Seller "}
                               {fmtMoney(
                                 order.feeBreakdown.sellerPayoutAmount,
                                 cur
@@ -819,7 +819,7 @@ function ContactModal({
                       </div>
 
                       <p className="text-xs text-white/50">
-                        Delivered: {fmt(order.deliveredAt)} · Payment:{" "}
+                        Delivered: {fmt(order.deliveredAt)} | Payment:{" "}
                         {order.paymentStatus || "—"}
                       </p>
                       {order.payout?.blockedReason && (
@@ -930,7 +930,7 @@ function ContactModal({
                       >
                         <p className="text-[10px] font-semibold uppercase tracking-wide text-white/40">
                           {m.who}
-                          {m.at ? ` · ${fmt(m.at)}` : ""}
+                          {m.at ? ` | ${fmt(m.at)}` : ""}
                         </p>
                         <p className="mt-1 whitespace-pre-wrap text-white/80">
                           {m.body}
@@ -1023,7 +1023,7 @@ function ContactModal({
                       className="rounded-lg border border-white/8 bg-white/[0.02] px-3 py-2 text-xs text-white/55"
                     >
                       <p className="text-white/35">
-                        {n.admin?.name || "Admin"} · {fmt(n.createdAt)}
+                        {n.admin?.name || "Admin"} | {fmt(n.createdAt)}
                       </p>
                       <p className="mt-1 whitespace-pre-wrap">{n.body}</p>
                     </div>
@@ -1750,12 +1750,12 @@ function ContactsDirectory() {
               </p>
               {row.relatedOrder && (
                 <p className="mt-2 text-[11px] tabular-nums text-white/35">
-                  {row.relatedOrder.orderNumber || "Order"} ·{" "}
+                  {row.relatedOrder.orderNumber || "Order"} |{" "}
                   {fmtMoney(
                     chargedTotal(row.relatedOrder),
                     orderCurrency(row.relatedOrder)
                   )}{" "}
-                  · {orderRegion(row.relatedOrder)}
+                  | {orderRegion(row.relatedOrder)}
                 </p>
               )}
               <p className="mt-2 text-[11px] text-white/30">
@@ -1810,13 +1810,13 @@ function ContactsDirectory() {
                         <Badge tone="warn">Delivery</Badge>
                       )}
                       {row.relatedProduct?.name
-                        ? ` · ${row.relatedProduct.name}`
+                        ? ` | ${row.relatedProduct.name}`
                         : ""}
                       {row.relatedSeller?.storeName
-                        ? ` · ${row.relatedSeller.storeName}`
+                        ? ` | ${row.relatedSeller.storeName}`
                         : ""}
                       {row.relatedOrder
-                        ? ` · ${fmtMoney(
+                        ? ` | ${fmtMoney(
                             chargedTotal(row.relatedOrder),
                             orderCurrency(row.relatedOrder)
                           )}`
@@ -1865,7 +1865,7 @@ function ContactsDirectory() {
             Previous
           </Button>
           <span className="text-xs text-white/40">
-            Page {page} of {pages} · {total} total
+            Page {page} of {pages} | {total} total
           </span>
           <Button
             tone="ghost"

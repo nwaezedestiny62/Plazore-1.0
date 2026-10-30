@@ -420,11 +420,11 @@ export default function ProductPerformancePage() {
           </p>
           <p className="text-[32px] font-extrabold tracking-tight">{score}</p>
           <p className="mt-1 text-xs text-[#4A6078]">
-            Views ×1 · Cart ×5 · Purchases ×15
+            Views ×1 | Cart ×5 | Purchases ×15
           </p>
           {data.milestones?.p200 ? (
             <span className="mt-2 inline-block rounded-full bg-[#1A2F28] px-2.5 py-1 text-[11px] font-bold text-[#8FE3B0]">
-              Milestone · 200 pts
+              Milestone | 200 pts
             </span>
           ) : null}
         </section>

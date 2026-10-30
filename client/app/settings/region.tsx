@@ -364,7 +364,7 @@ export default function MarketplaceRegionScreen() {
         Toast.show({
           type: 'success',
           text1: 'Marketplace updated',
-          text2: `${getRegion(saved).name} · prices refresh across the app`,
+          text2: `${getRegion(saved).name} | prices refresh across the app`,
         })
       }
     } catch {
@@ -430,7 +430,7 @@ export default function MarketplaceRegionScreen() {
                 key={r.code}
                 flag={r.flag}
                 name={r.name}
-                currencyLabel={`${r.currency.symbol} · ${r.currency.code}`}
+                currencyLabel={`${r.currency.symbol} | ${r.currency.code}`}
                 selected={region === r.code}
                 disabled={saving}
                 width={layout.tileW}

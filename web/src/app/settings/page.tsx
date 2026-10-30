@@ -145,7 +145,7 @@ export default function SettingsPage() {
               {loading ? "…" : r.name}
             </span>
             <span className="mt-0.5 block text-[12px] text-[#A7ADB8]">
-              {currencyCode} · {r.currency.symbol}
+              {currencyCode} | {r.currency.symbol}
             </span>
           </span>
           <ChevronRight className="h-4 w-4 shrink-0 text-[#737A86]" />
@@ -188,7 +188,7 @@ export default function SettingsPage() {
         <LinkList items={PLAZORE_LINKS} />
 
         <p className="mt-10 text-center text-[11px] tracking-[0.06em] text-[#6B7280]">
-          Plazore · Digital Mall
+          Plazore | Digital Mall
         </p>
       </main>
     </div>

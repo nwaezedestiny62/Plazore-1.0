@@ -253,5 +253,5 @@ export function formatSelectedOptions(
   return Object.entries(opts)
     .filter(([, v]) => v != null && String(v).trim() !== '')
     .map(([k, v]) => `${k}: ${v}`)
-    .join(' · ')
+    .join(' | ')
 }

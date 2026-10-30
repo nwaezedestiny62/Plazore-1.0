@@ -518,7 +518,7 @@ export default function AboutPage() {
             <SectionMedia
               imgKey="autopilot"
               alt="Systems and circuitry representing automated intelligence"
-              caption="Observe · understand · improve"
+              caption="Observe | understand | improve"
             />
           </Reveal>
           <Reveal delay={120}>
@@ -556,7 +556,7 @@ export default function AboutPage() {
             <SectionMedia
               imgKey="buyers"
               alt="People shopping and exploring products"
-              caption="Discover · understand · buy"
+              caption="Discover | understand | buy"
             />
           </Reveal>
           <Reveal delay={100}>
@@ -597,7 +597,7 @@ export default function AboutPage() {
             <SectionMedia
               imgKey="sellers"
               alt="Seller and retail operations"
-              caption="Build · reach · grow"
+              caption="Build | reach | grow"
             />
           </Reveal>
           <Reveal delay={100}>
@@ -785,7 +785,7 @@ export default function AboutPage() {
             <SectionMedia
               imgKey="trust"
               alt="Secure transaction and structure"
-              caption="Payment · order · fulfilment · confirmation"
+              caption="Payment | order | fulfilment | confirmation"
             />
           </Reveal>
           <Reveal delay={100}>

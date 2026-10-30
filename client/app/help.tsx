@@ -241,7 +241,7 @@ export default function HelpScreen() {
           <View style={styles.section}>
             <Text style={styles.sectionLabel}>
               {q
-                ? `RESULTS · ${filtered.reduce((n, c) => n + c.articles.length, 0)}`
+                ? `RESULTS | ${filtered.reduce((n, c) => n + c.articles.length, 0)}`
                 : 'TOPICS'}
             </Text>
 

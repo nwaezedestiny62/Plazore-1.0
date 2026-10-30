@@ -393,7 +393,7 @@ function BuyerLivePreview({
 
       <div className="mb-4 bg-[#0A121C] p-3 sm:p-3.5">
         <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.8px] text-[#737A86]">
-          Showroom card · cover = first photo
+          Showroom card | cover = first photo
         </p>
         <div className="w-[130px] sm:w-[150px]">
           <div className="relative aspect-[1/1.35] overflow-hidden bg-[#F1F1F1]">
@@ -419,7 +419,7 @@ function BuyerLivePreview({
             <p className="mt-0.5 text-[11px] text-white/50">Pay on arrival</p>
           )}
           {hasVariants && optionLabels && optionLabels.length > 0 && (
-            <p className="mt-1 text-[11px] text-white/45">{optionLabels.join(" · ")}</p>
+            <p className="mt-1 text-[11px] text-white/45">{optionLabels.join(" | ")}</p>
           )}
         </div>
       </div>
@@ -450,7 +450,7 @@ function BuyerLivePreview({
           <div className="p-3.5">
             {(category || subCategory) && (
               <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-[1.2px] text-[#737A86]">
-                {[category, subCategory].filter(Boolean).join(" · ")}
+                {[category, subCategory].filter(Boolean).join(" | ")}
               </p>
             )}
             <p className="text-lg font-bold leading-6 text-text">{name || "Product name"}</p>
@@ -465,10 +465,10 @@ function BuyerLivePreview({
               >
                 {hasVariants
                   ? stockN > 0
-                    ? `In stock · ${stockN}`
+                    ? `In stock | ${stockN}`
                     : "Select options"
                   : stockN > 0
-                    ? `Available · ${stockN}`
+                    ? `Available | ${stockN}`
                     : "Unavailable"}
               </span>
             </div>
@@ -1175,7 +1175,7 @@ export default function EditProductPage() {
           </Link>
           <div className="min-w-0">
             <p className="text-[10px] font-bold uppercase tracking-[2px] text-[#737A86] sm:text-[11px]">
-              Seller Lounge · {sellerRegionConfig.flag} {sellerRegionConfig.name}
+              Seller Lounge | {sellerRegionConfig.flag} {sellerRegionConfig.name}
             </p>
             <h1 className="truncate text-xl font-extrabold tracking-tight sm:text-2xl md:text-[26px]">
               Edit product
@@ -1185,7 +1185,7 @@ export default function EditProductPage() {
 
         <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(280px,320px)] lg:items-start lg:gap-8">
           <div className="min-w-0">
-            <Section step="01" title="Images" subtitle={`Up to ${maxImages} · first photo is always the cover`}>
+            <Section step="01" title="Images" subtitle={`Up to ${maxImages} | first photo is always the cover`}>
               <div className="flex flex-wrap gap-2">
                 {images.map((item, i) => (
                   <div
@@ -1387,7 +1387,7 @@ export default function EditProductPage() {
               {hasVariants && (
                 <div className="space-y-4">
                   <p className="text-[12px] leading-relaxed text-[#737A86]">
-                    Specs stay factual. Options are buyer choices. Max 5 groups · 30 values · 200 variants.
+                    Specs stay factual. Options are buyer choices. Max 5 groups | 30 values | 200 variants.
                   </p>
 
                   {optionDrafts.map((opt, idx) => (
@@ -1448,13 +1448,13 @@ export default function EditProductPage() {
                   {variantDrafts.length > 0 && (
                     <div className="mt-2 overflow-x-auto">
                       <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.8px] text-[#737A86]">
-                        Variants · {variantDrafts.length}
+                        Variants | {variantDrafts.length}
                       </p>
                       <div className="min-w-[280px] space-y-2">
                         {variantDrafts.map((v) => {
                           const label = Object.entries(v.options)
                             .map(([k, val]) => `${k}: ${val}`)
-                            .join(" · ");
+                            .join(" | ");
                           return (
                             <div
                               key={v.key}
@@ -1529,7 +1529,7 @@ export default function EditProductPage() {
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-[13px] text-text">{doc.documentName}</p>
                         <p className="text-[11px] capitalize text-[#737A86]">
-                          {doc.documentType.replace(/_/g, " ")} · saved
+                          {doc.documentType.replace(/_/g, " ")} | saved
                         </p>
                       </div>
                       <button

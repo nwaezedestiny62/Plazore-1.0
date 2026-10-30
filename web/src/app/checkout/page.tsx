@@ -476,7 +476,7 @@ export default function CheckoutPage() {
     setProcessingHint(
       routeGroups.length > 1
         ? `Preparing ${routeGroups.length} payments…`
-        : `Preparing secure payment · ${providerLabel}`
+        : `Preparing secure payment | ${providerLabel}`
     );
     setPhase("processing");
     setPaidCount(0);
@@ -672,7 +672,7 @@ export default function CheckoutPage() {
         const label = p.orderNumber || `Seller ${i + 1}`;
 
         setProcessingHint(
-          `Paying ${i + 1} of ${ready.length} · ${label} · ${providerLabel}`
+          `Paying ${i + 1} of ${ready.length} | ${label} | ${providerLabel}`
         );
 
         // Paystack popup path
@@ -1034,14 +1034,14 @@ export default function CheckoutPage() {
       <div className="mx-auto grid max-w-6xl gap-4 px-4 pb-32 pt-4 md:grid-cols-[1fr_340px] md:px-6 md:pb-10">
         <div>
           <p className="mb-3.5 text-[11px] font-bold tracking-[0.16em] text-white/38">
-            REVIEW · DELIVER · PAY
+            REVIEW | DELIVER | PAY
           </p>
 
           {routeGroups.length > 1 && (
             <div className="mb-3 flex gap-2.5 border border-blue/25 bg-blue/[0.08] p-3">
               <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-blue-400" />
               <p className="text-[12.5px] leading-[18px] text-white/55">
-                {routeGroups.length} sellers · each is paid separately.
+                {routeGroups.length} sellers | each is paid separately.
                 Successful payments stay protected.
               </p>
             </div>
@@ -1059,7 +1059,7 @@ export default function CheckoutPage() {
               <p className="text-xs font-semibold text-white/55">
                 {itemCount} item{itemCount !== 1 ? "s" : ""}
                 {routeGroups.length > 1
-                  ? ` · ${routeGroups.length} sellers`
+                  ? ` | ${routeGroups.length} sellers`
                   : ""}
               </p>
             </div>
@@ -1116,7 +1116,7 @@ export default function CheckoutPage() {
                           </p>
                         ) : null}
                         <p className="mt-0.5 text-[11px] text-white/55">
-                          Qty {qty} · {fmtProduct(unit, region)} each
+                          Qty {qty} | {fmtProduct(unit, region)} each
                         </p>
                       </div>
                       <p className="ml-2 text-[13px] font-bold">
@@ -1127,7 +1127,7 @@ export default function CheckoutPage() {
                 })}
                 <div className="flex justify-between border-t border-white/[0.06] bg-[#0A0C10] px-3.5 py-2 text-[11px]">
                   <span className="text-white/40">
-                    Route subtotal · delivery {fmt(group.deliveryFeeDisplay)}
+                    Route subtotal | delivery {fmt(group.deliveryFeeDisplay)}
                   </span>
                   <span className="font-bold text-white/70">
                     {fmt(
@@ -1255,7 +1255,7 @@ export default function CheckoutPage() {
                 <span>
                   <span className="text-[13px] font-bold">Paystack</span>
                   <span className="mt-1 block text-xs text-white/55">
-                    Cards, bank transfer &amp; local methods · Best for Nigeria
+                    Cards, bank transfer &amp; local methods | Best for Nigeria
                     &amp; Africa
                   </span>
                 </span>
@@ -1282,7 +1282,7 @@ export default function CheckoutPage() {
                 <span>
                   <span className="text-[13px] font-bold">Stripe</span>
                   <span className="mt-1 block text-xs text-white/55">
-                    Cards &amp; wallets · Best for US, EU &amp; international
+                    Cards &amp; wallets | Best for US, EU &amp; international
                   </span>
                 </span>
               </button>
@@ -1299,7 +1299,7 @@ export default function CheckoutPage() {
                 <div>
                   <p className="text-sm font-extrabold">Payment method</p>
                   <p className="text-[10px] text-white/40">
-                    Saved cards · {providerLabel} hosts entry
+                    Saved cards | {providerLabel} hosts entry
                   </p>
                 </div>
               </div>
@@ -1579,7 +1579,7 @@ export default function CheckoutPage() {
       </div>
 
       <p className="pb-8 text-center text-[11px] font-semibold tracking-wide text-white/38 md:pb-6">
-        Plazore · Digital Mall
+        Plazore | Digital Mall
       </p>
     </div>
   );

@@ -555,7 +555,7 @@ const bulkHide = async () => {
           <Text style={styles.title}>My Products</Text>
           <Text style={styles.subtitle}>
             {products.length} product{products.length !== 1 ? 's' : ''}
-            {' · '}
+            {' | '}
             {SORT_LABEL[sort]}
           </Text>
         </View>

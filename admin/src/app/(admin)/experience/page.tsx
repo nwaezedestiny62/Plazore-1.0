@@ -49,10 +49,10 @@ export default function ExperiencePage() {
         </div>
 
         <ul className="mt-6 space-y-2 border-t border-[#252A33] pt-4 text-sm text-[#A7ADB8]">
-          <li>· Music remains available only through user Settings.</li>
-          <li>· Default state on the product is OFF.</li>
-          <li>· Hero banner management is under Content — not here.</li>
-          <li>· Do not use the public Plazore orb as an admin music preloader.</li>
+          <li>| Music remains available only through user Settings.</li>
+          <li>| Default state on the product is OFF.</li>
+          <li>| Hero banner management is under Content — not here.</li>
+          <li>| Do not use the public Plazore orb as an admin music preloader.</li>
         </ul>
       </Panel>
     </div>

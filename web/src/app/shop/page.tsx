@@ -620,7 +620,7 @@ function ShopInner() {
           ? "Stores"
           : mode === "category" && selectedCategory
             ? selectedSub
-              ? `${selectedCategory} · ${selectedSub}`
+              ? `${selectedCategory} | ${selectedSub}`
               : selectedCategory
             : "Categories";
 

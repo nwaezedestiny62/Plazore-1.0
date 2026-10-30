@@ -640,7 +640,7 @@ export default function DownloadPage() {
             </Reveal>
           </div>
 
-          {/* ── DESKTOP: copy · QR · welcoming.png ── */}
+          {/* ── DESKTOP: copy | QR | welcoming.png ── */}
           <div className="hidden lg:block">
             <div className="grid grid-cols-12 items-center gap-6 xl:gap-8">
               <div className="col-span-4">
@@ -714,7 +714,7 @@ export default function DownloadPage() {
         <div className="mx-auto grid max-w-6xl items-center gap-12 px-4 sm:px-6 lg:grid-cols-2 lg:gap-16">
           <Reveal>
             <SectionCopy
-              kicker="01 · Home"
+              kicker="01 | Home"
               title="Discover commerce differently."
               body="Plazore puts discovery at the center of the commerce experience, helping people encounter products and businesses rather than relying only on traditional search."
             />
@@ -756,7 +756,7 @@ export default function DownloadPage() {
           </Reveal>
           <Reveal delay={60} className="order-1 lg:order-2">
             <SectionCopy
-              kicker="02 · Plazore"
+              kicker="02 | Plazore"
               title="A new way to experience commerce."
               body="Plazore brings buying, selling, and product discovery into one connected commerce experience — designed to feel less like browsing a catalog and more like entering a marketplace built around how people actually explore."
             />
@@ -773,7 +773,7 @@ export default function DownloadPage() {
           <Reveal>
             <SectionCopy
               align="center"
-              kicker="03 · Product"
+              kicker="03 | Product"
               title="Understand what you're buying."
               body="The product experience brings the information, seller context and commerce controls together before the purchase decision."
             />
@@ -805,7 +805,7 @@ export default function DownloadPage() {
         <div className="mx-auto grid max-w-6xl items-center gap-12 px-4 sm:px-6 lg:grid-cols-2 lg:gap-16">
           <Reveal>
             <SectionCopy
-              kicker="04 · Seller"
+              kicker="04 | Seller"
               title="One platform. Both sides of commerce."
               body="Plazore gives sellers a dedicated commerce environment for managing products, orders and activity while participating in the same marketplace buyers explore."
             />
@@ -833,7 +833,7 @@ export default function DownloadPage() {
           <Reveal>
             <SectionCopy
               align="center"
-              kicker="05 · Intelligence"
+              kicker="05 | Intelligence"
               title="Commerce without the guesswork."
               body="Plazore uses product intelligence and real commerce activity to help people understand products and commerce activity more clearly."
             />

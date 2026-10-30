@@ -209,7 +209,7 @@ export default function SellerSettings() {
             />
           </View>
 
-          <Text style={styles.footer}>Plazore · Seller Lounge</Text>
+          <Text style={styles.footer}>Plazore | Seller Lounge</Text>
         </ScrollView>
       </Animated.View>
     </SafeAreaView>

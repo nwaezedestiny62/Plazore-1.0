@@ -81,7 +81,7 @@ export default function SellerMarketplaceRegionScreen() {
         Toast.show({
           type: 'success',
           text1: 'Store marketplace updated',
-          text2: `${getRegion(saved).name} · catalog & prices use this region`,
+          text2: `${getRegion(saved).name} | catalog & prices use this region`,
         })
       }
     } catch {
@@ -154,7 +154,7 @@ export default function SellerMarketplaceRegionScreen() {
                       className="text-[12px] mt-0.5"
                       style={{ color: colors.muted }}
                     >
-                      {r.currency.symbol} · {r.currency.code}
+                      {r.currency.symbol} | {r.currency.code}
                     </Text>
                   </View>
                   {selected && (

@@ -335,7 +335,7 @@ export default function SellerRegister() {
                 </TouchableOpacity>
               ) : null}
             </View>
-            <Text style={styles.hint}>Required · square · storefront cards</Text>
+            <Text style={styles.hint}>Required | square | storefront cards</Text>
 
             <Text style={styles.label}>Store banner *</Text>
             <TouchableOpacity onPress={() => pickImage('banner')} style={[styles.bannerBox, !storeBanner && styles.mediaRequired]} activeOpacity={0.85}>
@@ -353,7 +353,7 @@ export default function SellerRegister() {
                 <Text style={styles.clearText}>Remove banner</Text>
               </TouchableOpacity>
             ) : null}
-            <Text style={styles.hint}>Required · wide · store header</Text>
+            <Text style={styles.hint}>Required | wide | store header</Text>
 
             <Text style={[styles.section, { marginTop: 8 }]}>Store details *</Text>
             <Text style={styles.label}>Business / store name *</Text>
@@ -419,7 +419,7 @@ export default function SellerRegister() {
               <View style={{ flex: 1 }}>
                 <Text style={styles.regionName}>{selectedRegion?.name}</Text>
                 <Text style={styles.regionMeta}>
-                  Currency {selectedRegion?.currency?.symbol} ·{' '}
+                  Currency {selectedRegion?.currency?.symbol} |{' '}
                   {isNigeria ? 'Paystack payouts' : 'Stripe Connect payouts'}
                 </Text>
               </View>
@@ -516,7 +516,7 @@ export default function SellerRegister() {
                   />
                 </View>
                 {accountVerified ? (
-                  <Text style={styles.verified}>Verified with Paystack · {accountName}</Text>
+                  <Text style={styles.verified}>Verified with Paystack | {accountName}</Text>
                 ) : null}
               </>
             ) : (

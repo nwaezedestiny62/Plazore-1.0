@@ -34,7 +34,7 @@ async function notifyChatRecipient(opts) {
     const preview = String(opts.text || "").trim().slice(0, 140);
     const title = opts.senderIsBuyer ? "New buyer message" : "New store message";
     const message = productName
-        ? `${preview || "New message"} · ${productName}`
+        ? `${preview || "New message"} | ${productName}`
         : preview || "You have a new message on Plazore.";
     const created = await sendNotification({
         userId: recipientId,

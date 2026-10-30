@@ -405,7 +405,7 @@ function SubscriptionsBody() {
         <div className="border-b border-white/[0.06] px-4 py-3">
           <h2 className="text-sm font-semibold">Seller subscriptions</h2>
           <p className="text-[11px] text-white/40">
-            {rows.length} loaded · promotional rows marked
+            {rows.length} loaded | promotional rows marked
           </p>
         </div>
         {rows.length === 0 ? (
@@ -445,7 +445,7 @@ function SubscriptionsBody() {
                     </td>
                     <td className="px-4 py-3">{planLabel(r.planId)}</td>
                     <td className="px-4 py-3">
-                      {r.country || "—"} · {r.currency || "—"}
+                      {r.country || "—"} | {r.currency || "—"}
                     </td>
                     <td className="px-4 py-3 tabular-nums">
                       {r.transactionFeeRate != null

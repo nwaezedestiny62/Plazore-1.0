@@ -353,8 +353,8 @@ function ActivityFloat({
                 />
               </div>
               <p className="mt-2.5 text-[10px] leading-snug text-white/35">
-                {health.active24h} active · {health.quiet7d} quiet ·{" "}
-                {health.dormant} dormant · {health.total} total
+                {health.active24h} active | {health.quiet7d} quiet |{" "}
+                {health.dormant} dormant | {health.total} total
               </p>
               <p className="mt-1 text-[9px] text-white/25">
                 Orders / cart / listings — not last seen
@@ -535,10 +535,10 @@ function OrderLine({ o, hrefBase = "/orders" }: { o: OrderLite; hrefBase?: strin
           </p>
           <p className="mt-0.5 truncate text-[12px] text-white/55">
             {shortDate(o.createdAt)}
-            {" · "}
+            {" | "}
             <span className="text-white/70">{status}</span>
-            {pay ? ` · ${pay}` : ""}
-            {party ? ` · ${party}` : ""}
+            {pay ? ` | ${pay}` : ""}
+            {party ? ` | ${party}` : ""}
           </p>
           {itemLabel ? (
             <p className="mt-0.5 truncate text-[11px] text-white/35">{itemLabel}</p>
@@ -591,7 +591,7 @@ function ProductLine({ p }: { p: ProductLite }) {
         </p>
         <p className="mt-0.5 text-[11px] text-white/40">
           {shortDate(p.createdAt)}
-          {p.status ? ` · ${p.status}` : ""}
+          {p.status ? ` | ${p.status}` : ""}
         </p>
       </div>
       <p className="shrink-0 text-[12px] tabular-nums text-white/60">
@@ -911,7 +911,7 @@ function UserProfileModal({
                     onClick={() => {
                       setContactOpen(true);
                       setContactSubject(
-                        `Message from Plazore · ${u.storeName || u.name || "Account"}`,
+                        `Message from Plazore | ${u.storeName || u.name || "Account"}`,
                       );
                     }}
                   >
@@ -1270,7 +1270,7 @@ function UsersDirectory() {
           category: "account",
           subject:
             contactSubject.trim() ||
-            `Message from Plazore · ${user.storeName || user.name || "Account"}`,
+            `Message from Plazore | ${user.storeName || user.name || "Account"}`,
           message: msg,
           storeId: user.role === "seller" ? user._id : undefined,
           allowsReply: contactAllowsReply,
@@ -1315,7 +1315,7 @@ function UsersDirectory() {
             onClick={() => load(1)}
           >
             <RefreshCw className={cn("h-3.5 w-3.5", loading && "animate-spin")} />
-            Refresh · {total.toLocaleString()}
+            Refresh | {total.toLocaleString()}
           </Button>
         </div>
         <div className="mt-4 flex flex-wrap items-center gap-2">
@@ -1626,7 +1626,7 @@ function UsersDirectory() {
       )}
       {!hasMore && items.length > 0 && (
         <p className="py-3 text-center text-[11px] text-white/30">
-          End · {items.length.toLocaleString()} shown
+          End | {items.length.toLocaleString()} shown
         </p>
       )}
 

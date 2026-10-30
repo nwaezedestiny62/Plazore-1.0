@@ -260,5 +260,5 @@ export function formatSelectedOptions(
   if (!opts) return ''
   return Object.entries(opts)
     .map(([k, v]) => `${k}: ${v}`)
-    .join(' · ')
+    .join(' | ')
 }

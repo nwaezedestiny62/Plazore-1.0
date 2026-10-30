@@ -702,8 +702,8 @@ function ProductModal({
                 </h2>
                 <p className="mt-1 text-sm text-white/50">
                   {selected.category}
-                  {selected.subCategory ? ` · ${selected.subCategory}` : ""}
-                  {selected.brand ? ` · ${selected.brand}` : ""}
+                  {selected.subCategory ? ` | ${selected.subCategory}` : ""}
+                  {selected.brand ? ` | ${selected.brand}` : ""}
                 </p>
                 <div className="mt-2 flex flex-wrap gap-1.5">
                   <Badge tone={selected.isActive ? "green" : "error"}>
@@ -729,7 +729,7 @@ function ProductModal({
                     <p className="text-white/40">Listed in</p>
                     <p className="font-semibold text-white/85">
                       {region}
-                      {region !== "—" ? ` · ${regionName(region)}` : ""}
+                      {region !== "—" ? ` | ${regionName(region)}` : ""}
                     </p>
                   </div>
                   <div>
@@ -746,7 +746,7 @@ function ProductModal({
                 <SectionLabel>
                   Images
                   {(selected.images?.length || 0) > 0
-                    ? ` · ${selected.images!.length}`
+                    ? ` | ${selected.images!.length}`
                     : ""}
                 </SectionLabel>
                 <div className="mt-2">
@@ -799,7 +799,7 @@ function ProductModal({
                 <Field label="Email">{selected.seller?.email || "—"}</Field>
                 <Field label="Seller region">
                   {selected.seller?.marketplaceRegion
-                    ? `${norm(selected.seller.marketplaceRegion)} · ${
+                    ? `${norm(selected.seller.marketplaceRegion)} | ${
                         currencyForRegion(selected.seller.marketplaceRegion) ||
                         "—"
                       }`
@@ -815,7 +815,7 @@ function ProductModal({
                 <Field label="Location">{locLabel(selected)}</Field>
                 <Field label="Listing region">
                   {region !== "—"
-                    ? `${region} · ${regionName(region)} · ${currency}`
+                    ? `${region} | ${regionName(region)} | ${currency}`
                     : "—"}
                 </Field>
               </div>
@@ -1165,12 +1165,12 @@ function ProductsDirectory() {
           <div className="flex flex-wrap items-center gap-2">
             <p className="text-xs tabular-nums text-white/40">
               <span className="text-[#F5F7FA]">{total.toLocaleString()}</span>{" "}
-              in view ·{" "}
+              in view |{" "}
               <span className="text-[#F5F7FA]">
                 {counts.all.toLocaleString()}
               </span>{" "}
               total
-              {stale ? " · cached" : ""}
+              {stale ? " | cached" : ""}
             </p>
             <Button
               tone="ghost"
@@ -1415,7 +1415,7 @@ function ProductsDirectory() {
                       {fmtListingPrice(p.price, cur)}
                     </p>
                     <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-wide text-white/40">
-                      {reg} · {cur}
+                      {reg} | {cur}
                     </p>
                   </div>
                 </div>
@@ -1426,7 +1426,7 @@ function ProductsDirectory() {
                   <Badge tone="blue">{reg}</Badge>
                 </div>
                 <p className="mt-3 text-[11px] tabular-nums text-white/35">
-                  {m.views} views · {m.cart} carts · {m.checkout} checkouts
+                  {m.views} views | {m.cart} carts | {m.checkout} checkouts
                 </p>
               </button>
             );
@@ -1489,7 +1489,7 @@ function ProductsDirectory() {
                       <Badge tone="blue">{reg}</Badge>
                       <p className="mt-1 text-[10px] text-white/35">
                         {cur}
-                        {reg !== "—" ? ` · ${regionName(reg)}` : ""}
+                        {reg !== "—" ? ` | ${regionName(reg)}` : ""}
                       </p>
                     </td>
                     <td className="px-4 py-3">
@@ -1503,7 +1503,7 @@ function ProductsDirectory() {
                         {fmtListingPrice(p.price, cur)}
                       </p>
                       <p className="text-[10px] text-white/35">
-                        {reg} · {cur}
+                        {reg} | {cur}
                       </p>
                     </td>
                   </tr>
