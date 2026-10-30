@@ -11,6 +11,7 @@ const ADD_LOCK_MS = 1000;
 const recentLineAdds = new Map<string, number>();
 
 export type CartItem = {
+  /** productId or productId::variantKey */
   id: string;
   product: Product;
   quantity: number;
@@ -28,6 +29,7 @@ export type AddToCartSelection = {
   variant?: ProductVariant | null;
 };
 
+/** Stable line id — same product + same variant = one line */
 function lineId(productId: string, variantKey?: string): string {
   const key = String(variantKey || "").trim();
   return key ? `${productId}::${key}` : productId;
@@ -65,8 +67,9 @@ export function cartCount() {
 }
 
 /**
- * Returns true if quantity was written, false if blocked by lock.
- * ONE successful write per line id within ADD_LOCK_MS.
+ * Add to cart.
+ * Returns true if written, false if blocked by lock (duplicate fire).
+ * Same product + same variantKey → +qty on that line (never duplicate lines).
  */
 export function addToCart(
   product: Product,
@@ -172,6 +175,7 @@ export function clearCart() {
   window.dispatchEvent(new Event("plazore-cart"));
 }
 
+/** Payload rows for POST /orders create (backend-compatible) */
 export function cartItemsForCheckout(items?: CartItem[]) {
   const list = items || read();
   return list.map((item) => ({

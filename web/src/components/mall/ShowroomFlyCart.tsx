@@ -7,6 +7,7 @@ import {
   useEffect,
   useRef,
   useState,
+  type CSSProperties,
   type ReactNode,
 } from "react";
 import { addToCart, type AddToCartSelection } from "@/lib/cart";
@@ -22,7 +23,11 @@ type FlyJob = {
 };
 
 type Ctx = {
-  /** ONLY place that writes to cart from the showroom. Returns true if +1 written. */
+  /**
+   * ONLY showroom write path.
+   * Adds exactly +1 (or blocked by cart lock), then flies to bag.
+   * Returns true if cart was written.
+   */
   flyAdd: (
     product: Product,
     origin: Origin,
@@ -44,8 +49,9 @@ export function ShowroomFlyCartProvider({ children }: { children: ReactNode }) {
   const [bagPulse, setBagPulse] = useState(0);
 
   const registerBagTarget = useCallback((el: HTMLElement | null) => {
-    if (!el) return;
+    if (!el || typeof window === "undefined") return;
     const r = el.getBoundingClientRect();
+    if (r.width <= 0 || r.height <= 0) return;
     targetRef.current = {
       x: r.left + r.width / 2,
       y: r.top + r.height / 2,
@@ -58,6 +64,8 @@ export function ShowroomFlyCartProvider({ children }: { children: ReactNode }) {
       origin: Origin,
       selection?: AddToCartSelection
     ): boolean => {
+      if (!product?._id) return false;
+
       let added = false;
       try {
         added = addToCart(product, 1, selection) === true;
@@ -72,16 +80,25 @@ export function ShowroomFlyCartProvider({ children }: { children: ReactNode }) {
           ? { x: window.innerWidth - 48, y: 40 }
           : { x: 0, y: 0 });
 
-      const id = `${product._id}-${Date.now()}`;
+      const id = `${String(product._id)}-${Date.now()}-${Math.random()
+        .toString(36)
+        .slice(2, 7)}`;
+
       setJobs((prev) => [
         ...prev,
         {
           id,
           image: product.images?.[0],
-          origin,
+          origin: {
+            x: Number(origin.x) || 0,
+            y: Number(origin.y) || 0,
+            width: Number(origin.width) || 36,
+            height: Number(origin.height) || 36,
+          },
           target,
         },
       ]);
+
       return true;
     },
     []
@@ -109,7 +126,7 @@ function FlyParticle({
   job: FlyJob;
   onDone: () => void;
 }) {
-  const [style, setStyle] = useState<React.CSSProperties>({
+  const [style, setStyle] = useState<CSSProperties>({
     left: job.origin.x + job.origin.width / 2 - 22,
     top: job.origin.y + job.origin.height / 2 - 22,
     opacity: 1,

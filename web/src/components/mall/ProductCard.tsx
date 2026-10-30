@@ -313,7 +313,9 @@ export function ProductCard({
     }, 240);
   }, []);
 
-   const doAdd = useCallback(
+  /** ONLY flyAdd writes to cart — never call addToCart here */
+  /** ONLY flyAdd writes to cart — never call addToCart here */
+  const doAdd = useCallback(
     (variant?: ProductVariant | null) => {
       if (addLockRef.current) return;
       addLockRef.current = true;
@@ -359,7 +361,6 @@ export function ProductCard({
             })()
           : { x: 0, y: 0, width: 36, height: 36 };
 
-      // ONLY write path — do NOT call addToCart here
       if (fly) {
         fly.flyAdd(payload as Product, origin, selection);
       }
@@ -372,11 +373,6 @@ export function ProductCard({
     e.stopPropagation();
     if (!isLoaded) return;
     if (addLockRef.current) return;
-
-    addLockRef.current = true;
-    window.setTimeout(() => {
-      addLockRef.current = false;
-    }, 900);
 
     if (!isSignedIn) {
       stashReturn(product._id);
@@ -395,11 +391,6 @@ export function ProductCard({
     e.stopPropagation();
     if (!selectionComplete || !selectedVariant || !inStock) return;
     if (addLockRef.current) return;
-
-    addLockRef.current = true;
-    window.setTimeout(() => {
-      addLockRef.current = false;
-    }, 900);
 
     doAdd(selectedVariant);
     closePicker();
@@ -448,7 +439,6 @@ export function ProductCard({
           light ? "text-chamber-ink" : "text-text"
         }`}
       >
-        {/* Image is the positioning parent. Button is a sibling of the link, pinned to this frame. */}
         <div className="relative aspect-[3/3.55] overflow-hidden bg-[#0A0C10] sm:aspect-[3/3.5]">
           <Link
             href={`/product/${product._id}`}
@@ -672,23 +662,23 @@ export function ProductCard({
           ) : null}
 
           <button
-  ref={btnRef}
-  type="button"
-  onClick={onCart}
-  onPointerDown={(e) => {
-    e.stopPropagation();
-    setPressed(true);
-  }}
-  onPointerUp={() => setPressed(false)}
-  onPointerLeave={() => setPressed(false)}
-  aria-label={hasVariants ? "Choose options" : "Add to bag"}
-  className="absolute bottom-2 right-2 z-30 flex h-8 w-8 items-center justify-center bg-white text-[#111] shadow-[0_2px_10px_rgba(0,0,0,0.18)] transition-[transform,box-shadow,opacity] duration-200 ease-out hover:shadow-[0_4px_14px_rgba(0,0,0,0.22)] focus:outline-none focus-visible:ring-1 focus-visible:ring-white/40 active:opacity-90 sm:bottom-2.5 sm:right-2.5 sm:h-9 sm:w-9"
-  style={{
-    transform: pressed ? "scale(0.96)" : "scale(1)",
-    opacity: pickerOpen ? 0 : 1,
-    pointerEvents: pickerOpen ? "none" : "auto",
-  }}
->
+            ref={btnRef}
+            type="button"
+            onClick={onCart}
+            onPointerDown={(e) => {
+              e.stopPropagation();
+              setPressed(true);
+            }}
+            onPointerUp={() => setPressed(false)}
+            onPointerLeave={() => setPressed(false)}
+            aria-label={hasVariants ? "Choose options" : "Add to bag"}
+            className="absolute bottom-2 right-2 z-30 flex h-8 w-8 items-center justify-center bg-white text-[#111] shadow-[0_2px_10px_rgba(0,0,0,0.18)] transition-[transform,box-shadow,opacity] duration-200 ease-out hover:shadow-[0_4px_14px_rgba(0,0,0,0.22)] focus:outline-none focus-visible:ring-1 focus-visible:ring-white/40 active:opacity-90 sm:bottom-2.5 sm:right-2.5 sm:h-9 sm:w-9"
+            style={{
+              transform: pressed ? "scale(0.96)" : "scale(1)",
+              opacity: pickerOpen ? 0 : 1,
+              pointerEvents: pickerOpen ? "none" : "auto",
+            }}
+          >
             <ShoppingCart
               className="h-[14px] w-[14px] sm:h-[15px] sm:w-[15px]"
               strokeWidth={2.1}

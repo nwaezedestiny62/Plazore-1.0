@@ -84,6 +84,16 @@ type SplitRooms = {
 const RAIL_CLASS =
   "flex gap-2 overflow-x-auto overscroll-x-contain px-4 pb-2 sm:gap-3 sm:px-6 md:px-10 lg:px-16 [scrollbar-width:none] [-webkit-overflow-scrolling:touch] [&::-webkit-scrollbar]:hidden";
 
+/** Shared cart badge — same on desktop + mobile */
+function CartBadge({ n }: { n: number }) {
+  if (n <= 0) return null;
+  return (
+    <span className="absolute right-0.5 top-0.5 flex h-[16px] min-w-[16px] items-center justify-center rounded-full bg-[#00E575] px-1 text-center text-[9px] font-extrabold leading-none text-[#041412]">
+      {n > 9 ? "9+" : n}
+    </span>
+  );
+}
+
 function takeUnique(
   list: Product[] | undefined,
   cap: number,
@@ -438,11 +448,7 @@ function MallChrome({
               className="h-[17px] w-[17px] lg:h-[18px] lg:w-[18px]"
               strokeWidth={1.75}
             />
-            {bagN > 0 ? (
-              <span className="absolute right-1 top-1 min-w-[15px] rounded-full bg-[#00E575] px-1 text-center text-[9px] font-extrabold text-[#041412]">
-                {bagN > 9 ? "9+" : bagN}
-              </span>
-            ) : null}
+            <CartBadge n={bagN} />
           </Link>
 
           {isSignedIn ? (
@@ -526,19 +532,11 @@ function MallChrome({
             aria-label="Shopping cart"
             data-plazore-cart-icon
           >
-            <span
-              aria-hidden
-              className="pointer-events-none absolute inset-1 bg-[#00E575]/12 blur-[5px]"
-            />
             <ShoppingCart
               className="relative h-[17px] w-[17px]"
               strokeWidth={1.75}
             />
-            {bagN > 0 ? (
-              <span className="absolute -right-0.5 -top-0.5 flex min-w-[15px] items-center justify-center bg-gradient-to-r from-[#00E575] to-[#3B82F6] px-1 text-[8px] font-extrabold text-[#041412] shadow-[0_0_10px_rgba(0,229,117,0.45)]">
-                {bagN > 9 ? "9+" : bagN}
-              </span>
-            ) : null}
+            <CartBadge n={bagN} />
           </Link>
 
           {isSignedIn ? (
@@ -573,7 +571,6 @@ function MallChrome({
 
 /* ─────────────────────────────────────────────────────────────
    ROOM 3 — THE SIGNAL
-   Strict +1 add, fly, badge update. No border radius.
 ───────────────────────────────────────────────────────────── */
 function RoomThreeStage({ products }: { products: Product[] }) {
   const router = useRouter();
@@ -672,7 +669,6 @@ function RoomThreeStage({ products }: { products: Product[] }) {
   const handleAddToCart = (e: React.MouseEvent | React.PointerEvent) => {
     e.preventDefault();
     e.stopPropagation();
-
     if (!isLoaded || adding) return;
 
     const product = products[currentRef.current];
@@ -713,7 +709,6 @@ function RoomThreeStage({ products }: { products: Product[] }) {
           })()
         : { x: 0, y: 0, width: 40, height: 40 };
 
-    // ONLY flyAdd — never call addToCart here
     if (fly) {
       fly.flyAdd(product, origin);
     }
@@ -757,7 +752,6 @@ function RoomThreeStage({ products }: { products: Product[] }) {
         </div>
 
         <div className="relative w-full max-w-[min(100%,380px)] sm:max-w-[460px] lg:max-w-[520px]">
-          {/* NO border radius */}
           <div className="relative aspect-[4/5] w-full overflow-hidden border border-white/10 bg-black/40 shadow-[0_20px_60px_rgba(0,0,0,0.45)] sm:aspect-[5/6]">
             {products.map((p, i) => (
               <div
@@ -1145,7 +1139,6 @@ function MallInner({
 
       <HeroStage slides={heroSlides} onEnterShowroom={enterShowroom} />
 
-      {/* Desktop room dots */}
       <div
         className={`fixed right-3 top-1/2 z-40 hidden -translate-y-1/2 flex-col gap-2.5 md:flex lg:right-4 ${
           roomNavOn ? "opacity-100" : "pointer-events-none opacity-0"
@@ -1166,7 +1159,6 @@ function MallInner({
         ))}
       </div>
 
-      {/* Mobile room pills */}
       <div
         className={`fixed inset-x-0 z-40 flex justify-center px-4 md:hidden ${
           roomNavOn ? "opacity-100" : "pointer-events-none opacity-0"
@@ -1202,7 +1194,6 @@ function MallInner({
           </div>
         ) : (
           <>
-            {/* ──────────── ROOM 1 — THE HORIZON ──────────── */}
             {rooms.one.length > 0 ? (
               <section
                 ref={(el) => {
@@ -1265,7 +1256,6 @@ function MallInner({
               </section>
             ) : null}
 
-            {/* ──────────── ROOM 2 — THE CHAMBER ──────────── */}
             {rooms.two.length > 0 ? (
               <section
                 ref={(el) => {
@@ -1307,7 +1297,6 @@ function MallInner({
               </section>
             ) : null}
 
-            {/* ──────────── ROOM 3 — THE SIGNAL ──────────── */}
             {rooms.three.length > 0 ? (
               <section
                 ref={(el) => {
@@ -1319,7 +1308,6 @@ function MallInner({
               </section>
             ) : null}
 
-            {/* ──────────── ROOM 4 — THE LOCALE (no border radius) ──────────── */}
             {rooms.four.length > 0 ? (
               <section
                 ref={(el) => {
@@ -1328,8 +1316,6 @@ function MallInner({
                 className="relative overflow-hidden bg-[#07090F] px-0 py-12 sm:py-16 md:py-20"
               >
                 <Starfield />
-
-                {/* soft top edge line — sharp, no radius */}
                 <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-white/[0.06]" />
 
                 <div className="relative z-10 px-4 sm:px-6 md:px-10 lg:px-16">
@@ -1344,7 +1330,6 @@ function MallInner({
                   </p>
                 </div>
 
-                {/* Sharp-edge product rail — force no radius on cards in this room */}
                 <div
                   className={`relative z-10 mt-8 sm:mt-10 ${RAIL_CLASS} pb-4 [&_.group]:!rounded-none [&_img]:!rounded-none [&_button]:!rounded-none`}
                 >
@@ -1384,4 +1369,4 @@ export function Mall({
       <MallInner products={products} rooms={rooms} loading={loading} />
     </ShowroomFlyCartProvider>
   );
-} 
+}

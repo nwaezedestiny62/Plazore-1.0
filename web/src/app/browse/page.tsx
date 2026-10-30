@@ -341,14 +341,14 @@ const STRUCTURE_OPTIONS: { key: StructureOrder; label: string }[] = [
 ];
 
 /**
- * PRODUCT GRID — significant vertical spacing, especially on phones
- * Mobile (2-col): gap-y-11 / gap-y-12  → clear separation between rows
- * sm+: progressive increase so cards never feel stacked
+ * Same horizontal spacing logic as Mall Room 2 (responsive):
+ * gap-2.5 between left/right on phone, cards stay full width (no overflow).
+ * Vertical gaps stay generous so rows don't feel stacked.
  */
 const PRODUCT_GRID =
-  "grid w-full grid-cols-2 gap-x-6 gap-y-8 " +        // mobile: wider space between columns
-  "sm:gap-x-7 sm:gap-y-9 " +
-  "md:grid-cols-3 md:gap-x-7 md:gap-y-10 " +
+  "grid w-full grid-cols-2 gap-x-2.5 gap-y-8 " +
+  "sm:gap-x-4 sm:gap-y-9 " +
+  "md:grid-cols-3 md:gap-x-6 md:gap-y-10 " +
   "lg:grid-cols-4 lg:gap-x-8 lg:gap-y-11 " +
   "xl:grid-cols-5 xl:gap-x-9 xl:gap-y-12";
 
@@ -365,13 +365,14 @@ function CustomBarIcon({ className = "" }: { className?: string }) {
   );
 }
 
+/** Room 2 cell pattern: space between cards, card still full-showing */
 const ProductCell = memo(function ProductCell({
   product,
 }: {
   product: Product;
 }) {
   return (
-    <div className="plazore-product-cell min-w-0 w-full [&>*]:!block [&>*]:!h-full [&>*]:!w-full [&>*]:!max-w-none [&_a]:!block [&_a]:!w-full [&_img]:!w-full">
+    <div className="mx-auto w-full min-w-0 max-w-[340px] md:max-w-none [&_.group]:!max-w-none [&_.group]:!w-full [&_.group]:!min-w-0">
       <ProductCard product={product} />
     </div>
   );
@@ -1445,7 +1446,6 @@ function BrowseInner() {
 
   return (
     <div className="min-h-screen bg-bg text-text">
-      {/* header — no border */}
       <header className="sticky top-0 z-40 bg-bg/90 backdrop-blur-md">
         <div className="mx-auto flex h-14 max-w-6xl items-center gap-3 px-3 sm:h-16 sm:px-4">
           <Link
@@ -1483,7 +1483,6 @@ function BrowseInner() {
 
       <div className="mx-auto max-w-6xl px-3 pb-16 pt-4 sm:px-4 sm:pt-6">
         <div className="space-y-3">
-          {/* search — no border / no ring */}
           <div ref={searchWrapRef} className="relative">
             <div className="flex h-12 items-center gap-2.5 rounded-2xl bg-white/[0.05] px-3.5 transition focus-within:bg-white/[0.07] sm:h-[52px] sm:px-4">
               <Search
@@ -1549,7 +1548,6 @@ function BrowseInner() {
               )}
             </div>
 
-            {/* suggest — no border, clean surface */}
             {showSuggestPanel ? (
               <div className="absolute left-0 right-0 top-[calc(100%+6px)] z-50 overflow-hidden rounded-2xl bg-[#0C1017] shadow-[0_16px_48px_rgba(0,0,0,0.55)]">
                 <div className="h-px w-full bg-gradient-to-r from-transparent via-[#00E575]/35 to-transparent" />
@@ -1815,7 +1813,7 @@ function BrowseInner() {
                   </div>
                   <div className="mt-12 flex justify-center sm:mt-14">
                     <Link
-                      href="/shop?mode=trending"
+                      href="/shop?mode=newest"
                       className="rounded-xl bg-white/[0.06] px-6 py-3 text-[11px] font-semibold tracking-[0.16em] uppercase text-white/80 transition hover:bg-white/[0.1]"
                     >
                       Show more
@@ -1867,7 +1865,6 @@ function BrowseInner() {
         )}
       </div>
 
-      {/* sheets — no ring borders */}
       {sortOpen ? (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 md:items-center">
           <button
