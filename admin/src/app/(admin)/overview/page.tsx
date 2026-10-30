@@ -2,13 +2,7 @@
 
 import { useAuth } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { adminFetch } from "@/lib/api";
 import {
   TV_QUOTE_SLIDES,
@@ -17,10 +11,17 @@ import {
   type ActivityCounts,
   type TvTile,
 } from "@/lib/tvCatalog";
-import { markCountSeen, unreadCount } from "@/lib/tvSeen";
+import {
+  countUncheckedLatest,
+  markCountSeen,
+  markLatestSeenNow,
+  readLatestSeenAt,
+  unreadCount,
+} from "@/lib/tvSeen";
 
 const SLIDE_MS = 6500;
 const EASE = "cubic-bezier(0.22, 1, 0.36, 1)";
+const LATEST_POLL_MS = 20000;
 
 function TileFace({ tile, badge }: { tile: TvTile; badge: number }) {
   return (
@@ -171,6 +172,8 @@ export default function OverviewPage() {
   const { getToken, isLoaded, isSignedIn } = useAuth();
   const router = useRouter();
   const [raw, setRaw] = useState<ActivityCounts | null>(null);
+  const [latestUnchecked, setLatestUnchecked] = useState(0);
+  const [latestServerTime, setLatestServerTime] = useState<string | null>(null);
   const [, bump] = useState(0);
   const [fly, setFly] = useState<{
     href: string;
@@ -182,25 +185,59 @@ export default function OverviewPage() {
     badge: number;
   } | null>(null);
   const lock = useRef(false);
+  const latestTimeRef = useRef<string | null>(null);
+  latestTimeRef.current = latestServerTime;
+
+  const pullLatest = useCallback(async (token: string | null) => {
+    const json = await adminFetch<any>("/admin/latest?hours=168", token);
+    const items = (json?.data?.items || []) as Array<{ at?: string; id?: string }>;
+    const serverTime = (json?.data?.serverTime as string | undefined) || null;
+    setLatestServerTime(serverTime);
+    setLatestUnchecked(countUncheckedLatest(items, readLatestSeenAt()));
+  }, []);
 
   useEffect(() => {
     if (!isLoaded || !isSignedIn) return;
-    (async () => {
+    let alive = true;
+
+    const run = async () => {
       try {
         const token = await getToken();
         const json = await adminFetch<any>("/admin/stats", token);
+        if (!alive) return;
         const next = countsFromStats(json.data);
         setRaw(next);
         sessionStorage.setItem("plazore.admin.liveCounts", JSON.stringify(next));
+        await pullLatest(token);
       } catch {
-        setRaw(countsFromStats(null));
+        if (alive) setRaw(countsFromStats(null));
       }
-    })();
-  }, [isLoaded, isSignedIn, getToken]);
+    };
+
+    void run();
+    const id = window.setInterval(() => {
+      void (async () => {
+        try {
+          const token = await getToken();
+          await pullLatest(token);
+        } catch {
+          /* keep last badge */
+        }
+      })();
+    }, LATEST_POLL_MS);
+
+    return () => {
+      alive = false;
+      window.clearInterval(id);
+    };
+  }, [isLoaded, isSignedIn, getToken, pullLatest]);
 
   const badges = useMemo(() => {
-    if (!raw) return {} as Record<string, number>;
+    if (!raw) {
+      return { latestNew: latestUnchecked } as Record<string, number>;
+    }
     return {
+      latestNew: latestUnchecked,
       usersNew: unreadCount("usersNew", raw.usersNew),
       sellersNew: unreadCount("sellersNew", raw.sellersNew),
       productsNew: unreadCount("productsNew", raw.productsNew),
@@ -209,18 +246,22 @@ export default function OverviewPage() {
       contactsNew: unreadCount("contactsNew", raw.contactsNew),
       moderationOpen: unreadCount("moderationOpen", raw.moderationOpen),
     };
-  }, [raw]);
+  }, [raw, latestUnchecked]);
 
   const openTile = (el: HTMLElement, tile: TvTile) => {
     if (lock.current) return;
     lock.current = true;
     const badge = tile.countKey ? badges[tile.countKey] ?? 0 : 0;
-    // Mark seen with the *raw* total so the badge does not return until the metric grows again
-    if (tile.countKey && raw && tile.countKey in raw) {
+
+    if (tile.countKey === "latestNew") {
+      markLatestSeenNow(latestTimeRef.current);
+      setLatestUnchecked(0);
+    } else if (tile.countKey && raw && tile.countKey in raw) {
       const baseline = Number(raw[tile.countKey as keyof ActivityCounts] ?? 0);
       markCountSeen(tile.countKey, baseline);
     }
     bump((n) => n + 1);
+
     const r = el.getBoundingClientRect();
     setFly({
       href: tile.href,

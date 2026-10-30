@@ -21,7 +21,6 @@ export type QuoteSlide = {
 export const TV_ROOM_BG =
   "https://images.unsplash.com/photo-1600210492486-724fe5c67fb0?auto=format&fit=crop&w=2400&q=80";
 
-/** 7 cinematic slides — commerce, discovery, Plazore */
 export const TV_QUOTE_SLIDES: QuoteSlide[] = [
   {
     image:
@@ -80,13 +79,14 @@ export const TV_ROWS: TvRow[] = [
     title: "Marketplace",
     tiles: [
       {
-  href: "/latest",
-  label: "Latest",
-  kicker: "Live commerce",
-  kind: "image",
-  image:
-    "https://images.unsplash.com/photo-1556740738-b6a63e27c4df?auto=format&fit=crop&w=900&q=80",
-},
+        href: "/latest",
+        label: "Latest",
+        kicker: "Live commerce",
+        kind: "image",
+        countKey: "latestNew",
+        image:
+          "https://images.unsplash.com/photo-1556740738-b6a63e27c4df?auto=format&fit=crop&w=900&q=80",
+      },
       {
         href: "/users",
         label: "People",
@@ -289,6 +289,7 @@ export type ActivityCounts = {
   reportsNew: number;
   contactsNew: number;
   moderationOpen: number;
+  latestNew: number;
 };
 
 export function countsFromStats(data: any): ActivityCounts {
@@ -302,6 +303,7 @@ export function countsFromStats(data: any): ActivityCounts {
     reportsNew: Number(s.support?.reportsNew ?? 0),
     contactsNew: Number(s.support?.contactNew ?? 0),
     moderationOpen: Number(s.support?.reportsUnresolved ?? 0),
+    latestNew: Number(s.latest?.unchecked ?? s.latest?.new ?? 0),
   };
 }
 
