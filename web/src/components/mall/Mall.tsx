@@ -215,7 +215,7 @@ function Starfield() {
       delay: number;
       dur: number;
     }[] = [];
-    for (let i = 0; i < 56; i++) {
+    for (let i = 0; i < 100; i++) {   // ← change this number
       const seed = (i * 97) % 1000;
       out.push({
         left: `${(seed * 0.137) % 100}%`,
@@ -812,7 +812,7 @@ function RoomThreeStage({ products }: { products: Product[] }) {
                   <span className="capitalize">
                     {(active.brand || "plazore").toLowerCase()}
                   </span>
-                  <span className="text-white/30">·</span>
+                  <span className="text-white/30">|</span>
                   <span className="font-semibold text-white">
                     {formatProductPrice(
                       Number(active.price),
@@ -1366,7 +1366,7 @@ function MallInner({
       </section>
 
       <p className="pb-8 pt-5 text-center text-[10px] tracking-wide text-muted sm:pb-10 sm:pt-6 sm:text-[11px]">
-        Plazore · Digital Mall
+        Plazore | Digital Mall
       </p>
     </div>
   );

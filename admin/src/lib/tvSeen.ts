@@ -3,7 +3,10 @@ const LATEST_AT = "plazore.admin.latestSeenAt.v1";
 
 function read(): Record<string, number> {
   try {
-    return JSON.parse(localStorage.getItem(KEY) || "{}") as Record<string, number>;
+    return JSON.parse(localStorage.getItem(KEY) || "{}") as Record<
+      string,
+      number
+    >;
   } catch {
     return {};
   }
@@ -20,10 +23,6 @@ function write(map: Record<string, number>) {
 /**
  * Unread badge = how much the metric has grown since this tile/screen
  * was last opened.
- *
- * - First visit (no baseline): show full current count
- * - After markCountSeen(key, baseline): badge stays 0 until current > baseline
- * - Never returns a negative
  */
 export function unreadCount(key: string, current: number): number {
   if (typeof window === "undefined") return 0;
@@ -56,7 +55,6 @@ export function clearCountSeen(key: string) {
   write(map);
 }
 
-/** Epoch ms of the last time the Latest card was opened. 0 = never. */
 export function readLatestSeenAt(): number {
   if (typeof window === "undefined") return 0;
   const raw = localStorage.getItem(LATEST_AT);
@@ -65,11 +63,12 @@ export function readLatestSeenAt(): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-/** Call when the Latest tile (or /latest) is opened. */
 export function markLatestSeenNow(iso?: string | null) {
   if (typeof window === "undefined") return;
   const parsed = iso ? Date.parse(iso) : NaN;
-  const stamp = Number.isFinite(parsed) ? new Date(parsed).toISOString() : new Date().toISOString();
+  const stamp = Number.isFinite(parsed)
+    ? new Date(parsed).toISOString()
+    : new Date().toISOString();
   try {
     localStorage.setItem(LATEST_AT, stamp);
   } catch {
@@ -77,7 +76,6 @@ export function markLatestSeenNow(iso?: string | null) {
   }
 }
 
-/** Events strictly newer than the last open. First open counts the whole window. */
 export function countUncheckedLatest(
   items: Array<{ at?: string; id?: string }>,
   seenAtMs: number,

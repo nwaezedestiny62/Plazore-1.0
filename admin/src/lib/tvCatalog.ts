@@ -212,6 +212,7 @@ export const TV_ROWS: TvRow[] = [
         label: "Payments",
         kicker: "Settlement",
         kind: "image",
+        countKey: "paymentsNew",
         image:
           "https://images.unsplash.com/photo-1563013544-824ae1b704d3?auto=format&fit=crop&w=900&q=80",
       },
@@ -220,6 +221,7 @@ export const TV_ROWS: TvRow[] = [
         label: "Failed pay",
         kicker: "Issues desk",
         kind: "image",
+        countKey: "failedPaymentsNew",
         image:
           "https://images.unsplash.com/photo-1563986768609-322da13575f3?auto=format&fit=crop&w=900&q=80",
       },
@@ -230,12 +232,14 @@ export const TV_ROWS: TvRow[] = [
         kind: "image",
         image:
           "https://images.unsplash.com/photo-1554224155-6726b3ff858f?auto=format&fit=crop&w=900&q=80",
+        // no countKey — revenue stays clean
       },
       {
         href: "/monetization/subscriptions",
         label: "Subscriptions",
         kicker: "On-platform",
         kind: "image",
+        countKey: "subscriptionsNew",
         image:
           "https://images.unsplash.com/photo-1553729459-efe14ef6055d?auto=format&fit=crop&w=900&q=80",
       },
@@ -244,6 +248,7 @@ export const TV_ROWS: TvRow[] = [
         label: "Transmission",
         kicker: "Platform fee",
         kind: "image",
+        countKey: "transmissionNew",
         image:
           "https://images.unsplash.com/photo-1639322537228-f710d846310a?auto=format&fit=crop&w=900&q=80",
       },
@@ -290,10 +295,17 @@ export type ActivityCounts = {
   contactsNew: number;
   moderationOpen: number;
   latestNew: number;
+  // monetization (live)
+  paymentsNew: number;
+  failedPaymentsNew: number;
+  subscriptionsNew: number;
+  transmissionNew: number;
 };
 
 export function countsFromStats(data: any): ActivityCounts {
   const s = data ?? {};
+  const money = s.monetization ?? s.payments ?? s.finance ?? {};
+
   return {
     usersNew: Number(s.users?.new7d ?? 0),
     sellersNew: Number(s.users?.newSellers7d ?? 0),
@@ -304,6 +316,31 @@ export function countsFromStats(data: any): ActivityCounts {
     contactsNew: Number(s.support?.contactNew ?? 0),
     moderationOpen: Number(s.support?.reportsUnresolved ?? 0),
     latestNew: Number(s.latest?.unchecked ?? s.latest?.new ?? 0),
+
+    // monetization live counts
+    paymentsNew: Number(
+      money.paymentsNew ?? money.payments?.new ?? money.pending ?? 0,
+    ),
+    failedPaymentsNew: Number(
+      money.failedPaymentsNew ??
+        money.failed?.new ??
+        money.failedCount ??
+        money.failed ??
+        0,
+    ),
+    subscriptionsNew: Number(
+      money.subscriptionsNew ??
+        money.subscriptions?.new ??
+        money.subsNew ??
+        money.activeSubs ??
+        0,
+    ),
+    transmissionNew: Number(
+      money.transmissionNew ??
+        money.transmission?.new ??
+        money.feesPending ??
+        0,
+    ),
   };
 }
 

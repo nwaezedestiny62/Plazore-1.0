@@ -29,7 +29,11 @@ function TileFace({ tile, badge }: { tile: TvTile; badge: number }) {
       {tile.kind === "logo" ? (
         <div className="flex h-full items-center justify-center bg-[#0b0d11]">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={tile.image} alt="" className="h-[70%] w-[70%] object-contain" />
+          <img
+            src={tile.image}
+            alt=""
+            className="h-[70%] w-[70%] object-contain"
+          />
         </div>
       ) : (
         <>
@@ -44,11 +48,13 @@ function TileFace({ tile, badge }: { tile: TvTile; badge: number }) {
           <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/20 to-transparent" />
         </>
       )}
+
       {badge > 0 && (
         <span className="absolute right-2.5 top-2.5 z-10 min-w-6 rounded-full bg-[#00E575] px-1.5 py-0.5 text-center text-[10px] font-extrabold text-[#041412] shadow-[0_0_18px_rgba(0,229,117,0.55)]">
           {badge > 99 ? "99+" : badge}
         </span>
       )}
+
       <div className="absolute bottom-3 left-3 right-3">
         <p className="text-[10px] font-semibold tracking-[0.14em] text-white/55">
           {tile.kicker}
@@ -190,7 +196,10 @@ export default function OverviewPage() {
 
   const pullLatest = useCallback(async (token: string | null) => {
     const json = await adminFetch<any>("/admin/latest?hours=168", token);
-    const items = (json?.data?.items || []) as Array<{ at?: string; id?: string }>;
+    const items = (json?.data?.items || []) as Array<{
+      at?: string;
+      id?: string;
+    }>;
     const serverTime = (json?.data?.serverTime as string | undefined) || null;
     setLatestServerTime(serverTime);
     setLatestUnchecked(countUncheckedLatest(items, readLatestSeenAt()));
@@ -207,7 +216,10 @@ export default function OverviewPage() {
         if (!alive) return;
         const next = countsFromStats(json.data);
         setRaw(next);
-        sessionStorage.setItem("plazore.admin.liveCounts", JSON.stringify(next));
+        sessionStorage.setItem(
+          "plazore.admin.liveCounts",
+          JSON.stringify(next),
+        );
         await pullLatest(token);
       } catch {
         if (alive) setRaw(countsFromStats(null));
@@ -215,6 +227,7 @@ export default function OverviewPage() {
     };
 
     void run();
+
     const id = window.setInterval(() => {
       void (async () => {
         try {
@@ -236,6 +249,7 @@ export default function OverviewPage() {
     if (!raw) {
       return { latestNew: latestUnchecked } as Record<string, number>;
     }
+
     return {
       latestNew: latestUnchecked,
       usersNew: unreadCount("usersNew", raw.usersNew),
@@ -245,21 +259,37 @@ export default function OverviewPage() {
       reportsNew: unreadCount("reportsNew", raw.reportsNew),
       contactsNew: unreadCount("contactsNew", raw.contactsNew),
       moderationOpen: unreadCount("moderationOpen", raw.moderationOpen),
+
+      // monetization
+      paymentsNew: unreadCount("paymentsNew", raw.paymentsNew),
+      failedPaymentsNew: unreadCount(
+        "failedPaymentsNew",
+        raw.failedPaymentsNew,
+      ),
+      subscriptionsNew: unreadCount(
+        "subscriptionsNew",
+        raw.subscriptionsNew,
+      ),
+      transmissionNew: unreadCount("transmissionNew", raw.transmissionNew),
     };
   }, [raw, latestUnchecked]);
 
   const openTile = (el: HTMLElement, tile: TvTile) => {
     if (lock.current) return;
     lock.current = true;
-    const badge = tile.countKey ? badges[tile.countKey] ?? 0 : 0;
+
+    const badge = tile.countKey ? (badges[tile.countKey] ?? 0) : 0;
 
     if (tile.countKey === "latestNew") {
       markLatestSeenNow(latestTimeRef.current);
       setLatestUnchecked(0);
     } else if (tile.countKey && raw && tile.countKey in raw) {
-      const baseline = Number(raw[tile.countKey as keyof ActivityCounts] ?? 0);
+      const baseline = Number(
+        raw[tile.countKey as keyof ActivityCounts] ?? 0,
+      );
       markCountSeen(tile.countKey, baseline);
     }
+
     bump((n) => n + 1);
 
     const r = el.getBoundingClientRect();
@@ -272,6 +302,7 @@ export default function OverviewPage() {
       tile,
       badge,
     });
+
     window.setTimeout(() => router.push(tile.href), 560);
   };
 
@@ -289,7 +320,9 @@ export default function OverviewPage() {
             </h2>
             <div className="tv-hide-scroll flex gap-3 overflow-x-auto px-4 pb-1 sm:gap-4 sm:px-8 lg:px-12">
               {row.tiles.map((tile) => {
-                const badge = tile.countKey ? badges[tile.countKey] ?? 0 : 0;
+                const badge = tile.countKey
+                  ? (badges[tile.countKey] ?? 0)
+                  : 0;
                 return (
                   <button
                     key={tile.href}

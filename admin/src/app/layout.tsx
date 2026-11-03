@@ -6,6 +6,10 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "Plazore Admin",
   description: "Plazore operational control center",
+  icons: {
+    icon: "/favicon.ico",
+    apple: "/favicon.ico", 
+  },
 };
 
 export default function RootLayout({
