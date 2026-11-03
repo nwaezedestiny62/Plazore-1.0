@@ -204,7 +204,7 @@ function stashPendingAdd(productId: string) {
 }
 
 /* ─────────────────────────────────────────────────────────────
-   Soft twinkling stars for Room 4 — CSS only, zero lag
+   Soft twinkling stars (now used by Room 3)
 ───────────────────────────────────────────────────────────── */
 function Starfield() {
   const stars = useMemo(() => {
@@ -260,6 +260,68 @@ function Starfield() {
           }
         }
       `}</style>
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Cinematic video background (now used by Room 4)
+───────────────────────────────────────────────────────────── */
+function RoomVideoBackground() {
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+
+    v.muted = true;
+    v.defaultMuted = true;
+    v.playsInline = true;
+    v.loop = true;
+    v.preload = "auto";
+
+    const tryPlay = () => {
+      const p = v.play();
+      if (p && typeof p.catch === "function") {
+        p.catch(() => {
+          setTimeout(() => v.play().catch(() => {}), 400);
+        });
+      }
+    };
+
+    tryPlay();
+
+    const onVis = () => {
+      if (document.visibilityState === "visible") tryPlay();
+    };
+    document.addEventListener("visibilitychange", onVis);
+
+    return () => {
+      document.removeEventListener("visibilitychange", onVis);
+    };
+  }, []);
+
+  return (
+    <div className="pointer-events-none absolute inset-0 z-0">
+      <video
+        ref={videoRef}
+        className="h-full w-full object-cover"
+        src="/room3.mp4"
+        muted
+        loop
+        playsInline
+        autoPlay
+        preload="auto"
+        disablePictureInPicture
+        controlsList="nodownload nofullscreen noremoteplayback"
+        style={{
+          transform: "translateZ(0)",
+          willChange: "transform",
+          backfaceVisibility: "hidden",
+        }}
+      />
+      <div className="absolute inset-0 bg-gradient-to-b from-[#05060A]/55 via-[#05060A]/35 to-[#05060A]/75" />
+      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_30%,rgba(5,6,10,0.55)_100%)]" />
     </div>
   );
 }
@@ -570,7 +632,7 @@ function MallChrome({
 }
 
 /* ─────────────────────────────────────────────────────────────
-   ROOM 3 — THE SIGNAL
+   ROOM 3 — THE SIGNAL  (now uses Starfield background)
 ───────────────────────────────────────────────────────────── */
 function RoomThreeStage({ products }: { products: Product[] }) {
   const router = useRouter();
@@ -584,39 +646,7 @@ function RoomThreeStage({ products }: { products: Product[] }) {
   const busy = useRef(false);
   const autoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cartBtnRef = useRef<HTMLButtonElement>(null);
-  const videoRef = useRef<HTMLVideoElement>(null);
   const [adding, setAdding] = useState(false);
-
-  useEffect(() => {
-    const v = videoRef.current;
-    if (!v) return;
-
-    v.muted = true;
-    v.defaultMuted = true;
-    v.playsInline = true;
-    v.loop = true;
-    v.preload = "auto";
-
-    const tryPlay = () => {
-      const p = v.play();
-      if (p && typeof p.catch === "function") {
-        p.catch(() => {
-          setTimeout(() => v.play().catch(() => {}), 400);
-        });
-      }
-    };
-
-    tryPlay();
-
-    const onVis = () => {
-      if (document.visibilityState === "visible") tryPlay();
-    };
-    document.addEventListener("visibilitychange", onVis);
-
-    return () => {
-      document.removeEventListener("visibilitychange", onVis);
-    };
-  }, []);
 
   useEffect(() => {
     currentRef.current = current;
@@ -719,26 +749,11 @@ function RoomThreeStage({ products }: { products: Product[] }) {
 
   return (
     <div className="relative w-full overflow-hidden">
+      {/* Starfield background (moved from Room 4) */}
       <div className="pointer-events-none absolute inset-0 z-0">
-        <video
-          ref={videoRef}
-          className="h-full w-full object-cover"
-          src="/room3.mp4"
-          muted
-          loop
-          playsInline
-          autoPlay
-          preload="auto"
-          disablePictureInPicture
-          controlsList="nodownload nofullscreen noremoteplayback"
-          style={{
-            transform: "translateZ(0)",
-            willChange: "transform",
-            backfaceVisibility: "hidden",
-          }}
-        />
-        <div className="absolute inset-0 bg-gradient-to-b from-[#05060A]/55 via-[#05060A]/35 to-[#05060A]/75" />
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_30%,rgba(5,6,10,0.55)_100%)]" />
+        <Starfield />
+        <div className="absolute inset-0 bg-gradient-to-b from-[#05060A]/50 via-[#05060A]/25 to-[#05060A]/80" />
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_25%,rgba(5,6,10,0.6)_100%)]" />
       </div>
 
       <div className="relative z-10 mx-auto flex w-full max-w-[1100px] flex-col items-center px-4 py-12 sm:px-6 sm:py-16 md:py-20 lg:px-10">
@@ -1313,9 +1328,11 @@ function MallInner({
                 ref={(el) => {
                   roomRefs.current[4] = el;
                 }}
-                className="relative overflow-hidden bg-[#07090F] px-0 py-12 sm:py-16 md:py-20"
+                className="relative overflow-hidden bg-[#05060A] px-0 py-12 sm:py-16 md:py-20"
               >
-                <Starfield />
+                {/* Video background (moved from Room 3) */}
+                <RoomVideoBackground />
+
                 <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-white/[0.06]" />
 
                 <div className="relative z-10 px-4 sm:px-6 md:px-10 lg:px-16">
