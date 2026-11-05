@@ -19,7 +19,12 @@ import {
   updateQuantity,
   type CartItem,
 } from "@/lib/cart";
-import { formatSelectedOptions } from "@/lib/types";
+import {
+  formatSelectedOptions,
+  getAvailableStock,
+  productHasVariants,
+  type ProductVariant,
+} from "@/lib/types";
 import {
   convertPrice,
   DEFAULT_REGION,
@@ -33,10 +38,31 @@ function productRegion(product: CartItem["product"]) {
   if (seller && typeof seller === "object" && "marketplaceRegion" in seller) {
     return String(
       (seller as { marketplaceRegion?: string }).marketplaceRegion ||
-        DEFAULT_REGION
+        DEFAULT_REGION,
     );
   }
   return DEFAULT_REGION;
+}
+
+/** Resolve the concrete variant for this cart line (if any) */
+function resolveVariant(item: CartItem): ProductVariant | null {
+  if (!productHasVariants(item.product)) return null;
+  const variants = item.product.variants || [];
+  if (item.variantId) {
+    const byId = variants.find((v) => v.variantId === item.variantId);
+    if (byId) return byId;
+  }
+  if (item.variantKey) {
+    const byKey = variants.find((v) => v.key === item.variantKey);
+    if (byKey) return byKey;
+  }
+  return null;
+}
+
+/** Max units allowed for this specific cart line */
+function getLineMaxStock(item: CartItem): number {
+  const variant = resolveVariant(item);
+  return getAvailableStock(item.product, variant);
 }
 
 export default function CartPage() {
@@ -45,7 +71,25 @@ export default function CartPage() {
   const { region: marketplaceRegion } = useMarketplace();
   const displayRegion = marketplaceRegion || DEFAULT_REGION;
 
-  const sync = () => setItems(getCart());
+  const sync = () => {
+    const cart = getCart();
+
+    // Auto-clamp any line that exceeds current available stock
+    let changed = false;
+    for (const item of cart) {
+      const max = getLineMaxStock(item);
+      if (max > 0 && item.quantity > max) {
+        updateQuantity(item.id, max);
+        changed = true;
+      } else if (max === 0 && item.quantity > 0) {
+        // Out of stock → remove the line
+        removeFromCart(item.id);
+        changed = true;
+      }
+    }
+
+    setItems(changed ? getCart() : cart);
+  };
 
   useEffect(() => {
     sync();
@@ -60,6 +104,7 @@ export default function CartPage() {
   const { productPrice, deliveryFee, totalAmount } = useMemo(() => {
     if (!items.length)
       return { productPrice: 0, deliveryFee: 0, totalAmount: 0 };
+
     let productsSum = 0;
     const bySeller: Record<string, number> = {};
     let noSellerMax = 0;
@@ -97,6 +142,7 @@ export default function CartPage() {
 
     const feeSum =
       Object.values(bySeller).reduce((s, f) => s + f, 0) + noSellerMax;
+
     return {
       productPrice: productsSum,
       deliveryFee: feeSum,
@@ -105,6 +151,17 @@ export default function CartPage() {
   }, [items, displayRegion]);
 
   const count = items.reduce((n, i) => n + (i.quantity || 0), 0);
+
+  const handleDecrease = (item: CartItem) => {
+    updateQuantity(item.id, item.quantity - 1);
+  };
+
+  const handleIncrease = (item: CartItem) => {
+    const max = getLineMaxStock(item);
+    if (max <= 0) return;
+    if (item.quantity >= max) return; // hard stop
+    updateQuantity(item.id, item.quantity + 1);
+  };
 
   return (
     <div className="min-h-screen bg-bg text-text">
@@ -128,6 +185,7 @@ export default function CartPage() {
         </div>
         <span className="w-11" />
       </header>
+
       <div
         className="mx-4 h-px md:mx-6"
         style={{
@@ -170,6 +228,9 @@ export default function CartPage() {
                   Number(item.product?.shipping?.deliveryFee) || 0;
                 const note = item.note || "";
                 const config = formatSelectedOptions(item.selectedOptions);
+                const maxStock = getLineMaxStock(item);
+                const atMax = maxStock > 0 && qty >= maxStock;
+                const outOfStock = maxStock <= 0;
 
                 return (
                   <article
@@ -188,60 +249,86 @@ export default function CartPage() {
                       ) : (
                         <div className="flex h-[76px] w-[76px] shrink-0 items-center justify-center bg-[#14181F]" />
                       )}
+
                       <div className="min-w-0 flex-1">
                         <p className="text-sm font-semibold leading-[19px]">
                           {item.product?.name || "Product"}
                         </p>
+
                         {config ? (
                           <p className="mt-1 text-[12px] font-medium tracking-wide text-white/50">
                             {config}
                           </p>
                         ) : null}
+
                         <p className="mt-1 text-sm font-extrabold text-green">
                           {fmtProduct(unit, region)}
                         </p>
+
                         {lineFee > 0 && (
                           <p className="mt-0.5 text-[11px] font-medium text-white/38">
                             Delivery {fmtProduct(lineFee, region)}
                           </p>
                         )}
+
+                        {/* Stock feedback */}
+                        {outOfStock ? (
+                          <p className="mt-1 text-[11px] font-semibold text-red-400">
+                            Out of stock
+                          </p>
+                        ) : atMax ? (
+                          <p className="mt-1 text-[11px] font-semibold text-amber-400/90">
+                            Max {maxStock} available
+                          </p>
+                        ) : maxStock <= 5 ? (
+                          <p className="mt-1 text-[11px] font-medium text-white/45">
+                            Only {maxStock} left
+                          </p>
+                        ) : null}
+
                         <div className="mt-3 flex items-center">
                           <div className="flex items-center border border-white/8 bg-[#14181F]">
                             <button
                               type="button"
-                              onClick={() =>
-                                updateQuantity(item.id, item.quantity - 1)
-                              }
-                              className="flex h-8 w-8 items-center justify-center"
+                              onClick={() => handleDecrease(item)}
+                              disabled={qty <= 1}
+                              className="flex h-8 w-8 items-center justify-center disabled:opacity-35"
+                              aria-label="Decrease quantity"
                             >
                               <Minus className="h-3.5 w-3.5" />
                             </button>
+
                             <span className="w-7 text-center text-[13px] font-bold">
-                              {item.quantity}
+                              {qty}
                             </span>
+
                             <button
                               type="button"
-                              onClick={() =>
-                                updateQuantity(item.id, item.quantity + 1)
-                              }
-                              className="flex h-8 w-8 items-center justify-center"
+                              onClick={() => handleIncrease(item)}
+                              disabled={atMax || outOfStock}
+                              className="flex h-8 w-8 items-center justify-center disabled:opacity-35"
+                              aria-label="Increase quantity"
                             >
                               <Plus className="h-3.5 w-3.5" />
                             </button>
                           </div>
+
                           <p className="mx-2.5 min-w-0 flex-1 text-right text-sm font-bold">
                             {fmtProduct(unit * qty, region)}
                           </p>
+
                           <button
                             type="button"
                             onClick={() => removeFromCart(item.id)}
                             className="flex h-[34px] w-[34px] items-center justify-center border border-red-500/20 bg-red-500/8"
+                            aria-label="Remove item"
                           >
                             <Trash2 className="h-4 w-4 text-red-500" />
                           </button>
                         </div>
                       </div>
                     </div>
+
                     <div className="border-t border-white/8 px-4 pb-3.5 pt-2">
                       <p className="mb-1.5 text-[10px] font-extrabold uppercase tracking-widest text-white/38">
                         Note for seller

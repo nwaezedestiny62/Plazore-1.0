@@ -4,8 +4,13 @@ import {
   formatMoney,
   formatProductPrice,
 } from '@/constants/regions'
-import { formatSelectedOptions } from '@/constants/types'
-import { useCart } from '@/context/CartContext'
+import {
+  formatSelectedOptions,
+  productHasVariants,
+  type Product,
+  type ProductVariant,
+} from '@/constants/types'
+import { useCart, type CartItem } from '@/context/CartContext'
 import { useMarketplace } from '@/context/MarketplaceContext'
 import { Ionicons } from '@expo/vector-icons'
 import { LinearGradient } from 'expo-linear-gradient'
@@ -44,8 +49,8 @@ const GREEN = '#00E575'
 const TEAL = '#14B8A6'
 const BLUE = '#2563EB'
 const DANGER = '#EF4444'
+const AMBER = '#FBBF24'
 const GRAD = [GREEN, TEAL, BLUE] as const
-
 const U = 8
 const H_PAD = U * 2
 
@@ -58,6 +63,53 @@ function resolveProductRegion(product: any): string {
     return String(seller.marketplaceRegion)
   }
   return DEFAULT_REGION
+}
+
+/** Resolve the concrete variant for this cart line */
+function resolveVariant(item: CartItem): ProductVariant | null {
+  const product = item.product as Product | undefined
+  if (!product || !productHasVariants(product)) return null
+  const list = product.variants || []
+  if (!list.length) return null
+
+  if (item.variantId) {
+    const byId = list.find((v) => v.variantId === item.variantId)
+    if (byId) return byId
+  }
+  if (item.variantKey) {
+    const byKey = list.find(
+      (v) =>
+        (v as any).key === item.variantKey ||
+        v.variantKey === item.variantKey,
+    )
+    if (byKey) return byKey
+  }
+  if (item.selectedOptions && Object.keys(item.selectedOptions).length) {
+    const entries = Object.entries(item.selectedOptions).filter(
+      ([, v]) => v != null && String(v).trim() !== '',
+    )
+    const match = list.find((v) => {
+      const o = v.options || {}
+      return entries.every(([k, val]) => String(o[k]) === String(val))
+    })
+    if (match) return match
+  }
+  return null
+}
+
+/** Max units allowed for this specific cart line */
+function getLineMaxStock(item: CartItem): number {
+  const product = item.product as Product | undefined
+  if (!product) return 0
+
+  if (productHasVariants(product)) {
+    const variant = resolveVariant(item)
+    if (!variant) return 0
+    if (variant.isActive === false) return 0
+    return Math.max(0, Number(variant.stock) || 0)
+  }
+
+  return Math.max(0, Number(product.stock) || 0)
 }
 
 export default function Cart() {
@@ -74,7 +126,17 @@ export default function Cart() {
   useFocusEffect(
     useCallback(() => {
       refreshRegion()
-    }, [refreshRegion])
+
+      // Auto-clamp any line that exceeds current available stock
+      for (const item of cartItems) {
+        const max = getLineMaxStock(item)
+        if (max <= 0 && item.quantity > 0) {
+          removeFromCart(item.id)
+        } else if (max > 0 && item.quantity > max) {
+          updateQuantity(item.id, max)
+        }
+      }
+    }, [refreshRegion, cartItems, removeFromCart, updateQuantity]),
   )
 
   const displayRegion = buyerRegion || DEFAULT_REGION
@@ -87,7 +149,7 @@ export default function Cart() {
         return formatMoney(amount, displayRegion)
       }
     },
-    [format, displayRegion]
+    [format, displayRegion],
   )
 
   const fmtProduct = useCallback(
@@ -100,7 +162,7 @@ export default function Cart() {
         return formatProductPrice(amount, productRegion, displayRegion)
       }
     },
-    [formatProduct, displayRegion]
+    [formatProduct, displayRegion],
   )
 
   const { productPrice, deliveryFee, totalAmount } = useMemo(() => {
@@ -116,7 +178,6 @@ export default function Cart() {
       const productRegion = resolveProductRegion(item.product)
       const unit = Number(item.price ?? item.product?.price) || 0
       const qty = Number(item.quantity) || 1
-
       productsSum += convertPrice(unit * qty, productRegion, displayRegion)
 
       const feeRaw = Number(item.product?.shipping?.deliveryFee) || 0
@@ -150,7 +211,6 @@ export default function Cart() {
   const itemCount = cartItems.reduce((n, i) => n + (i.quantity || 0), 0)
 
   const bagAnim = useRef(new Animated.Value(0)).current
-
   useEffect(() => {
     Animated.spring(bagAnim, {
       toValue: 1,
@@ -160,13 +220,23 @@ export default function Cart() {
     }).start()
   }, [])
 
-  const onQty = (id: string, qty: number) => {
+  const onQty = (item: CartItem, nextQty: number) => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut)
-    if (qty < 1) {
-      removeFromCart(id)
+
+    if (nextQty < 1) {
+      removeFromCart(item.id)
       return
     }
-    updateQuantity(id, qty)
+
+    const max = getLineMaxStock(item)
+    if (max <= 0) {
+      removeFromCart(item.id)
+      return
+    }
+
+    // Hard cap — never exceed available stock
+    const safeQty = Math.min(nextQty, max)
+    updateQuantity(item.id, safeQty)
   }
 
   const onRemove = (id: string) => {
@@ -184,7 +254,6 @@ export default function Cart() {
         >
           <Ionicons name="chevron-back" size={22} color={TEXT} />
         </TouchableOpacity>
-
         <View style={styles.headerCenter}>
           <Text style={styles.headerTitle}>Shopping Bag</Text>
           {itemCount > 0 && (
@@ -193,12 +262,16 @@ export default function Cart() {
             </Text>
           )}
         </View>
-
         <View style={styles.headerRight} />
       </View>
 
       <LinearGradient
-        colors={['transparent', 'rgba(0,229,117,0.45)', 'rgba(37,99,235,0.35)', 'transparent']}
+        colors={[
+          'transparent',
+          'rgba(0,229,117,0.45)',
+          'rgba(37,99,235,0.35)',
+          'transparent',
+        ]}
         locations={[0, 0.3, 0.7, 1]}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 0 }}
@@ -263,10 +336,13 @@ export default function Cart() {
                 const thumb =
                   item.image || item.product?.images?.[0] || undefined
 
+                const maxStock = getLineMaxStock(item)
+                const atMax = maxStock > 0 && qty >= maxStock
+                const outOfStock = maxStock <= 0
+
                 return (
                   <View key={item.id} style={styles.card}>
                     <View style={styles.cardEdge} />
-
                     <View style={styles.cardTop}>
                       {thumb ? (
                         <Image source={{ uri: thumb }} style={styles.thumb} />
@@ -301,22 +377,53 @@ export default function Cart() {
                           </Text>
                         )}
 
+                        {/* Stock feedback */}
+                        {outOfStock ? (
+                          <Text style={styles.stockOut}>Out of stock</Text>
+                        ) : atMax ? (
+                          <Text style={styles.stockMax}>
+                            Max {maxStock} available
+                          </Text>
+                        ) : maxStock <= 5 ? (
+                          <Text style={styles.stockLow}>
+                            Only {maxStock} left
+                          </Text>
+                        ) : null}
+
                         <View style={styles.actionRow}>
                           <View style={styles.qtyControl}>
                             <TouchableOpacity
-                              onPress={() => onQty(item.id, item.quantity - 1)}
-                              style={styles.qtyBtn}
+                              onPress={() => onQty(item, item.quantity - 1)}
+                              style={[
+                                styles.qtyBtn,
+                                qty <= 1 && styles.qtyBtnDisabled,
+                              ]}
                               hitSlop={8}
+                              disabled={qty <= 1}
                             >
-                              <Ionicons name="remove" size={15} color={TEXT} />
+                              <Ionicons
+                                name="remove"
+                                size={15}
+                                color={qty <= 1 ? MUTED : TEXT}
+                              />
                             </TouchableOpacity>
-                            <Text style={styles.qtyValue}>{item.quantity}</Text>
+
+                            <Text style={styles.qtyValue}>{qty}</Text>
+
                             <TouchableOpacity
-                              onPress={() => onQty(item.id, item.quantity + 1)}
-                              style={styles.qtyBtn}
+                              onPress={() => onQty(item, item.quantity + 1)}
+                              style={[
+                                styles.qtyBtn,
+                                (atMax || outOfStock) && styles.qtyBtnDisabled,
+                              ]}
                               hitSlop={8}
+                              disabled={atMax || outOfStock}
                             >
-                              <Ionicons name="add" size={15} color={TEXT} />
+                              <Ionicons
+                                name="add"
+                                size={15}
+                                color={atMax || outOfStock ? MUTED : TEXT}
+                              />
                             </TouchableOpacity>
                           </View>
 
@@ -368,7 +475,6 @@ export default function Cart() {
                 <View style={styles.summaryHead}>
                   <Text style={styles.summaryTitle}>ORDER SUMMARY</Text>
                 </View>
-
                 <View style={styles.summaryBody}>
                   <View style={styles.summaryRow}>
                     <Text style={styles.summaryLabel}>Product price</Text>
@@ -376,16 +482,13 @@ export default function Cart() {
                       {fmt(productPrice)}
                     </Text>
                   </View>
-
                   <View style={styles.summaryRow}>
                     <Text style={styles.summaryLabel}>Delivery fee</Text>
                     <Text style={styles.summaryValue} numberOfLines={1}>
                       {fmt(deliveryFee)}
                     </Text>
                   </View>
-
                   <View style={styles.summaryDivider} />
-
                   <View style={styles.summaryRow}>
                     <Text style={styles.totalLabel}>Total</Text>
                     <Text style={styles.totalValue} numberOfLines={1}>
@@ -399,13 +502,17 @@ export default function Cart() {
 
           <View style={styles.bottomBar}>
             <LinearGradient
-              colors={['transparent', 'rgba(0,229,117,0.35)', 'rgba(37,99,235,0.25)', 'transparent']}
+              colors={[
+                'transparent',
+                'rgba(0,229,117,0.35)',
+                'rgba(37,99,235,0.25)',
+                'transparent',
+              ]}
               locations={[0, 0.25, 0.75, 1]}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 0 }}
               style={styles.bottomRule}
             />
-
             <View style={styles.bottomInner}>
               <View style={styles.bottomLeft}>
                 <Text style={styles.amountDueLabel}>AMOUNT DUE</Text>
@@ -418,7 +525,6 @@ export default function Cart() {
                   {fmt(totalAmount)}
                 </Text>
               </View>
-
               <TouchableOpacity
                 onPress={() => router.push('/(tabs)/checkout' as any)}
                 activeOpacity={0.88}
@@ -568,6 +674,24 @@ const styles = StyleSheet.create({
     marginTop: 3,
     fontWeight: '500',
   },
+  stockOut: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: DANGER,
+    marginTop: 4,
+  },
+  stockMax: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: AMBER,
+    marginTop: 4,
+  },
+  stockLow: {
+    fontSize: 11,
+    fontWeight: '500',
+    color: MUTED,
+    marginTop: 4,
+  },
   actionRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -585,6 +709,9 @@ const styles = StyleSheet.create({
     height: 32,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  qtyBtnDisabled: {
+    opacity: 0.4,
   },
   qtyValue: {
     width: 28,

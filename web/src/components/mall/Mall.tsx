@@ -204,7 +204,7 @@ function stashPendingAdd(productId: string) {
 }
 
 /* ─────────────────────────────────────────────────────────────
-   Soft twinkling stars (now used by Room 3)
+   Soft, dense, realistic starfield (Room 3)
 ───────────────────────────────────────────────────────────── */
 function Starfield() {
   const stars = useMemo(() => {
@@ -214,15 +214,33 @@ function Starfield() {
       size: number;
       delay: number;
       dur: number;
+      baseOpacity: number;
+      glow: number;
     }[] = [];
-    for (let i = 0; i < 100; i++) {   // ← change this number
-      const seed = (i * 97) % 1000;
+
+    // Better pseudo-random using different primes
+    for (let i = 0; i < 280; i++) {
+      const seed = (i * 16807 + 12345) % 2147483647;
+      const r1 = (seed % 10000) / 10000;
+      const r2 = ((seed * 3) % 10000) / 10000;
+      const r3 = ((seed * 7) % 10000) / 10000;
+      const r4 = ((seed * 13) % 10000) / 10000;
+      const r5 = ((seed * 17) % 10000) / 10000;
+
+      // Size distribution: mostly tiny, few medium, rare larger
+      let size = 0.8;
+      if (r3 > 0.92) size = 2.1 + r4 * 1.1;      // rare bright
+      else if (r3 > 0.78) size = 1.4 + r4 * 0.6; // medium
+      else size = 0.7 + r4 * 0.7;                 // tiny majority
+
       out.push({
-        left: `${(seed * 0.137) % 100}%`,
-        top: `${(seed * 0.271) % 100}%`,
-        size: 1 + (seed % 3) * 0.55,
-        delay: (seed % 40) / 10,
-        dur: 2.6 + (seed % 28) / 10,
+        left: `${r1 * 100}%`,
+        top: `${r2 * 100}%`,
+        size,
+        delay: r5 * 6,                    // 0–6s
+        dur: 2.8 + r3 * 4.2,              // 2.8–7s (natural variation)
+        baseOpacity: 0.18 + r4 * 0.35,    // different brightness
+        glow: size > 1.6 ? 4 + r5 * 5 : 1.5 + r5 * 2.5,
       });
     }
     return out;
@@ -236,27 +254,34 @@ function Starfield() {
       {stars.map((s, i) => (
         <span
           key={i}
-          className="absolute bg-white"
+          className="absolute rounded-full bg-white"
           style={{
             left: s.left,
             top: s.top,
             width: s.size,
             height: s.size,
-            opacity: 0.3,
+            opacity: s.baseOpacity,
+            boxShadow: `0 0 ${s.glow}px ${s.glow * 0.45}px rgba(255, 255, 255, 0.55)`,
             animation: `plazore-twinkle ${s.dur}s ease-in-out ${s.delay}s infinite`,
+            willChange: "opacity, transform",
           }}
         />
       ))}
+
       <style jsx>{`
         @keyframes plazore-twinkle {
           0%,
           100% {
-            opacity: 0.12;
-            transform: scale(0.85);
+            opacity: 0.15;
+            transform: scale(0.92);
           }
-          50% {
-            opacity: 0.7;
-            transform: scale(1.12);
+          40% {
+            opacity: 0.95;
+            transform: scale(1.08);
+          }
+          70% {
+            opacity: 0.45;
+            transform: scale(1);
           }
         }
       `}</style>
@@ -750,11 +775,12 @@ function RoomThreeStage({ products }: { products: Product[] }) {
   return (
     <div className="relative w-full overflow-hidden">
       {/* Starfield background (moved from Room 4) */}
-      <div className="pointer-events-none absolute inset-0 z-0">
-        <Starfield />
-        <div className="absolute inset-0 bg-gradient-to-b from-[#05060A]/50 via-[#05060A]/25 to-[#05060A]/80" />
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_25%,rgba(5,6,10,0.6)_100%)]" />
-      </div>
+      {/* Starfield background */}
+<div className="pointer-events-none absolute inset-0 z-0">
+  <Starfield />
+  <div className="absolute inset-0 bg-gradient-to-b from-[#05060A]/40 via-[#05060A]/15 to-[#05060A]/75" />
+  <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_20%,rgba(5,6,10,0.55)_100%)]" />
+</div>
 
       <div className="relative z-10 mx-auto flex w-full max-w-[1100px] flex-col items-center px-4 py-12 sm:px-6 sm:py-16 md:py-20 lg:px-10">
         <div className="mb-8 text-center sm:mb-10">

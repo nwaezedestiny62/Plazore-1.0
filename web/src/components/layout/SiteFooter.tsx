@@ -196,7 +196,7 @@ export function SiteFooter() {
               </div>
             </Link>
             <p className="mt-5 text-[14px] leading-[1.7] text-white/42 sm:text-[15px]">
-              Curated floors. Trusted sellers. Shopping without the noise.
+              The New Way to Shop and Earn.
             </p>
           </div>
 
