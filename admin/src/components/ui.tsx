@@ -120,8 +120,25 @@ export function LoadingBlock({ label = "Loading…" }: { label?: string }) {
   return <Panel className="p-8 text-sm text-[#737A86]">{label}</Panel>;
 }
 
-export function ErrorBlock({ message }: { message: string }) {
+export function ErrorBlock({
+  message,
+  onRetry,
+}: {
+  message: string;
+  onRetry?: () => void;
+}) {
   return (
-    <div className="border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-200">{message}</div>
+    <div className="border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-200">
+      <p>{message}</p>
+      {onRetry ? (
+        <button
+          type="button"
+          onClick={onRetry}
+          className="mt-3 text-xs font-semibold text-red-100 underline underline-offset-2 hover:text-white"
+        >
+          Retry
+        </button>
+      ) : null}
+    </div>
   );
 }

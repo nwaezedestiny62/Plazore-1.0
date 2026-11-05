@@ -482,11 +482,11 @@ export default function FailedPaymentsPage() {
                       tool === "refund_buyer" && "border-red-500/40 text-red-300",
                       tool === "cancel_order" && "border-red-500/40"
                     )}
-                    variant={
-                      tool === "refund_buyer" || tool === "cancel_order"
-                        ? "ghost"
-                        : "default"
-                    }
+                    tone={
+  tool === "refund_buyer" || tool === "cancel_order"
+    ? "danger"
+    : "ghost"
+}
                   >
                     {ACTION_LABEL[tool] || tool}
                   </Button>
