@@ -46,6 +46,9 @@ const FONT = {
   jakarta700: "PlusJakartaSans_700Bold",
 };
 
+const CASCADE_STAGGER_MS = 110;
+const CASCADE_DURATION_MS = 850;
+
 function GradientText({
   children,
   style,
@@ -72,6 +75,59 @@ function GradientText({
   );
 }
 
+/** Soft rise + fade, staggered by index (ascending / top → bottom) */
+function CascadeItem({
+  index,
+  active,
+  children,
+  style,
+}: {
+  index: number;
+  active: boolean;
+  children: React.ReactNode;
+  style?: StyleProp<any>;
+}) {
+  const opacity = useRef(new Animated.Value(0)).current;
+  const lift = useRef(new Animated.Value(22)).current;
+  const started = useRef(false);
+
+  useEffect(() => {
+    if (!active || started.current) return;
+    started.current = true;
+    const delay = index * CASCADE_STAGGER_MS;
+    Animated.parallel([
+      Animated.timing(opacity, {
+        toValue: 1,
+        duration: CASCADE_DURATION_MS,
+        delay,
+        easing: Easing.bezier(0.22, 1, 0.36, 1),
+        useNativeDriver: true,
+      }),
+      Animated.timing(lift, {
+        toValue: 0,
+        duration: CASCADE_DURATION_MS,
+        delay,
+        easing: Easing.bezier(0.22, 1, 0.36, 1),
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [active, index, opacity, lift]);
+
+  return (
+    <Animated.View
+      style={[
+        style,
+        {
+          opacity,
+          transform: [{ translateY: lift }],
+        },
+      ]}
+    >
+      {children}
+    </Animated.View>
+  );
+}
+
 export default function PlazoreAIScreen() {
   const [fontsLoaded] = useFonts({
     SpaceGrotesk_500Medium,
@@ -90,8 +146,6 @@ export default function PlazoreAIScreen() {
   const [revealed, setRevealed] = useState(false);
 
   const orbRotation = useRef(new Animated.Value(0)).current;
-  const revealOpacity = useRef(new Animated.Value(0)).current;
-  const revealLift = useRef(new Animated.Value(24)).current;
 
   useEffect(() => {
     const loop = Animated.loop(
@@ -106,27 +160,13 @@ export default function PlazoreAIScreen() {
 
     const revealTimer = setTimeout(() => {
       setRevealed(true);
-      Animated.parallel([
-        Animated.timing(revealOpacity, {
-          toValue: 1,
-          duration: 1400,
-          easing: Easing.out(Easing.cubic),
-          useNativeDriver: true,
-        }),
-        Animated.timing(revealLift, {
-          toValue: 0,
-          duration: 1400,
-          easing: Easing.out(Easing.cubic),
-          useNativeDriver: true,
-        }),
-      ]).start();
-    }, 2600);
+    }, 2200);
 
     return () => {
       clearTimeout(revealTimer);
       loop.stop();
     };
-  }, []);
+  }, [orbRotation]);
 
   useEffect(() => {
     if (!id) return;
@@ -165,36 +205,42 @@ export default function PlazoreAIScreen() {
     return <View style={styles.container} />;
   }
 
+  let cascadeIndex = 0;
+  const nextIndex = () => cascadeIndex++;
+
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" />
 
+      {/* Fixed titlebar — stays at top while content scrolls */}
       <SafeAreaView edges={["top"]} style={styles.headerSafe}>
         <View style={styles.header}>
           <TouchableOpacity
             onPress={() => router.back()}
-            activeOpacity={0.8}
+            activeOpacity={0.75}
             style={styles.backBtn}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
             <Ionicons name="chevron-back" size={20} color={TEXT} />
           </TouchableOpacity>
 
-          <View style={styles.headerCenter}>
+          <View style={styles.headerCenter} pointerEvents="none">
             <View style={styles.titleRow}>
               <Image
                 source={require("@/assets/images/plazore-ai-logo.png")}
                 style={styles.headerLogo}
                 resizeMode="contain"
               />
-              {/* Space Grotesk 600 | white */}
-              <Text style={styles.headerTitle}>Plazore AI</Text>
+              <Text style={styles.headerTitle} numberOfLines={1}>
+                Plazore AI
+              </Text>
             </View>
             <GradientText style={styles.headerSub}>
               Product Intelligence
             </GradientText>
           </View>
 
-          <View style={{ width: 42 }} />
+          <View style={styles.headerSpacer} />
         </View>
       </SafeAreaView>
 
@@ -205,7 +251,7 @@ export default function PlazoreAIScreen() {
               colors={["rgba(16,185,129,0.07)", "rgba(59,130,246,0.05)"]}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
-              style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 }}
+              style={styles.absoluteFill}
             />
             <View style={styles.orbWrapper}>
               <Animated.View
@@ -225,64 +271,80 @@ export default function PlazoreAIScreen() {
         </View>
       ) : (
         <Animated.ScrollView
-          style={{ flex: 1 }}
-          contentContainerStyle={{ padding: 20, paddingBottom: 70 }}
+          style={styles.scroll}
+          contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
           bounces={false}
           decelerationRate="normal"
+          keyboardShouldPersistTaps="handled"
         >
-          <Animated.View
-            style={{
-              opacity: revealOpacity,
-              transform: [{ translateY: revealLift }],
-            }}
-          >
+          <CascadeItem index={nextIndex()} active={revealed}>
             <ProductImageStack images={productImages} name={productName} />
+          </CascadeItem>
 
-            {data?.summary ? (
+          {data?.summary ? (
+            <CascadeItem index={nextIndex()} active={revealed}>
               <InsightSection eyebrow="Summary" title="Quick interpretation">
                 <Text style={styles.bodyText}>{data.summary}</Text>
               </InsightSection>
-            ) : null}
+            </CascadeItem>
+          ) : null}
 
-            <InsightSection eyebrow="Understand" title="The product in context">
+          <CascadeItem index={nextIndex()} active={revealed}>
+            <InsightSection
+              eyebrow="Understand"
+              title="The product in context"
+            >
               <Text style={styles.bodyText}>
                 {data?.overview ||
                   "Plazore AI is still preparing the full interpretation for this listing."}
               </Text>
             </InsightSection>
+          </CascadeItem>
 
-            {!!data?.highlights?.length && (
+          {!!data?.highlights?.length && (
+            <CascadeItem index={nextIndex()} active={revealed}>
               <InsightSection eyebrow="Evaluate" title="What stands out">
                 {data.highlights.map((item: string, index: number) => (
                   <Bullet key={index} text={item} />
                 ))}
               </InsightSection>
-            )}
+            </CascadeItem>
+          )}
 
-            {!!data?.bestFor?.length && (
-              <InsightSection eyebrow="Consider" title="What may matter to you">
+          {!!data?.bestFor?.length && (
+            <CascadeItem index={nextIndex()} active={revealed}>
+              <InsightSection
+                eyebrow="Consider"
+                title="What may matter to you"
+              >
                 {data.bestFor.map((item: string, index: number) => (
                   <Bullet key={index} text={item} />
                 ))}
               </InsightSection>
-            )}
+            </CascadeItem>
+          )}
 
-            {!!data?.thingsToConsider?.length && (
+          {!!data?.thingsToConsider?.length && (
+            <CascadeItem index={nextIndex()} active={revealed}>
               <InsightSection eyebrow="Clarity" title="Things worth noting">
                 {data.thingsToConsider.map((item: string, index: number) => (
                   <Bullet key={index} text={item} />
                 ))}
               </InsightSection>
-            )}
+            </CascadeItem>
+          )}
 
-            {data?.shippingSummary ? (
+          {data?.shippingSummary ? (
+            <CascadeItem index={nextIndex()} active={revealed}>
               <InsightSection eyebrow="Delivery" title="Shipping details">
                 <Text style={styles.bodyText}>{data.shippingSummary}</Text>
               </InsightSection>
-            ) : null}
+            </CascadeItem>
+          ) : null}
 
-            {data?.buyerConfidence ? (
+          {data?.buyerConfidence ? (
+            <CascadeItem index={nextIndex()} active={revealed}>
               <InsightSection eyebrow="Confidence" title="Buyer confidence">
                 <View style={styles.confidenceBadge}>
                   <LinearGradient
@@ -301,19 +363,23 @@ export default function PlazoreAIScreen() {
                     {data.buyerConfidence.level}
                   </GradientText>
                 </View>
-                <Text style={[styles.bodyText, { marginTop: 10 }]}>
-                  {data.confidenceExplanation}
-                </Text>
+                {data.confidenceExplanation ? (
+                  <Text style={[styles.bodyText, { marginTop: 10 }]}>
+                    {data.confidenceExplanation}
+                  </Text>
+                ) : null}
               </InsightSection>
-            ) : null}
+            </CascadeItem>
+          ) : null}
 
+          <CascadeItem index={nextIndex()} active={revealed}>
             <View style={styles.footer}>
               <Text style={styles.footerText}>
                 Plazore AI interprets the information shared by the merchant. It
                 helps you understand the listing — it does not decide for you.
               </Text>
             </View>
-          </Animated.View>
+          </CascadeItem>
         </Animated.ScrollView>
       )}
     </View>
@@ -400,7 +466,7 @@ function InsightSection({
         colors={["rgba(16,185,129,0.05)", "rgba(59,130,246,0.04)"]}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
-        style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 }}
+        style={styles.absoluteFill}
       />
       <GradientText style={styles.sectionEyebrow}>{eyebrow}</GradientText>
       <Text style={styles.sectionTitle}>{title}</Text>
@@ -428,31 +494,42 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: BG,
   },
+
+  absoluteFill: {
+    position: "absolute",
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+  },
+
+  /* Fixed header — outside ScrollView so it never moves */
   headerSafe: {
-    backgroundColor: BG,
+    backgroundColor: "rgba(9,11,15,0.96)",
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "rgba(255,255,255,0.07)",
+    zIndex: 50,
   },
   header: {
+    height: 56,
     paddingHorizontal: 16,
-    paddingTop: 6,
-    paddingBottom: 14,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "rgba(255,255,255,0.06)",
   },
   backBtn: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
+    width: 40,
+    height: 40,
     backgroundColor: "rgba(255,255,255,0.05)",
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: "rgba(255,255,255,0.08)",
+    borderColor: "rgba(255,255,255,0.10)",
     alignItems: "center",
     justifyContent: "center",
   },
   headerCenter: {
+    flex: 1,
     alignItems: "center",
+    paddingHorizontal: 8,
   },
   titleRow: {
     flexDirection: "row",
@@ -460,23 +537,25 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   headerLogo: {
-    width: 22,
-    height: 22,
+    width: 20,
+    height: 20,
   },
-  /* Space Grotesk 600 | white */
   headerTitle: {
     color: "#FFFFFF",
     fontFamily: FONT.space600,
     fontSize: 16,
     letterSpacing: -0.2,
   },
-  /* Space Grotesk 500 via gradient mask */
   headerSub: {
     fontFamily: FONT.space500,
     fontSize: 9,
     letterSpacing: 1.8,
     textTransform: "uppercase",
-    marginTop: 3,
+    marginTop: 2,
+  },
+  headerSpacer: {
+    width: 40,
+    height: 40,
   },
 
   loaderContainer: {
@@ -487,7 +566,6 @@ const styles = StyleSheet.create({
   },
   loaderCard: {
     width: "100%",
-    borderRadius: 28,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: "rgba(16,185,129,0.2)",
     backgroundColor: "rgba(17,20,26,0.7)",
@@ -527,6 +605,15 @@ const styles = StyleSheet.create({
     height: 34,
   },
 
+  scroll: {
+    flex: 1,
+  },
+  scrollContent: {
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 48,
+  },
+
   stackBlock: {
     alignItems: "center",
     marginBottom: 28,
@@ -543,7 +630,6 @@ const styles = StyleSheet.create({
     position: "absolute",
     width: 108,
     height: 128,
-    borderRadius: 14,
     overflow: "hidden",
     backgroundColor: SURFACE,
     borderWidth: StyleSheet.hairlineWidth,
@@ -581,7 +667,6 @@ const styles = StyleSheet.create({
   },
 
   section: {
-    borderRadius: 22,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: "rgba(16,185,129,0.18)",
     backgroundColor: "rgba(17,20,26,0.65)",
@@ -638,7 +723,6 @@ const styles = StyleSheet.create({
     alignSelf: "flex-start",
     paddingHorizontal: 10,
     paddingVertical: 6,
-    borderRadius: 999,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: "rgba(59,130,246,0.28)",
   },
@@ -655,7 +739,7 @@ const styles = StyleSheet.create({
   },
 
   footer: {
-    marginTop: 12,
+    marginTop: 4,
     paddingTop: 22,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: "rgba(255,255,255,0.06)",

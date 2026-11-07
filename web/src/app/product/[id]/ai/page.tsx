@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { ChevronLeft, ShieldCheck } from "lucide-react";
@@ -58,47 +57,51 @@ export default function ProductAIPage() {
 
   return (
     <div className="relative min-h-dvh overflow-x-hidden bg-[#090B0F] text-[#F5F7FA]">
+      {/* Ambient glow (desktop) */}
       <div className="pointer-events-none absolute inset-0 hidden lg:block">
         <div className="absolute -top-40 left-1/2 h-[520px] w-[900px] -translate-x-1/2 rounded-full bg-[#10B981]/[0.07] blur-[120px]" />
         <div className="absolute top-[28%] right-[-8%] h-[420px] w-[420px] rounded-full bg-[#3B82F6]/[0.06] blur-[110px]" />
       </div>
 
-      <header className="sticky top-0 z-20 border-b border-white/[0.06] bg-[#090B0F]/90 backdrop-blur-md">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3 sm:px-6 lg:px-10 lg:py-4">
+      {/* ── Real sticky titlebar ── */}
+      <header className="sticky top-0 z-50 border-b border-white/[0.07] bg-[#090B0F]/92 backdrop-blur-xl supports-[backdrop-filter]:bg-[#090B0F]/80">
+        <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-4 sm:px-6 lg:h-16 lg:px-10">
           <button
             type="button"
             onClick={goBack}
-            className="flex h-10 w-10 items-center justify-center rounded-full border border-white/10 bg-white/[0.05] lg:h-11 lg:w-11"
+            className="flex h-10 w-10 shrink-0 items-center justify-center border border-white/10 bg-white/[0.05] transition-colors hover:bg-white/[0.09] active:bg-white/[0.12]"
             aria-label="Back"
           >
             <ChevronLeft className="h-5 w-5" />
           </button>
-          <div className="text-center">
+
+          <div className="min-w-0 flex-1 px-3 text-center">
             <div className="flex items-center justify-center gap-2">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src="/plazore-ai-logo.png"
                 alt=""
-                className="h-[22px] w-[22px] object-contain lg:h-7 lg:w-7"
+                className="h-[20px] w-[20px] object-contain sm:h-[22px] sm:w-[22px] lg:h-6 lg:w-6"
               />
-              <p className="font-display text-[16px] font-semibold tracking-tight lg:text-[18px]">
+              <p className="truncate font-display text-[15px] font-semibold tracking-tight sm:text-[16px] lg:text-[17px]">
                 Plazore AI
               </p>
             </div>
             <p
-              className="mt-0.5 font-display text-[9px] font-medium uppercase tracking-[0.18em] lg:text-[10px]"
+              className="mt-0.5 font-display text-[9px] font-medium uppercase tracking-[0.18em] sm:text-[10px]"
               style={gText}
             >
               Product Intelligence
             </p>
           </div>
-          <span className="w-10 lg:w-11" />
+
+          <span className="h-10 w-10 shrink-0" aria-hidden />
         </div>
       </header>
 
       {!revealed ? (
-        <div className="relative flex min-h-[72vh] items-center justify-center px-7">
-          <div className="relative w-full max-w-sm overflow-hidden rounded-[28px] border border-[#10B981]/20 bg-[#11141A]/80 px-8 py-16 lg:max-w-xl lg:rounded-[36px] lg:px-16 lg:py-24">
+        <div className="relative flex min-h-[calc(100dvh-3.5rem)] items-center justify-center px-7 lg:min-h-[calc(100dvh-4rem)]">
+          <div className="relative w-full max-w-sm overflow-hidden border border-[#10B981]/20 bg-[#11141A]/80 px-8 py-16 lg:max-w-xl lg:px-16 lg:py-24">
             <div
               className="pointer-events-none absolute inset-0"
               style={{
@@ -128,9 +131,12 @@ export default function ProductAIPage() {
           </div>
         </div>
       ) : (
-        <main className="relative mx-auto max-w-6xl px-5 pb-20 pt-6 sm:px-6 lg:px-10 lg:pb-28 lg:pt-12 [animation:aiIn_0.9s_ease-out]">
-          {/* Hero — stacked on mobile, cinematic split on large */}
-          <div className="mb-8 flex flex-col items-center lg:mb-14 lg:grid lg:grid-cols-[0.9fr_1.1fr] lg:items-center lg:gap-16">
+        <main className="relative mx-auto max-w-6xl px-5 pb-20 pt-6 sm:px-6 lg:px-10 lg:pb-28 lg:pt-12">
+          {/* Hero — cascade step 0 */}
+          <div
+            className="ai-cascade mb-8 flex flex-col items-center lg:mb-14 lg:grid lg:grid-cols-[0.9fr_1.1fr] lg:items-center lg:gap-16"
+            style={{ ["--i" as string]: 0 }}
+          >
             <ImageStack images={images} />
 
             <div className="mt-1 w-full text-center lg:mt-0 lg:text-left">
@@ -153,9 +159,12 @@ export default function ProductAIPage() {
             </div>
           </div>
 
-          {/* Mobile-only summary card (desktop already has it in the hero) */}
+          {/* Mobile summary */}
           {ai?.summary ? (
-            <div className="lg:hidden">
+            <div
+              className="ai-cascade lg:hidden"
+              style={{ ["--i" as string]: 1 }}
+            >
               <Section eyebrow="Summary" title="Quick interpretation">
                 <p className="whitespace-pre-wrap text-[15px] leading-6 text-[#A7ADB8]">
                   {ai.summary}
@@ -164,91 +173,136 @@ export default function ProductAIPage() {
             </div>
           ) : null}
 
-          <Section
-            eyebrow="Understand"
-            title="The product in context"
-            featured
+          <div
+            className="ai-cascade"
+            style={{ ["--i" as string]: 2 }}
           >
-            <p className="whitespace-pre-wrap text-[15px] leading-6 text-[#A7ADB8] lg:text-[17px] lg:leading-8">
-              {ai?.overview ||
-                "Plazore AI is still preparing the full interpretation for this listing."}
-            </p>
-          </Section>
+            <Section eyebrow="Understand" title="The product in context" featured>
+              <p className="whitespace-pre-wrap text-[15px] leading-6 text-[#A7ADB8] lg:text-[17px] lg:leading-8">
+                {ai?.overview ||
+                  "Plazore AI is still preparing the full interpretation for this listing."}
+              </p>
+            </Section>
+          </div>
 
           <div className="lg:grid lg:grid-cols-2 lg:gap-5">
             {!!ai?.highlights?.length && (
-              <Section eyebrow="Evaluate" title="What stands out">
-                {ai.highlights.map((item, i) => (
-                  <Bullet key={i} text={item} />
-                ))}
-              </Section>
+              <div
+                className="ai-cascade"
+                style={{ ["--i" as string]: 3 }}
+              >
+                <Section eyebrow="Evaluate" title="What stands out">
+                  {ai.highlights.map((item, i) => (
+                    <Bullet key={i} text={item} />
+                  ))}
+                </Section>
+              </div>
             )}
 
             {!!ai?.bestFor?.length && (
-              <Section eyebrow="Consider" title="What may matter to you">
-                {ai.bestFor.map((item, i) => (
-                  <Bullet key={i} text={item} />
-                ))}
-              </Section>
+              <div
+                className="ai-cascade"
+                style={{ ["--i" as string]: 4 }}
+              >
+                <Section eyebrow="Consider" title="What may matter to you">
+                  {ai.bestFor.map((item, i) => (
+                    <Bullet key={i} text={item} />
+                  ))}
+                </Section>
+              </div>
             )}
 
             {!!ai?.thingsToConsider?.length && (
-              <Section eyebrow="Clarity" title="Things worth noting">
-                {ai.thingsToConsider.map((item, i) => (
-                  <Bullet key={i} text={item} />
-                ))}
-              </Section>
+              <div
+                className="ai-cascade"
+                style={{ ["--i" as string]: 5 }}
+              >
+                <Section eyebrow="Clarity" title="Things worth noting">
+                  {ai.thingsToConsider.map((item, i) => (
+                    <Bullet key={i} text={item} />
+                  ))}
+                </Section>
+              </div>
             )}
 
             {ai?.shippingSummary ? (
-              <Section eyebrow="Delivery" title="Shipping details">
-                <p className="whitespace-pre-wrap text-[15px] leading-6 text-[#A7ADB8] lg:text-[16px] lg:leading-7">
-                  {ai.shippingSummary}
-                </p>
-              </Section>
+              <div
+                className="ai-cascade"
+                style={{ ["--i" as string]: 6 }}
+              >
+                <Section eyebrow="Delivery" title="Shipping details">
+                  <p className="whitespace-pre-wrap text-[15px] leading-6 text-[#A7ADB8] lg:text-[16px] lg:leading-7">
+                    {ai.shippingSummary}
+                  </p>
+                </Section>
+              </div>
             ) : null}
           </div>
 
           {ai?.buyerConfidence ? (
-            <Section eyebrow="Confidence" title="Buyer confidence" featured>
-              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:gap-10">
-                <div className="inline-flex shrink-0 items-center gap-2 self-start rounded-full border border-[#3B82F6]/30 bg-[#10B981]/10 px-2.5 py-1.5 lg:px-3 lg:py-2">
-                  <span
-                    className="flex h-[22px] w-[22px] items-center justify-center rounded-full lg:h-7 lg:w-7"
-                    style={{ backgroundImage: GRAD }}
-                  >
-                    <ShieldCheck className="h-3.5 w-3.5 text-white lg:h-4 lg:w-4" />
-                  </span>
-                  <span className="text-[14.5px] font-semibold lg:text-base" style={gText}>
-                    {ai.buyerConfidence.level}
-                  </span>
+            <div
+              className="ai-cascade"
+              style={{ ["--i" as string]: 7 }}
+            >
+              <Section eyebrow="Confidence" title="Buyer confidence" featured>
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:gap-10">
+                  <div className="inline-flex shrink-0 items-center gap-2 self-start border border-[#3B82F6]/30 bg-[#10B981]/10 px-2.5 py-1.5 lg:px-3 lg:py-2">
+                    <span
+                      className="flex h-[22px] w-[22px] items-center justify-center rounded-full lg:h-7 lg:w-7"
+                      style={{ backgroundImage: GRAD }}
+                    >
+                      <ShieldCheck className="h-3.5 w-3.5 text-white lg:h-4 lg:w-4" />
+                    </span>
+                    <span
+                      className="text-[14.5px] font-semibold lg:text-base"
+                      style={gText}
+                    >
+                      {ai.buyerConfidence.level}
+                    </span>
+                  </div>
+                  {ai.confidenceExplanation ? (
+                    <p className="whitespace-pre-wrap text-[15px] leading-6 text-[#A7ADB8] lg:text-[17px] lg:leading-8">
+                      {ai.confidenceExplanation}
+                    </p>
+                  ) : null}
                 </div>
-                {ai.confidenceExplanation ? (
-                  <p className="whitespace-pre-wrap text-[15px] leading-6 text-[#A7ADB8] lg:text-[17px] lg:leading-8">
-                    {ai.confidenceExplanation}
-                  </p>
-                ) : null}
-              </div>
-            </Section>
+              </Section>
+            </div>
           ) : null}
 
-          <p className="mt-6 border-t border-white/[0.06] pt-6 text-center text-[12.5px] leading-[19px] text-[#737A86] lg:mx-auto lg:mt-12 lg:max-w-xl lg:pt-10 lg:text-[13.5px] lg:leading-6">
-            Plazore AI interprets the information shared by the merchant. It helps you understand the listing — it does not decide for you.
-          </p>
-
-          <Link
-            href={`/product/${id}`}
-            className="mt-6 flex h-11 items-center justify-center rounded-full border border-white/12 bg-white/[0.04] text-sm font-semibold lg:hidden"
+          <p
+            className="ai-cascade mt-6 border-t border-white/[0.06] pt-6 text-center text-[12.5px] leading-[19px] text-[#737A86] lg:mx-auto lg:mt-12 lg:max-w-xl lg:pt-10 lg:text-[13.5px] lg:leading-6"
+            style={{ ["--i" as string]: 8 }}
           >
-            Back to product
-          </Link>
+            Plazore AI interprets the information shared by the merchant. It
+            helps you understand the listing — it does not decide for you.
+          </p>
         </main>
       )}
 
       <style>{`
-        @keyframes aiIn {
-          from { opacity: 0; transform: translateY(18px); }
-          to { opacity: 1; transform: translateY(0); }
+        .ai-cascade {
+          opacity: 0;
+          transform: translateY(22px);
+          animation: aiAscend 0.85s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+          animation-delay: calc(var(--i, 0) * 110ms);
+        }
+        @keyframes aiAscend {
+          from {
+            opacity: 0;
+            transform: translateY(22px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .ai-cascade {
+            opacity: 1;
+            transform: none;
+            animation: none;
+          }
         }
       `}</style>
     </div>
@@ -271,7 +325,7 @@ function ImageStack({ images }: { images: string[] }) {
               key={`${uri}-${i}`}
               src={uri}
               alt=""
-              className="absolute left-1/2 top-1/2 h-[128px] w-[108px] rounded-[14px] border border-white/12 object-cover lg:h-[280px] lg:w-[230px] lg:rounded-[22px]"
+              className="absolute left-1/2 top-1/2 h-[128px] w-[108px] border border-white/12 object-cover lg:h-[280px] lg:w-[230px]"
               style={{
                 transform: `translate(calc(-50% + ${x}px), calc(-50% + ${y}px)) rotate(${rotate}deg) scale(${scale})`,
                 zIndex: 10 - depth,
@@ -284,7 +338,7 @@ function ImageStack({ images }: { images: string[] }) {
           );
         })
       ) : (
-        <div className="absolute left-1/2 top-1/2 h-[128px] w-[108px] -translate-x-1/2 -translate-y-1/2 rounded-[14px] border border-[#252A33] bg-[#11141A] lg:h-[280px] lg:w-[230px] lg:rounded-[22px]" />
+        <div className="absolute left-1/2 top-1/2 h-[128px] w-[108px] -translate-x-1/2 -translate-y-1/2 border border-[#252A33] bg-[#11141A] lg:h-[280px] lg:w-[230px]" />
       )}
     </div>
   );
@@ -303,7 +357,7 @@ function Section({
 }) {
   return (
     <section
-      className={`relative mb-4 overflow-hidden rounded-[22px] border border-[#10B981]/18 bg-[#11141A]/65 p-[18px] lg:mb-5 lg:rounded-[28px] ${
+      className={`relative mb-4 overflow-hidden border border-[#10B981]/18 bg-[#11141A]/65 p-[18px] lg:mb-5 ${
         featured ? "lg:p-9" : "lg:p-7"
       }`}
     >
