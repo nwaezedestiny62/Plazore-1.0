@@ -14,6 +14,7 @@ import {
   Animated,
   Easing,
   Image,
+  Platform,
   StatusBar,
   StyleSheet,
   Text,
@@ -75,7 +76,6 @@ function GradientText({
   );
 }
 
-/** Soft rise + fade, staggered by index (ascending / top → bottom) */
 function CascadeItem({
   index,
   active,
@@ -210,11 +210,16 @@ export default function PlazoreAIScreen() {
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" />
+      <StatusBar barStyle="light-content" backgroundColor={BG} />
 
-      {/* Fixed titlebar — stays at top while content scrolls */}
-      <SafeAreaView edges={["top"]} style={styles.headerSafe}>
-        <View style={styles.header}>
+      {/*
+        COLUMN LAYOUT
+        1) Titlebar (fixed — never scrolls)
+        2) Body (flex:1 — only this area scrolls)
+      */}
+      <SafeAreaView style={styles.safe} edges={["top", "left", "right"]}>
+        {/* ── FIXED TITLEBAR ── */}
+        <View style={styles.titlebar} collapsable={false}>
           <TouchableOpacity
             onPress={() => router.back()}
             activeOpacity={0.75}
@@ -224,7 +229,7 @@ export default function PlazoreAIScreen() {
             <Ionicons name="chevron-back" size={20} color={TEXT} />
           </TouchableOpacity>
 
-          <View style={styles.headerCenter} pointerEvents="none">
+          <View style={styles.titlebarCenter} pointerEvents="none">
             <View style={styles.titleRow}>
               <Image
                 source={require("@/assets/images/plazore-ai-logo.png")}
@@ -242,146 +247,171 @@ export default function PlazoreAIScreen() {
 
           <View style={styles.headerSpacer} />
         </View>
-      </SafeAreaView>
 
-      {!revealed ? (
-        <View style={styles.loaderContainer}>
-          <View style={styles.loaderCard}>
-            <LinearGradient
-              colors={["rgba(16,185,129,0.07)", "rgba(59,130,246,0.05)"]}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={styles.absoluteFill}
-            />
-            <View style={styles.orbWrapper}>
-              <Animated.View
-                style={[styles.orbRing, { transform: [{ rotate }] }]}
-              >
-                <View style={styles.orbRingInner} />
-              </Animated.View>
-              <View style={styles.orbLogoWrap}>
-                <Image
-                  source={require("@/assets/images/plazore-ai-logo.png")}
-                  style={styles.orbLogo}
-                  resizeMode="contain"
+        {/* ── SCROLLABLE BODY (everything below titlebar) ── */}
+        <View style={styles.body}>
+          {!revealed ? (
+            <View style={styles.loaderContainer}>
+              <View style={styles.loaderCard}>
+                <LinearGradient
+                  colors={[
+                    "rgba(16,185,129,0.07)",
+                    "rgba(59,130,246,0.05)",
+                  ]}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={styles.absoluteFill}
                 />
+                <View style={styles.orbWrapper}>
+                  <Animated.View
+                    style={[styles.orbRing, { transform: [{ rotate }] }]}
+                  >
+                    <View style={styles.orbRingInner} />
+                  </Animated.View>
+                  <View style={styles.orbLogoWrap}>
+                    <Image
+                      source={require("@/assets/images/plazore-ai-logo.png")}
+                      style={styles.orbLogo}
+                      resizeMode="contain"
+                    />
+                  </View>
+                </View>
               </View>
             </View>
-          </View>
-        </View>
-      ) : (
-        <Animated.ScrollView
-          style={styles.scroll}
-          contentContainerStyle={styles.scrollContent}
-          showsVerticalScrollIndicator={false}
-          bounces={false}
-          decelerationRate="normal"
-          keyboardShouldPersistTaps="handled"
-        >
-          <CascadeItem index={nextIndex()} active={revealed}>
-            <ProductImageStack images={productImages} name={productName} />
-          </CascadeItem>
-
-          {data?.summary ? (
-            <CascadeItem index={nextIndex()} active={revealed}>
-              <InsightSection eyebrow="Summary" title="Quick interpretation">
-                <Text style={styles.bodyText}>{data.summary}</Text>
-              </InsightSection>
-            </CascadeItem>
-          ) : null}
-
-          <CascadeItem index={nextIndex()} active={revealed}>
-            <InsightSection
-              eyebrow="Understand"
-              title="The product in context"
+          ) : (
+            <Animated.ScrollView
+              style={styles.scroll}
+              contentContainerStyle={styles.scrollContent}
+              showsVerticalScrollIndicator={false}
+              bounces
+              alwaysBounceVertical={false}
+              decelerationRate="normal"
+              keyboardShouldPersistTaps="handled"
+              nestedScrollEnabled
             >
-              <Text style={styles.bodyText}>
-                {data?.overview ||
-                  "Plazore AI is still preparing the full interpretation for this listing."}
-              </Text>
-            </InsightSection>
-          </CascadeItem>
+              <CascadeItem index={nextIndex()} active={revealed}>
+                <ProductImageStack
+                  images={productImages}
+                  name={productName}
+                />
+              </CascadeItem>
 
-          {!!data?.highlights?.length && (
-            <CascadeItem index={nextIndex()} active={revealed}>
-              <InsightSection eyebrow="Evaluate" title="What stands out">
-                {data.highlights.map((item: string, index: number) => (
-                  <Bullet key={index} text={item} />
-                ))}
-              </InsightSection>
-            </CascadeItem>
-          )}
-
-          {!!data?.bestFor?.length && (
-            <CascadeItem index={nextIndex()} active={revealed}>
-              <InsightSection
-                eyebrow="Consider"
-                title="What may matter to you"
-              >
-                {data.bestFor.map((item: string, index: number) => (
-                  <Bullet key={index} text={item} />
-                ))}
-              </InsightSection>
-            </CascadeItem>
-          )}
-
-          {!!data?.thingsToConsider?.length && (
-            <CascadeItem index={nextIndex()} active={revealed}>
-              <InsightSection eyebrow="Clarity" title="Things worth noting">
-                {data.thingsToConsider.map((item: string, index: number) => (
-                  <Bullet key={index} text={item} />
-                ))}
-              </InsightSection>
-            </CascadeItem>
-          )}
-
-          {data?.shippingSummary ? (
-            <CascadeItem index={nextIndex()} active={revealed}>
-              <InsightSection eyebrow="Delivery" title="Shipping details">
-                <Text style={styles.bodyText}>{data.shippingSummary}</Text>
-              </InsightSection>
-            </CascadeItem>
-          ) : null}
-
-          {data?.buyerConfidence ? (
-            <CascadeItem index={nextIndex()} active={revealed}>
-              <InsightSection eyebrow="Confidence" title="Buyer confidence">
-                <View style={styles.confidenceBadge}>
-                  <LinearGradient
-                    colors={[...GRADIENT_COLORS]}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 1 }}
-                    style={styles.confidenceIconBg}
+              {data?.summary ? (
+                <CascadeItem index={nextIndex()} active={revealed}>
+                  <InsightSection
+                    eyebrow="Summary"
+                    title="Quick interpretation"
                   >
-                    <Ionicons
-                      name="shield-checkmark"
-                      size={14}
-                      color="#FFFFFF"
-                    />
-                  </LinearGradient>
-                  <GradientText style={styles.confidenceLevel}>
-                    {data.buyerConfidence.level}
-                  </GradientText>
-                </View>
-                {data.confidenceExplanation ? (
-                  <Text style={[styles.bodyText, { marginTop: 10 }]}>
-                    {data.confidenceExplanation}
-                  </Text>
-                ) : null}
-              </InsightSection>
-            </CascadeItem>
-          ) : null}
+                    <Text style={styles.bodyText}>{data.summary}</Text>
+                  </InsightSection>
+                </CascadeItem>
+              ) : null}
 
-          <CascadeItem index={nextIndex()} active={revealed}>
-            <View style={styles.footer}>
-              <Text style={styles.footerText}>
-                Plazore AI interprets the information shared by the merchant. It
-                helps you understand the listing — it does not decide for you.
-              </Text>
-            </View>
-          </CascadeItem>
-        </Animated.ScrollView>
-      )}
+              <CascadeItem index={nextIndex()} active={revealed}>
+                <InsightSection
+                  eyebrow="Understand"
+                  title="The product in context"
+                >
+                  <Text style={styles.bodyText}>
+                    {data?.overview ||
+                      "Plazore AI is still preparing the full interpretation for this listing."}
+                  </Text>
+                </InsightSection>
+              </CascadeItem>
+
+              {!!data?.highlights?.length && (
+                <CascadeItem index={nextIndex()} active={revealed}>
+                  <InsightSection eyebrow="Evaluate" title="What stands out">
+                    {data.highlights.map((item: string, index: number) => (
+                      <Bullet key={index} text={item} />
+                    ))}
+                  </InsightSection>
+                </CascadeItem>
+              )}
+
+              {!!data?.bestFor?.length && (
+                <CascadeItem index={nextIndex()} active={revealed}>
+                  <InsightSection
+                    eyebrow="Consider"
+                    title="What may matter to you"
+                  >
+                    {data.bestFor.map((item: string, index: number) => (
+                      <Bullet key={index} text={item} />
+                    ))}
+                  </InsightSection>
+                </CascadeItem>
+              )}
+
+              {!!data?.thingsToConsider?.length && (
+                <CascadeItem index={nextIndex()} active={revealed}>
+                  <InsightSection
+                    eyebrow="Clarity"
+                    title="Things worth noting"
+                  >
+                    {data.thingsToConsider.map(
+                      (item: string, index: number) => (
+                        <Bullet key={index} text={item} />
+                      ),
+                    )}
+                  </InsightSection>
+                </CascadeItem>
+              )}
+
+              {data?.shippingSummary ? (
+                <CascadeItem index={nextIndex()} active={revealed}>
+                  <InsightSection eyebrow="Delivery" title="Shipping details">
+                    <Text style={styles.bodyText}>
+                      {data.shippingSummary}
+                    </Text>
+                  </InsightSection>
+                </CascadeItem>
+              ) : null}
+
+              {data?.buyerConfidence ? (
+                <CascadeItem index={nextIndex()} active={revealed}>
+                  <InsightSection
+                    eyebrow="Confidence"
+                    title="Buyer confidence"
+                  >
+                    <View style={styles.confidenceBadge}>
+                      <LinearGradient
+                        colors={[...GRADIENT_COLORS]}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 1 }}
+                        style={styles.confidenceIconBg}
+                      >
+                        <Ionicons
+                          name="shield-checkmark"
+                          size={14}
+                          color="#FFFFFF"
+                        />
+                      </LinearGradient>
+                      <GradientText style={styles.confidenceLevel}>
+                        {data.buyerConfidence.level}
+                      </GradientText>
+                    </View>
+                    {data.confidenceExplanation ? (
+                      <Text style={[styles.bodyText, { marginTop: 10 }]}>
+                        {data.confidenceExplanation}
+                      </Text>
+                    ) : null}
+                  </InsightSection>
+                </CascadeItem>
+              ) : null}
+
+              <CascadeItem index={nextIndex()} active={revealed}>
+                <View style={styles.footer}>
+                  <Text style={styles.footerText}>
+                    Plazore AI interprets the information shared by the
+                    merchant. It helps you understand the listing — it does not
+                    decide for you.
+                  </Text>
+                </View>
+              </CascadeItem>
+            </Animated.ScrollView>
+          )}
+        </View>
+      </SafeAreaView>
     </View>
   );
 }
@@ -494,6 +524,10 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: BG,
   },
+  safe: {
+    flex: 1,
+    backgroundColor: BG,
+  },
 
   absoluteFill: {
     position: "absolute",
@@ -503,19 +537,28 @@ const styles = StyleSheet.create({
     left: 0,
   },
 
-  /* Fixed header — outside ScrollView so it never moves */
-  headerSafe: {
-    backgroundColor: "rgba(9,11,15,0.96)",
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "rgba(255,255,255,0.07)",
-    zIndex: 50,
-  },
-  header: {
+  /* Fixed titlebar — sibling of body, NOT inside ScrollView */
+  titlebar: {
     height: 56,
     paddingHorizontal: 16,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
+    backgroundColor: BG,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "rgba(255,255,255,0.07)",
+    zIndex: 100,
+    ...Platform.select({
+      ios: {
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.18,
+        shadowRadius: 2,
+      },
+      android: {
+        elevation: 4,
+      },
+    }),
   },
   backBtn: {
     width: 40,
@@ -526,7 +569,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  headerCenter: {
+  titlebarCenter: {
     flex: 1,
     alignItems: "center",
     paddingHorizontal: 8,
@@ -556,6 +599,12 @@ const styles = StyleSheet.create({
   headerSpacer: {
     width: 40,
     height: 40,
+  },
+
+  /* Body fills remaining height; only this region scrolls */
+  body: {
+    flex: 1,
+    minHeight: 0,
   },
 
   loaderContainer: {

@@ -56,15 +56,15 @@ export default function ProductAIPage() {
   };
 
   return (
-    <div className="relative min-h-dvh overflow-x-hidden bg-[#090B0F] text-[#F5F7FA]">
-      {/* Ambient glow (desktop) */}
-      <div className="pointer-events-none absolute inset-0 hidden lg:block">
+    <div className="relative min-h-dvh bg-[#090B0F] text-[#F5F7FA]">
+      {/* Ambient glow (desktop only) */}
+      <div className="pointer-events-none fixed inset-0 hidden lg:block">
         <div className="absolute -top-40 left-1/2 h-[520px] w-[900px] -translate-x-1/2 rounded-full bg-[#10B981]/[0.07] blur-[120px]" />
         <div className="absolute top-[28%] right-[-8%] h-[420px] w-[420px] rounded-full bg-[#3B82F6]/[0.06] blur-[110px]" />
       </div>
 
-      {/* ── Real sticky titlebar ── */}
-      <header className="sticky top-0 z-50 border-b border-white/[0.07] bg-[#090B0F]/92 backdrop-blur-xl supports-[backdrop-filter]:bg-[#090B0F]/80">
+      {/* ── FIXED TITLEBAR (never scrolls) ── */}
+      <header className="fixed inset-x-0 top-0 z-50 border-b border-white/[0.07] bg-[#090B0F]/95 backdrop-blur-xl supports-[backdrop-filter]:bg-[#090B0F]/88">
         <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-4 sm:px-6 lg:h-16 lg:px-10">
           <button
             type="button"
@@ -99,6 +99,9 @@ export default function ProductAIPage() {
         </div>
       </header>
 
+      {/* Spacer so content starts below the fixed bar */}
+      <div className="h-14 lg:h-16" aria-hidden />
+
       {!revealed ? (
         <div className="relative flex min-h-[calc(100dvh-3.5rem)] items-center justify-center px-7 lg:min-h-[calc(100dvh-4rem)]">
           <div className="relative w-full max-w-sm overflow-hidden border border-[#10B981]/20 bg-[#11141A]/80 px-8 py-16 lg:max-w-xl lg:px-16 lg:py-24">
@@ -132,7 +135,7 @@ export default function ProductAIPage() {
         </div>
       ) : (
         <main className="relative mx-auto max-w-6xl px-5 pb-20 pt-6 sm:px-6 lg:px-10 lg:pb-28 lg:pt-12">
-          {/* Hero — cascade step 0 */}
+          {/* Hero */}
           <div
             className="ai-cascade mb-8 flex flex-col items-center lg:mb-14 lg:grid lg:grid-cols-[0.9fr_1.1fr] lg:items-center lg:gap-16"
             style={{ ["--i" as string]: 0 }}
@@ -159,7 +162,6 @@ export default function ProductAIPage() {
             </div>
           </div>
 
-          {/* Mobile summary */}
           {ai?.summary ? (
             <div
               className="ai-cascade lg:hidden"
@@ -173,11 +175,12 @@ export default function ProductAIPage() {
             </div>
           ) : null}
 
-          <div
-            className="ai-cascade"
-            style={{ ["--i" as string]: 2 }}
-          >
-            <Section eyebrow="Understand" title="The product in context" featured>
+          <div className="ai-cascade" style={{ ["--i" as string]: 2 }}>
+            <Section
+              eyebrow="Understand"
+              title="The product in context"
+              featured
+            >
               <p className="whitespace-pre-wrap text-[15px] leading-6 text-[#A7ADB8] lg:text-[17px] lg:leading-8">
                 {ai?.overview ||
                   "Plazore AI is still preparing the full interpretation for this listing."}
@@ -240,10 +243,7 @@ export default function ProductAIPage() {
           </div>
 
           {ai?.buyerConfidence ? (
-            <div
-              className="ai-cascade"
-              style={{ ["--i" as string]: 7 }}
-            >
+            <div className="ai-cascade" style={{ ["--i" as string]: 7 }}>
               <Section eyebrow="Confidence" title="Buyer confidence" featured>
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:gap-10">
                   <div className="inline-flex shrink-0 items-center gap-2 self-start border border-[#3B82F6]/30 bg-[#10B981]/10 px-2.5 py-1.5 lg:px-3 lg:py-2">
